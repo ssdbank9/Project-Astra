@@ -3,7 +3,7 @@
 Prepared for Aly Jafferani and the next Claude Code implementation session.
 
 - GitHub repository: `https://github.com/ssdbank9/Project-Astra`
-- Repository visibility: intended private; verify current GitHub settings before adding users or integrations
+- Repository visibility: public by Aly Jafferani's explicit 2026-09-21 decision; do not change visibility without a new explicit instruction
 - Clean imported baseline branch: `main`
 - Transferred implementation branch: `hs3jry-handoff`
 - Historical Windows source workspace: `C:\Users\Aly Jafferani\Documents\ChatGPT\New project\astra_project_tracker`

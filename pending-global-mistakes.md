@@ -334,8 +334,8 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 ## ASTRA-20260921-03 - repository visibility was not verified before the first push
 
 - Date / project: 2026-09-21; Astra standalone GitHub publication.
-- Category / status: Confirmed privacy-process error; repository was observed as public after both sanitized branches were pushed; correction requires the owner's explicit permission change.
+- Category / status: Confirmed verification-process error; repository was observed as public only after both sanitized branches were pushed. Aly Jafferani subsequently instructed that it remain public for now, so no visibility correction is pending.
 - Evidence / impact: The signed-in GitHub repository page labeled `ssdbank9/Project-Astra` a public repository. The uploaded payload contains Astra source, tests, design documents, Jaira records and product handoffs, but the pre-push hygiene checks found no database, virtual environment, credential file, private key or GitHub token marker.
 - Cause: The empty repository was created and authenticated earlier, but its visibility was not read and confirmed before publishing.
-- Correction / prevention: Verify visibility on the empty repository page before any first push; for private work require an explicit private label, then verify again after publication. Switch this repository to private only after the owner confirms the permission change, then separately authorize only the intended Claude connector scope.
-- Verification: Both branches and expected files are visible remotely; privacy correction and Claude connector authorization remain pending at the time of this entry.
+- Correction / prevention: Verify visibility on the empty repository page before any first push and state the observed setting to the owner. For private work require an explicit private label, then verify again after publication. Repository visibility and external connector access remain separate permission decisions.
+- Verification: Both branches and expected files are visible remotely. On 2026-09-21 Aly explicitly chose to keep `Project-Astra` public for now. Claude connector authorization remains separate and was not completed in that session.
