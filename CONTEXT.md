@@ -25,14 +25,17 @@ Owners of the project's individual tasks.
 _Avoid_: owner (unqualified), manager (bare), lead.
 
 **Chairman**:
-An organizational role with org-wide project visibility comparable to the App
-Owner but no access to private sources, and no power to grant access or perform
-exceptional closure.
+An organizational role with org-wide read-only project visibility comparable to the
+App Owner but no access to private sources and no mutation power of its own: it
+cannot grant access, decide protected actions, close projects, or manage files. A
+Chairman gains project powers only through a separately granted project role.
 
 **Collaborator / Reviewer / Approver**:
-Supporting people on a task, tracked separately from its Task Owner. An Approver may
-accept a submission; a Reviewer may request changes; a Collaborator contributes to
-the work. A person in these roles is never the accountable party by virtue of it.
+Supporting people on a task, tracked separately from its Task Owner. An Approver
+recommends acceptance of a submission by requesting it from the App Owner, who
+decides; a Reviewer is recorded as reviewing the work; a Collaborator contributes to
+the work. Neither the Reviewer nor the Collaborator role carries request or decision
+power. A person in these roles is never the accountable party by virtue of it.
 _Avoid_: assignee, member (for these specific task roles).
 
 ## AI assessment

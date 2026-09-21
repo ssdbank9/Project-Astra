@@ -1,6 +1,7 @@
 # Astra authorization matrix
 
-Status: implemented baseline for `HS3JRY` (2026-09-20).
+Status: implemented baseline for `HS3JRY` (2026-09-20); reconciled against the
+service, HTTP routes, tests, `README.md` and `CONTEXT.md` on 2026-09-21.
 
 The service layer is the authorization boundary. HTTP and browser controls must
 call the same `AstraService` methods; hiding a control is not an authorization
@@ -50,3 +51,21 @@ No automation runner or offline mutation replay subsystem exists in the current
 codebase. There is therefore no alternate write seam today. Future implementations
 must enter through the service authorization/request seam and carry the real actor,
 expected revision, and audit attribution.
+
+## Deferred: request decision controls
+
+Reviewed scope decision for `HS3JRY`: generic approve/reject execution of an
+`owner_action_requests` row is intentionally not implemented in this ticket. The
+Owner Inbox lists pending requests under **Needs action** for visibility only; the
+Owner acts directly on the underlying task or project screen, where the same
+Owner-only service methods apply. A request row therefore stays `pending` until a
+later ticket executes or closes it. Request execution, rejection and their audit
+attribution belong to roadmap Gate 3 (`CLAUDE_CODE_HANDOFF_2026-09-21.md`,
+section 11). This is not an accidental omission.
+
+## Out of scope: production dashboard overflow
+
+The legacy dashboard shows horizontal overflow and clipped toolbar content at a
+1280 px wide viewport. This is a pre-existing shell layout issue tracked under
+roadmap Gate 2 (responsive A-hybrid product shell). `HS3JRY` does not touch it and
+must not be read as fixing or hiding it.

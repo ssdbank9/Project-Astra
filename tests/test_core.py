@@ -616,6 +616,88 @@ class AstraCoreTests(unittest.TestCase):
             0,
         )
 
+    def test_read_only_chairman_protected_attempts_are_blocked_audited_and_notified(self):
+        project = self.service.create_project(self.owner, "Chairman blocked")
+        chairman = self.service.create_user(
+            self.owner, "blocked-chair@example.org", "Chairman", "chairman password safe", "chairman"
+        )
+        submitter = self.service.create_user(
+            self.owner, "blocked-submitter@example.org", "Submitter", "submitter password safe"
+        )
+        self.service.grant_project_access(self.owner, project["id"], submitter["id"], "member")
+        task = self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Board minutes", "owner_user_id": submitter["id"],
+        })
+        submission = self.service.submit_task(submitter, task["id"], "Ready")
+
+        with self.assertRaises(Forbidden):
+            self.service.accept_submission(chairman, submission["id"], "Chairman approves")
+        with self.assertRaises(Forbidden):
+            self.service.set_on_hold(chairman, task["id"], "Pause it", "2027-04-01", submitter["id"])
+        with self.assertRaises(Forbidden):
+            self.service.close_project(chairman, project["id"], "Chairman closes")
+
+        self.assertEqual(self.service.get_submission(self.owner, submission["id"])["status"], "submitted")
+        self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], "submitted")
+        self.assertEqual(self.service.get_project(self.owner, project["id"])["status"], "active")
+        task_blocked = [e for e in self.service.task_events(self.owner, task["id"])
+                        if e["event_type"] == "protected_action_blocked"]
+        self.assertEqual([e["actor_user_id"] for e in task_blocked], [chairman["id"]] * 2)
+        self.assertIn('"action": "accept_submission"', task_blocked[0]["after_json"])
+        self.assertIn('"action": "set_on_hold"', task_blocked[1]["after_json"])
+        project_blocked = [e for e in self.service.project_events(self.owner, project["id"])
+                           if e["event_type"] == "protected_action_blocked"]
+        self.assertEqual(len(project_blocked), 1)
+        self.assertEqual(project_blocked[0]["actor_user_id"], chairman["id"])
+        self.assertIn('"action": "close_project"', project_blocked[0]["detail_json"])
+        blocked_notes = [n for n in self.service.list_notifications(self.owner)
+                         if n["kind"] == "protected_action_blocked"]
+        self.assertEqual(len(blocked_notes), 3)
+        self.assertEqual(self.service.list_owner_action_requests(self.owner), [])
+
+    def test_viewer_protected_attempts_are_blocked_audited_and_notified(self):
+        project = self.service.create_project(self.owner, "Viewer blocked")
+        viewer = self.service.create_user(
+            self.owner, "blocked-viewer@example.org", "Viewer", "viewer password safe"
+        )
+        self.service.grant_project_access(self.owner, project["id"], viewer["id"], "viewer")
+        task = self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Read-only deliverable", "owner_user_id": self.owner["id"],
+        })
+        attachment = self.service.add_task_attachment(self.owner, task["id"], "/data/viewer-cannot.pdf")
+        submission = self.service.submit_task(self.owner, task["id"], "Owner submitted")
+
+        with self.assertRaises(Forbidden):
+            self.service.update_task(viewer, task["id"], {"title": "Renamed by viewer"})
+        with self.assertRaises(Forbidden):
+            self.service.accept_submission(viewer, submission["id"], "Viewer approves")
+        with self.assertRaises(Forbidden):
+            self.service.request_changes(viewer, submission["id"], "Viewer wants changes")
+        with self.assertRaises(Forbidden):
+            self.service.close_project(viewer, project["id"], "Viewer closes")
+        with self.assertRaises(Forbidden):
+            self.service.remove_task_attachment(viewer, task["id"], attachment["id"])
+
+        self.assertEqual(self.service.get_task(self.owner, task["id"])["title"], "Read-only deliverable")
+        self.assertEqual(self.service.get_submission(self.owner, submission["id"])["status"], "submitted")
+        self.assertEqual(self.service.get_project(self.owner, project["id"])["status"], "active")
+        self.assertEqual(len(self.service.list_task_attachments(self.owner, task["id"])), 1)
+        task_kinds = [e["event_type"] for e in self.service.task_events(self.owner, task["id"])]
+        self.assertEqual(task_kinds.count("protected_action_blocked"), 2)
+        self.assertIn("attachment_removal_blocked", task_kinds)
+        project_kinds = [e["event_type"] for e in self.service.project_events(self.owner, project["id"])]
+        self.assertEqual(project_kinds.count("protected_action_blocked"), 1)
+        owner_kinds = [n["kind"] for n in self.service.list_notifications(self.owner)]
+        self.assertEqual(owner_kinds.count("protected_action_blocked"), 3)
+        self.assertIn("attachment_removal_blocked", owner_kinds)
+        self.assertEqual(self.service.list_owner_action_requests(self.owner), [])
+        permissions = self.service.task_detail(viewer, task["id"])["permissions"]
+        self.assertFalse(permissions["can_edit_ordinary"])
+        self.assertFalse(permissions["can_request_protected"])
+        self.assertFalse(permissions["can_decide_protected"])
+        self.assertFalse(permissions["can_manage_files"])
+        self.assertTrue(permissions["can_read_files"])
+
     def test_update_task_cannot_shortcut_governed_status(self):
         project = self.service.create_project(self.owner, "Guard")
         task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "G"})
@@ -761,6 +843,25 @@ class AstraCoreTests(unittest.TestCase):
         self.assertEqual(self.service.get_schedule_proposal(self.owner, proposal["id"])["status"], "pending")
         self.service.approve_schedule_proposal(self.owner, proposal["id"], "Owner approves")
         self.assertEqual(self.service.get_task(self.owner, task["id"])["due_date"], "2026-10-20")
+
+    def test_manager_schedule_rejection_is_an_owner_request(self):
+        project = self.service.create_project(self.owner, "Governed rejection")
+        task = self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Milestone", "due_date": "2026-10-05",
+        })
+        manager = self.service.create_user(
+            self.owner, "reject-manager@example.org", "Manager", "manager password safe"
+        )
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        proposal = self.service.propose_schedule(manager, task["id"], None, "2026-10-20", "Slip requested")
+
+        outcome = self.service.reject_schedule_proposal(manager, proposal["id"], "Manager recommends rejection")
+
+        self.assertEqual(outcome["request"]["action"], "reject_schedule_proposal")
+        self.assertEqual(self.service.get_schedule_proposal(self.owner, proposal["id"])["status"], "pending")
+        self.assertEqual(self.service.get_task(self.owner, task["id"])["due_date"], "2026-10-05")
+        rejected = self.service.reject_schedule_proposal(self.owner, proposal["id"], "Owner rejects")
+        self.assertEqual(rejected["status"], "rejected")
 
     def test_schedule_proposal_reject_is_noop_and_requires_reason(self):
         p = self.service.create_project(self.owner, "RejectSched")
