@@ -330,3 +330,12 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 - Evidence / impact: A read-only `rg` secret-pattern scan failed because nested quote characters ended the PowerShell string and caused part of the pattern to be parsed as a module name. No file or Git state changed.
 - Correction / prevention: Run simple fixed-string credential markers as separate bounded searches instead of embedding quoted assignment patterns in one shell command. Treat a failed hygiene scan as no evidence and rerun it successfully before publishing.
 - Status: Recovered workflow; the replacement scans and final result are recorded in the GitHub export verification.
+
+## ASTRA-20260921-03 - repository visibility was not verified before the first push
+
+- Date / project: 2026-09-21; Astra standalone GitHub publication.
+- Category / status: Confirmed privacy-process error; repository was observed as public after both sanitized branches were pushed; correction requires the owner's explicit permission change.
+- Evidence / impact: The signed-in GitHub repository page labeled `ssdbank9/Project-Astra` a public repository. The uploaded payload contains Astra source, tests, design documents, Jaira records and product handoffs, but the pre-push hygiene checks found no database, virtual environment, credential file, private key or GitHub token marker.
+- Cause: The empty repository was created and authenticated earlier, but its visibility was not read and confirmed before publishing.
+- Correction / prevention: Verify visibility on the empty repository page before any first push; for private work require an explicit private label, then verify again after publication. Switch this repository to private only after the owner confirms the permission change, then separately authorize only the intended Claude connector scope.
+- Verification: Both branches and expected files are visible remotely; privacy correction and Claude connector authorization remain pending at the time of this entry.
