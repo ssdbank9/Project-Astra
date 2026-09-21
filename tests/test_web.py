@@ -677,6 +677,34 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual(response.status, 400)
         self.assertIn("reason", payload["error"])
 
+    def test_task_detail_subtasks_carry_step_schedule_fields_over_http(self):
+        # D73AQW: GET /api/tasks/{id} subtasks include the fields the Gantt step
+        # tooltip and the detail dialog render (start, criticality, progress, owner id, parent).
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "StepsHTTP"}, cookie=cookie, csrf=csrf)
+        pid = project["project"]["id"]
+        _, parent = self.request("POST", "/api/tasks", {"project_id": pid, "title": "Parent"}, cookie=cookie, csrf=csrf)
+        parent_id = parent["task"]["id"]
+        _, step = self.request("POST", "/api/tasks", {
+            "project_id": pid, "title": "Step one", "parent_task_id": parent_id,
+            "start_date": "2026-11-02", "due_date": "2026-11-06", "criticality": "normal", "progress": 25,
+        }, cookie=cookie, csrf=csrf)
+        response, detail = self.request("GET", f"/api/tasks/{parent_id}", cookie=cookie)
+        self.assertEqual(response.status, 200)
+        subtasks = detail["task"]["subtasks"]
+        self.assertEqual(len(subtasks), 1)
+        self.assertEqual(subtasks[0]["id"], step["task"]["id"])
+        self.assertEqual(subtasks[0]["start_date"], "2026-11-02")
+        self.assertEqual(subtasks[0]["due_date"], "2026-11-06")
+        self.assertEqual(subtasks[0]["criticality"], "normal")
+        self.assertEqual(subtasks[0]["progress"], 25)
+        self.assertEqual(subtasks[0]["parent_task_id"], parent_id)
+        self.assertIn("owner_user_id", subtasks[0])
+        # The step's own detail names its parent so the dialog can render the back-link.
+        _, step_detail = self.request("GET", f"/api/tasks/{step['task']['id']}", cookie=cookie)
+        self.assertEqual(step_detail["task"]["parent_title"], "Parent")
+        self.assertEqual(step_detail["task"]["parent_task_id"], parent_id)
+
 
 if __name__ == "__main__":
     unittest.main()

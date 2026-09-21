@@ -1246,9 +1246,13 @@ class AstraService:
         return self.get_task(actor, task_id)
 
     def list_subtasks(self, actor: dict, task_id: str) -> list[dict]:
+        # D73AQW: the Gantt step segments, their tooltip and the detail dialog's
+        # Subtasks list share this one read shape, so it carries the schedule and
+        # ownership fields as well as the roll-up basics. Read-only; no schema change.
         self.get_task(actor, task_id)
         rows = self.db.execute(
-            """SELECT t.id, t.title, t.status, t.due_date, u.display_name owner_name
+            """SELECT t.id, t.title, t.status, t.start_date, t.due_date, t.criticality, t.progress,
+                      t.parent_task_id, t.owner_user_id, u.display_name owner_name
                FROM tasks t LEFT JOIN users u ON u.id=t.owner_user_id
                WHERE t.parent_task_id=? ORDER BY t.title COLLATE NOCASE""",
             (task_id,),
