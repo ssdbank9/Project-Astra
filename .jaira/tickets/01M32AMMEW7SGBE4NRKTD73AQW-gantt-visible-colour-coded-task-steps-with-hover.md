@@ -25,7 +25,7 @@ related: []
 commits:
   - 33d237f8fc11c712722c48e9d8834f63ed4dc0eb
 created-at: 2026-09-21T15:51:31Z
-updated-at: 2026-09-21T16:10:45Z
+updated-at: 2026-09-21T16:12:25Z
 updated-by: Claude
 claimed-by: vm-8214
 claimed-at: 2026-09-21T15:52:35Z
@@ -77,3 +77,4 @@ Dead end: pkill -f <script name> also kills the invoking shell when the name is 
 Noise: every jaira write prints 'HS3JRY/D73AQW could not be sent: gitref: fatal: expected acknowledgments, received packfile' - a jaira sync/transport error in this container, not a gate refusal; the ticket file on disk updated each time.
 Refusal read and satisfied: backlog->brainstorm was refused because the brainstorm option is not ticked; the ticket already had a goal so it moved backlog->todo->pre-process->in-progress instead.
 Evidence: scratchpad gantt/browser-evidence.md (not committed); fixture server extended in scratchpad only, stopped, no listener on 8768.
+- **2026-09-21 16:12 · Claude** — Code review (medium) on 6a82463..HEAD found two real issues, fixed in a follow-up commit: fmtDay rendered UTC-parsed ISO dates in the local zone (viewers west of UTC saw the previous day in the tooltip) - now formatted with timeZone UTC; new Set(storage.get('astra.gantt.expanded')) would throw at load on a non-array stored value - now guarded with Array.isArray. node --check clean after both.
