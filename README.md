@@ -8,7 +8,8 @@ are allowed to access.
 This first vertical slice provides:
 
 - owner bootstrap and authenticated sessions;
-- owner, Chairman, manager, and member roles;
+- App Owner, Chairman (organization-wide read-only unless separately granted a project role),
+  manager, and member roles;
 - an owner-only People panel: create users, deactivate/reactivate them, and grant or
   revoke project access; task owners are chosen from users authorized on the project;
 - project-scoped access;
@@ -17,13 +18,16 @@ This first vertical slice provides:
 - append-only task audit events;
 - a task detail view with authorized inline editing (reason required for status/schedule
   changes), add/remove of multiple dependencies, and a human-readable event history;
-- a governed work lifecycle: submissions are recorded and an authorized person (a project
-  manager, owner/Chairman, or a designated approver) accepts them to complete a task — a
-  submitter cannot accept their own work unless they are the app owner; an accepted version
-  is immutable and can only be superseded after an explicit reopen with a revised timeline;
-  on-hold work requires a reason plus a mandatory follow-up checkpoint; and project closure
-  is a separate event, with owner-only exceptional closure preserving a residual-work
-  snapshot rather than silently completing unfinished tasks;
+- a governed work lifecycle: submissions are recorded and only the App Owner decides the
+  protected actions — accept, request changes, reopen, hold, close, and schedule proposal
+  decisions; an eligible project manager or designated approver may request them, which
+  records an Owner request without changing live state; an accepted version is immutable
+  and can only be superseded after an explicit reopen with a revised timeline; on-hold work
+  requires a reason plus a mandatory follow-up checkpoint; and project closure is a separate
+  App Owner-only event, with exceptional closure preserving a residual-work snapshot rather
+  than silently completing unfinished tasks;
+- attachment-link and final-result mutations (add/remove, mark/unmark) are App Owner-only,
+  while every user authorized on the project may still read and list them;
 - reviewers, approvers, and collaborators recorded separately from the accountable owner;
 - entities and cross-entity project filing: a project keeps one stable id with links to one
   or more entities (the approved baseline entity list can be seeded on owner request);

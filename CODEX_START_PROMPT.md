@@ -5,27 +5,30 @@ Paste the block below to the next implementation agent. The cumulative brief is
 
 ---
 
-You are taking over the **Astra project tracker**. Work only in
-`C:\Users\Aly Jafferani\Documents\ChatGPT\New project\astra_project_tracker`
-unless the owner explicitly expands scope.
+You are taking over the **Astra project tracker** from the private GitHub
+repository `ssdbank9/Project-Astra`. Work from the repository root on your
+current platform unless the owner explicitly expands scope. The historical
+Windows source path is recorded in the handoffs for provenance only.
 
 Read these completely before changing anything:
 
 1. `CODEX_HANDOFF_2026-09-20.md` — current implementation, all settled decisions,
    runtime/sharing model, production gates and exact next sequence.
 2. The active `AGENTS.md` instructions — especially the Jaira lane rules.
-3. `C:\Users\Aly Jafferani\.codex\mistakes.md` and
-   `pending-global-mistakes.md` — prevention rules and unresolved synchronization.
+3. `pending-global-mistakes.md` — repository-available prevention rules and
+   unresolved synchronization. On Aly's Windows machine, also read
+   `C:\Users\Aly Jafferani\.codex\mistakes.md` when it is available.
 4. `docs/design/astra-product-ux-baseline.md` — product surface and UX contract.
 5. `docs/design/governed-drag-drop-contract.md` — mutation, locks, files,
    schedule and recovery contract.
 
-Then report, before editing:
+Then report, before editing. Use the command for your platform:
 
 ```powershell
 jaira next --per-lane --json
 jaira resume
-.venv\Scripts\python.exe tests\run.py
+# Linux/macOS: .venv/bin/python tests/run.py
+# Windows: .venv\Scripts\python.exe tests\run.py
 node --check src\astra\static\app.js
 git status --short
 ```

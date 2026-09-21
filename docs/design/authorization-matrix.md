@@ -1,0 +1,71 @@
+# Astra authorization matrix
+
+Status: implemented baseline for `HS3JRY` (2026-09-20); reconciled against the
+service, HTTP routes, tests, `README.md` and `CONTEXT.md` on 2026-09-21.
+
+The service layer is the authorization boundary. HTTP and browser controls must
+call the same `AstraService` methods; hiding a control is not an authorization
+decision.
+
+| Capability | App Owner | Project Manager | Viewer/member | Chairman without an explicit project role |
+| --- | --- | --- | --- | --- |
+| View authorized projects/tasks/files | All | Granted projects | Granted projects | Organization-wide read |
+| Create/edit ordinary task work | Yes | Granted projects | No | No |
+| Accept/return submissions, hold, reopen, close, or decide schedule proposals | Direct | Creates pending Owner request; live state unchanged | Blocked and audited | Blocked and audited |
+| Add/remove attachment links | Yes | No | No | No |
+| Mark/unmark final results | Yes | No | No | No |
+| Read authorized attachment/final-result records | Yes | Yes | Yes | Yes |
+| Publish templates, administer access, or configure calendars | Yes | No | No | No |
+
+`Chairman` is retained as an organization-wide read role for compatibility. It
+no longer grants implicit mutation power through `can_manage_project`. A person
+with that global role may receive an explicit project membership; any capability
+then comes from that project role, not from the Chairman label.
+
+## Protected action outcome
+
+A permitted Manager or designated approver attempt creates an append-only
+`owner_action_requests` row, task/project audit event, and Owner notification.
+The HTTP endpoint returns `202 Accepted` with a `request` object. The original
+task, submission, schedule proposal, checkpoint, or project remains unchanged.
+The Owner can list pending requests through `GET /api/owner-action-requests`, and
+the browser Inbox shows them under **Needs action**.
+
+An unauthorized Viewer/member or read-only Chairman attempt is rejected, audited,
+and notified to the Owner when it targets a visible record. A blocked attachment
+removal is always recorded as `attachment_removal_blocked` before the service
+returns `403 Forbidden`.
+
+## Current file boundary
+
+The current application stores attachment link metadata, not managed file bytes.
+The implemented mutation seams are add/remove attachment link and mark/unmark final
+result; all are Owner-only. Project-authorized list/read remains available. Upload,
+version, permanent-link, and streaming-download systems do not exist yet and cannot
+be treated as implemented. When introduced, they must call the same Owner-only
+service authorization boundary rather than adding route-only checks.
+
+## Automation and offline replay
+
+No automation runner or offline mutation replay subsystem exists in the current
+codebase. There is therefore no alternate write seam today. Future implementations
+must enter through the service authorization/request seam and carry the real actor,
+expected revision, and audit attribution.
+
+## Deferred: request decision controls
+
+Reviewed scope decision for `HS3JRY`: generic approve/reject execution of an
+`owner_action_requests` row is intentionally not implemented in this ticket. The
+Owner Inbox lists pending requests under **Needs action** for visibility only; the
+Owner acts directly on the underlying task or project screen, where the same
+Owner-only service methods apply. A request row therefore stays `pending` until a
+later ticket executes or closes it. Request execution, rejection and their audit
+attribution belong to roadmap Gate 3 (`CLAUDE_CODE_HANDOFF_2026-09-21.md`,
+section 11). This is not an accidental omission.
+
+## Out of scope: production dashboard overflow
+
+The legacy dashboard shows horizontal overflow and clipped toolbar content at a
+1280 px wide viewport. This is a pre-existing shell layout issue tracked under
+roadmap Gate 2 (responsive A-hybrid product shell). `HS3JRY` does not touch it and
+must not be read as fixing or hiding it.

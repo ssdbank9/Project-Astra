@@ -25,14 +25,17 @@ Owners of the project's individual tasks.
 _Avoid_: owner (unqualified), manager (bare), lead.
 
 **Chairman**:
-An organizational role with org-wide project visibility comparable to the App
-Owner but no access to private sources, and no power to grant access or perform
-exceptional closure.
+An organizational role with org-wide read-only project visibility comparable to the
+App Owner but no access to private sources and no mutation power of its own: it
+cannot grant access, decide protected actions, close projects, or manage files. A
+Chairman gains project powers only through a separately granted project role.
 
 **Collaborator / Reviewer / Approver**:
-Supporting people on a task, tracked separately from its Task Owner. An Approver may
-accept a submission; a Reviewer may request changes; a Collaborator contributes to
-the work. A person in these roles is never the accountable party by virtue of it.
+Supporting people on a task, tracked separately from its Task Owner. An Approver
+recommends acceptance of a submission by requesting it from the App Owner, who
+decides; a Reviewer is recorded as reviewing the work; a Collaborator contributes to
+the work. Neither the Reviewer nor the Collaborator role carries request or decision
+power. A person in these roles is never the accountable party by virtue of it.
 _Avoid_: assignee, member (for these specific task roles).
 
 ## AI assessment
@@ -56,10 +59,12 @@ _Avoid_: document (ambiguous), source (bare), input.
 ## Portfolio & budget
 
 **Budget**:
-A project's planned budget — one amount in one currency. It rolls up into exactly one
-entity (the project's Primary entity) so a project shared across entities is never
-counted twice. Planned only; actual/spent is not tracked yet.
-_Avoid_: cost, spend, actual (those are a separate future concept).
+A project's planned, committed and actual/spent amounts in one explicit currency,
+with variance derived from those amounts. It rolls up into exactly one entity (the
+project's Primary entity) so a project shared across entities is never counted twice.
+The current implementation stores planned amount only; committed, actual/spent and
+variance are an accepted production requirement that remains to be implemented.
+_Avoid_: silently blending currencies or presenting planned amount as actual spend.
 
 **Primary entity**:
 The single entity a project's Budget and portfolio figures count toward. For a
