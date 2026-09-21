@@ -1,7 +1,7 @@
 ---
 id: 01M32AMMEW7SGBE4NRKTD73AQW
 title: "Gantt: visible colour-coded task steps with hover and click detail"
-status: review
+status: in-progress
 ready: true
 creator: Claude
 assignee: Claude
@@ -25,10 +25,10 @@ related: []
 commits:
   - 33d237f8fc11c712722c48e9d8834f63ed4dc0eb
 created-at: 2026-09-21T15:51:31Z
-updated-at: 2026-09-21T16:24:02Z
+updated-at: 2026-09-21T16:27:51Z
 updated-by: Claude
-claimed-by: vm-8214
-claimed-at: 2026-09-21T15:52:35Z
+claimed-by: vm-13959
+claimed-at: 2026-09-21T16:27:02Z
 outcome-what: "Portfolio Gantt groups tasks by parent_task_id and draws each dated subtask as a numbered Okabe-Ito coloured segment inside the parent bar, with collapsed child rows behind an aria-expanded chevron (remembered per parent), one shared hover+focus tooltip (step n of m, owner, dates, status, due state, criticality; Escape closes), roving keyboard focus per bar, click/Enter opening the step's own record with a Parent back-link, +N overflow disclosure, 'n steps need dates' chip, dashed derived track, state glyphs/stripes, a Schedule table twin (phone default) and reduced-motion support. list_subtasks returns start_date, criticality, progress, parent_task_id, owner_user_id. Gantt positions now go through the CSSOM because the CSP dropped inline styles."
 outcome-why: "Aly asked on 2026-09-21 for steps to be visible inside the Gantt bar, one colour per step, with hover or click showing each step's details and owner; subtasks rendered as separate rows and the bar was not interactive."
 outcome-resolves: "Every DoD clause is evidenced: segments with index + colour, tooltip on hover and focus with Escape, click/Enter to the step record with Parent link, expand/collapse remembered, undated chip, legend, Schedule table with the ten columns and phone default, reduced motion, +N overflow, list_subtasks shape with unit and HTTP tests; node --check clean; 119 tests pass; browser evidence for Owner and Viewer at 1440x900 and 390x844 with no new console errors."

@@ -192,8 +192,8 @@ function renderGantt(tasks){
         }
         tall=laneEnd.length>1;
         const segs=drawn.map(({k,g})=>stepButton(k,g)).join("");
-        const more=overflow.length?`<button type="button" class="step-more" data-more="${id}" aria-expanded="false" aria-controls="more-${id}" aria-label="${overflow.length} more step${overflow.length===1?"":"s"} too small to draw; open the list">+${overflow.length}</button>`:"";
-        const moreList=overflow.length?`<div class="step-more-list" id="more-${id}" data-x="${Math.min(left,68)}" hidden><p class="muted">Steps too small to draw at this scale</p><ul>${overflow.map(stepListItem).join("")}</ul></div>`:"";
+        const more=overflow.length?`<button type="button" class="step-more" data-more="${id}" aria-expanded="false" aria-controls="more-${id}" aria-label="${overflow.length} more step${overflow.length===1?"":"s"} not drawn at this scale (too small or overlapping); open the list">+${overflow.length}</button>`:"";
+        const moreList=overflow.length?`<div class="step-more-list" id="more-${id}" data-x="${Math.min(left,68)}" hidden><p class="muted">${overflow.length} more step${overflow.length===1?"":"s"} not drawn at this scale (too small or overlapping)</p><ul>${overflow.map(stepListItem).join("")}</ul></div>`:"";
         const n=undatedKids.length;
         const undatedChip=n?`<button type="button" class="chip step-undated" data-detail="${id}" data-x="${Math.min(left+width+.6,80)}" aria-label="${n} step${n===1?"":"s"} of ${escapeHtml(t.title)} need${n===1?"s":""} dates; open the task">${n} step${n===1?"":"s"} need${n===1?"s":""} dates</button>`:"";
         if(!t.start_date&&!t.due_date)derived=`<br><span class="chip derived">Dates from steps</span>`;
@@ -279,6 +279,9 @@ function toggleMore(btn){const list=document.getElementById(btn.getAttribute("ar
     }
     if((e.key==="Enter"||e.key===" ")&&e.target===track){e.preventDefault();hideTip();openDetail(track.dataset.detail)}
   });
+  // Escape must also close a hover-only tooltip or an open +N list while focus is still on body,
+  // so it is bound on document; the #gantt keydown branch above keeps the focused-step case.
+  document.addEventListener("keydown",e=>{if(e.key==="Escape"){hideTip();closeMoreLists()}});
   document.addEventListener("click",e=>{if(!e.target.closest(".step-more,.step-more-list"))closeMoreLists()});
   window.addEventListener("scroll",()=>{if(tipFor)placeTip(tipFor)},true);
   document.querySelector("#view-table").onchange=e=>{storage.set("astra.gantt.view",e.target.checked?"table":"chart");render()};
