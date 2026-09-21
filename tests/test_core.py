@@ -1275,6 +1275,70 @@ class AstraCoreTests(unittest.TestCase):
                     self.service.unmark_final_result(actor, marked["id"])
         self.assertEqual(len(self.service.list_final_results(self.owner)), 1)
 
+    def test_read_only_chairman_attachment_removal_is_blocked_and_notifies_owner(self):
+        project = self.service.create_project(self.owner, "Chairman file boundary")
+        chairman = self.service.create_user(
+            self.owner, "file-chair@example.org", "Chairman", "chairman password safe", "chairman"
+        )
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Board pack"})
+        attachment = self.service.add_task_attachment(self.owner, task["id"], "/data/board-pack.pdf")
+
+        # Organization-wide read: the Chairman sees the link record without any membership.
+        self.assertEqual(len(self.service.list_task_attachments(chairman, task["id"])), 1)
+        with self.assertRaises(Forbidden):
+            self.service.remove_task_attachment(chairman, task["id"], attachment["id"])
+
+        # Same outcome the Manager and Viewer cases assert: link kept, attempt audited, Owner told.
+        self.assertEqual(len(self.service.list_task_attachments(self.owner, task["id"])), 1)
+        blocked = [e for e in self.service.task_events(self.owner, task["id"])
+                   if e["event_type"] == "attachment_removal_blocked"]
+        self.assertEqual([e["actor_user_id"] for e in blocked], [chairman["id"]])
+        self.assertIn(attachment["id"], blocked[0]["after_json"])
+        owner_notes = [n for n in self.service.list_notifications(self.owner)
+                       if n["kind"] == "attachment_removal_blocked"]
+        self.assertEqual(len(owner_notes), 1)
+        self.assertEqual(owner_notes[0]["task_id"], task["id"])
+        self.assertEqual(self.service.list_owner_action_requests(self.owner), [])
+
+    def test_templates_access_and_calendar_administration_are_owner_only_for_every_non_owner_role(self):
+        project = self.service.create_project(self.owner, "Administered")
+        self.service.create_task(self.owner, {"project_id": project["id"], "title": "Kick-off"})
+        manager = self.service.create_user(
+            self.owner, "admin-manager@example.org", "Manager", "manager password safe"
+        )
+        viewer = self.service.create_user(
+            self.owner, "admin-viewer@example.org", "Viewer", "viewer password safe"
+        )
+        chairman = self.service.create_user(
+            self.owner, "admin-chair@example.org", "Chairman", "chairman password safe", "chairman"
+        )
+        newcomer = self.service.create_user(
+            self.owner, "admin-newcomer@example.org", "Newcomer", "newcomer password safe"
+        )
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        self.service.grant_project_access(self.owner, project["id"], viewer["id"], "viewer")
+
+        for label, actor in (("manager", manager), ("viewer", viewer), ("chairman", chairman)):
+            with self.subTest(role=label, action="save_project_as_template"):
+                with self.assertRaises(Forbidden):
+                    self.service.save_project_as_template(actor, project["id"], f"{label} template")
+            with self.subTest(role=label, action="grant_project_access"):
+                with self.assertRaises(Forbidden):
+                    self.service.grant_project_access(actor, project["id"], newcomer["id"], "manager")
+            with self.subTest(role=label, action="set_working_days"):
+                with self.assertRaises(Forbidden):
+                    self.service.set_working_days(actor, project["id"], "01234")
+            with self.subTest(role=label, action="add_holiday"):
+                with self.assertRaises(Forbidden):
+                    self.service.add_holiday(actor, project["id"], "2026-12-25", "Holiday")
+
+        # Nothing leaked through: no template, no new membership, calendar untouched.
+        self.assertEqual(self.service.list_templates(self.owner), [])
+        self.assertEqual(self.service.list_projects(newcomer), [])
+        calendar = self.service.get_project_calendar(self.owner, project["id"])
+        self.assertEqual(calendar["working_days"], "0123456")
+        self.assertEqual(calendar["holidays"], [])
+
     def test_final_results_filter_by_type(self):
         project = self.service.create_project(self.owner, "Mixed")
         task = self._accepted_task(project["id"], "Report")
