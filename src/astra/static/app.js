@@ -59,10 +59,12 @@ const STATUS_LABELS={draft:"Draft",assigned:"Assigned",in_progress:"In progress"
 const tipMeta=new Map();
 // localStorage holds per-viewer conveniences only (expanded parents, chart/table choice).
 const storage={get(k,f){try{const v=localStorage.getItem(k);return v==null?f:JSON.parse(v)}catch(e){return f}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
-const expandedParents=new Set(storage.get("astra.gantt.expanded",[]));
+const storedExpanded=storage.get("astra.gantt.expanded",[]);
+const expandedParents=new Set(Array.isArray(storedExpanded)?storedExpanded:[]);
 const phoneMQ=window.matchMedia?window.matchMedia("(max-width: 760px)"):{matches:false};
 function currentView(){const stored=storage.get("astra.gantt.view",null);if(stored==="table"||stored==="chart")return stored;return phoneMQ.matches?"table":"chart"}
-function fmtDay(iso){if(!iso)return "—";return new Date(iso).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"})}
+// ISO dates parse as UTC midnight, so format them in UTC too or viewers west of UTC see the day before.
+function fmtDay(iso){if(!iso)return "—";return new Date(iso).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"})}
 function statusLabel(s){return STATUS_LABELS[s]||String(s||"").replace(/_/g," ")}
 function initials(name){return (name||"").split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0].toUpperCase()).join("")}
 function dueText(t){if(t.due_state==="undated")return "No due date";if(t.due_state==="closed")return "Closed";const d=t.days_to_due;if(d==null)return "";if(d<0)return `${-d} day${d===-1?"":"s"} overdue`;if(d===0)return "Due today";return `Due in ${d} day${d===1?"":"s"}`}
