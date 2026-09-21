@@ -1,0 +1,2034 @@
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+from datetime import date, datetime, timedelta, timezone
+from uuid import uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from .auth import hash_password, normalize_email
+from .db import transaction
+
+
+ROLES = {"owner", "chairman", "member"}
+STATUSES = {
+    "draft", "assigned", "in_progress", "submitted", "changes_requested",
+    "completed", "on_hold", "delayed", "cancelled", "abandoned", "reopened",
+}
+CRITICALITIES = {"critical", "high", "normal", "low", None}
+# Transitions that carry mandatory records (submission, acceptance, checkpoint,
+# revised timeline) and must go through their dedicated lifecycle actions rather
+# than a plain field update.
+GOVERNED_STATUSES = {"submitted", "completed", "on_hold", "reopened"}
+REVIEWER_ROLES = {"reviewer", "approver", "collaborator"}
+
+LOGIN_WINDOW_SECONDS = 900
+LOGIN_MAX_FAILURES = 5
+
+# Approved baseline entities from the handoff (Section 4). Seeded only on explicit
+# owner request; never injected automatically.
+APPROVED_ENTITIES = [
+    "Rupani Foundation USA",
+    "Rupani Foundation Pakistan",
+    "Rupani IB College",
+    "Apex & Co",
+    "Apex Amanat Microfinance",
+    "Ibn Sina Medical College",
+    "Ibn Sina Foundation",
+    "RDI - Global",
+    "RDI Pakistan",
+    "Tax Exempt",
+]
+
+
+def now_text() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def new_id() -> str:
+    return str(uuid4())
+
+
+def row_dict(row: sqlite3.Row | None) -> dict | None:
+    return dict(row) if row is not None else None
+
+
+class Forbidden(PermissionError):
+    pass
+
+
+class AstraService:
+    def __init__(self, connection: sqlite3.Connection):
+        self.db = connection
+
+    def owner_exists(self) -> bool:
+        return bool(self.db.execute("SELECT 1 FROM users WHERE global_role='owner'").fetchone())
+
+    def login_is_throttled(self, email: str) -> bool:
+        """True when this email has reached the failed-attempt cap inside the window."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=LOGIN_WINDOW_SECONDS)).isoformat()
+        count = self.db.execute(
+            "SELECT COUNT(*) c FROM login_attempts WHERE email=? AND success=0 AND attempted_at>=?",
+            (email, cutoff),
+        ).fetchone()["c"]
+        return count >= LOGIN_MAX_FAILURES
+
+    def record_login_attempt(self, email: str, ip: str, success: bool) -> None:
+        self.db.execute(
+            "INSERT INTO login_attempts VALUES(?,?,?,?,?)",
+            (new_id(), email, ip or "", now_text(), 1 if success else 0),
+        )
+        if success:
+            self.db.execute("DELETE FROM login_attempts WHERE email=? AND success=0", (email,))
+
+    def cleanup_expired_sessions(self) -> None:
+        self.db.execute("DELETE FROM sessions WHERE expires_at <= ?", (now_text(),))
+
+    def revoke_user_sessions(self, user_id: str) -> int:
+        cursor = self.db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        return cursor.rowcount
+
+    def create_initial_owner(self, email: str, display_name: str, password: str) -> dict:
+        if self.owner_exists():
+            raise ValueError("An owner account already exists.")
+        user_id = new_id()
+        self.db.execute(
+            "INSERT INTO users(id,email,display_name,password_hash,global_role,created_at) VALUES(?,?,?,?,?,?)",
+            (user_id, normalize_email(email), display_name.strip() or "Owner", hash_password(password), "owner", now_text()),
+        )
+        return self.get_user(user_id)
+
+    def get_user(self, user_id: str) -> dict:
+        user = row_dict(self.db.execute(
+            "SELECT id,email,display_name,global_role,active,created_at FROM users WHERE id=?", (user_id,)
+        ).fetchone())
+        if not user:
+            raise KeyError("User not found.")
+        return user
+
+    def create_user(self, actor: dict, email: str, display_name: str, password: str, role: str = "member") -> dict:
+        self.require_owner(actor)
+        if role not in ROLES or role == "owner":
+            raise ValueError("New users may be Chairman or member; owner transfer is a separate operation.")
+        email = normalize_email(email)
+        if not display_name.strip():
+            raise ValueError("A display name is required.")
+        if self.db.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
+            raise ValueError("A user with this email already exists.")
+        user_id = new_id()
+        self.db.execute(
+            "INSERT INTO users VALUES(?,?,?,?,?,?,?,?)",
+            (user_id, email, display_name.strip(), hash_password(password), role, 1, now_text(), actor["id"]),
+        )
+        return self.get_user(user_id)
+
+    def list_users(self, actor: dict) -> list[dict]:
+        if actor["global_role"] not in {"owner", "chairman"}:
+            raise Forbidden("User directory access denied.")
+        rows = self.db.execute(
+            "SELECT id,email,display_name,global_role,active,created_at FROM users ORDER BY display_name COLLATE NOCASE"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_user_active(self, actor: dict, user_id: str, active: bool) -> dict:
+        self.require_owner(actor)
+        if user_id == actor["id"]:
+            raise ValueError("You cannot change your own active status.")
+        target = self.get_user(user_id)
+        if target["global_role"] == "owner":
+            raise ValueError("The owner account cannot be deactivated.")
+        self.db.execute("UPDATE users SET active=? WHERE id=?", (1 if active else 0, user_id))
+        if not active:
+            self.revoke_user_sessions(user_id)
+        return self.get_user(user_id)
+
+    def list_assignable_users(self, actor: dict, project_id: str) -> list[dict]:
+        if not self.can_manage_project(actor, project_id):
+            raise Forbidden("Task-management access denied.")
+        self._require_project(project_id)
+        rows = self.db.execute(
+            """SELECT DISTINCT u.id, u.display_name, u.email FROM users u
+               WHERE u.active=1 AND (
+                   u.global_role IN ('owner','chairman')
+                   OR EXISTS(SELECT 1 FROM memberships m WHERE m.user_id=u.id AND m.project_id=?)
+               )
+               ORDER BY u.display_name COLLATE NOCASE""",
+            (project_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def revoke_project_access(self, actor: dict, project_id: str, user_id: str) -> None:
+        self.require_owner(actor)
+        self.db.execute("DELETE FROM memberships WHERE project_id=? AND user_id=?", (project_id, user_id))
+
+    def list_memberships(self, actor: dict, project_id: str | None = None) -> list[dict]:
+        self.require_owner(actor)
+        query = (
+            "SELECT m.project_id, m.user_id, m.role, p.name project_name, u.display_name user_name "
+            "FROM memberships m JOIN projects p ON p.id=m.project_id JOIN users u ON u.id=m.user_id"
+        )
+        params: tuple = ()
+        if project_id:
+            query += " WHERE m.project_id=?"
+            params = (project_id,)
+        query += " ORDER BY p.name COLLATE NOCASE, u.display_name COLLATE NOCASE"
+        return [dict(row) for row in self.db.execute(query, params).fetchall()]
+
+    # --- Entities and cross-entity project filing ---
+
+    def get_entity(self, entity_id: str) -> dict:
+        entity = row_dict(self.db.execute("SELECT * FROM entities WHERE id=?", (entity_id,)).fetchone())
+        if not entity:
+            raise KeyError("Entity not found.")
+        return entity
+
+    def list_entities(self, actor: dict) -> list[dict]:
+        rows = self.db.execute("SELECT * FROM entities ORDER BY name COLLATE NOCASE").fetchall()
+        return [dict(row) for row in rows]
+
+    def create_entity(self, actor: dict, name: str) -> dict:
+        self.require_owner(actor)
+        name = str(name).strip()
+        if not name:
+            raise ValueError("Entity name is required.")
+        if self.db.execute("SELECT 1 FROM entities WHERE name=?", (name,)).fetchone():
+            raise ValueError("An entity with this name already exists.")
+        entity_id = new_id()
+        self.db.execute(
+            "INSERT INTO entities VALUES(?,?,?,?,?)", (entity_id, name, 1, now_text(), actor["id"])
+        )
+        return self.get_entity(entity_id)
+
+    def set_entity_active(self, actor: dict, entity_id: str, active: bool) -> dict:
+        self.require_owner(actor)
+        self.get_entity(entity_id)
+        self.db.execute("UPDATE entities SET active=? WHERE id=?", (1 if active else 0, entity_id))
+        return self.get_entity(entity_id)
+
+    def seed_default_entities(self, actor: dict) -> list[str]:
+        self.require_owner(actor)
+        created = []
+        for name in APPROVED_ENTITIES:
+            if not self.db.execute("SELECT 1 FROM entities WHERE name=?", (name,)).fetchone():
+                self.db.execute(
+                    "INSERT INTO entities VALUES(?,?,?,?,?)", (new_id(), name, 1, now_text(), actor["id"])
+                )
+                created.append(name)
+        return created
+
+    def set_project_entities(self, actor: dict, project_id: str, entity_ids: list) -> list[dict]:
+        # The owner chooses a project's filing entities; a cross-entity project keeps one
+        # stable project id with several entity links rather than duplicated projects.
+        self.require_owner(actor)
+        self._require_project(project_id)
+        seen = []
+        with transaction(self.db):
+            self.db.execute("DELETE FROM project_entities WHERE project_id=?", (project_id,))
+            for entity_id in entity_ids or []:
+                if entity_id in seen:
+                    continue
+                if not self.db.execute("SELECT 1 FROM entities WHERE id=?", (entity_id,)).fetchone():
+                    raise ValueError("Unknown entity.")
+                self.db.execute("INSERT INTO project_entities VALUES(?,?)", (project_id, entity_id))
+                seen.append(entity_id)
+        return self.list_project_entities(actor, project_id)
+
+    def list_project_entities(self, actor: dict, project_id: str) -> list[dict]:
+        self.get_project(actor, project_id)
+        rows = self.db.execute(
+            """SELECT e.id, e.name FROM project_entities pe JOIN entities e ON e.id=pe.entity_id
+               WHERE pe.project_id=? ORDER BY e.name COLLATE NOCASE""",
+            (project_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _attach_entities(self, projects: list[dict]) -> list[dict]:
+        if not projects:
+            return projects
+        ids = [project["id"] for project in projects]
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.db.execute(
+            f"""SELECT pe.project_id, e.id, e.name FROM project_entities pe JOIN entities e ON e.id=pe.entity_id
+                WHERE pe.project_id IN ({placeholders}) ORDER BY e.name COLLATE NOCASE""",
+            tuple(ids),
+        ).fetchall()
+        by_project: dict[str, list] = {pid: [] for pid in ids}
+        for row in rows:
+            by_project[row["project_id"]].append({"id": row["id"], "name": row["name"]})
+        for project in projects:
+            project["entities"] = by_project.get(project["id"], [])
+        return projects
+
+    # --- Project working calendar (permissive by default: every day is a working day) ---
+
+    def _project_working_days(self, project_id: str) -> set:
+        row = self.db.execute("SELECT working_days FROM projects WHERE id=?", (project_id,)).fetchone()
+        days = row["working_days"] if row and row["working_days"] else "0123456"
+        return {int(c) for c in days if c in "0123456"}
+
+    def is_working_day(self, project_id: str, day_iso: str) -> bool:
+        if date.fromisoformat(day_iso).weekday() not in self._project_working_days(project_id):
+            return False
+        holiday = self.db.execute(
+            "SELECT 1 FROM project_holidays WHERE project_id=? AND holiday_date=?", (project_id, day_iso)
+        ).fetchone()
+        return not holiday
+
+    def working_days_between(self, project_id: str, start_iso: str, end_iso: str) -> int:
+        start, end = date.fromisoformat(start_iso), date.fromisoformat(end_iso)
+        if end < start:
+            start, end = end, start
+        working = self._project_working_days(project_id)
+        holidays = {
+            r["holiday_date"] for r in self.db.execute(
+                "SELECT holiday_date FROM project_holidays WHERE project_id=?", (project_id,)
+            ).fetchall()
+        }
+        count, day = 0, start
+        while day <= end:
+            if day.weekday() in working and day.isoformat() not in holidays:
+                count += 1
+            day += timedelta(days=1)
+        return count
+
+    def get_project_calendar(self, actor: dict, project_id: str) -> dict:
+        project = self.get_project(actor, project_id)
+        return {"working_days": project.get("working_days") or "0123456",
+                "holidays": self.list_holidays(actor, project_id)}
+
+    def set_working_days(self, actor: dict, project_id: str, days) -> str:
+        self.require_owner(actor)
+        self._require_project(project_id)
+        if isinstance(days, (list, tuple)):
+            days = "".join(str(x) for x in days)
+        cleaned = "".join(sorted({c for c in str(days) if c in "0123456"}))
+        if not cleaned:
+            raise ValueError("At least one working day is required.")
+        self.db.execute("UPDATE projects SET working_days=? WHERE id=?", (cleaned, project_id))
+        return cleaned
+
+    def list_holidays(self, actor: dict, project_id: str) -> list[dict]:
+        self.get_project(actor, project_id)
+        rows = self.db.execute(
+            "SELECT holiday_date, label FROM project_holidays WHERE project_id=? ORDER BY holiday_date", (project_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_holiday(self, actor: dict, project_id: str, holiday_date, label: str = "") -> list[dict]:
+        self.require_owner(actor)
+        self._require_project(project_id)
+        day = self._date(holiday_date)
+        if not day:
+            raise ValueError("A holiday date is required.")
+        self.db.execute(
+            "INSERT OR REPLACE INTO project_holidays(project_id,holiday_date,label,created_by,created_at)"
+            " VALUES(?,?,?,?,?)",
+            (project_id, day, str(label).strip(), actor["id"], now_text()),
+        )
+        return self.list_holidays(actor, project_id)
+
+    def remove_holiday(self, actor: dict, project_id: str, holiday_date) -> None:
+        self.require_owner(actor)
+        self.db.execute(
+            "DELETE FROM project_holidays WHERE project_id=? AND holiday_date=?", (project_id, self._date(holiday_date))
+        )
+
+    # --- Budgets and per-entity portfolio roll-up ---
+
+    def set_project_budget(self, actor: dict, project_id: str, amount, currency: str) -> dict:
+        self.require_owner(actor)
+        self._require_project(project_id)
+        if amount in (None, ""):
+            amount = None
+        else:
+            amount = float(amount)
+            if amount < 0:
+                raise ValueError("Budget cannot be negative.")
+        currency = (str(currency).strip().upper() or "PKR")
+        self.db.execute(
+            "UPDATE projects SET budget_amount=?, budget_currency=? WHERE id=?", (amount, currency, project_id)
+        )
+        return self.get_project(actor, project_id)
+
+    def set_project_schedule(self, actor: dict, project_id: str, start_date, target_date, reason: str = "") -> dict:
+        # Project dates are informational — recorded and change-logged, never a
+        # constraint on task dates (matches the permissive calendar decision).
+        if not self.can_manage_project(actor, project_id):
+            raise Forbidden("Project-management access denied.")
+        project = self.get_project(actor, project_id)
+        start_date = self._date(start_date)
+        target_date = self._date(target_date)
+        if start_date and target_date and target_date < start_date:
+            raise ValueError("Target date cannot be earlier than the start date.")
+        old = {"start_date": project.get("start_date"), "target_date": project.get("target_date")}
+        new = {"start_date": start_date, "target_date": target_date}
+        if old == new:
+            raise ValueError("The project schedule is already set to those dates.")
+        reason = str(reason or "").strip()
+        if not reason:
+            raise ValueError("A reason is required to change the project schedule.")
+        with transaction(self.db):
+            self.db.execute(
+                "UPDATE projects SET start_date=?, target_date=? WHERE id=?",
+                (start_date, target_date, project_id),
+            )
+            self._project_event(project_id, actor["id"], "project_schedule_changed",
+                                {"before": old, "after": new}, reason)
+        return self.get_project(actor, project_id)
+
+    def set_primary_entity(self, actor: dict, project_id: str, entity_id) -> dict:
+        self.require_owner(actor)
+        self._require_project(project_id)
+        entity_id = entity_id or None
+        if entity_id:
+            linked = {e["id"] for e in self.list_project_entities(actor, project_id)}
+            if entity_id not in linked:
+                raise ValueError("The primary entity must be one of the project's entities.")
+        self.db.execute("UPDATE projects SET primary_entity_id=? WHERE id=?", (entity_id, project_id))
+        return self.get_project(actor, project_id)
+
+    def _rollup_entity_id(self, project: dict):
+        # A project's budget/tasks roll up to its primary entity; if none is set but the
+        # project has exactly one entity, that one; otherwise unassigned (never double-counted).
+        if project.get("primary_entity_id"):
+            return project["primary_entity_id"]
+        entities = project.get("entities", [])
+        return entities[0]["id"] if len(entities) == 1 else None
+
+    def portfolio_rollup(self, actor: dict) -> list[dict]:
+        projects = self.list_projects(actor)
+        tasks = self.list_tasks(actor)
+        entity_name = {e["id"]: e["name"] for e in self.list_entities(actor)}
+        closed = {"completed", "cancelled", "abandoned"}
+        buckets: dict = {}
+
+        def bucket(eid):
+            if eid not in buckets:
+                buckets[eid] = {
+                    "entity_id": eid,
+                    "entity_name": entity_name.get(eid, "Unassigned") if eid else "Unassigned",
+                    "project_count": 0, "open": 0, "overdue": 0, "critical": 0, "budgets": {},
+                }
+            return buckets[eid]
+
+        project_rollup = {}
+        for project in projects:
+            eid = self._rollup_entity_id(project)
+            project_rollup[project["id"]] = eid
+            b = bucket(eid)
+            b["project_count"] += 1
+            if project.get("budget_amount") is not None:
+                currency = project.get("budget_currency") or "PKR"
+                b["budgets"][currency] = round(b["budgets"].get(currency, 0) + project["budget_amount"], 2)
+        for task in tasks:
+            b = bucket(project_rollup.get(task["project_id"]))
+            if task["status"] not in closed:
+                b["open"] += 1
+                if task.get("criticality") == "critical":
+                    b["critical"] += 1
+            if task.get("due_state") == "overdue":
+                b["overdue"] += 1
+        result = sorted((b for b in buckets.values() if b["entity_id"]), key=lambda b: b["entity_name"].lower())
+        if None in buckets:
+            result.append(buckets[None])
+        return result
+
+    def require_owner(self, actor: dict) -> None:
+        if not actor.get("active") or actor.get("global_role") != "owner":
+            raise Forbidden("Owner access required.")
+
+    def can_view_project(self, actor: dict, project_id: str) -> bool:
+        if actor["global_role"] in {"owner", "chairman"}:
+            return True
+        return bool(self.db.execute(
+            "SELECT 1 FROM memberships WHERE project_id=? AND user_id=?", (project_id, actor["id"])
+        ).fetchone())
+
+    def can_manage_project(self, actor: dict, project_id: str) -> bool:
+        if actor["global_role"] in {"owner", "chairman"}:
+            return True
+        row = self.db.execute(
+            "SELECT role FROM memberships WHERE project_id=? AND user_id=?", (project_id, actor["id"])
+        ).fetchone()
+        return bool(row and row["role"] == "manager")
+
+    def create_project(self, actor: dict, name: str, description: str = "", timezone_name: str = "Asia/Karachi") -> dict:
+        self.require_owner(actor)
+        if not name.strip():
+            raise ValueError("Project name is required.")
+        project_id = new_id()
+        self.db.execute(
+            "INSERT INTO projects(id,name,description,timezone,created_at,created_by) VALUES(?,?,?,?,?,?)",
+            (project_id, name.strip(), description.strip(), timezone_name, now_text(), actor["id"]),
+        )
+        return self.get_project(actor, project_id)
+
+    def get_project(self, actor: dict, project_id: str) -> dict:
+        if not self.can_view_project(actor, project_id):
+            raise Forbidden("Project access denied.")
+        project = row_dict(self.db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
+        if not project:
+            raise KeyError("Project not found.")
+        return self._attach_entities([project])[0]
+
+    def list_projects(self, actor: dict) -> list[dict]:
+        if actor["global_role"] in {"owner", "chairman"}:
+            rows = self.db.execute("SELECT * FROM projects ORDER BY name COLLATE NOCASE").fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT p.* FROM projects p JOIN memberships m ON m.project_id=p.id WHERE m.user_id=? ORDER BY p.name COLLATE NOCASE",
+                (actor["id"],),
+            ).fetchall()
+        return self._attach_entities([dict(row) for row in rows])
+
+    def grant_project_access(self, actor: dict, project_id: str, user_id: str, role: str) -> None:
+        self.require_owner(actor)
+        if role not in {"manager", "member", "viewer"}:
+            raise ValueError("Invalid project role.")
+        self.db.execute(
+            "INSERT INTO memberships VALUES(?,?,?,?,?) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role",
+            (project_id, user_id, role, now_text(), actor["id"]),
+        )
+
+    def _require_project(self, project_id: str) -> None:
+        if not self.db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise KeyError("Project not found.")
+
+    def _validate_assignee(self, project_id: str, owner_user_id: str | None) -> str | None:
+        if not owner_user_id:
+            return None
+        row = self.db.execute(
+            "SELECT active, global_role FROM users WHERE id=?", (owner_user_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("Assigned owner is not a known user.")
+        if not row["active"]:
+            raise ValueError("Assigned owner is not an active user.")
+        if row["global_role"] in {"owner", "chairman"}:
+            return owner_user_id
+        member = self.db.execute(
+            "SELECT 1 FROM memberships WHERE project_id=? AND user_id=?", (project_id, owner_user_id)
+        ).fetchone()
+        if not member:
+            raise ValueError("Assigned owner must have access to this project.")
+        return owner_user_id
+
+    def create_task(self, actor: dict, payload: dict) -> dict:
+        project_id = str(payload.get("project_id", ""))
+        if not self.can_manage_project(actor, project_id):
+            raise Forbidden("Task-management access denied.")
+        self._require_project(project_id)
+        title = str(payload.get("title", "")).strip()
+        if not title:
+            raise ValueError("Task title is required.")
+        owner_user_id = self._validate_assignee(project_id, payload.get("owner_user_id") or None)
+        status = payload.get("status", "draft")
+        criticality = payload.get("criticality") or None
+        if status not in STATUSES or criticality not in CRITICALITIES:
+            raise ValueError("Invalid task status or criticality.")
+        start_date = self._date(payload.get("start_date"))
+        due_date = self._date(payload.get("due_date"))
+        if start_date and due_date and due_date < start_date:
+            raise ValueError("Due date cannot be earlier than start date.")
+        parent_task_id = payload.get("parent_task_id") or None
+        predecessor_task_id = payload.get("predecessor_task_id") or None
+        if parent_task_id:
+            parent = self.get_task(actor, parent_task_id)
+            if parent["project_id"] != project_id:
+                raise ValueError("A parent task must belong to the same project.")
+        if predecessor_task_id:
+            predecessor = self.get_task(actor, predecessor_task_id)
+            if predecessor["project_id"] != project_id:
+                raise ValueError("A predecessor task must belong to the same project.")
+        task_id = new_id()
+        timestamp = now_text()
+        with transaction(self.db):
+            self.db.execute(
+                """INSERT INTO tasks(id,project_id,parent_task_id,title,description,owner_user_id,status,criticality,
+                   start_date,due_date,progress,created_at,created_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (task_id, project_id, parent_task_id, title, str(payload.get("description", "")).strip(),
+                 owner_user_id, status, criticality, start_date, due_date,
+                 self._progress(payload.get("progress")), timestamp, actor["id"], timestamp),
+            )
+            self._ensure_baseline(task_id)
+            task = self.get_task(actor, task_id)
+            self._event(task_id, actor["id"], "task_created", None, task, payload.get("reason"))
+            if predecessor_task_id:
+                self.db.execute(
+                    "INSERT INTO task_dependencies VALUES(?,?,?)",
+                    (predecessor_task_id, task_id, "finish_to_start"),
+                )
+                self._event(
+                    task_id,
+                    actor["id"],
+                    "dependency_added",
+                    None,
+                    {"predecessor_task_id": predecessor_task_id, "dependency_type": "finish_to_start"},
+                    None,
+                )
+        return task
+
+    def update_task(self, actor: dict, task_id: str, payload: dict) -> dict:
+        before = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, before["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        merged = {**before, **payload}
+        status = merged["status"]
+        criticality = merged.get("criticality") or None
+        if status not in STATUSES or criticality not in CRITICALITIES:
+            raise ValueError("Invalid task status or criticality.")
+        if status != before["status"] and status in GOVERNED_STATUSES:
+            raise ValueError(f"Use the dedicated {status.replace('_', ' ')} action for this transition.")
+        if criticality != (before.get("criticality") or None):
+            raise ValueError("Use the confirm criticality action to change criticality.")
+        reason = str(payload.get("reason", "")).strip() or None
+        sensitive_change = any(before.get(key) != merged.get(key) for key in ("start_date", "due_date", "status"))
+        if sensitive_change and not reason:
+            raise ValueError("A reason is required for schedule or status changes.")
+        if status in {"cancelled", "abandoned", "on_hold", "delayed", "reopened"} and not reason:
+            raise ValueError("This lifecycle change requires a reason.")
+        start_date, due_date = self._date(merged.get("start_date")), self._date(merged.get("due_date"))
+        if start_date and due_date and due_date < start_date:
+            raise ValueError("Due date cannot be earlier than start date.")
+        title = str(merged.get("title", "")).strip()
+        if not title:
+            raise ValueError("Task title is required.")
+        if "owner_user_id" in payload:
+            owner_user_id = self._validate_assignee(before["project_id"], payload.get("owner_user_id") or None)
+        else:
+            owner_user_id = before.get("owner_user_id")
+        with transaction(self.db):
+            self.db.execute(
+                """UPDATE tasks SET title=?,description=?,owner_user_id=?,status=?,criticality=?,start_date=?,due_date=?,
+                   progress=?,updated_at=?,revision=revision+1 WHERE id=?""",
+                (title, str(merged.get("description", "")).strip(), owner_user_id,
+                 status, criticality, start_date, due_date, self._progress(merged.get("progress")), now_text(), task_id),
+            )
+            self._ensure_baseline(task_id)
+            after = self.get_task(actor, task_id)
+            self._event(task_id, actor["id"], "task_updated", before, after, reason)
+        return after
+
+    def get_task(self, actor: dict, task_id: str) -> dict:
+        task = row_dict(self.db.execute(
+            """SELECT t.*, u.display_name owner_name, p.name project_name, p.timezone project_timezone FROM tasks t
+               LEFT JOIN users u ON u.id=t.owner_user_id JOIN projects p ON p.id=t.project_id WHERE t.id=?""",
+            (task_id,),
+        ).fetchone())
+        if not task:
+            raise KeyError("Task not found.")
+        if not self.can_view_project(actor, task["project_id"]):
+            raise Forbidden("Task access denied.")
+        return task
+
+    # QY0WG2 (owner decision 2026-09-15): the task list offers BOTH orderings as a
+    # user-selectable toggle, not a single hard-coded one. "criticality" sorts by
+    # consequence first (Critical>High>Normal>Low, Unrated last) then nearest due
+    # date; "due_date" sorts by nearest/overdue date first (undated last) then by
+    # criticality. Both end on title as a stable tiebreaker.
+    SORT_MODES = ("criticality", "due_date")
+    _CRITICALITY_RANK = ("CASE t.criticality WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
+                         "WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
+    _DUE_DATE_KEY = "COALESCE(t.due_date,'9999-12-31')"
+
+    def list_tasks(self, actor: dict, project_id: str | None = None, sort: str = "criticality") -> list[dict]:
+        sort = sort if sort in self.SORT_MODES else "criticality"
+        clauses, params = [], []
+        if project_id:
+            if not self.can_view_project(actor, project_id):
+                raise Forbidden("Project access denied.")
+            clauses.append("t.project_id=?")
+            params.append(project_id)
+        if actor["global_role"] not in {"owner", "chairman"}:
+            clauses.append("EXISTS(SELECT 1 FROM memberships m WHERE m.project_id=t.project_id AND m.user_id=?)")
+            params.append(actor["id"])
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        if sort == "due_date":
+            order_by = f" ORDER BY {self._DUE_DATE_KEY}, {self._CRITICALITY_RANK}, t.title COLLATE NOCASE"
+        else:
+            order_by = f" ORDER BY {self._CRITICALITY_RANK}, {self._DUE_DATE_KEY}, t.title COLLATE NOCASE"
+        rows = self.db.execute(
+            """SELECT t.*, u.display_name owner_name, p.name project_name, p.timezone project_timezone FROM tasks t
+               LEFT JOIN users u ON u.id=t.owner_user_id JOIN projects p ON p.id=t.project_id"""
+            + where
+            + order_by,
+            params,
+        ).fetchall()
+        today_by_tz: dict[str | None, str] = {}
+        result = []
+        for row in rows:
+            item = dict(row)
+            tz_name = item.get("project_timezone")
+            if tz_name not in today_by_tz:
+                today_by_tz[tz_name] = self._today_in_timezone(tz_name)
+            today = today_by_tz[tz_name]
+            item["due_state"] = self._due_state(item.get("due_date"), item["status"], today)
+            item["days_to_due"] = (
+                None if not item.get("due_date")
+                else (date.fromisoformat(item["due_date"]) - date.fromisoformat(today)).days
+            )
+            result.append(item)
+        self._add_dependency_state(result)
+        self._add_critical_path(result)
+        for item in result:
+            item["next_action"] = self._next_action(item)
+        return result
+
+    @staticmethod
+    def _duration_days(task: dict) -> int:
+        start, due = task.get("start_date"), task.get("due_date")
+        if start and due:
+            return max(1, (date.fromisoformat(due) - date.fromisoformat(start)).days + 1)
+        return 1
+
+    def _add_critical_path(self, tasks: list[dict]) -> list[dict]:
+        for task in tasks:
+            task["is_critical_path"] = False
+        by_id = {task["id"]: task for task in tasks}
+        if not by_id:
+            return tasks
+        placeholders = ",".join("?" for _ in by_id)
+        params = tuple(by_id) + tuple(by_id)
+        rows = self.db.execute(
+            f"""SELECT predecessor_task_id, successor_task_id FROM task_dependencies
+                WHERE predecessor_task_id IN ({placeholders}) AND successor_task_id IN ({placeholders})""",
+            params,
+        ).fetchall()
+        edges_by_project: dict[str, list] = {}
+        tasks_by_project: dict[str, list] = {}
+        for task in tasks:
+            tasks_by_project.setdefault(task["project_id"], []).append(task["id"])
+        for row in rows:
+            pred, succ = row["predecessor_task_id"], row["successor_task_id"]
+            if by_id[pred]["project_id"] == by_id[succ]["project_id"]:
+                edges_by_project.setdefault(by_id[pred]["project_id"], []).append((pred, succ))
+        for project_id, task_ids in tasks_by_project.items():
+            for task_id in self._critical_path_nodes(task_ids, edges_by_project.get(project_id, []), by_id):
+                by_id[task_id]["is_critical_path"] = True
+        return tasks
+
+    def _critical_path_nodes(self, task_ids: list, edges: list, by_id: dict) -> set:
+        """Critical activities in one project by full CPM (AYW0QC, owner decision
+        2026-09-15): a forward pass (earliest start/finish) and backward pass
+        (latest start/finish) over the finish-to-start dependency network yield a
+        slack per activity; every zero-slack activity is critical. This marks ALL
+        parallel critical paths, not just a single longest chain.
+
+        Cancelled/abandoned tasks are excluded. Only tasks in the dependency
+        network (with a predecessor or successor) participate; an isolated task is
+        never on the critical path. With no edges at all there is no critical path.
+        """
+        active = {tid for tid in task_ids if by_id[tid]["status"] not in ("cancelled", "abandoned")}
+        preds = {tid: [] for tid in active}
+        succ = {tid: [] for tid in active}
+        indeg = {tid: 0 for tid in active}
+        has_edge = False
+        for pred, s in edges:
+            if pred in active and s in active:
+                preds[s].append(pred)
+                succ[pred].append(s)
+                indeg[s] += 1
+                has_edge = True
+        if not has_edge:
+            return set()
+        # The network is the connected part; isolated tasks are ignored entirely.
+        network = {tid for tid in active if preds[tid] or succ[tid]}
+        # Kahn topological order (dependencies are acyclic by construction).
+        queue = [tid for tid in network if indeg[tid] == 0]
+        remaining = {tid: indeg[tid] for tid in network}
+        topo = []
+        while queue:
+            node = queue.pop(0)
+            topo.append(node)
+            for nxt in succ[node]:
+                remaining[nxt] -= 1
+                if remaining[nxt] == 0:
+                    queue.append(nxt)
+        if len(topo) != len(network):  # a cycle slipped in — refuse to guess
+            return set()
+        duration = {tid: self._duration_days(by_id[tid]) for tid in network}
+        # Forward pass: earliest start / earliest finish.
+        es, ef = {}, {}
+        for node in topo:
+            es[node] = max((ef[p] for p in preds[node] if p in network), default=0)
+            ef[node] = es[node] + duration[node]
+        project_end = max(ef.values())
+        # Backward pass: latest finish / latest start (over reverse topo order).
+        lf, ls = {}, {}
+        for node in reversed(topo):
+            lf[node] = min((ls[s] for s in succ[node] if s in network), default=project_end)
+            ls[node] = lf[node] - duration[node]
+        # Zero-slack activities are critical (float compares exactly on ints).
+        return {node for node in network if ls[node] - es[node] == 0}
+
+    @staticmethod
+    def _next_action(task: dict) -> str:
+        status = task["status"]
+        if status in {"completed", "cancelled", "abandoned"}:
+            return "None"
+        if task.get("is_blocked"):
+            return "Blocked by predecessors"
+        if status == "submitted":
+            return "Awaiting acceptance"
+        if status == "changes_requested":
+            return "Rework by owner"
+        if status == "on_hold":
+            return "Resume at checkpoint"
+        if not task.get("owner_user_id"):
+            return "Assign an owner"
+        if not task.get("due_date"):
+            return "Set a due date"
+        return "In progress by owner"
+
+    def search(self, actor: dict, query: str) -> dict:
+        term = str(query).strip()
+        if not term:
+            return {"tasks": [], "projects": []}
+        like = f"%{term}%"
+        if actor["global_role"] in {"owner", "chairman"}:
+            task_rows = self.db.execute(
+                """SELECT t.id,t.title,t.status,p.name project_name FROM tasks t JOIN projects p ON p.id=t.project_id
+                   WHERE t.title LIKE ? OR t.description LIKE ? ORDER BY t.title COLLATE NOCASE LIMIT 50""",
+                (like, like),
+            ).fetchall()
+            project_rows = self.db.execute(
+                "SELECT id,name FROM projects WHERE name LIKE ? ORDER BY name COLLATE NOCASE LIMIT 50", (like,)
+            ).fetchall()
+        else:
+            task_rows = self.db.execute(
+                """SELECT t.id,t.title,t.status,p.name project_name FROM tasks t JOIN projects p ON p.id=t.project_id
+                   WHERE (t.title LIKE ? OR t.description LIKE ?)
+                     AND EXISTS(SELECT 1 FROM memberships m WHERE m.project_id=t.project_id AND m.user_id=?)
+                   ORDER BY t.title COLLATE NOCASE LIMIT 50""",
+                (like, like, actor["id"]),
+            ).fetchall()
+            project_rows = self.db.execute(
+                """SELECT p.id,p.name FROM projects p JOIN memberships m ON m.project_id=p.id
+                   WHERE m.user_id=? AND p.name LIKE ? ORDER BY p.name COLLATE NOCASE LIMIT 50""",
+                (actor["id"], like),
+            ).fetchall()
+        return {"tasks": [dict(r) for r in task_rows], "projects": [dict(r) for r in project_rows]}
+
+    def export_tasks(self, actor: dict, filters: dict) -> dict:
+        # Authorization is inherited from list_tasks; only the actor's visible tasks are ever returned.
+        tasks = self.list_tasks(actor, filters.get("project_id") or None, filters.get("sort") or "criticality")
+        status = filters.get("status") or None
+        entity = filters.get("entity_id") or None
+        criticality = filters.get("criticality") or None
+        owner = (filters.get("owner") or "").lower()
+        band = filters.get("band") or None
+        open_only = bool(filters.get("open_only"))
+        entity_projects = None
+        if entity:
+            entity_projects = {
+                p["id"] for p in self.list_projects(actor) if any(e["id"] == entity for e in p.get("entities", []))
+            }
+
+        def keep(t: dict) -> bool:
+            if status and t["status"] != status:
+                return False
+            if criticality:
+                if criticality == "unrated" and t.get("criticality"):
+                    return False
+                if criticality != "unrated" and t.get("criticality") != criticality:
+                    return False
+            if owner and owner not in (t.get("owner_name") or "").lower():
+                return False
+            if open_only and t["status"] in ("completed", "cancelled", "abandoned"):
+                return False
+            if entity_projects is not None and t["project_id"] not in entity_projects:
+                return False
+            if band == "overdue" and t.get("due_state") != "overdue":
+                return False
+            if band == "today" and t.get("due_state") != "today":
+                return False
+            if band and band.isdigit():
+                days = t.get("days_to_due")
+                if days is None or days < 0 or days > int(band):
+                    return False
+            return True
+
+        return {"as_of": now_text(), "filters": filters, "tasks": [t for t in tasks if keep(t)]}
+
+    def task_detail(self, actor: dict, task_id: str) -> dict:
+        task = self.get_task(actor, task_id)
+        task["due_state"] = self._due_state(
+            task.get("due_date"), task["status"], self._today_in_timezone(task.get("project_timezone"))
+        )
+        task["dependencies"] = self.get_task_dependencies(actor, task_id)
+        task["submissions"] = self.list_task_submissions(actor, task_id)
+        task["reviewers"] = self.list_task_reviewers(actor, task_id)
+        task["attachments"] = self.list_task_attachments(actor, task_id)
+        task["final_results"] = self.list_task_final_results(actor, task_id)
+        subtasks = self.list_subtasks(actor, task_id)
+        task["subtasks"] = subtasks
+        task["subtask_rollup"] = {
+            "total": len(subtasks),
+            "completed": sum(1 for s in subtasks if s["status"] == "completed"),
+        }
+        task["baseline"] = {"start_date": task.get("baseline_start_date"), "due_date": task.get("baseline_due_date")}
+        task["schedule_proposals"] = self.list_schedule_proposals(actor, task_id)
+        if task.get("due_date"):
+            today = self._today_in_timezone(task.get("project_timezone"))
+            task["working_days_to_due"] = self.working_days_between(task["project_id"], today, task["due_date"])
+        else:
+            task["working_days_to_due"] = None
+        if task.get("parent_task_id"):
+            parent = self.db.execute(
+                "SELECT title FROM tasks WHERE id=?", (task["parent_task_id"],)
+            ).fetchone()
+            task["parent_title"] = parent["title"] if parent else None
+        else:
+            task["parent_title"] = None
+        return task
+
+    def task_events(self, actor: dict, task_id: str) -> list[dict]:
+        self.get_task(actor, task_id)
+        rows = self.db.execute(
+            """SELECT e.*, u.display_name actor_name FROM task_events e
+               LEFT JOIN users u ON u.id=e.actor_user_id
+               WHERE e.task_id=? ORDER BY e.occurred_at,e.id""",
+            (task_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    # --- Lifecycle: submissions, acceptance, review, reopening, holds ---
+
+    def get_submission(self, actor: dict, submission_id: str) -> dict:
+        row = row_dict(self.db.execute(
+            """SELECT s.*, t.project_id, sb.display_name submitted_by_name, db.display_name decided_by_name
+               FROM task_submissions s JOIN tasks t ON t.id=s.task_id
+               LEFT JOIN users sb ON sb.id=s.submitted_by
+               LEFT JOIN users db ON db.id=s.decided_by WHERE s.id=?""",
+            (submission_id,),
+        ).fetchone())
+        if not row:
+            raise KeyError("Submission not found.")
+        if not self.can_view_project(actor, row["project_id"]):
+            raise Forbidden("Submission access denied.")
+        return row
+
+    def list_task_submissions(self, actor: dict, task_id: str) -> list[dict]:
+        self.get_task(actor, task_id)
+        rows = self.db.execute(
+            """SELECT s.*, sb.display_name submitted_by_name, db.display_name decided_by_name
+               FROM task_submissions s LEFT JOIN users sb ON sb.id=s.submitted_by
+               LEFT JOIN users db ON db.id=s.decided_by
+               WHERE s.task_id=? ORDER BY s.version""",
+            (task_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _is_approver(self, task_id: str, user_id: str) -> bool:
+        return bool(self.db.execute(
+            "SELECT 1 FROM task_reviewers WHERE task_id=? AND user_id=? AND role='approver'",
+            (task_id, user_id),
+        ).fetchone())
+
+    def _require_decider(self, actor: dict, task: dict) -> None:
+        if self.can_manage_project(actor, task["project_id"]) or self._is_approver(task["id"], actor["id"]):
+            return
+        raise Forbidden("You are not authorized to decide this submission.")
+
+    def _block_self_decision(self, actor: dict, submission: dict) -> None:
+        # The submitter cannot accept or review their own work unless they are the
+        # app owner; otherwise the decision routes to the owner.
+        if actor["id"] == submission["submitted_by"] and actor["global_role"] != "owner":
+            raise Forbidden("The submitter cannot decide their own work; it routes to the owner.")
+
+    def submit_task(self, actor: dict, task_id: str, note: str = "") -> dict:
+        task = self.get_task(actor, task_id)
+        collaborator = self.db.execute(
+            "SELECT 1 FROM task_reviewers WHERE task_id=? AND user_id=? AND role='collaborator'",
+            (task_id, actor["id"]),
+        ).fetchone()
+        if not (self.can_manage_project(actor, task["project_id"])
+                or actor["id"] == task.get("owner_user_id") or collaborator):
+            raise Forbidden("You are not authorized to submit this task.")
+        if task["status"] in {"submitted", "completed", "cancelled", "abandoned"}:
+            raise ValueError(f"A {task['status']} task cannot be submitted; reopen it first if needed.")
+        version = self.db.execute(
+            "SELECT COALESCE(MAX(version),0) m FROM task_submissions WHERE task_id=?", (task_id,)
+        ).fetchone()["m"] + 1
+        submission_id = new_id()
+        timestamp = now_text()
+        note = str(note).strip()
+        with transaction(self.db):
+            self.db.execute(
+                "INSERT INTO task_submissions(id,task_id,version,submitted_by,submitted_at,note,status)"
+                " VALUES(?,?,?,?,?,?,'submitted')",
+                (submission_id, task_id, version, actor["id"], timestamp, note),
+            )
+            self.db.execute(
+                "UPDATE tasks SET status='submitted', updated_at=?, revision=revision+1 WHERE id=?",
+                (timestamp, task_id),
+            )
+            self._event(task_id, actor["id"], "task_submitted", None,
+                        {"submission_id": submission_id, "version": version, "note": note}, None)
+        return self.get_submission(actor, submission_id)
+
+    def accept_submission(self, actor: dict, submission_id: str, decision_note: str = "", checklist=None) -> dict:
+        submission = self.get_submission(actor, submission_id)
+        task = self.get_task(actor, submission["task_id"])
+        self._require_decider(actor, task)
+        self._block_self_decision(actor, submission)
+        if submission["status"] != "submitted":
+            raise ValueError("Only a pending submission can be accepted.")
+        timestamp = now_text()
+        decision_note = str(decision_note).strip()
+        checklist_text = json.dumps(checklist, default=str, sort_keys=True) if checklist else None
+        with transaction(self.db):
+            self.db.execute(
+                "UPDATE task_submissions SET status='accepted', decided_by=?, decided_at=?, decision_note=?, checklist=?"
+                " WHERE id=?",
+                (actor["id"], timestamp, decision_note, checklist_text, submission_id),
+            )
+            self.db.execute(
+                "UPDATE tasks SET status='completed', accepted_submission_id=?, updated_at=?, revision=revision+1 WHERE id=?",
+                (submission_id, timestamp, task["id"]),
+            )
+            self._event(task["id"], actor["id"], "submission_accepted", {"status": task["status"]},
+                        {"submission_id": submission_id, "version": submission["version"], "status": "completed"},
+                        decision_note or None)
+            # CS93C6 (owner decision 2026-09-15): acceptance does NOT auto-add the
+            # submission to the final-results repository. Every final result is an
+            # explicit manual mark (see mark_final_result) — an accepted submission
+            # becomes eligible to be marked, but is not recorded automatically.
+        return self.get_submission(actor, submission_id)
+
+    def request_changes(self, actor: dict, submission_id: str, reason: str) -> dict:
+        submission = self.get_submission(actor, submission_id)
+        task = self.get_task(actor, submission["task_id"])
+        self._require_decider(actor, task)
+        self._block_self_decision(actor, submission)
+        if submission["status"] != "submitted":
+            raise ValueError("Only a pending submission can be returned for changes.")
+        reason = str(reason).strip()
+        if not reason:
+            raise ValueError("A reason is required to request changes.")
+        timestamp = now_text()
+        with transaction(self.db):
+            self.db.execute(
+                "UPDATE task_submissions SET status='changes_requested', decided_by=?, decided_at=?, decision_note=?"
+                " WHERE id=?",
+                (actor["id"], timestamp, reason, submission_id),
+            )
+            self.db.execute(
+                "UPDATE tasks SET status='changes_requested', updated_at=?, revision=revision+1 WHERE id=?",
+                (timestamp, task["id"]),
+            )
+            self._event(task["id"], actor["id"], "changes_requested", None,
+                        {"submission_id": submission_id, "version": submission["version"]}, reason)
+        return self.get_submission(actor, submission_id)
+
+    def reopen_task(self, actor: dict, task_id: str, reason: str, new_due_date) -> dict:
+        task = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        if task["status"] not in {"completed", "cancelled", "abandoned"}:
+            raise ValueError("Only a completed, cancelled, or abandoned task can be reopened.")
+        reason = str(reason).strip()
+        if not reason:
+            raise ValueError("A reason is required to reopen a task.")
+        new_due = self._date(new_due_date)
+        if not new_due:
+            raise ValueError("A revised timeline (new due date) is required to reopen a task.")
+        timestamp = now_text()
+        before = {"status": task["status"], "due_date": task.get("due_date")}
+        with transaction(self.db):
+            # accepted_submission_id is retained so the prior accepted version stays visible.
+            self.db.execute(
+                "UPDATE tasks SET status='reopened', due_date=?, updated_at=?, revision=revision+1 WHERE id=?",
+                (new_due, timestamp, task_id),
+            )
+            self._event(task_id, actor["id"], "task_reopened", before,
+                        {"status": "reopened", "due_date": new_due}, reason)
+        return self.get_task(actor, task_id)
+
+    def set_on_hold(self, actor: dict, task_id: str, reason: str, checkpoint_date, hold_owner_id=None) -> dict:
+        task = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        reason = str(reason).strip()
+        if not reason:
+            raise ValueError("On-hold work requires a reason.")
+        checkpoint = self._date(checkpoint_date)
+        if not checkpoint:
+            raise ValueError("On-hold work requires a mandatory follow-up checkpoint date.")
+        hold_owner = self._validate_assignee(task["project_id"], hold_owner_id or task.get("owner_user_id"))
+        if not hold_owner:
+            raise ValueError("On-hold work requires a responsible owner.")
+        timestamp = now_text()
+        with transaction(self.db):
+            self.db.execute(
+                "UPDATE tasks SET status='on_hold', owner_user_id=?, updated_at=?, revision=revision+1 WHERE id=?",
+                (hold_owner, timestamp, task_id),
+            )
+            self.db.execute(
+                "INSERT INTO task_checkpoints(id,task_id,checkpoint_date,reason,owner_user_id,created_by,created_at)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (new_id(), task_id, checkpoint, reason, hold_owner, actor["id"], timestamp),
+            )
+            self._event(task_id, actor["id"], "task_on_hold", {"status": task["status"]},
+                        {"status": "on_hold", "checkpoint_date": checkpoint, "owner_user_id": hold_owner}, reason)
+        return self.get_task(actor, task_id)
+
+    def list_subtasks(self, actor: dict, task_id: str) -> list[dict]:
+        self.get_task(actor, task_id)
+        rows = self.db.execute(
+            """SELECT t.id, t.title, t.status, t.due_date, u.display_name owner_name
+               FROM tasks t LEFT JOIN users u ON u.id=t.owner_user_id
+               WHERE t.parent_task_id=? ORDER BY t.title COLLATE NOCASE""",
+            (task_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _task_ancestors(self, task_id: str) -> set:
+        ancestors, current = set(), task_id
+        while True:
+            row = self.db.execute("SELECT parent_task_id FROM tasks WHERE id=?", (current,)).fetchone()
+            parent = row["parent_task_id"] if row else None
+            if not parent or parent in ancestors:
+                break
+            ancestors.add(parent)
+            current = parent
+        return ancestors
+
+    def set_parent(self, actor: dict, task_id: str, parent_task_id) -> dict:
+        task = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        parent_task_id = parent_task_id or None
+        if parent_task_id:
+            if parent_task_id == task_id:
+                raise ValueError("A task cannot be its own parent.")
+            parent = self.get_task(actor, parent_task_id)
+            if parent["project_id"] != task["project_id"]:
+                raise ValueError("A parent task must belong to the same project.")
+            # Reject if the proposed parent is a descendant of this task (would form a cycle).
+            if task_id in self._task_ancestors(parent_task_id):
+                raise ValueError("That parent would create a subtask cycle.")
+        timestamp = now_text()
+        before = {"parent_task_id": task.get("parent_task_id")}
+        with transaction(self.db):
+            self.db.execute(
+                "UPDATE tasks SET parent_task_id=?, updated_at=?, revision=revision+1 WHERE id=?",
+                (parent_task_id, timestamp, task_id),
+            )
+            self._event(task_id, actor["id"], "parent_changed", before, {"parent_task_id": parent_task_id}, None)
+        return self.get_task(actor, task_id)
+
+    def confirm_criticality(self, actor: dict, task_id: str, criticality, reason: str) -> dict:
+        task = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        criticality = criticality or None
+        if criticality not in CRITICALITIES:
+            raise ValueError("Invalid criticality.")
+        reason = str(reason).strip()
+        if not reason:
+            raise ValueError("A reason is required to confirm criticality.")
+        old = task.get("criticality") or None
+        if old == criticality:
+            raise ValueError("Criticality is already set to that level.")
+        timestamp = now_text()
+        with transaction(self.db):
+            self.db.execute(
+                "UPDATE tasks SET criticality=?, updated_at=?, revision=revision+1 WHERE id=?",
+                (criticality, timestamp, task_id),
+            )
+            self._event(task_id, actor["id"], "criticality_changed",
+                        {"criticality": old}, {"criticality": criticality}, reason)
+        return self.get_task(actor, task_id)
+
+    def add_task_reviewer(self, actor: dict, task_id: str, user_id: str, role: str) -> None:
+        task = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        if role not in REVIEWER_ROLES:
+            raise ValueError("Invalid reviewer role.")
+        if not user_id:
+            raise ValueError("A user is required.")
+        self._validate_assignee(task["project_id"], user_id)
+        self.db.execute(
+            "INSERT OR IGNORE INTO task_reviewers VALUES(?,?,?,?,?)",
+            (task_id, user_id, role, now_text(), actor["id"]),
+        )
+
+    def remove_task_reviewer(self, actor: dict, task_id: str, user_id: str, role: str) -> None:
+        task = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        self.db.execute(
+            "DELETE FROM task_reviewers WHERE task_id=? AND user_id=? AND role=?", (task_id, user_id, role)
+        )
+
+    def list_task_reviewers(self, actor: dict, task_id: str) -> list[dict]:
+        self.get_task(actor, task_id)
+        rows = self.db.execute(
+            """SELECT r.user_id, r.role, u.display_name FROM task_reviewers r JOIN users u ON u.id=r.user_id
+               WHERE r.task_id=? ORDER BY r.role, u.display_name COLLATE NOCASE""",
+            (task_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    # --- Attachments: links to files that live in a folder outside Astra ---
+    #
+    # Astra deliberately stores no bytes. An attachment is a LINK — a local
+    # filesystem path plus its metadata. Deleting one removes the link record,
+    # never the file on disk. The task's own authorization gates the link
+    # record (who can see it in-app); it cannot gate the file on disk.
+
+    def add_task_attachment(self, actor: dict, task_id: str, path: str, display_name: str = "", note: str = "") -> dict:
+        task = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        path = str(path or "").strip()
+        if not path:
+            raise ValueError("A file path is required.")
+        display_name = str(display_name or "").strip() or os.path.basename(path.rstrip("/\\")) or path
+        attachment_id = new_id()
+        with transaction(self.db):
+            self.db.execute(
+                "INSERT INTO task_attachments(id,task_id,path,display_name,note,added_by,added_at)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (attachment_id, task_id, path, display_name, str(note or "").strip(), actor["id"], now_text()),
+            )
+            self._event(task_id, actor["id"], "attachment_added", None,
+                        {"path": path, "display_name": display_name}, None)
+        return self._get_attachment(task_id, attachment_id)
+
+    def list_task_attachments(self, actor: dict, task_id: str) -> list[dict]:
+        # get_task enforces the same view authorization the whole task has.
+        self.get_task(actor, task_id)
+        rows = self.db.execute(
+            """SELECT a.*, u.display_name added_by_name FROM task_attachments a
+               LEFT JOIN users u ON u.id=a.added_by WHERE a.task_id=? ORDER BY a.added_at, a.id""",
+            (task_id,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["exists"] = self._path_exists(item["path"])
+            result.append(item)
+        return result
+
+    def remove_task_attachment(self, actor: dict, task_id: str, attachment_id: str) -> None:
+        # Owner-controlled deletion (owner decision 2026-09-15): removing an
+        # attachment LINK is restricted to the App Owner only. Project managers
+        # may add attachments (see add_task_attachment) but not delete them.
+        self.require_owner(actor)
+        self.get_task(actor, task_id)  # validates the task exists and is visible
+        row = self.db.execute(
+            "SELECT path, display_name FROM task_attachments WHERE id=? AND task_id=?",
+            (attachment_id, task_id),
+        ).fetchone()
+        if not row:
+            raise KeyError("Attachment not found.")
+        with transaction(self.db):
+            self.db.execute("DELETE FROM task_attachments WHERE id=? AND task_id=?", (attachment_id, task_id))
+            # Removing the link never touches the file on disk.
+            self._event(task_id, actor["id"], "attachment_removed",
+                        {"path": row["path"], "display_name": row["display_name"]}, None, None)
+
+    def _get_attachment(self, task_id: str, attachment_id: str) -> dict:
+        row = row_dict(self.db.execute(
+            """SELECT a.*, u.display_name added_by_name FROM task_attachments a
+               LEFT JOIN users u ON u.id=a.added_by WHERE a.id=? AND a.task_id=?""",
+            (attachment_id, task_id),
+        ).fetchone())
+        if not row:
+            raise KeyError("Attachment not found.")
+        row["exists"] = self._path_exists(row["path"])
+        return row
+
+    @staticmethod
+    def _path_exists(path: str) -> bool:
+        # Best-effort: a linked file can be moved or renamed outside Astra, so
+        # this flags dead links in the UI. Never fatal if the check itself fails.
+        try:
+            return os.path.exists(path)
+        except (OSError, ValueError):
+            return False
+
+    # --- Templates: reusable STRUCTURE snapshots (never evidence or history) ---
+    #
+    # A template captures the shape of recurring work — task titles, hierarchy,
+    # criticality, dependencies, attachment links, a SUGGESTED owner (by name),
+    # and dates as day OFFSETS from an anchor — as a JSON snapshot. It deliberately
+    # omits everything that is evidence or history: live status/progress, revisions,
+    # baselines, events, submissions, checkpoints, schedule proposals and
+    # notifications. Instantiating one re-applies the offsets to a fresh anchor
+    # date, starts every task in 'draft', and pre-fills each suggested owner when
+    # they are still an assignable project member (otherwise unassigned). Owner-only.
+
+    @staticmethod
+    def _compute_anchor(rows: list[dict]) -> str | None:
+        dates = [r[key] for r in rows for key in ("start_date", "due_date") if r[key]]
+        return min(dates) if dates else None  # ISO dates compare chronologically
+
+    @staticmethod
+    def _offset(date_str: str | None, anchor: str | None):
+        if not date_str or not anchor:
+            return None
+        return (date.fromisoformat(date_str) - date.fromisoformat(anchor)).days
+
+    @staticmethod
+    def _apply_offset(anchor_date: str | None, offset):
+        if anchor_date is None or offset is None:
+            return None
+        return (date.fromisoformat(anchor_date) + timedelta(days=int(offset))).isoformat()
+
+    def _subtree_rows(self, root_id: str) -> list[dict]:
+        collected: dict[str, dict] = {}
+        frontier = [root_id]
+        while frontier:
+            current = frontier.pop()
+            if current in collected:
+                continue
+            row = row_dict(self.db.execute("SELECT * FROM tasks WHERE id=?", (current,)).fetchone())
+            if not row:
+                continue
+            collected[current] = row
+            children = self.db.execute("SELECT id FROM tasks WHERE parent_task_id=?", (current,)).fetchall()
+            frontier.extend(child["id"] for child in children)
+        return list(collected.values())
+
+    def _snapshot_tasks(self, rows: list[dict]) -> dict:
+        rows = sorted(rows, key=lambda r: (r["created_at"], r["id"]))
+        anchor = self._compute_anchor(rows)
+        local_of = {r["id"]: index for index, r in enumerate(rows)}
+        tasks = []
+        for row in rows:
+            parent = row["parent_task_id"]
+            attachments = [dict(a) for a in self.db.execute(
+                "SELECT path, display_name, note FROM task_attachments WHERE task_id=? ORDER BY added_at, id",
+                (row["id"],),
+            ).fetchall()]
+            # 8B9NBH (owner decision 2026-09-15): carry a SUGGESTED owner — the
+            # display name of who held the task last cycle — so instantiation can
+            # pre-fill them instead of always leaving the task unassigned. It is a
+            # hint only (resolved by name at instantiation), never a stored user id.
+            suggested_owner = None
+            if row["owner_user_id"]:
+                owner_row = self.db.execute(
+                    "SELECT display_name FROM users WHERE id=?", (row["owner_user_id"],)
+                ).fetchone()
+                if owner_row:
+                    suggested_owner = owner_row["display_name"]
+            tasks.append({
+                "local_id": local_of[row["id"]],
+                "title": row["title"],
+                "description": row["description"],
+                "criticality": row["criticality"],
+                "start_offset": self._offset(row["start_date"], anchor),
+                "due_offset": self._offset(row["due_date"], anchor),
+                "parent_local_id": local_of.get(parent) if parent in local_of else None,
+                "suggested_owner": suggested_owner,
+                "attachments": attachments,
+            })
+        ids = set(local_of)
+        dependencies = []
+        for dep in self.db.execute(
+            "SELECT predecessor_task_id, successor_task_id FROM task_dependencies"
+        ).fetchall():
+            if dep["predecessor_task_id"] in ids and dep["successor_task_id"] in ids:
+                dependencies.append({
+                    "predecessor_local_id": local_of[dep["predecessor_task_id"]],
+                    "successor_local_id": local_of[dep["successor_task_id"]],
+                })
+        return {"anchor": anchor, "tasks": tasks, "dependencies": dependencies}
+
+    def _store_template(self, actor: dict, kind: str, name: str, description: str, body: dict) -> dict:
+        name = str(name or "").strip()
+        if not name:
+            raise ValueError("A template name is required.")
+        template_id = new_id()
+        self.db.execute(
+            "INSERT INTO templates(id,kind,name,description,body_json,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
+            (template_id, kind, name, str(description or "").strip(),
+             json.dumps(body, default=str, sort_keys=True), actor["id"], now_text()),
+        )
+        return self.get_template(actor, template_id)
+
+    def save_project_as_template(self, actor: dict, project_id: str, name: str, description: str = "") -> dict:
+        self.require_owner(actor)
+        project = self.get_project(actor, project_id)
+        rows = [dict(r) for r in self.db.execute(
+            "SELECT * FROM tasks WHERE project_id=?", (project_id,)
+        ).fetchall()]
+        body = self._snapshot_tasks(rows)
+        body["kind"] = "project"
+        body["project"] = {
+            "description": project.get("description", ""),
+            "timezone": project.get("timezone", "Asia/Karachi"),
+            "working_days": project.get("working_days", "0123456"),
+        }
+        return self._store_template(actor, "project", name, description, body)
+
+    def save_task_as_template(self, actor: dict, task_id: str, name: str, description: str = "") -> dict:
+        self.require_owner(actor)
+        self.get_task(actor, task_id)  # existence + view (owner sees all)
+        rows = self._subtree_rows(task_id)
+        body = self._snapshot_tasks(rows)
+        body["kind"] = "task"
+        body["project"] = None
+        return self._store_template(actor, "task", name, description, body)
+
+    def list_templates(self, actor: dict, kind: str | None = None) -> list[dict]:
+        self.require_owner(actor)
+        query = ("SELECT t.id,t.kind,t.name,t.description,t.body_json,t.created_at,u.display_name created_by_name"
+                 " FROM templates t LEFT JOIN users u ON u.id=t.created_by")
+        params: list = []
+        if kind:
+            query += " WHERE t.kind=?"
+            params.append(kind)
+        query += " ORDER BY t.name COLLATE NOCASE"
+        result = []
+        for row in self.db.execute(query, params).fetchall():
+            item = dict(row)
+            body = json.loads(item.pop("body_json"))
+            item["task_count"] = len(body.get("tasks", []))
+            result.append(item)
+        return result
+
+    def get_template(self, actor: dict, template_id: str) -> dict:
+        self.require_owner(actor)
+        row = row_dict(self.db.execute(
+            "SELECT t.*, u.display_name created_by_name FROM templates t LEFT JOIN users u ON u.id=t.created_by"
+            " WHERE t.id=?", (template_id,),
+        ).fetchone())
+        if not row:
+            raise KeyError("Template not found.")
+        row["body"] = json.loads(row.pop("body_json"))
+        return row
+
+    def delete_template(self, actor: dict, template_id: str) -> None:
+        self.require_owner(actor)
+        if not self.db.execute("SELECT 1 FROM templates WHERE id=?", (template_id,)).fetchone():
+            raise KeyError("Template not found.")
+        self.db.execute("DELETE FROM templates WHERE id=?", (template_id,))
+
+    def _resolve_suggested_owner(self, project_id: str, name: str | None) -> str | None:
+        """Map a template's suggested-owner display name to a currently assignable
+        user for this project. Returns None when the name is missing, unknown,
+        ambiguous, inactive, or not permitted on the project — the task then
+        instantiates unassigned (8B9NBH)."""
+        if not name:
+            return None
+        rows = self.db.execute(
+            "SELECT id FROM users WHERE display_name=? AND active=1", (name,)
+        ).fetchall()
+        if len(rows) != 1:  # unknown or ambiguous -> no pre-fill
+            return None
+        try:
+            return self._validate_assignee(project_id, rows[0]["id"])
+        except (ValueError, Forbidden):
+            return None
+
+    def _instantiate_tasks(self, actor: dict, body: dict, project_id: str,
+                           root_parent_id: str | None, anchor_date: str | None, source_name: str) -> None:
+        tasks = body.get("tasks", [])
+        timestamp = now_text()
+        id_of: dict[int, str] = {}
+        for task in tasks:  # pass 1 — insert every row, parents wired in pass 2
+            new_task_id = new_id()
+            id_of[task["local_id"]] = new_task_id
+            start_date = self._apply_offset(anchor_date, task.get("start_offset"))
+            due_date = self._apply_offset(anchor_date, task.get("due_offset"))
+            # Pre-fill the suggested owner when they are still an assignable member;
+            # otherwise leave it unassigned.
+            owner_user_id = self._resolve_suggested_owner(project_id, task.get("suggested_owner"))
+            self.db.execute(
+                """INSERT INTO tasks(id,project_id,parent_task_id,title,description,owner_user_id,status,criticality,
+                   start_date,due_date,progress,created_at,created_by,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (new_task_id, project_id, None, task["title"], task.get("description", ""),
+                 owner_user_id, "draft", task.get("criticality"), start_date, due_date, None,
+                 timestamp, actor["id"], timestamp),
+            )
+        for task in tasks:  # pass 2 — hierarchy, baseline, creation event
+            new_task_id = id_of[task["local_id"]]
+            parent_local = task.get("parent_local_id")
+            if parent_local is not None:
+                parent_id = id_of.get(parent_local)
+            else:
+                parent_id = root_parent_id
+            if parent_id:
+                self.db.execute("UPDATE tasks SET parent_task_id=? WHERE id=?", (parent_id, new_task_id))
+            self._ensure_baseline(new_task_id)
+            self._event(new_task_id, actor["id"], "task_created", None,
+                        {"title": task["title"], "from_template": source_name}, None)
+        for dep in body.get("dependencies", []):
+            pred = id_of.get(dep.get("predecessor_local_id"))
+            succ = id_of.get(dep.get("successor_local_id"))
+            if pred and succ:
+                self.db.execute(
+                    "INSERT OR IGNORE INTO task_dependencies VALUES(?,?,?)", (pred, succ, "finish_to_start")
+                )
+        for task in tasks:  # attachment links copied last
+            new_task_id = id_of[task["local_id"]]
+            for attachment in task.get("attachments", []):
+                self.db.execute(
+                    "INSERT INTO task_attachments(id,task_id,path,display_name,note,added_by,added_at)"
+                    " VALUES(?,?,?,?,?,?,?)",
+                    (new_id(), new_task_id, attachment["path"], attachment["display_name"],
+                     attachment.get("note", ""), actor["id"], timestamp),
+                )
+
+    def create_project_from_template(self, actor: dict, template_id: str, name: str, anchor_date=None) -> dict:
+        self.require_owner(actor)
+        template = self.get_template(actor, template_id)
+        if template["kind"] != "project":
+            raise ValueError("This template does not create a project.")
+        name = str(name or "").strip()
+        if not name:
+            raise ValueError("A project name is required.")
+        anchor_date = self._date(anchor_date)
+        body = template["body"]
+        meta = body.get("project") or {}
+        with transaction(self.db):
+            project_id = new_id()
+            self.db.execute(
+                "INSERT INTO projects(id,name,description,timezone,working_days,created_at,created_by)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (project_id, name, meta.get("description", ""), meta.get("timezone", "Asia/Karachi"),
+                 meta.get("working_days", "0123456"), now_text(), actor["id"]),
+            )
+            self._instantiate_tasks(actor, body, project_id, None, anchor_date, template["name"])
+        return self.get_project(actor, project_id)
+
+    def create_task_from_template(self, actor: dict, template_id: str, project_id: str,
+                                  parent_task_id=None, anchor_date=None) -> dict:
+        self.require_owner(actor)
+        template = self.get_template(actor, template_id)
+        if template["kind"] != "task":
+            raise ValueError("This template does not create a task.")
+        self._require_project(project_id)
+        parent_task_id = parent_task_id or None
+        if parent_task_id:
+            parent = self.get_task(actor, parent_task_id)
+            if parent["project_id"] != project_id:
+                raise ValueError("A parent task must belong to the same project.")
+        anchor_date = self._date(anchor_date)
+        body = template["body"]
+        with transaction(self.db):
+            self._instantiate_tasks(actor, body, project_id, parent_task_id, anchor_date, template["name"])
+        return {"project_id": project_id, "created": len(body.get("tasks", []))}
+
+    # --- Final results: a searchable index of accepted deliverables ---
+    #
+    # Every final result is an explicit manual mark (CS93C6): an accepted
+    # submission or an attachment link is marked by hand — nothing is recorded
+    # automatically on acceptance. The repository is scoped exactly like the task
+    # board: owner/chairman see all, everyone else only their own projects.
+
+    def mark_final_result(self, actor: dict, task_id: str, source_type: str, source_id: str, note: str = "") -> dict:
+        task = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        if source_type not in {"submission", "attachment"}:
+            raise ValueError("A final result is a submission or an attachment.")
+        note = str(note or "").strip()
+        timestamp = now_text()
+        result_id = new_id()
+        if source_type == "submission":
+            submission = self.db.execute(
+                "SELECT version, status FROM task_submissions WHERE id=? AND task_id=?", (source_id, task_id)
+            ).fetchone()
+            if not submission:
+                raise KeyError("Submission not found on this task.")
+            if submission["status"] != "accepted":
+                raise ValueError("Only an accepted submission can be a final result.")
+            title = f"{task['title']} (v{submission['version']})"
+            columns, values = ("submission_id",), (source_id,)
+        else:
+            attachment = self.db.execute(
+                "SELECT display_name FROM task_attachments WHERE id=? AND task_id=?", (source_id, task_id)
+            ).fetchone()
+            if not attachment:
+                raise KeyError("Attachment not found on this task.")
+            title = attachment["display_name"]
+            columns, values = ("attachment_id",), (source_id,)
+        with transaction(self.db):
+            self.db.execute(
+                f"INSERT OR IGNORE INTO final_results(id,task_id,source_type,{columns[0]},title,note,marked_by,marked_at)"
+                " VALUES(?,?,?,?,?,?,?,?)",
+                (result_id, task_id, source_type, values[0], title, note, actor["id"], timestamp),
+            )
+            self._event(task_id, actor["id"], "final_result_marked", None,
+                        {"source_type": source_type, "title": title}, note or None)
+        return self._get_final_result_for_source(task_id, source_type, source_id)
+
+    def unmark_final_result(self, actor: dict, result_id: str) -> None:
+        row = self.db.execute(
+            "SELECT fr.task_id, fr.title, t.project_id FROM final_results fr JOIN tasks t ON t.id=fr.task_id"
+            " WHERE fr.id=?", (result_id,)
+        ).fetchone()
+        if not row:
+            raise KeyError("Final result not found.")
+        if not self.can_manage_project(actor, row["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        with transaction(self.db):
+            self.db.execute("DELETE FROM final_results WHERE id=?", (result_id,))
+            self._event(row["task_id"], actor["id"], "final_result_unmarked", {"title": row["title"]}, None, None)
+
+    def _get_final_result_for_source(self, task_id: str, source_type: str, source_id: str) -> dict:
+        column = "submission_id" if source_type == "submission" else "attachment_id"
+        row = row_dict(self.db.execute(
+            f"SELECT * FROM final_results WHERE task_id=? AND {column}=?", (task_id, source_id)
+        ).fetchone())
+        if not row:
+            raise KeyError("Final result not found.")
+        return row
+
+    def list_final_results(self, actor: dict, filters: dict | None = None) -> list[dict]:
+        filters = filters or {}
+        clauses, params = [], []
+        if actor["global_role"] not in {"owner", "chairman"}:
+            clauses.append("EXISTS(SELECT 1 FROM memberships m WHERE m.project_id=t.project_id AND m.user_id=?)")
+            params.append(actor["id"])
+        if filters.get("project_id"):
+            clauses.append("t.project_id=?")
+            params.append(filters["project_id"])
+        if filters.get("type") in {"submission", "attachment"}:
+            clauses.append("fr.source_type=?")
+            params.append(filters["type"])
+        if filters.get("from"):
+            clauses.append("fr.marked_at>=?")
+            params.append(self._date(filters["from"]))
+        if filters.get("to"):
+            clauses.append("fr.marked_at<=?")
+            params.append(self._date(filters["to"]) + "T23:59:59")
+        if filters.get("entity_id"):
+            clauses.append("EXISTS(SELECT 1 FROM project_entities pe WHERE pe.project_id=t.project_id AND pe.entity_id=?)")
+            params.append(filters["entity_id"])
+        if str(filters.get("q") or "").strip():
+            like = f"%{filters['q'].strip()}%"
+            clauses.append("(fr.title LIKE ? OR t.title LIKE ? OR p.name LIKE ?)")
+            params.extend([like, like, like])
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        rows = self.db.execute(
+            """SELECT fr.*, t.title task_title, t.project_id, p.name project_name,
+                      u.display_name marked_by_name, a.path attachment_path, s.version submission_version
+               FROM final_results fr JOIN tasks t ON t.id=fr.task_id JOIN projects p ON p.id=t.project_id
+               LEFT JOIN users u ON u.id=fr.marked_by
+               LEFT JOIN task_attachments a ON a.id=fr.attachment_id
+               LEFT JOIN task_submissions s ON s.id=fr.submission_id"""
+            + where + " ORDER BY fr.marked_at DESC, fr.id DESC",
+            params,
+        ).fetchall()
+        result = [dict(row) for row in rows]
+        return self._attach_entity_names(result)
+
+    def _attach_entity_names(self, rows: list[dict]) -> list[dict]:
+        for row in rows:
+            entities = self.db.execute(
+                """SELECT e.name FROM project_entities pe JOIN entities e ON e.id=pe.entity_id
+                   WHERE pe.project_id=? ORDER BY e.name COLLATE NOCASE""",
+                (row["project_id"],),
+            ).fetchall()
+            row["entities"] = [entity["name"] for entity in entities]
+        return rows
+
+    def export_final_results(self, actor: dict, filters: dict | None = None) -> dict:
+        return {"as_of": now_text(), "filters": filters or {}, "results": self.list_final_results(actor, filters)}
+
+    def list_task_final_results(self, actor: dict, task_id: str) -> list[dict]:
+        self.get_task(actor, task_id)  # inherits the task's view authorization
+        rows = self.db.execute(
+            "SELECT id, source_type, submission_id, attachment_id, title FROM final_results WHERE task_id=?",
+            (task_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def close_project(self, actor: dict, project_id: str, note: str = "", exceptional: bool = False) -> dict:
+        project = self.get_project(actor, project_id)
+        if project["status"] == "closed":
+            raise ValueError("This project is already closed.")
+        outstanding = [dict(row) for row in self.db.execute(
+            "SELECT id,title,status FROM tasks WHERE project_id=? AND status NOT IN ('completed','cancelled','abandoned')"
+            " ORDER BY title COLLATE NOCASE",
+            (project_id,),
+        ).fetchall()]
+        note = str(note).strip()
+        if outstanding:
+            self.require_owner(actor)  # only the app owner may exceptionally close
+            if not exceptional:
+                raise ValueError("This project has outstanding work; an exceptional owner closure is required.")
+            if not note:
+                raise ValueError("Exceptional closure requires a note describing the residual work.")
+        elif actor["global_role"] not in {"owner", "chairman"}:
+            raise Forbidden("Only the owner or Chairman may close a project.")
+        timestamp = now_text()
+        with transaction(self.db):
+            self.db.execute(
+                "UPDATE projects SET status='closed', closed_at=?, closed_by=?, closure_note=?, closure_is_exceptional=?"
+                " WHERE id=?",
+                (timestamp, actor["id"], note, 1 if outstanding else 0, project_id),
+            )
+            self._project_event(
+                project_id, actor["id"], "project_closed",
+                {"exceptional": bool(outstanding), "note": note, "residual_work": outstanding}, note or None,
+            )
+        return self.get_project(actor, project_id)
+
+    def project_events(self, actor: dict, project_id: str) -> list[dict]:
+        self.get_project(actor, project_id)
+        rows = self.db.execute(
+            """SELECT e.*, u.display_name actor_name FROM project_events e
+               LEFT JOIN users u ON u.id=e.actor_user_id WHERE e.project_id=? ORDER BY e.occurred_at,e.id""",
+            (project_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _project_event(self, project_id: str, actor_id: str, kind: str, detail: dict | None, reason: str | None) -> None:
+        self.db.execute(
+            "INSERT INTO project_events VALUES(?,?,?,?,?,?,?)",
+            (new_id(), project_id, kind, actor_id, now_text(), reason,
+             json.dumps(detail, default=str, sort_keys=True) if detail is not None else None),
+        )
+
+    # --- Schedule revisions: baseline / current / pending ---
+
+    def _ensure_baseline(self, task_id: str) -> None:
+        # The baseline is the ORIGINAL schedule — captured the first time a task has any
+        # start/due date, and never silently overwritten afterwards.
+        self.db.execute(
+            "UPDATE tasks SET baseline_start_date=start_date, baseline_due_date=due_date"
+            " WHERE id=? AND baseline_start_date IS NULL AND baseline_due_date IS NULL"
+            " AND (start_date IS NOT NULL OR due_date IS NOT NULL)",
+            (task_id,),
+        )
+
+    def _impacted_successors(self, task_id: str) -> list[dict]:
+        rows = self.db.execute(
+            """SELECT s.id, s.title FROM task_dependencies d JOIN tasks s ON s.id=d.successor_task_id
+               WHERE d.predecessor_task_id=? AND s.status NOT IN ('completed','cancelled','abandoned')
+               ORDER BY s.title COLLATE NOCASE""",
+            (task_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_schedule_proposal(self, actor: dict, proposal_id: str) -> dict:
+        row = row_dict(self.db.execute(
+            """SELECT p.*, t.project_id, pb.display_name proposed_by_name, db.display_name decided_by_name
+               FROM task_schedule_proposals p JOIN tasks t ON t.id=p.task_id
+               LEFT JOIN users pb ON pb.id=p.proposed_by LEFT JOIN users db ON db.id=p.decided_by
+               WHERE p.id=?""",
+            (proposal_id,),
+        ).fetchone())
+        if not row:
+            raise KeyError("Schedule proposal not found.")
+        if not self.can_view_project(actor, row["project_id"]):
+            raise Forbidden("Schedule proposal access denied.")
+        return row
+
+    def list_schedule_proposals(self, actor: dict, task_id: str) -> list[dict]:
+        self.get_task(actor, task_id)
+        rows = self.db.execute(
+            """SELECT p.*, pb.display_name proposed_by_name, db.display_name decided_by_name
+               FROM task_schedule_proposals p LEFT JOIN users pb ON pb.id=p.proposed_by
+               LEFT JOIN users db ON db.id=p.decided_by
+               WHERE p.task_id=? ORDER BY p.proposed_at DESC""",
+            (task_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def propose_schedule(self, actor: dict, task_id: str, start_date, due_date, reason: str) -> dict:
+        task = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        reason = str(reason).strip()
+        if not reason:
+            raise ValueError("A reason is required to propose a schedule change.")
+        start, due = self._date(start_date), self._date(due_date)
+        if start and due and due < start:
+            raise ValueError("Due date cannot be earlier than start date.")
+        proposal_id, timestamp = new_id(), now_text()
+        with transaction(self.db):
+            self.db.execute(
+                "INSERT INTO task_schedule_proposals(id,task_id,start_date,due_date,reason,proposed_by,proposed_at,status)"
+                " VALUES(?,?,?,?,?,?,?,'pending')",
+                (proposal_id, task_id, start, due, reason, actor["id"], timestamp),
+            )
+            self._event(task_id, actor["id"], "schedule_proposed", None,
+                        {"start_date": start, "due_date": due}, reason)
+        proposal = self.get_schedule_proposal(actor, proposal_id)
+        # Dependents are shown, never silently rescheduled.
+        proposal["impacted_successors"] = self._impacted_successors(task_id)
+        return proposal
+
+    def approve_schedule_proposal(self, actor: dict, proposal_id: str, decision_reason: str = "") -> dict:
+        proposal = self.get_schedule_proposal(actor, proposal_id)
+        task = self.get_task(actor, proposal["task_id"])
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        if proposal["status"] != "pending":
+            raise ValueError("Only a pending schedule proposal can be approved.")
+        timestamp = now_text()
+        before = {"start_date": task.get("start_date"), "due_date": task.get("due_date")}
+        after = {"start_date": proposal["start_date"], "due_date": proposal["due_date"]}
+        with transaction(self.db):
+            self.db.execute(
+                "UPDATE tasks SET start_date=?, due_date=?, updated_at=?, revision=revision+1 WHERE id=?",
+                (proposal["start_date"], proposal["due_date"], timestamp, task["id"]),
+            )
+            self._ensure_baseline(task["id"])
+            self.db.execute(
+                "UPDATE task_schedule_proposals SET status='approved', decided_by=?, decided_at=?, decision_reason=?"
+                " WHERE id=?",
+                (actor["id"], timestamp, str(decision_reason).strip() or None, proposal_id),
+            )
+            self._event(task["id"], actor["id"], "schedule_revised", before, after, proposal["reason"])
+        return self.get_task(actor, task["id"])
+
+    def reject_schedule_proposal(self, actor: dict, proposal_id: str, reason: str) -> dict:
+        proposal = self.get_schedule_proposal(actor, proposal_id)
+        task = self.get_task(actor, proposal["task_id"])
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        if proposal["status"] != "pending":
+            raise ValueError("Only a pending schedule proposal can be rejected.")
+        reason = str(reason).strip()
+        if not reason:
+            raise ValueError("A reason is required to reject a schedule proposal.")
+        with transaction(self.db):
+            self.db.execute(
+                "UPDATE task_schedule_proposals SET status='rejected', decided_by=?, decided_at=?, decision_reason=?"
+                " WHERE id=?",
+                (actor["id"], now_text(), reason, proposal_id),
+            )
+            self._event(task["id"], actor["id"], "schedule_proposal_rejected", None,
+                        {"proposal_id": proposal_id}, reason)
+        return self.get_schedule_proposal(actor, proposal_id)
+
+    def add_task_dependency(
+        self,
+        actor: dict,
+        predecessor_task_id: str,
+        successor_task_id: str,
+        dependency_type: str = "finish_to_start",
+    ) -> dict:
+        predecessor = self.get_task(actor, predecessor_task_id)
+        successor = self.get_task(actor, successor_task_id)
+        if not self.can_manage_project(actor, successor["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        if predecessor["project_id"] != successor["project_id"]:
+            raise ValueError("Dependencies must stay within one project.")
+        if predecessor_task_id == successor_task_id:
+            raise ValueError("A task cannot depend on itself.")
+        if dependency_type != "finish_to_start":
+            raise ValueError("Only finish-to-start dependencies are currently supported.")
+        value = {
+            "predecessor_task_id": predecessor_task_id,
+            "successor_task_id": successor_task_id,
+            "dependency_type": dependency_type,
+            "created": True,
+        }
+        with transaction(self.db):
+            existing = self.db.execute(
+                """SELECT 1 FROM task_dependencies
+                   WHERE predecessor_task_id=? AND successor_task_id=?""",
+                (predecessor_task_id, successor_task_id),
+            ).fetchone()
+            if existing:
+                return {**value, "created": False}
+            cycle = self.db.execute(
+                """WITH RECURSIVE descendants(task_id) AS (
+                       SELECT successor_task_id FROM task_dependencies WHERE predecessor_task_id=?
+                       UNION
+                       SELECT d.successor_task_id FROM task_dependencies d
+                       JOIN descendants r ON d.predecessor_task_id=r.task_id
+                   )
+                   SELECT 1 FROM descendants WHERE task_id=? LIMIT 1""",
+                (successor_task_id, predecessor_task_id),
+            ).fetchone()
+            if cycle:
+                raise ValueError("This dependency would create a cycle.")
+            self.db.execute(
+                "INSERT INTO task_dependencies VALUES(?,?,?)",
+                (predecessor_task_id, successor_task_id, dependency_type),
+            )
+            self._event(successor_task_id, actor["id"], "dependency_added", None, value, None)
+        return value
+
+    def remove_task_dependency(
+        self, actor: dict, predecessor_task_id: str, successor_task_id: str, reason: str
+    ) -> None:
+        successor = self.get_task(actor, successor_task_id)
+        if not self.can_manage_project(actor, successor["project_id"]):
+            raise Forbidden("Task-management access denied.")
+        reason = str(reason).strip()
+        if not reason:
+            raise ValueError("A reason is required to remove a dependency.")
+        existing = self.db.execute(
+            """SELECT dependency_type FROM task_dependencies
+               WHERE predecessor_task_id=? AND successor_task_id=?""",
+            (predecessor_task_id, successor_task_id),
+        ).fetchone()
+        if not existing:
+            raise KeyError("Dependency not found.")
+        before = {
+            "predecessor_task_id": predecessor_task_id,
+            "successor_task_id": successor_task_id,
+            "dependency_type": existing["dependency_type"],
+        }
+        with transaction(self.db):
+            self.db.execute(
+                """DELETE FROM task_dependencies
+                   WHERE predecessor_task_id=? AND successor_task_id=?""",
+                (predecessor_task_id, successor_task_id),
+            )
+            self._event(successor_task_id, actor["id"], "dependency_removed", before, None, reason)
+
+    def get_task_dependencies(self, actor: dict, task_id: str) -> list[dict]:
+        task = self.get_task(actor, task_id)
+        rows = self.db.execute(
+            """SELECT d.predecessor_task_id,d.successor_task_id,d.dependency_type,
+                      p.title predecessor_title,p.status predecessor_status,
+                      s.title successor_title
+               FROM task_dependencies d
+               JOIN tasks p ON p.id=d.predecessor_task_id
+               JOIN tasks s ON s.id=d.successor_task_id
+               WHERE d.predecessor_task_id=? OR d.successor_task_id=?
+               ORDER BY p.title COLLATE NOCASE,s.title COLLATE NOCASE""",
+            (task_id, task_id),
+        ).fetchall()
+        return [
+            {
+                **dict(row),
+                "direction": "incoming" if row["successor_task_id"] == task["id"] else "outgoing",
+                "blocking": row["successor_task_id"] == task["id"] and row["predecessor_status"] != "completed",
+            }
+            for row in rows
+        ]
+
+    def _add_dependency_state(self, tasks: list[dict]) -> list[dict]:
+        if not tasks:
+            return tasks
+        task_ids = {task["id"] for task in tasks}
+        placeholders = ",".join("?" for _ in task_ids)
+        rows = self.db.execute(
+            f"""SELECT d.successor_task_id,d.predecessor_task_id,t.title,t.status
+                FROM task_dependencies d JOIN tasks t ON t.id=d.predecessor_task_id
+                WHERE d.successor_task_id IN ({placeholders})
+                ORDER BY t.title COLLATE NOCASE""",
+            tuple(task_ids),
+        ).fetchall()
+        incoming = {task_id: [] for task_id in task_ids}
+        for row in rows:
+            incoming[row["successor_task_id"]].append({
+                "task_id": row["predecessor_task_id"],
+                "title": row["title"],
+                "status": row["status"],
+                "blocking": row["status"] != "completed",
+            })
+        for task in tasks:
+            task["predecessors"] = incoming[task["id"]]
+            task["blocked_by"] = [item for item in task["predecessors"] if item["blocking"]]
+            task["is_blocked"] = bool(task["blocked_by"])
+        return tasks
+
+    def _event(self, task_id: str, actor_id: str, kind: str, before: dict | None, after: dict | None, reason: str | None) -> None:
+        event_id = new_id()
+        self.db.execute(
+            "INSERT INTO task_events VALUES(?,?,?,?,?,?,?,?)",
+            (event_id, task_id, kind, actor_id, now_text(), reason,
+             json.dumps(before, default=str, sort_keys=True) if before else None,
+             json.dumps(after, default=str, sort_keys=True) if after else None),
+        )
+        self._notify_owner(event_id, task_id, actor_id, kind)
+
+    def _notify_owner(self, event_id: str, task_id: str, actor_id: str, kind: str) -> None:
+        # Durable record for the app owner of every task change made by someone else.
+        # The owner's own actions are already visible to them, so they are not self-notified.
+        owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
+        if not owner or owner["id"] == actor_id:
+            return
+        row = self.db.execute("SELECT title FROM tasks WHERE id=?", (task_id,)).fetchone()
+        title = row["title"] if row else task_id
+        summary = f"{kind.replace('_', ' ')}: {title}"
+        # INSERT OR IGNORE with the unique (user_id, event_id) index makes retries idempotent.
+        self.db.execute(
+            "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (new_id(), owner["id"], event_id, task_id, kind, summary, now_text()),
+        )
+
+    def list_notifications(self, actor: dict, unread_only: bool = False) -> list[dict]:
+        query = ("SELECT n.*, t.title task_title FROM notifications n LEFT JOIN tasks t ON t.id=n.task_id"
+                 " WHERE n.user_id=?")
+        if unread_only:
+            query += " AND n.read_at IS NULL"
+        query += " ORDER BY n.created_at DESC, n.id DESC LIMIT 200"
+        return [dict(row) for row in self.db.execute(query, (actor["id"],)).fetchall()]
+
+    def unread_notification_count(self, actor: dict) -> int:
+        return self.db.execute(
+            "SELECT COUNT(*) c FROM notifications WHERE user_id=? AND read_at IS NULL", (actor["id"],)
+        ).fetchone()["c"]
+
+    def mark_notification_read(self, actor: dict, notification_id: str) -> None:
+        row = self.db.execute("SELECT user_id FROM notifications WHERE id=?", (notification_id,)).fetchone()
+        if not row:
+            raise KeyError("Notification not found.")
+        if row["user_id"] != actor["id"]:
+            raise Forbidden("Notification access denied.")
+        # Marking read only sets read_at; it never deletes the record or changes task state.
+        self.db.execute(
+            "UPDATE notifications SET read_at=? WHERE id=? AND read_at IS NULL", (now_text(), notification_id)
+        )
+
+    def mark_all_notifications_read(self, actor: dict) -> int:
+        cursor = self.db.execute(
+            "UPDATE notifications SET read_at=? WHERE user_id=? AND read_at IS NULL", (now_text(), actor["id"])
+        )
+        return cursor.rowcount
+
+    @staticmethod
+    def _date(value) -> str | None:
+        if value in (None, ""):
+            return None
+        return date.fromisoformat(str(value)).isoformat()
+
+    @staticmethod
+    def _progress(value) -> int | None:
+        if value in (None, ""):
+            return None
+        number = int(value)
+        if not 0 <= number <= 100:
+            raise ValueError("Progress must be between 0 and 100.")
+        return number
+
+    @staticmethod
+    def _today_in_timezone(tz_name: str | None) -> str:
+        """Current calendar date in the project's governing timezone.
+
+        A date-only deadline runs through the end of that local day, so the
+        comparison date must be 'now' as seen in the project's timezone rather
+        than the server's local date. Falls back to the server date only if the
+        timezone name is missing or the IANA database is unavailable.
+        """
+        if tz_name:
+            try:
+                return datetime.now(ZoneInfo(tz_name)).date().isoformat()
+            except (ZoneInfoNotFoundError, ValueError):
+                pass
+        return date.today().isoformat()
+
+    @staticmethod
+    def _due_state(due_date: str | None, status: str, today: str) -> str:
+        if status in {"completed", "cancelled", "abandoned"}:
+            return "closed"
+        if not due_date:
+            return "undated"
+        days = (date.fromisoformat(due_date) - date.fromisoformat(today)).days
+        if days < 0:
+            return "overdue"
+        if days == 0:
+            return "today"
+        if days <= 7:
+            return "soon"
+        return "scheduled"

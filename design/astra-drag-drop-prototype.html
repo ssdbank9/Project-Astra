@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Astra governed drag-and-drop prototype</title>
+  <style>
+    :root{--navy:#112f4f;--navy2:#0a223c;--teal:#078a8d;--teal2:#10aaa6;--cream:#f7f5ef;--paper:#fff;--ink:#10233e;--muted:#637189;--line:#dbe3ea;--red:#d84058;--amber:#c47d0c;--green:#16785d;--blue:#2266c7;--purple:#7053ce;--shadow:0 18px 48px #15314d1b;--radius:16px}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink);background:#eef2f6}button,input,select{font:inherit}button{cursor:pointer}button:focus-visible,[tabindex]:focus-visible{outline:3px solid #14b8b2;outline-offset:3px}.top{height:64px;background:linear-gradient(110deg,var(--navy2),var(--navy));color:#fff;display:flex;align-items:center;padding:0 20px;gap:18px;position:sticky;top:0;z-index:20}.brand{font-family:Georgia,serif;font-weight:900;letter-spacing:.12em;font-size:19px;display:flex;gap:10px;align-items:center}.logo{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;background:linear-gradient(145deg,#22c3ba,#17609b);box-shadow:0 8px 24px #00d9cc43}.prototype{margin:auto;padding:7px 13px;border:1px solid #ffffff42;border-radius:999px;background:#06192eb8;font-size:11px;font-weight:800;letter-spacing:.08em}.role{display:flex;align-items:center;gap:8px}.role select{background:#fff;color:var(--ink);border:0;border-radius:9px;padding:8px 28px 8px 10px;font-weight:800}.shell{display:grid;grid-template-columns:220px minmax(0,1fr) 330px;min-height:calc(100vh - 64px)}.side{background:#fff;border-right:1px solid var(--line);padding:18px 13px}.side h2,.eyebrow{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8a97aa;margin:14px 10px 7px}.nav{display:flex;align-items:center;gap:10px;padding:10px 11px;border-radius:10px;font-size:13px;font-weight:750;margin:3px 0}.nav.active{background:#dff2f1;color:#006d71}.nav .count{margin-left:auto;background:#e8465b;color:#fff;border-radius:999px;padding:2px 7px;font-size:10px}.project{margin:4px 0 4px 18px;padding:8px 10px;border-radius:9px;font-size:12px}.project.active{background:#eaf0f6;font-weight:800}.main{padding:20px;min-width:0}.intro{background:linear-gradient(120deg,#fff,#f6fbfb);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin-bottom:14px;box-shadow:0 8px 22px #1735530c}.intro h1{margin:0 0 5px;font:800 24px/1.1 Georgia,serif}.intro p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}.health{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}.metric{background:#fff;border:1px solid var(--line);border-radius:13px;padding:12px}.metric b{display:block;font-size:21px}.metric span{font-size:11px;color:var(--muted)}.toolbar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:12px 0}.btn{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:9px;padding:8px 11px;font-weight:760;font-size:12px}.btn:hover{border-color:#9fadb9;transform:translateY(-1px)}.btn.primary{background:var(--teal);color:#fff;border-color:var(--teal);box-shadow:0 8px 20px #078a8d30}.btn.danger{color:var(--red);background:#fff2f3;border-color:#ffd7dc}.btn.active{background:var(--navy);color:#fff;border-color:var(--navy)}.views{background:#fff;border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}.view-tabs{display:flex;border-bottom:1px solid var(--line);padding:8px 10px;gap:4px}.view-tabs button{border:0;background:transparent;padding:9px 12px;border-radius:8px;font-weight:800;font-size:12px}.view-tabs button.active{background:#e7f4f3;color:#006e72}.view{display:none}.view.active{display:block}.board{display:grid;grid-template-columns:repeat(4,minmax(190px,1fr));gap:10px;padding:12px;overflow:auto}.column{background:#f4f7f9;border:1px solid transparent;border-radius:12px;padding:9px;min-height:300px}.column.over{border:2px dashed var(--teal);background:#e8f8f6}.column h3{margin:4px 3px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;display:flex;justify-content:space-between}.card{background:#fff;border:1px solid var(--line);border-radius:11px;padding:11px;margin:8px 0;box-shadow:0 5px 14px #1735530d;cursor:grab}.card:active{cursor:grabbing}.card.locked{border-color:#f1a23b;background:#fffaf1}.card.critical{border-left:4px solid var(--red)}.card .title{font-size:12px;font-weight:850;margin:0 0 7px}.card .meta{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:10px}.card .tags{display:flex;gap:5px;margin-top:8px;flex-wrap:wrap}.chip{font-size:9px;font-weight:800;border-radius:999px;padding:4px 7px;background:#e9eff8;color:#285a93}.chip.red{background:#ffe8ec;color:#ba243c}.chip.green{background:#e5f6ef;color:#126b51}.chip.amber{background:#fff1d8;color:#8a5909}.timeline{padding:14px;overflow:auto}.timeline-head,.timeline-row{display:grid;grid-template-columns:170px minmax(620px,1fr);align-items:center}.timeline-head{font-size:10px;color:var(--muted);text-transform:uppercase}.days{display:grid;grid-template-columns:repeat(12,1fr)}.days span{text-align:center;border-left:1px solid var(--line);padding:5px}.timeline-row{min-height:55px;border-top:1px solid var(--line)}.task-label{font-size:11px;font-weight:800}.track{height:34px;display:grid;grid-template-columns:repeat(12,1fr);position:relative;background:repeating-linear-gradient(90deg,transparent 0,transparent calc(8.333% - 1px),#e7edf2 calc(8.333% - 1px),#e7edf2 8.333%)}.bar{height:25px;align-self:center;border-radius:8px;background:linear-gradient(90deg,var(--teal),var(--teal2));color:#fff;font-size:9px;font-weight:850;padding:6px 8px;white-space:nowrap;overflow:hidden;cursor:grab;box-shadow:0 7px 16px #078a8d2e}.bar.critical{background:linear-gradient(90deg,#c92d48,#eb5b6f)}.gantt-drops{display:flex;gap:8px;padding:10px 0}.drop-shift{flex:1;border:2px dashed #b8c7d4;border-radius:11px;padding:12px;text-align:center;font-size:11px;font-weight:800;color:var(--muted)}.drop-shift.over{border-color:var(--teal);color:var(--teal);background:#e9f8f7}.lab{padding:14px}.nodes{display:flex;gap:12px;align-items:center;overflow:auto;padding:12px 2px}.node{min-width:160px;border:1px solid var(--line);border-radius:11px;padding:10px;background:#fff}.node.drop-ready{outline:2px dashed var(--teal)}.connector{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--navy);color:#fff;cursor:grab;float:right}.deps{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.dep{border:1px solid #c7d2df;border-radius:999px;padding:6px 9px;font-size:10px;background:#f7f9fb}.file-zone{margin:12px 0;border:2px dashed #a8bbc9;border-radius:13px;padding:24px;text-align:center;background:#f8fbfc}.file-zone.over{border-color:var(--teal);background:#eaf8f7}.file-zone strong{display:block;margin-bottom:5px}.scenario{padding:14px}.scenario-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}.walkthrough{background:#f6f9fb;border:1px solid var(--line);border-radius:12px;padding:13px}.walkthrough h3{margin:0 0 5px;font-size:14px}.walkthrough p{margin:0 0 10px;color:var(--muted);font-size:12px}.steps{display:flex;gap:7px;flex-wrap:wrap}.step.done{background:#e3f4ed;color:var(--green);border-color:#bce3d3}.inspector{background:#f8fafb;border-left:1px solid var(--line);padding:15px;overflow:auto;max-height:calc(100vh - 64px);position:sticky;top:64px}.inspector h2{font:800 18px Georgia,serif;margin:3px 0 12px}.state-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px;margin:9px 0}.state-card h3{margin:0 0 8px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#748399}.kv{display:grid;grid-template-columns:1fr auto;gap:6px;font-size:11px;padding:3px 0}.kv b{text-align:right}.event{border-left:3px solid var(--teal);padding:5px 8px;margin:6px 0;background:#f4f9f9;border-radius:0 7px 7px 0;font-size:10px;line-height:1.35}.event.blocked{border-color:var(--red);background:#fff2f4}.event.approval{border-color:var(--amber);background:#fff8e9}.empty{font-size:10px;color:var(--muted);font-style:italic}.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#0c243f;color:#fff;border-radius:12px;padding:11px 14px;box-shadow:0 18px 40px #0004;display:flex;gap:12px;align-items:center;z-index:50;max-width:560px;font-size:12px}.toast[hidden]{display:none}.toast button{background:#fff;color:var(--navy);border:0;border-radius:7px;padding:6px 9px;font-weight:850}.mode-banner{display:none;background:#6b4fd3;color:#fff;padding:8px 14px;font-size:11px;font-weight:800;text-align:center}.mode-banner.on{display:block}.question{background:#fff7df;border:1px solid #f1d18c;border-radius:10px;padding:9px 11px;font-size:11px;margin-top:8px}.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}.badge{padding:4px 7px;border-radius:999px;font-size:9px;font-weight:850;background:#e8eef6}.badge.owner{background:#fff0cf;color:#7d5106}.badge.manager{background:#dff3f2;color:#006d71}.badge.viewer{background:#eceff3;color:#5e6877}
+    @media(max-width:1180px){.shell{grid-template-columns:190px minmax(0,1fr)}.inspector{grid-column:1/-1;position:static;max-height:none;border-left:0;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.inspector h2{grid-column:1/-1}.state-card{margin:0}.board{grid-template-columns:repeat(4,210px)}}
+    @media(max-width:760px){.top{padding:0 10px}.prototype{display:none}.shell{display:block}.side{display:none}.main{padding:10px}.health{grid-template-columns:repeat(2,1fr)}.board{grid-template-columns:repeat(4,78vw)}.timeline-head,.timeline-row{grid-template-columns:125px 620px}.inspector{display:block}.role span{display:none}.intro h1{font-size:20px}}
+    @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important;animation:none!important}.btn:hover{transform:none}}
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="logo">A</span> ASTRA</div>
+    <div class="prototype">THROWAWAY GOVERNED DRAG PROTOTYPE · NO DATA IS SAVED</div>
+    <label class="role"><span>Simulated role</span><select id="role"><option>App Owner</option><option>Manager</option><option>Viewer</option></select></label>
+  </header>
+  <div id="modeBanner" class="mode-banner">WHAT-IF MODE · PRIVATE SIMULATION · LIVE PROJECT IS UNCHANGED</div>
+  <div class="shell">
+    <aside class="side" aria-label="Workspace navigation">
+      <h2>Workspace</h2><div class="nav active">▦ Portfolio</div><div class="nav">⌁ My work <span class="count">7</span></div><div class="nav">▣ Inbox <span class="count">3</span></div>
+      <h2>Projects</h2><div class="nav">⌄ Ibn Sina Foundation</div><div class="project active">FY26 Audit</div><div class="project">Accreditation</div><div class="nav">› Rupani Foundation</div><div class="nav">› RDI Pakistan</div>
+      <h2>Library</h2><div class="nav">◇ Final results</div><div class="nav">▤ Templates</div>
+    </aside>
+    <main class="main">
+      <section class="intro">
+        <div class="eyebrow">Logic question</div>
+        <h1>Do Astra's governed drops stay understandable?</h1>
+        <p>Drag cards and schedule bars or use the guided cases. Watch locks, approvals, critical-path impact, files, audit and recovery change in the state panel. This is in-memory demonstration logic—not production behavior.</p>
+      </section>
+      <section class="health" aria-label="Project health">
+        <div class="metric"><b id="openMetric">6</b><span>Open tasks</span></div><div class="metric"><b id="criticalMetric">2</b><span>Critical tasks</span></div><div class="metric"><b id="endMetric">30 Sep</b><span>Calculated completion</span></div><div class="metric"><b id="approvalMetric">0</b><span>Owner approvals</span></div>
+      </section>
+      <div class="toolbar" aria-label="Free play controls">
+        <button class="btn primary" data-action="managerMove">Manager: move ordinary task</button>
+        <button class="btn" data-action="protectedMove">Manager: request completion</button>
+        <button class="btn" data-action="criticalShift">Shift critical task +3d</button>
+        <button class="btn" data-action="crossProject">Cross-project move</button>
+        <button class="btn" data-action="lockConflict">Create lock conflict</button>
+        <button class="btn" data-action="bulkMove">Bulk move selected</button>
+        <button class="btn" data-action="whatIf">Toggle What-if</button>
+        <button class="btn" data-action="undo">Undo</button>
+        <button class="btn" data-action="reset">Reset</button>
+      </div>
+      <section class="views">
+        <div class="view-tabs" role="tablist">
+          <button class="active" data-view="board" role="tab">Kanban</button><button data-view="timeline" role="tab">Timeline</button><button data-view="dependencies" role="tab">Dependencies</button><button data-view="files" role="tab">Files</button><button data-view="scenarios" role="tab">Guided cases</button>
+        </div>
+        <div id="board" class="view active"><div id="boardGrid" class="board"></div></div>
+        <div id="timeline" class="view"><div class="timeline"><div class="timeline-head"><span>Task</span><div class="days" id="dayHead"></div></div><div id="timelineRows"></div><div class="gantt-drops"><div class="drop-shift" data-shift="-3">Drop a bar here to shift 3 days earlier</div><div class="drop-shift" data-shift="3">Drop a bar here to shift 3 days later</div></div></div></div>
+        <div id="dependencies" class="view"><div class="lab"><p class="question">Drag the dark connector from one task and drop it on another. Finish-to-start is the prototype default; advanced relationship types belong to the impact popover in production.</p><div id="dependencyNodes" class="nodes"></div><div id="dependencyList" class="deps"></div></div></div>
+        <div id="files" class="view"><div class="lab"><div id="fileZone" class="file-zone" tabindex="0"><strong>Drop files or a folder here</strong><span>Prototype reads names and total size only. It uploads nothing.</span></div><div class="toolbar"><button class="btn" data-action="validBatch">Simulate 180MB batch</button><button class="btn danger" data-action="oversizeBatch">Simulate 280MB batch</button><button class="btn" data-action="duplicateFile">Simulate duplicate version</button></div><div id="fileResult"></div></div></div>
+        <div id="scenarios" class="view"><div class="scenario"><div id="scenarioTabs" class="scenario-tabs"></div><div id="walkthrough" class="walkthrough"></div></div></div>
+      </section>
+    </main>
+    <aside class="inspector" aria-label="Current prototype state">
+      <h2>Current governed state</h2>
+      <section class="state-card"><h3>Interaction</h3><div id="interactionState"></div></section>
+      <section class="state-card"><h3>Locks and selection</h3><div id="lockState"></div></section>
+      <section class="state-card"><h3>Approvals and notices</h3><div id="noticeState"></div></section>
+      <section class="state-card"><h3>Latest audit events</h3><div id="auditState"></div></section>
+      <section class="state-card"><h3>Production boundary</h3><p class="empty">In-memory only. No API, database, upload, notification or persistent lock is used. Production requires separate test-first implementation.</p></section>
+    </aside>
+  </div>
+  <div id="toast" class="toast" hidden><span id="toastText"></span><button data-action="undo">Undo</button></div>
+  <div id="live" class="sr" aria-live="polite"></div>
+  <script>
+  const DragModel=(()=>{
+    const statuses=['Draft','Ready','In progress','Submitted'];
+    const protectedStatuses=['Accepted','Completed','Closed'];
+    const seed=()=>({
+      role:'App Owner',mode:'live',phase:'idle',selected:[],locks:{},pendingDrag:null,lastMessage:'Ready for free play.',lastKind:'ok',
+      tasks:[
+        {id:'T1',title:'Submit Q3 audit response',status:'Submitted',start:2,duration:4,critical:true,project:'FY26 Audit',owner:'Sara'},
+        {id:'T2',title:'Reconcile grant utilization',status:'In progress',start:4,duration:3,critical:true,project:'FY26 Audit',owner:'Hassan'},
+        {id:'T3',title:'Approve safeguarding protocol',status:'Ready',start:7,duration:2,critical:false,project:'FY26 Audit',owner:'Mariam'},
+        {id:'T4',title:'Publish board action register',status:'Draft',start:1,duration:3,critical:false,project:'FY26 Audit',owner:'Aly'},
+        {id:'T5',title:'Verify annual return evidence',status:'In progress',start:8,duration:2,critical:false,project:'FY26 Audit',owner:'Usman'},
+        {id:'T6',title:'Archive accepted deliverables',status:'Draft',start:10,duration:2,critical:false,project:'FY26 Audit',owner:'Sara'}
+      ],
+      simulation:null,dependencies:[{from:'T1',to:'T2',type:'FS'}],approvals:[],notices:[],audits:[],files:[],undo:[],scenario:'ordinary',scenarioStep:0
+    });
+    const clone=s=>structuredClone(s);
+    const snapshot=s=>({tasks:clone(s.tasks),dependencies:clone(s.dependencies),files:clone(s.files),approvals:clone(s.approvals)});
+    const task=(s,id)=>s.tasks.find(t=>t.id===id);
+    const actor=s=>s.role==='App Owner'?'Aly Jafferani':s.role;
+    const audit=(s,type,text,kind='ok')=>{s.audits.unshift({type,text,actor:actor(s),time:new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})});s.audits=s.audits.slice(0,8);s.lastMessage=text;s.lastKind=kind};
+    const notice=(s,text,mode='digest')=>{s.notices.unshift({text,mode});s.notices=s.notices.slice(0,6)};
+    const saveUndo=s=>s.undo.push(snapshot(s));
+    const lockAll=(s,ids)=>{const conflict=ids.find(id=>s.locks[id]&&s.locks[id]!==actor(s));if(conflict)return {ok:false,id:conflict,holder:s.locks[conflict]};ids.forEach(id=>s.locks[id]=actor(s));return {ok:true}};
+    const release=(s,ids)=>ids.forEach(id=>delete s.locks[id]);
+    const base=(state)=>clone(state);
+    function reduce(state,action){
+      if(action.type==='RESET')return seed();
+      const s=base(state);
+      if(action.type==='SET_ROLE'){s.role=action.role;s.selected=[];s.pendingDrag=null;s.phase='idle';audit(s,'role',`Simulated role changed to ${action.role}.`);return s}
+      if(action.type==='SELECT'){s.selected=s.selected.includes(action.id)?s.selected.filter(x=>x!==action.id):[...s.selected,action.id];s.lastMessage=`${s.selected.length} task${s.selected.length===1?'':'s'} selected; selection alone creates no locks.`;return s}
+      if(action.type==='BEGIN_DRAG'){
+        if(s.role==='Viewer'){audit(s,'blocked','Viewer cannot start a task mutation.','blocked');notice(s,'Blocked Viewer mutation attempt','realtime');return s}
+        const ids=action.ids?.length?action.ids:[action.id];const got=lockAll(s,ids);
+        if(!got.ok){s.phase='conflict';audit(s,'lock_conflict',`${got.id} is locked by ${got.holder}; nothing started.`,'blocked');notice(s,'Lock conflict','realtime');return s}
+        s.phase='dragging';s.pendingDrag={ids,source:action.source||'board'};s.lastMessage=`Locked ${ids.join(', ')} for ${actor(s)}. Drop or cancel releases the lease.`;return s
+      }
+      if(action.type==='CANCEL_DRAG'){if(s.pendingDrag)release(s,s.pendingDrag.ids);s.pendingDrag=null;s.phase='idle';s.lastMessage='Drag cancelled; acquired leases released.';return s}
+      if(action.type==='DROP_STATUS'){
+        const ids=action.ids?.length?action.ids:(s.pendingDrag?.ids||[action.id]);
+        if(!s.pendingDrag){const got=lockAll(s,ids);if(!got.ok){audit(s,'lock_conflict',`${got.id} is locked by ${got.holder}; status change did not start.`,'blocked');return s}}
+        if(s.role==='Viewer'){release(s,ids);audit(s,'blocked','Viewer status change rejected.','blocked');return s}
+        if(protectedStatuses.includes(action.status)&&s.role!=='App Owner'){
+          s.approvals.unshift({id:`AR-${s.approvals.length+1}`,kind:'Protected status',items:ids,target:action.status,state:'Pending Owner'});release(s,ids);s.phase='approval';s.pendingDrag=null;audit(s,'approval',`Owner approval requested to move ${ids.length} task(s) to ${action.status}.`,'approval');notice(s,'Protected Kanban transition needs Owner approval','realtime');return s
+        }
+        saveUndo(s);ids.forEach(id=>{const t=task(s,id);if(t)t.status=action.status});release(s,ids);s.selected=[];s.pendingDrag=null;s.phase='committed';audit(s,'status_changed',`${ids.length} task(s) moved to ${action.status}; 15-second Undo available.`);notice(s,'Routine Kanban movement','digest');return s
+      }
+      if(action.type==='SHIFT_GANTT'){
+        const t=task(s,action.id);if(!t)return s;if(s.role==='Viewer'){audit(s,'blocked','Viewer schedule change rejected.','blocked');return s}
+        const got=lockAll(s,[t.id]);if(!got.ok){audit(s,'lock_conflict',`${t.id} is locked by ${got.holder}.`,'blocked');return s}
+        const protectedImpact=t.critical||action.days>2;
+        if(s.mode==='what-if'){
+          if(!s.simulation)s.simulation={tasks:clone(s.tasks),dependencies:clone(s.dependencies),submitted:false};const sim=s.simulation.tasks.find(x=>x.id===t.id);sim.start=Math.max(1,sim.start+action.days);release(s,[t.id]);s.phase='simulating';audit(s,'simulation',`Private What-if moved ${t.id} ${action.days>0?'+':''}${action.days} days; live task unchanged.`);return s
+        }
+        if(protectedImpact&&s.role==='Manager'){
+          s.approvals.unshift({id:`AR-${s.approvals.length+1}`,kind:'Critical schedule',items:[t.id],target:`${action.days>0?'+':''}${action.days} days`,state:'Pending Owner'});release(s,[t.id]);s.phase='approval';audit(s,'approval',`Critical schedule shift for ${t.id} sent to Owner.`,'approval');notice(s,'Critical-path proposal','realtime');return s
+        }
+        saveUndo(s);t.start=Math.max(1,t.start+action.days);release(s,[t.id]);s.phase='committed';audit(s,'schedule_changed',`${t.id} shifted ${action.days>0?'+':''}${action.days} days; critical path recalculated.`);if(protectedImpact)notice(s,'Critical path or completion changed','realtime');else notice(s,'Routine date change','digest');return s
+      }
+      if(action.type==='ADD_DEP'){
+        if(s.role==='Viewer'){audit(s,'blocked','Viewer dependency change rejected.','blocked');return s}
+        if(action.from===action.to||s.dependencies.some(d=>d.from===action.to&&d.to===action.from)){audit(s,'blocked','Dependency rejected: self-link or cycle detected.','blocked');return s}
+        const criticalImpact=action.criticalImpact??task(s,action.to)?.critical;
+        if(criticalImpact&&s.role==='Manager'){
+          s.approvals.unshift({id:`AR-${s.approvals.length+1}`,kind:'Critical dependency',items:[action.from,action.to],target:action.relationship||'FS',state:'Pending Owner'});audit(s,'approval',`Dependency ${action.from} → ${action.to} requires Owner approval.`,'approval');notice(s,'Critical dependency proposal','realtime');return s
+        }
+        saveUndo(s);s.dependencies.push({from:action.from,to:action.to,type:action.relationship||'FS'});audit(s,'dependency_added',`${action.relationship||'FS'} dependency ${action.from} → ${action.to} added; critical path recalculated.`);return s
+      }
+      if(action.type==='CROSS_PROJECT'){
+        if(s.role!=='App Owner'){audit(s,'blocked','Cross-project Move / Copy / Link is App Owner-only.','blocked');notice(s,'Unauthorized cross-project attempt','realtime');return s}
+        saveUndo(s);const t=task(s,action.id);if(action.operation==='Move')t.project='Accreditation';audit(s,'cross_project',`${action.operation} preview confirmed for ${action.id}; access and portfolio effects audited.`);notice(s,'Large cross-project action','realtime');return s
+      }
+      if(action.type==='UPLOAD_BATCH'){
+        if(s.role!=='App Owner'){audit(s,'blocked','All file management is App Owner-only.','blocked');notice(s,'Unauthorized file attempt','realtime');return s}
+        if(action.totalMB>250||action.maxFileMB>250){audit(s,'blocked',`Batch rejected at ${action.totalMB.toFixed(1)}MB; fixed ceiling is 250MB.`,'blocked');notice(s,'Blocked over-limit upload','realtime');return s}
+        saveUndo(s);s.files.unshift({count:action.count,totalMB:action.totalMB,names:action.names||['Evidence package'],result:action.duplicate?'New immutable version':'Accepted to in-memory queue'});audit(s,'file_batch',`${action.count} file(s), ${action.totalMB.toFixed(1)}MB, accepted to prototype queue.`);notice(s,'File batch queued','digest');return s
+      }
+      if(action.type==='LOCK_OTHER'){s.locks[action.id]=action.holder||'Hassan Ali';audit(s,'lock_created',`${action.id} now demonstrates a renewable lease held by ${s.locks[action.id]}.`);return s}
+      if(action.type==='FORCE_UNLOCK'){if(s.role!=='App Owner'){audit(s,'blocked','Only App Owner can force-unlock.','blocked');return s}delete s.locks[action.id];audit(s,'force_unlock',`${action.id} force-unlocked by App Owner; holder notification queued.`);notice(s,'Owner force-unlock','realtime');return s}
+      if(action.type==='BULK_MOVE'){
+        const ids=action.ids?.length?action.ids:s.selected;if(!ids.length){audit(s,'blocked','Select tasks before a bulk action.','blocked');return s}
+        const got=lockAll(s,ids);if(!got.ok){release(s,ids.filter(id=>s.locks[id]===actor(s)));audit(s,'lock_conflict',`Atomic bulk move blocked: ${got.id} is held by ${got.holder}.`,'blocked');return s}
+        if(s.role==='Viewer'){release(s,ids);audit(s,'blocked','Viewer bulk action rejected.','blocked');return s}
+        saveUndo(s);ids.forEach(id=>task(s,id).status=action.status||'Ready');release(s,ids);s.selected=[];audit(s,'bulk_status',`${ids.length} tasks atomically moved to ${action.status||'Ready'}.`);return s
+      }
+      if(action.type==='TOGGLE_WHATIF'){s.mode=s.mode==='live'?'what-if':'live';s.simulation=s.mode==='what-if'?{tasks:clone(s.tasks),dependencies:clone(s.dependencies),submitted:false}:null;s.phase=s.mode==='what-if'?'simulating':'idle';audit(s,'mode',s.mode==='what-if'?'Private What-if simulation started.':'What-if discarded; live project unchanged.');return s}
+      if(action.type==='SUBMIT_SIM'){if(!s.simulation){audit(s,'blocked','Start What-if before submitting a revision.','blocked');return s}s.simulation.submitted=true;s.approvals.unshift({id:`AR-${s.approvals.length+1}`,kind:'Schedule revision',items:['simulation'],target:'Apply proposed schedule',state:'Pending Owner'});audit(s,'approval','What-if schedule submitted as an Owner approval request.','approval');return s}
+      if(action.type==='APPROVE'){
+        if(s.role!=='App Owner'){audit(s,'blocked','Only App Owner can approve protected work.','blocked');return s}const req=s.approvals.find(x=>x.state==='Pending Owner');if(!req){audit(s,'blocked','No pending Owner request.','blocked');return s}req.state='Approved';if(req.kind==='Protected status')req.items.forEach(id=>task(s,id).status=req.target);audit(s,'approval_decision',`${req.id} approved by App Owner.`);return s
+      }
+      if(action.type==='UNDO'){
+        const prev=s.undo.pop();if(!prev){audit(s,'blocked','Nothing recoverable to Undo.','blocked');return s}Object.assign(s,prev,{undo:s.undo,audits:s.audits,notices:s.notices,role:s.role,lastMessage:s.lastMessage,lastKind:s.lastKind});audit(s,'undo','Latest recoverable change reversed; original audit remains.');return s
+      }
+      if(action.type==='RESTORE'){const first=s.audits.find(x=>!['restore','role'].includes(x.type));audit(s,'restore',first?'Audited restoration created from prior state; history preserved.':'No earlier state is available to restore.');return s}
+      if(action.type==='SCENARIO'){return {...seed(),role:action.role||'Manager',scenario:action.name,scenarioStep:0,lastMessage:`Scenario loaded: ${action.name}.`}}
+      if(action.type==='STEP'){s.scenarioStep=action.step+1;return reduce(s,action.action)}
+      return s
+    }
+    return {seed,reduce,statuses,protectedStatuses};
+  })();
+
+  let state=DragModel.seed(),currentDrag=null,dependencyFrom=null,toastTimer=null,currentView='board';
+  const scenarios={
+    ordinary:{title:'Ordinary Kanban + Undo',description:'A Manager moves routine work, then proves recovery does not erase history.',role:'Manager',steps:[['Move T4 to Ready',{type:'BEGIN_DRAG',id:'T4'}],['Drop in Ready',{type:'DROP_STATUS',id:'T4',status:'Ready'}],['Undo the move',{type:'UNDO'}]]},
+    protected:{title:'Protected completion',description:'A Manager cannot self-approve completion; the drop becomes an Owner request.',role:'Manager',steps:[['Begin T1 drag',{type:'BEGIN_DRAG',id:'T1'}],['Drop in Completed',{type:'DROP_STATUS',id:'T1',status:'Completed'}],['Switch to Owner',{type:'SET_ROLE',role:'App Owner'}],['Approve request',{type:'APPROVE'}]]},
+    conflict:{title:'Atomic lock conflict',description:'One locked task prevents a bulk operation from partly applying.',role:'Manager',steps:[['Select T3',{type:'SELECT',id:'T3'}],['Select T4',{type:'SELECT',id:'T4'}],['Other user locks T4',{type:'LOCK_OTHER',id:'T4',holder:'Hassan Ali'}],['Try bulk move',{type:'BULK_MOVE',ids:['T3','T4'],status:'In progress'}]]},
+    critical:{title:'Critical dependency',description:'A Manager can draw it, but protected schedule impact becomes an Owner proposal.',role:'Manager',steps:[['Connect T3 to critical T2',{type:'ADD_DEP',from:'T3',to:'T2',relationship:'FS',criticalImpact:true}],['Switch to Owner',{type:'SET_ROLE',role:'App Owner'}],['Approve request',{type:'APPROVE'}]]},
+    files:{title:'Owner-only files',description:'Manager upload is blocked; Owner batch below 250MB is accepted; oversize batch is rejected.',role:'Manager',steps:[['Manager tries 180MB',{type:'UPLOAD_BATCH',count:8,totalMB:180,maxFileMB:45}],['Switch to Owner',{type:'SET_ROLE',role:'App Owner'}],['Owner queues 180MB',{type:'UPLOAD_BATCH',count:8,totalMB:180,maxFileMB:45}],['Reject 280MB',{type:'UPLOAD_BATCH',count:12,totalMB:280,maxFileMB:60}]]},
+    whatif:{title:'Private What-if',description:'A critical date shifts in simulation, stays separate from live, then becomes an approval proposal.',role:'Manager',steps:[['Start What-if',{type:'TOGGLE_WHATIF'}],['Shift T1 +3 days',{type:'SHIFT_GANTT',id:'T1',days:3}],['Submit revision',{type:'SUBMIT_SIM'}]]}
+  };
+
+  function dispatch(action,{quiet=false}={}){const before=state;state=DragModel.reduce(state,action);render();if(!quiet&&state.lastMessage!==before.lastMessage)showToast(state.lastMessage);document.getElementById('live').textContent=state.lastMessage}
+  function esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+  function taskSet(){return state.mode==='what-if'&&state.simulation?state.simulation.tasks:state.tasks}
+  function render(){renderBoard();renderTimeline();renderDependencies();renderFiles();renderInspector();renderScenarios();document.getElementById('role').value=state.role;document.getElementById('modeBanner').classList.toggle('on',state.mode==='what-if');const tasks=taskSet();document.getElementById('openMetric').textContent=tasks.length;document.getElementById('criticalMetric').textContent=tasks.filter(t=>t.critical).length;const end=Math.max(...tasks.map(t=>t.start+t.duration));document.getElementById('endMetric').textContent=`${end+12} Sep`;document.getElementById('approvalMetric').textContent=state.approvals.filter(a=>a.state==='Pending Owner').length}
+  function renderBoard(){const statuses=DragModel.statuses;document.getElementById('boardGrid').innerHTML=statuses.map(status=>`<section class="column" data-status="${status}"><h3>${status}<span>${taskSet().filter(t=>t.status===status).length}</span></h3>${taskSet().filter(t=>t.status===status).map(cardHTML).join('')}</section>`).join('')}
+  function cardHTML(t){const locked=state.locks[t.id];const selected=state.selected.includes(t.id);return `<article class="card ${locked?'locked':''} ${t.critical?'critical':''}" draggable="true" data-card="${t.id}" tabindex="0"><label><input type="checkbox" data-select="${t.id}" ${selected?'checked':''}> select</label><p class="title">${esc(t.title)}</p><div class="meta"><span>${t.id} · ${esc(t.owner)}</span><span>${esc(t.project)}</span></div><div class="tags">${t.critical?'<span class="chip red">Critical</span>':''}${locked?`<span class="chip amber">Locked · ${esc(locked)}</span>`:''}<span class="chip">${t.duration}d</span></div></article>`}
+  function renderTimeline(){document.getElementById('dayHead').innerHTML=Array.from({length:12},(_,i)=>`<span>${i+1}</span>`).join('');document.getElementById('timelineRows').innerHTML=taskSet().map(t=>`<div class="timeline-row"><span class="task-label">${t.id} · ${esc(t.title)}</span><div class="track"><div draggable="true" data-gantt="${t.id}" class="bar ${t.critical?'critical':''}" style="grid-column:${t.start}/span ${t.duration}">${t.start}–${t.start+t.duration-1} Sep</div></div></div>`).join('')}
+  function renderDependencies(){document.getElementById('dependencyNodes').innerHTML=taskSet().slice(0,4).map(t=>`<div class="node" data-dep-target="${t.id}"><span class="connector" draggable="true" data-dep-from="${t.id}" title="Drag dependency from ${t.id}">↗</span><b>${t.id}</b><div>${esc(t.title)}</div></div>`).join('');document.getElementById('dependencyList').innerHTML=state.dependencies.map(d=>`<span class="dep">${d.from} <b>→ ${d.type}</b> → ${d.to}</span>`).join('')||'<span class="empty">No dependencies</span>'}
+  function renderFiles(){document.getElementById('fileResult').innerHTML=state.files.length?state.files.map(f=>`<div class="event"><b>${f.count} files · ${f.totalMB.toFixed(1)}MB</b><br>${esc(f.result)}</div>`).join(''):'<p class="empty">No prototype file batch accepted.</p>'}
+  function renderInspector(){
+    document.getElementById('interactionState').innerHTML=[['Role',`<span class="badge ${state.role==='App Owner'?'owner':state.role.toLowerCase()}">${esc(state.role)}</span>`],['Mode',state.mode],['Phase',state.phase],['Last result',esc(state.lastMessage)]].map(([k,v])=>`<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('');
+    const locks=Object.entries(state.locks);document.getElementById('lockState').innerHTML=`<div class="kv"><span>Selected</span><b>${state.selected.join(', ')||'None'}</b></div><div class="kv"><span>Leases</span><b>${locks.length}</b></div>${locks.map(([id,h])=>`<div class="event">${id} · ${esc(h)}</div>`).join('')||'<div class="empty">No active prototype leases.</div>'}`;
+    document.getElementById('noticeState').innerHTML=`<div class="kv"><span>Pending Owner</span><b>${state.approvals.filter(x=>x.state==='Pending Owner').length}</b></div>${state.approvals.slice(0,3).map(a=>`<div class="event approval"><b>${a.id}</b> ${esc(a.kind)} · ${esc(a.state)}</div>`).join('')}${state.notices.slice(0,3).map(n=>`<div class="event">${n.mode==='realtime'?'⚡':'☷'} ${esc(n.text)}</div>`).join('')||'<div class="empty">No notices yet.</div>'}`;
+    document.getElementById('auditState').innerHTML=state.audits.slice(0,6).map(a=>`<div class="event ${a.type==='blocked'||a.type==='lock_conflict'?'blocked':a.type==='approval'?'approval':''}"><b>${esc(a.type)}</b> · ${esc(a.time)}<br>${esc(a.text)}</div>`).join('')||'<div class="empty">Actions will appear here.</div>'
+  }
+  function renderScenarios(){const keys=Object.keys(scenarios);document.getElementById('scenarioTabs').innerHTML=keys.map(k=>`<button class="btn ${state.scenario===k?'active':''}" data-scenario="${k}">${scenarios[k].title}</button>`).join('');const sc=scenarios[state.scenario]||scenarios.ordinary;document.getElementById('walkthrough').innerHTML=`<h3>${sc.title}</h3><p>${sc.description}</p><div class="steps">${sc.steps.map((step,i)=>`<button class="btn step ${i<state.scenarioStep?'done':''}" data-step="${i}" ${i>state.scenarioStep?'disabled':''}>${i+1}. ${step[0]}</button>`).join('')}</div>`}
+  function showToast(text){const toast=document.getElementById('toast');document.getElementById('toastText').textContent=text;toast.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.hidden=true,15000)}
+  function setView(name){currentView=name;document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===name));document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===name))}
+
+  document.addEventListener('click',e=>{
+    const view=e.target.closest('[data-view]');if(view){setView(view.dataset.view);return}
+    const scenario=e.target.closest('[data-scenario]');if(scenario){const sc=scenarios[scenario.dataset.scenario];dispatch({type:'SCENARIO',name:scenario.dataset.scenario,role:sc.role});setView('scenarios');return}
+    const step=e.target.closest('[data-step]');if(step){const sc=scenarios[state.scenario];const i=Number(step.dataset.step);dispatch({type:'STEP',step:i,action:sc.steps[i][1]});return}
+    const action=e.target.closest('[data-action]')?.dataset.action;if(!action)return;
+    const map={
+      managerMove:()=>{if(state.role!=='Manager')dispatch({type:'SET_ROLE',role:'Manager'},{quiet:true});dispatch({type:'BEGIN_DRAG',id:'T4'});dispatch({type:'DROP_STATUS',id:'T4',status:'Ready'})},
+      protectedMove:()=>{if(state.role!=='Manager')dispatch({type:'SET_ROLE',role:'Manager'},{quiet:true});dispatch({type:'BEGIN_DRAG',id:'T1'});dispatch({type:'DROP_STATUS',id:'T1',status:'Completed'})},
+      criticalShift:()=>dispatch({type:'SHIFT_GANTT',id:'T1',days:3}),crossProject:()=>dispatch({type:'CROSS_PROJECT',id:'T3',operation:'Link'}),lockConflict:()=>dispatch({type:'LOCK_OTHER',id:'T4',holder:'Hassan Ali'}),bulkMove:()=>dispatch({type:'BULK_MOVE',ids:state.selected,status:'In progress'}),whatIf:()=>dispatch({type:'TOGGLE_WHATIF'}),undo:()=>dispatch({type:'UNDO'}),reset:()=>dispatch({type:'RESET'}),validBatch:()=>dispatch({type:'UPLOAD_BATCH',count:8,totalMB:180,maxFileMB:45}),oversizeBatch:()=>dispatch({type:'UPLOAD_BATCH',count:12,totalMB:280,maxFileMB:60}),duplicateFile:()=>dispatch({type:'UPLOAD_BATCH',count:1,totalMB:4.8,maxFileMB:4.8,duplicate:true}),forceUnlock:()=>dispatch({type:'FORCE_UNLOCK',id:'T4'})
+    };map[action]?.()
+  });
+  document.addEventListener('change',e=>{if(e.target.id==='role')dispatch({type:'SET_ROLE',role:e.target.value});if(e.target.matches('[data-select]'))dispatch({type:'SELECT',id:e.target.dataset.select})});
+  document.addEventListener('dragstart',e=>{
+    const card=e.target.closest('[data-card]');if(card){currentDrag={kind:'task',id:card.dataset.card};const ids=state.selected.includes(card.dataset.card)?state.selected:[card.dataset.card];dispatch({type:'BEGIN_DRAG',ids,source:'board'},{quiet:true});e.dataTransfer.setData('text/plain',card.dataset.card);return}
+    const bar=e.target.closest('[data-gantt]');if(bar){currentDrag={kind:'gantt',id:bar.dataset.gantt};e.dataTransfer.setData('text/plain',bar.dataset.gantt);return}
+    const dep=e.target.closest('[data-dep-from]');if(dep){dependencyFrom=dep.dataset.depFrom;currentDrag={kind:'dependency',id:dependencyFrom};e.dataTransfer.setData('text/plain',dependencyFrom)}
+  });
+  document.addEventListener('dragover',e=>{const target=e.target.closest('.column,.drop-shift,[data-dep-target],#fileZone');if(target){e.preventDefault();target.classList.add(target.classList.contains('column')||target.classList.contains('drop-shift')||target.id==='fileZone'?'over':'drop-ready')}});
+  document.addEventListener('dragleave',e=>{const target=e.target.closest('.column,.drop-shift,[data-dep-target],#fileZone');if(target)target.classList.remove('over','drop-ready')});
+  document.addEventListener('drop',e=>{
+    const target=e.target.closest('.column,.drop-shift,[data-dep-target],#fileZone');if(!target)return;e.preventDefault();target.classList.remove('over','drop-ready');
+    if(target.id==='fileZone'){const files=[...e.dataTransfer.files];const total=files.reduce((n,f)=>n+f.size,0)/1048576;dispatch({type:'UPLOAD_BATCH',count:files.length,totalMB:total,maxFileMB:Math.max(0,...files.map(f=>f.size/1048576)),names:files.map(f=>f.name)});currentDrag=null;return}
+    if(currentDrag?.kind==='task'&&target.matches('.column')){dispatch({type:'DROP_STATUS',status:target.dataset.status});currentDrag=null;return}
+    if(currentDrag?.kind==='gantt'&&target.matches('.drop-shift')){dispatch({type:'SHIFT_GANTT',id:currentDrag.id,days:Number(target.dataset.shift)});currentDrag=null;return}
+    if(currentDrag?.kind==='dependency'&&target.matches('[data-dep-target]')){dispatch({type:'ADD_DEP',from:dependencyFrom,to:target.dataset.depTarget,relationship:'FS'});dependencyFrom=null;currentDrag=null}
+  });
+  document.addEventListener('dragend',()=>{document.querySelectorAll('.over,.drop-ready').forEach(x=>x.classList.remove('over','drop-ready'));if(currentDrag?.kind==='task'&&state.phase==='dragging')dispatch({type:'CANCEL_DRAG'},{quiet:true});currentDrag=null;dependencyFrom=null});
+  document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-card]')){e.preventDefault();dispatch({type:'SELECT',id:e.target.dataset.card})}if(e.key==='Escape'&&state.pendingDrag)dispatch({type:'CANCEL_DRAG'})});
+  render();
+  const requestedView=new URLSearchParams(location.search).get('view');
+  if(['board','timeline','dependencies','files','scenarios'].includes(requestedView))setView(requestedView);
+  </script>
+</body>
+</html>

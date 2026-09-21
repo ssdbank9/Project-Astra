@@ -1,0 +1,143 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; }
+    a { color: #0c7c86; } a:hover { color: #095e66; }
+    .dc-root, .dc-root * { box-sizing: border-box; font-family: "Segoe UI", system-ui, Arial, sans-serif; }
+  </style>
+</helmet>
+<div class="dc-root" style="width: 1440px; min-height: 1100px; background: #f3f5f8; color: #172033;">
+
+  <!-- Top bar -->
+  <div style="height: 64px; background: #172a46; color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 28px;">
+    <div style="display: flex; align-items: baseline; gap: 18px;">
+      <span style="font-weight: 800; letter-spacing: .18em; color: #44bac3; font-size: 18px;">ASTRA</span>
+      <span style="color: #cdd7e4; font-size: 13px;">Portfolio control</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <div style="display: flex; align-items: center; gap: 6px; background: #d98d16; color: #fff; border-radius: 8px; padding: 6px 10px; font-size: 13px; font-weight: 600;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        <span>3</span>
+      </div>
+      <span style="font-size: 13px; color: #e7eef6;">Aly Jafferani · owner</span>
+      <span style="background: #223a5c; color: #cdd7e4; border-radius: 8px; padding: 7px 12px; font-size: 13px;">Sign out</span>
+    </div>
+  </div>
+
+  <div style="padding: 24px 28px; display: flex; flex-direction: column; gap: 18px;">
+
+    <!-- Summary tiles -->
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px;">
+      <div style="background: #fff; border: 1px solid #e2e7ed; border-radius: 12px; padding: 18px;"><div style="font-size: 30px; font-weight: 700; line-height: 1;">9</div><div style="color: #667085; font-size: 13px; margin-top: 6px;">Projects</div></div>
+      <div style="background: #fff; border: 1px solid #e2e7ed; border-radius: 12px; padding: 18px;"><div style="font-size: 30px; font-weight: 700; line-height: 1;">23</div><div style="color: #667085; font-size: 13px; margin-top: 6px;">Visible tasks</div></div>
+      <div style="background: #fff; border: 1px solid #e2e7ed; border-radius: 12px; padding: 18px;"><div style="font-size: 30px; font-weight: 700; line-height: 1; color: #c53a48;">3</div><div style="color: #667085; font-size: 13px; margin-top: 6px;">Overdue</div></div>
+      <div style="background: #fff; border: 1px solid #e2e7ed; border-radius: 12px; padding: 18px;"><div style="font-size: 30px; font-weight: 700; line-height: 1; color: #8792a2;">3</div><div style="color: #667085; font-size: 13px; margin-top: 6px;">Need dates</div></div>
+    </div>
+
+    <!-- Due bands -->
+    <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px;">
+      <div style="background: #fff; border: 1px solid #e2e7ed; border-left: 4px solid #c53a48; border-radius: 8px; padding: 12px; text-align: center;"><div style="font-size: 22px; font-weight: 700;">3</div><div style="color: #667085; font-size: 12px;">Overdue</div></div>
+      <div style="background: #fff; border: 1px solid #e2e7ed; border-left: 4px solid #d98d16; border-radius: 8px; padding: 12px; text-align: center;"><div style="font-size: 22px; font-weight: 700;">2</div><div style="color: #667085; font-size: 12px;">Today</div></div>
+      <div style="background: #fff; border: 1px solid #e2e7ed; border-left: 4px solid #d98d16; border-radius: 8px; padding: 12px; text-align: center;"><div style="font-size: 22px; font-weight: 700;">5</div><div style="color: #667085; font-size: 12px;">Days 1–7</div></div>
+      <div style="background: #fff; border: 1px solid #e2e7ed; border-left: 4px solid #3478c5; border-radius: 8px; padding: 12px; text-align: center;"><div style="font-size: 22px; font-weight: 700;">4</div><div style="color: #667085; font-size: 12px;">Days 8–14</div></div>
+      <div style="background: #fff; border: 1px solid #e2e7ed; border-left: 4px solid #3478c5; border-radius: 8px; padding: 12px; text-align: center;"><div style="font-size: 22px; font-weight: 700;">6</div><div style="color: #667085; font-size: 12px;">Days 15–30</div></div>
+      <div style="background: #fff; border: 1px solid #e2e7ed; border-left: 4px solid #8792a2; border-radius: 8px; padding: 12px; text-align: center;"><div style="font-size: 22px; font-weight: 700;">3</div><div style="color: #667085; font-size: 12px;">Undated</div></div>
+    </div>
+
+    <!-- Toolbar -->
+    <div style="background: #fff; border: 1px solid #e2e7ed; border-radius: 12px; padding: 14px 16px; display: flex; gap: 12px; align-items: end; flex-wrap: wrap;">
+      <label style="display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 600; color: #3a465b;">Project<div style="border: 1px solid #c8d0db; border-radius: 8px; padding: 9px 12px; min-width: 150px; background: #fff; font-weight: 500; display: flex; justify-content: space-between; align-items: center; gap: 8px;">All projects <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div></label>
+      <label style="display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 600; color: #3a465b;">Status<div style="border: 1px solid #c8d0db; border-radius: 8px; padding: 9px 12px; min-width: 130px; background: #fff; font-weight: 500; display: flex; justify-content: space-between; align-items: center; gap: 8px;">All statuses <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div></label>
+      <label style="display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 600; color: #3a465b;">Entity<div style="border: 1px solid #c8d0db; border-radius: 8px; padding: 9px 12px; min-width: 150px; background: #fff; font-weight: 500; display: flex; justify-content: space-between; align-items: center; gap: 8px;">All entities <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div></label>
+      <label style="display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 600; color: #3a465b;">Criticality<div style="border: 1px solid #c8d0db; border-radius: 8px; padding: 9px 12px; min-width: 120px; background: #fff; font-weight: 500; display: flex; justify-content: space-between; align-items: center; gap: 8px;">All <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div></label>
+      <div style="flex-grow: 1;"></div>
+      <div style="display: flex; gap: 10px;">
+        <span style="background: #0c7c86; color: #fff; border-radius: 8px; padding: 10px 14px; font-size: 13px; font-weight: 700;">New task</span>
+        <span style="background: #e9eef4; color: #27364c; border-radius: 8px; padding: 10px 14px; font-size: 13px; font-weight: 700;">New project</span>
+        <span style="background: #e9eef4; color: #27364c; border-radius: 8px; padding: 10px 14px; font-size: 13px; font-weight: 700;">People</span>
+      </div>
+    </div>
+
+    <!-- Board panel with calendar Gantt + critical path -->
+    <div style="background: #fff; border: 1px solid #e2e7ed; border-radius: 12px; padding: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0; font-size: 18px;">Portfolio Gantt</h2>
+        <span style="color: #667085; font-size: 12px;">As of 15 Sep 2026, 10:42 (Asia/Karachi)</span>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center; color: #667085; font-size: 12px; margin: 12px 0 14px; flex-wrap: wrap;">
+        <span style="display: inline-block; width: 16px; height: 8px; border-radius: 4px; background: #c53a48;"></span>Overdue
+        <span style="display: inline-block; width: 16px; height: 8px; border-radius: 4px; background: #d98d16; margin-left: 10px;"></span>Due in 7 days
+        <span style="display: inline-block; width: 16px; height: 8px; border-radius: 4px; background: #3478c5; margin-left: 10px;"></span>Scheduled
+        <span style="display: inline-block; width: 16px; height: 8px; border-radius: 4px; background: #7257b5; margin-left: 10px;"></span>Blocked
+        <span style="display: inline-block; width: 16px; height: 8px; border-radius: 4px; background: #8792a2; margin-left: 10px;"></span>Undated
+        <span style="display: inline-block; width: 22px; height: 10px; border-radius: 4px; background: #a01f2b; box-shadow: 0 0 0 2px rgba(160,31,43,.22); margin-left: 14px;"></span><span style="color:#a01f2b; font-weight:700;">Critical path</span>
+      </div>
+
+      <!-- Gantt grid: left info column + right calendar timeline -->
+      <div style="display: grid; grid-template-columns: 560px 1fr;">
+
+        <!-- Header: left -->
+        <div style="height: 34px; border-bottom: 1px solid #e3e7ee; display: grid; grid-template-columns: 320px 240px; align-items: center; color: #8792a2; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;">
+          <div style="padding-left: 8px;">Project / task</div><div>Owner · due · next</div>
+        </div>
+        <!-- Header: calendar week axis -->
+        <div style="height: 34px; border-bottom: 1px solid #e3e7ee; display: flex;">
+          <div style="width: 16.666%; padding: 8px 0 0 6px; font-size: 11px; font-weight: 700; color: #48566b; border-left: 1px solid #edf0f4;">Sep 8</div>
+          <div style="width: 16.666%; padding: 8px 0 0 6px; font-size: 11px; font-weight: 700; color: #48566b; border-left: 1px solid #edf0f4;">Sep 15</div>
+          <div style="width: 16.666%; padding: 8px 0 0 6px; font-size: 11px; font-weight: 700; color: #48566b; border-left: 1px solid #edf0f4;">Sep 22</div>
+          <div style="width: 16.666%; padding: 8px 0 0 6px; font-size: 11px; font-weight: 700; color: #48566b; border-left: 1px solid #edf0f4;">Sep 29</div>
+          <div style="width: 16.666%; padding: 8px 0 0 6px; font-size: 11px; font-weight: 700; color: #48566b; border-left: 1px solid #edf0f4;">Oct 6</div>
+          <div style="width: 16.666%; padding: 8px 0 0 6px; font-size: 11px; font-weight: 700; color: #48566b; border-left: 1px solid #edf0f4;">Oct 13</div>
+        </div>
+
+        <!-- Body: left info rows (each 54px) -->
+        <div style="display: flex; flex-direction: column;">
+          <div style="height: 54px; display: grid; grid-template-columns: 320px 240px; border-bottom: 1px solid #edf0f4; align-items: center;"><div style="padding-left: 8px; overflow: hidden;"><div style="font-weight: 650; font-size: 13px;">Ibn Sina Foundation</div><div style="color: #48566b; font-size: 12px;">Submit Q3 audit response to ZATCA</div></div><div style="color: #667085; font-size: 11.5px;">Sara Karim · Due 10 Sep · <span style="color:#c53a48;font-weight:700;">Critical</span><br><span style="color:#0c7c86;font-weight:600;">Next: Awaiting acceptance</span></div></div>
+          <div style="height: 54px; display: grid; grid-template-columns: 320px 240px; border-bottom: 1px solid #edf0f4; align-items: center;"><div style="padding-left: 8px; overflow: hidden;"><div style="font-weight: 650; font-size: 13px;">Rupani Foundation Pakistan</div><div style="color: #48566b; font-size: 12px;">Board pack for September meeting</div></div><div style="color: #667085; font-size: 11.5px;">Imran Ali · Due 16 Sep · <span style="color:#d98d16;font-weight:700;">High</span><br><span style="color:#0c7c86;font-weight:600;">Next: In progress by owner</span></div></div>
+          <div style="height: 54px; display: grid; grid-template-columns: 320px 240px; border-bottom: 1px solid #edf0f4; align-items: center; background: #fdf6f6;"><div style="padding-left: 8px; overflow: hidden;"><div style="font-weight: 650; font-size: 13px;">RDI Pakistan</div><div style="color: #48566b; font-size: 12px;">Verify scholarship eligibility</div></div><div style="color: #667085; font-size: 11.5px;">Aisha Mir · Due 21 Sep · <span style="color:#c53a48;font-weight:700;">Critical</span><br><span style="color:#a01f2b;font-weight:700;">On critical path</span></div></div>
+          <div style="height: 54px; display: grid; grid-template-columns: 320px 240px; border-bottom: 1px solid #edf0f4; align-items: center; background: #fdf6f6;"><div style="padding-left: 8px; overflow: hidden;"><div style="font-weight: 650; font-size: 13px;">RDI Pakistan</div><div style="color: #48566b; font-size: 12px;">Finalize scholarship disbursement list</div></div><div style="color: #667085; font-size: 11.5px;">Aisha Mir · Due 1 Oct · <span style="color:#d98d16;font-weight:700;">High</span><br><span style="color:#a01f2b;font-weight:700;">On critical path</span></div></div>
+          <div style="height: 54px; display: grid; grid-template-columns: 320px 240px; border-bottom: 1px solid #edf0f4; align-items: center; background: #fdf6f6;"><div style="padding-left: 8px; overflow: hidden;"><div style="font-weight: 650; font-size: 13px;">RDI Pakistan</div><div style="color: #48566b; font-size: 12px;">Board approval of disbursement</div></div><div style="color: #667085; font-size: 11.5px;">Imran Ali · Due 9 Oct · <span style="color:#c53a48;font-weight:700;">Critical</span><br><span style="color:#a01f2b;font-weight:700;">On critical path</span></div></div>
+          <div style="height: 54px; display: grid; grid-template-columns: 320px 240px; border-bottom: 1px solid #edf0f4; align-items: center;"><div style="padding-left: 8px; overflow: hidden;"><div style="font-weight: 650; font-size: 13px;">Apex Amanat Microfinance</div><div style="color: #48566b; font-size: 12px;">Renew microfinance operating license</div></div><div style="color: #667085; font-size: 11.5px;"><span style="color:#8792a2;">Unassigned</span> · Due 19 Sep · <span style="color:#d98d16;font-weight:700;">High</span><br><span style="color:#0c7c86;font-weight:600;">Next: Assign an owner</span></div></div>
+          <div style="height: 54px; display: grid; grid-template-columns: 320px 240px; align-items: center;"><div style="padding-left: 8px; overflow: hidden;"><div style="font-weight: 650; font-size: 13px;">Rupani Foundation USA</div><div style="color: #48566b; font-size: 12px;">Archive 2025 donor receipts</div></div><div style="color: #667085; font-size: 11.5px;">Bilal Tariq · No due date · <span style="color:#8792a2;">Unrated</span><br><span style="color:#0c7c86;font-weight:600;">Next: Set a due date</span></div></div>
+        </div>
+
+        <!-- Body: right calendar timeline (relative, 7 rows x 54 = 378px) -->
+        <div style="position: relative; height: 378px; background-image: linear-gradient(to right, #edf0f4 1px, transparent 1px); background-size: calc(100%/6) 100%;">
+          <!-- Today marker (Sep 15 = 16.666%) -->
+          <div style="position: absolute; left: 16.666%; top: 0; bottom: 0; width: 2px; background: #0c7c86;"></div>
+          <div style="position: absolute; left: 16.666%; top: -1px; transform: translateX(-50%); background: #0c7c86; color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 0 0 5px 5px;">Today</div>
+
+          <!-- Critical-path connectors (dashed crimson elbows) -->
+          <!-- CP1 end 30.96% @row2 mid135  ->  CP2 start 33.33% @row3 mid189 -->
+          <div style="position: absolute; left: 30.96%; top: 135px; height: 54px; border-left: 2px dashed #a01f2b;"></div>
+          <div style="position: absolute; left: 30.96%; top: 189px; width: 2.37%; border-top: 2px dashed #a01f2b;"></div>
+          <div style="position: absolute; left: 33.33%; top: 185px; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 6px solid #a01f2b;"></div>
+          <!-- CP2 end 54.76% @row3 mid189  ->  CP3 start 57.14% @row4 mid243 -->
+          <div style="position: absolute; left: 54.76%; top: 189px; height: 54px; border-left: 2px dashed #a01f2b;"></div>
+          <div style="position: absolute; left: 54.76%; top: 243px; width: 2.38%; border-top: 2px dashed #a01f2b;"></div>
+          <div style="position: absolute; left: 57.14%; top: 239px; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 6px solid #a01f2b;"></div>
+
+          <!-- Bars -->
+          <div style="position: absolute; top: 15px; left: 0%; width: 9.52%; height: 24px; border-radius: 5px; background: #c53a48; color: #fff; font-size: 11px; padding: 4px 6px; white-space: nowrap; overflow: hidden;">Audit response</div>
+          <div style="position: absolute; top: 69px; left: 9.52%; width: 9.52%; height: 24px; border-radius: 5px; background: #d98d16; color: #fff; font-size: 11px; padding: 4px 6px; white-space: nowrap; overflow: hidden;">Board pack</div>
+          <div style="position: absolute; top: 123px; left: 16.666%; width: 14.29%; height: 24px; border-radius: 5px; background: #a01f2b; box-shadow: 0 0 0 2px rgba(160,31,43,.22); color: #fff; font-size: 11px; padding: 4px 6px; white-space: nowrap; overflow: hidden;">Verify eligibility</div>
+          <div style="position: absolute; top: 177px; left: 33.33%; width: 21.43%; height: 24px; border-radius: 5px; background: #a01f2b; box-shadow: 0 0 0 2px rgba(160,31,43,.22); color: #fff; font-size: 11px; padding: 4px 6px; white-space: nowrap; overflow: hidden;">Finalize disbursement</div>
+          <div style="position: absolute; top: 231px; left: 57.14%; width: 16.666%; height: 24px; border-radius: 5px; background: #a01f2b; box-shadow: 0 0 0 2px rgba(160,31,43,.22); color: #fff; font-size: 11px; padding: 4px 6px; white-space: nowrap; overflow: hidden;">Board approval</div>
+          <div style="position: absolute; top: 285px; left: 19.05%; width: 7.14%; height: 24px; border-radius: 5px; background: #d98d16; color: #fff; font-size: 11px; padding: 4px 6px; white-space: nowrap; overflow: hidden;">License</div>
+          <div style="position: absolute; top: 339px; left: 0.5%; height: 24px; border-radius: 5px; background: #8792a2; color: #fff; font-size: 11px; padding: 4px 8px; white-space: nowrap;">Date required</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

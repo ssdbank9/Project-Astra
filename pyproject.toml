@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astra-project-tracker"
+version = "0.1.0"
+description = "Private, owner-hosted project tracker with evidence-backed Gantt planning."
+requires-python = ">=3.11"
+# tzdata supplies the IANA timezone database on platforms (notably Windows) that
+# lack a system copy, so project-governing timezones resolve for due-date logic.
+# It is a data-only package; the application code itself remains dependency-free.
+dependencies = ["tzdata>=2024.1; platform_system == 'Windows'"]
+
+[project.scripts]
+astra = "astra.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+astra = ["static/*"]

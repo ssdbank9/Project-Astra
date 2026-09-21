@@ -1,0 +1,22 @@
+{
+  "pages": [
+    { "id": "shell", "name": "v2 — Cohesive shell" },
+    { "id": "v1", "name": "v1 — Reference screens" }
+  ],
+  "artboards": [
+    { "file": "Shell.dc.html", "x": 0, "y": 0, "w": 1440, "h": 940, "title": "Shell — Board + task side panel", "page": "shell" },
+    { "file": "ShellTimeline.dc.html", "x": 1560, "y": 0, "w": 1440, "h": 820, "title": "Same shell — Timeline view", "page": "shell" },
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1440, "h": 1100, "title": "Dashboard (v1)", "page": "v1" },
+    { "file": "TaskDetail.dc.html", "x": 1560, "y": 0, "w": 920, "h": 1380, "title": "Task detail (v1 modal)", "page": "v1" },
+    { "file": "People.dc.html", "x": 2560, "y": 0, "w": 920, "h": 1400, "title": "People / admin (v1)", "page": "v1" }
+  ],
+  "annotations": [
+    { "id": "io-title", "page": "shell", "x": 0, "y": -160, "w": 940, "text": "v2 — the cohesive shell (Option A palette, new information architecture). Same data, many views, one persistent nav. How the pieces interoperate ↓" },
+    { "id": "io-views", "page": "shell", "x": 0, "y": 1000, "w": 700, "text": "ONE SHELL, MANY VIEWS\nThe left-nav view switch (Board · Timeline · Calendar · My Work · Portfolio) shows the SAME filtered tasks through different lenses. Switching a view keeps your project/entity/filter context — you never re-filter." },
+    { "id": "io-panel", "page": "shell", "x": 760, "y": 1000, "w": 700, "text": "DETAIL = SIDE PANEL, NOT A MODAL\nClicking a card opens the task in a docked right panel; the board stays visible and you can click card→card. Replaces the ~8 blocking dialogs of v1." },
+    { "id": "io-links", "page": "shell", "x": 0, "y": 1230, "w": 700, "text": "CROSS-LINKS (interoperability)\n• Portfolio entity card → opens the Board filtered to that entity\n• A notification, a global-search hit, or a critical-path bar → opens that task in the side panel, in context\n• My Work item → jumps to it in its project" },
+    { "id": "io-actions", "page": "shell", "x": 760, "y": 1230, "w": 700, "text": "IN-PLACE, LOW-FRICTION ACTIONS\n• Drag a card between sections (Board)\n• Drag a Gantt bar to reschedule → creates a schedule PROPOSAL (ties into the baseline/approve model already built)\n• Inline title/owner edit · quick-add a task inside a section" },
+    { "id": "v1-note", "page": "v1", "x": 0, "y": -140, "w": 900, "text": "v1 — the first screens (dashboard + modal-per-feature). Superseded by the shell on the 'v2' page; kept here for reference so we can compare the old flow with the new one." }
+  ],
+  "launch": { "view": "canvas", "page": "shell" }
+}

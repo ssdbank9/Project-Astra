@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; }
+    a { color: #0c7c86; } a:hover { color: #095e66; }
+    .s, .s * { box-sizing: border-box; font-family: "Segoe UI", system-ui, Arial, sans-serif; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:8px; color:#3a465b; font-size:13.5px; font-weight:500; }
+    .nav-item.active { background:#e6f3f4; color:#0c7c86; font-weight:700; }
+    .tab { padding:9px 4px; font-size:13.5px; font-weight:600; color:#8792a2; border-bottom:2px solid transparent; }
+    .tab.active { color:#172a46; border-bottom-color:#0c7c86; }
+    .lane-track { position:relative; }
+    .bar { position:absolute; height:26px; border-radius:13px; color:#fff; font-size:11.5px; padding:5px 10px 5px 6px; white-space:nowrap; overflow:hidden; display:flex; align-items:center; gap:6px; box-shadow:0 1px 2px #172a4620; }
+    .ava { width:18px; height:18px; border-radius:50%; background:rgba(255,255,255,.28); font-size:9px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .own { font-size:11px; font-weight:700; display:inline-flex; align-items:center; gap:5px; }
+    .own .cir { width:18px; height:18px; border-radius:50%; color:#fff; font-size:9px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+  </style>
+</helmet>
+<div class="s" style="width:1440px; height:1140px; background:#f3f5f8; color:#172033; display:flex; flex-direction:column;">
+  <!-- shell chrome -->
+  <div style="height:56px; background:#172a46; color:#fff; display:flex; align-items:center; justify-content:space-between; padding:0 20px; flex-shrink:0;">
+    <span style="font-weight:800; letter-spacing:.18em; color:#44bac3;">ASTRA</span>
+    <div style="flex:0 0 420px; display:flex; align-items:center; gap:8px; background:#223a5c; border-radius:8px; padding:7px 12px; color:#aebfd4; font-size:13px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>Search…</div>
+    <div style="display:flex; align-items:center; gap:14px;"><div style="background:#d98d16; border-radius:8px; padding:5px 9px; font-size:12px; font-weight:700;">3</div><div style="width:26px; height:26px; border-radius:50%; background:#0c7c86; color:#fff; font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center;">AJ</div></div>
+  </div>
+  <div style="flex:1; display:flex; min-height:0;">
+    <div style="width:236px; flex-shrink:0; background:#fff; border-right:1px solid #e2e7ed; padding:16px 12px; display:flex; flex-direction:column; gap:6px;">
+      <div style="font-size:11px; font-weight:700; color:#8792a2; letter-spacing:.06em; padding:4px 12px;">VIEWS</div>
+      <div class="nav-item"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="11" rx="1"/></svg>Board</div>
+      <div class="nav-item active"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 6h12M8 12h9M8 18h6"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>Timeline</div>
+      <div class="nav-item"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>Calendar</div>
+      <div class="nav-item"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>My Work</div>
+      <div class="nav-item"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7"/><rect x="12" y="6" width="3" height="11"/></svg>Portfolio</div>
+    </div>
+    <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
+      <div style="padding:14px 20px 0; display:flex; justify-content:space-between; align-items:flex-end;">
+        <div><div style="font-size:12px; color:#8792a2;">Ibn Sina Foundation</div><div style="font-size:20px; font-weight:800;">FY26 Audit</div></div>
+        <div style="display:flex; gap:10px; align-items:center; color:#667085; font-size:12px;">
+          <span style="display:flex; align-items:center; gap:6px;"><span style="width:20px; height:10px; border-radius:5px; background:#a01f2b; box-shadow:0 0 0 2px rgba(160,31,43,.22); display:inline-block;"></span><b style="color:#a01f2b;">Critical path</b></span>
+          <span style="display:flex; align-items:center; gap:6px;"><span style="width:18px; height:18px; border-radius:50%; background:#0c7c86; color:#fff; font-size:9px; font-weight:800; display:flex; align-items:center; justify-content:center;">SK</span>owner shown per task</span>
+        </div>
+      </div>
+      <div style="padding:10px 20px 0; display:flex; gap:20px; border-bottom:1px solid #e3e7ee;"><span class="tab">Board</span><span class="tab active">Timeline</span><span class="tab">Calendar</span><span class="tab">List</span></div>
+
+      <!-- detailed grouped Gantt -->
+      <div style="padding:14px 20px; flex:1; overflow:auto;">
+        <!-- month + week header -->
+        <div style="display:grid; grid-template-columns:320px repeat(4,1fr); gap:0;">
+          <div style="background:#e9edb6; font-weight:800; padding:12px; border-radius:8px 0 0 8px; text-align:center;">SEPTEMBER</div>
+          <div style="background:#eef2c0; font-weight:800; padding:12px; text-align:center; border-left:2px solid #fff;">WEEK 1</div>
+          <div style="background:#eef2c0; font-weight:800; padding:12px; text-align:center; border-left:2px solid #fff;">WEEK 2</div>
+          <div style="background:#eef2c0; font-weight:800; padding:12px; text-align:center; border-left:2px solid #fff;">WEEK 3</div>
+          <div style="background:#eef2c0; font-weight:800; padding:12px; text-align:center; border-radius:0 8px 8px 0; border-left:2px solid #fff;">WEEK 4</div>
+        </div>
+
+        <!-- Swimlane A: Audit workstream (ON CRITICAL PATH) -->
+        <div style="display:grid; grid-template-columns:320px 1fr; margin-top:14px; gap:0;">
+          <div style="background:#cdeee8; border-radius:10px 0 0 10px; padding:14px;">
+            <div style="font-weight:800; font-size:14px;">Audit workstream</div>
+            <div class="own" style="margin:6px 0 10px;"><span class="cir" style="background:#0c7c86;">SK</span>Sara Karim</div>
+            <div style="font-size:12.5px; color:#25404a; line-height:2;">Gather FY25 ledgers<br>Reconcile donor funds<br>Submit Q3 response</div>
+          </div>
+          <div class="lane-track" style="background:#eef1f5; border-radius:0 10px 10px 0; min-height:150px;">
+            <div style="position:absolute; left:2%; top:12px; height:24px; border-radius:12px; background:#9fd7cd; color:#0c5c5c; font-size:11.5px; display:flex; align-items:center; padding:0 12px; width:96%;">Duration (05 – 27 Sep)</div>
+            <div class="bar" style="left:2%; width:34%; top:48px; background:#a01f2b; box-shadow:0 0 0 2px rgba(160,31,43,.28);"><span class="ava">SK</span>Gather FY25 ledgers · 05–11</div>
+            <div class="bar" style="left:34%; width:34%; top:84px; background:#a01f2b; box-shadow:0 0 0 2px rgba(160,31,43,.28);"><span class="ava">SK</span>Reconcile donor funds · 12–19</div>
+            <div class="bar" style="left:64%; width:34%; top:120px; background:#a01f2b; box-shadow:0 0 0 2px rgba(160,31,43,.28);"><span class="ava">SK</span>Submit Q3 response · 20–27</div>
+          </div>
+        </div>
+
+        <!-- Swimlane B: Board reporting -->
+        <div style="display:grid; grid-template-columns:320px 1fr; margin-top:12px; gap:0;">
+          <div style="background:#f2d9ec; border-radius:10px 0 0 10px; padding:14px;">
+            <div style="font-weight:800; font-size:14px;">Board reporting</div>
+            <div class="own" style="margin:6px 0 10px;"><span class="cir" style="background:#8e3d78;">IA</span>Imran Ali</div>
+            <div style="font-size:12.5px; color:#4a2540; line-height:2;">Board pack<br>Grant report to donor</div>
+          </div>
+          <div class="lane-track" style="background:#eef1f5; border-radius:0 10px 10px 0; min-height:114px;">
+            <div style="position:absolute; left:2%; top:12px; height:24px; border-radius:12px; background:#e0b6d5; color:#6a2f59; font-size:11.5px; display:flex; align-items:center; padding:0 12px; width:70%;">Duration (05 – 21 Sep)</div>
+            <div class="bar" style="left:2%; width:22%; top:48px; background:#a4448c;"><span class="ava">IA</span>Board pack · 05–08</div>
+            <div class="bar" style="left:28%; width:40%; top:84px; background:#a4448c;"><span class="ava">IA</span>Grant report · 09–19</div>
+          </div>
+        </div>
+
+        <!-- Swimlane C: Compliance (mixed owners) -->
+        <div style="display:grid; grid-template-columns:320px 1fr; margin-top:12px; gap:0;">
+          <div style="background:#d6dbf6; border-radius:10px 0 0 10px; padding:14px;">
+            <div style="font-weight:800; font-size:14px;">Compliance</div>
+            <div class="own" style="margin:6px 0 10px;"><span class="cir" style="background:#3b45b5;">AM</span>Aisha Mir</div>
+            <div style="font-size:12.5px; color:#242a55; line-height:2;">Legal review (Imran)<br>License renewal (unassigned)</div>
+          </div>
+          <div class="lane-track" style="background:#eef1f5; border-radius:0 10px 10px 0; min-height:114px;">
+            <div style="position:absolute; left:52%; top:12px; height:24px; border-radius:12px; background:#b3bbee; color:#2c3577; font-size:11.5px; display:flex; align-items:center; padding:0 12px; width:46%;">Duration (16 – 27 Sep)</div>
+            <div class="bar" style="left:52%; width:22%; top:48px; background:#4b52c8;"><span class="ava">IA</span>Legal review · 16–19</div>
+            <div class="bar" style="left:66%; width:32%; top:84px; background:#8792a2;"><span class="ava">?</span>License renewal · 20–27 · unassigned</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,88 @@
+# Astra Project Tracker
+
+Astra is a standalone private project-management hub designed to run on the owner's
+computer. Source matching remains local. Ordinary users see only projects, tasks,
+Gantt schedules, assignments, dates, and explicitly published files for scopes they
+are allowed to access.
+
+This first vertical slice provides:
+
+- owner bootstrap and authenticated sessions;
+- owner, Chairman, manager, and member roles;
+- an owner-only People panel: create users, deactivate/reactivate them, and grant or
+  revoke project access; task owners are chosen from users authorized on the project;
+- project-scoped access;
+- projects, tasks, responsible people, dates, criticality, progress, and dependencies;
+- finish-to-start dependency creation, cycle prevention, blocking visibility, and audited removal;
+- append-only task audit events;
+- a task detail view with authorized inline editing (reason required for status/schedule
+  changes), add/remove of multiple dependencies, and a human-readable event history;
+- a governed work lifecycle: submissions are recorded and an authorized person (a project
+  manager, owner/Chairman, or a designated approver) accepts them to complete a task — a
+  submitter cannot accept their own work unless they are the app owner; an accepted version
+  is immutable and can only be superseded after an explicit reopen with a revised timeline;
+  on-hold work requires a reason plus a mandatory follow-up checkpoint; and project closure
+  is a separate event, with owner-only exceptional closure preserving a residual-work
+  snapshot rather than silently completing unfinished tasks;
+- reviewers, approvers, and collaborators recorded separately from the accountable owner;
+- entities and cross-entity project filing: a project keeps one stable id with links to one
+  or more entities (the approved baseline entity list can be seeded on owner request);
+- a portfolio dashboard with rolling due-bands (Overdue, Today, 1–7, 8–14, 15–30), combinable
+  entity/project/status/criticality/owner and cumulative due-within filters, an "open work
+  only" toggle, and a per-task "next action" shown separately from the accountable owner;
+- criticality governance: task lists sort criticality-first (Critical→Low, Unrated last but
+  visible) then by nearest due date, and criticality changes are confirmed with a reason and
+  recorded as a dedicated audit event;
+- parent/subtask hierarchy with a completed/total roll-up shown separately from a task's own
+  declared progress, cycle-safe re-parenting, and clickable subtasks;
+- a durable in-app notification inbox: the owner gets an idempotent record of every task change
+  made by someone else (in-app only; marking read never deletes or approves anything); and
+- portfolio and per-project Gantt views with overdue and upcoming highlighting.
+
+Integrity rules enforced at the service boundary: task titles cannot be blanked on
+update, task assignees must be active and authorized on the task's project, and
+operations against a non-existent project return a controlled 404 rather than a 500.
+
+Sign-in protection: repeated failed logins for an email are throttled (5 failures in
+15 minutes returns HTTP 429 until the window passes); a successful login clears that
+email's failure history and prunes expired sessions. "Sign out everywhere" revokes all
+of the current user's sessions. Set `ASTRA_SECURE_COOKIES=1` when serving over HTTPS to
+mark the session cookie `Secure`; it is left off by default so local HTTP works.
+Due-date state is evaluated in each project's governing timezone (the `tzdata` package
+supplies the IANA database on Windows).
+
+It does **not** yet ingest private evidence, publish files, send notifications, or
+perform AI matching. Those capabilities will be added behind the same access boundary.
+
+## Run locally
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python -m pip install -e .
+.venv\Scripts\astra init-owner --email owner@example.org
+.venv\Scripts\astra serve --host 127.0.0.1 --port 8765
+```
+
+The owner password is requested without echo. Application data defaults to
+`%LOCALAPPDATA%\AstraProjectTracker`; override it for testing with `ASTRA_HOME`.
+
+Do not expose the development HTTP server directly to the public internet. Private
+network/Tailscale access and HTTPS termination will be configured during deployment.
+
+## Verify locally
+
+The repository test runner supplies the `src` import path itself, so it works before
+an editable install:
+
+```powershell
+python tests\run.py
+node --check src\astra\static\app.js
+```
+
+These are offline structural and HTTP integration checks. They do not prove live
+deployment, browser compatibility on every device, or multi-user production safety.
+
+For an optional visual check, run `python tests\ui_fixture_server.py`, open
+`http://127.0.0.1:8766`, and sign in with the fixture-only credentials declared in
+that helper. Stop the server afterward and remove `tmp_ui_accept`. Never expose this
+synthetic fixture server beyond the local computer.

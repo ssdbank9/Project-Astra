@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; }
+    a { color: #0c7c86; } a:hover { color: #095e66; }
+    .dc-root, .dc-root * { box-sizing: border-box; font-family: "Segoe UI", system-ui, Arial, sans-serif; }
+    .sec { border-top: 1px solid #e3e7ee; padding-top: 16px; margin-top: 20px; }
+    .sec h3 { margin: 0 0 10px; font-size: 14px; }
+    .field { border: 1px solid #c8d0db; border-radius: 8px; padding: 9px 12px; font-size: 13px; background: #fff; color: #172033; display: flex; justify-content: space-between; align-items: center; }
+    .lbl { font-size: 12px; font-weight: 600; color: #3a465b; display: block; margin-bottom: 5px; }
+    .btn { background: #0c7c86; color: #fff; border-radius: 8px; padding: 9px 14px; font-size: 13px; font-weight: 700; display: inline-block; }
+    .btn.quiet { background: #e9eef4; color: #27364c; }
+    .subcard { background: #f7f9fb; border: 1px solid #e6ebf1; border-radius: 8px; padding: 12px; }
+    ul.clean { list-style: none; padding: 0; margin: 8px 0 0; }
+    ul.clean li { padding: 8px 0; border-bottom: 1px solid #edf0f4; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+    .link { color: #0c7c86; font-weight: 600; font-size: 12.5px; text-decoration: underline; }
+    .pill { border-radius: 7px; padding: 2px 8px; font-size: 11.5px; font-weight: 600; }
+  </style>
+</helmet>
+<div class="dc-root" style="width: 920px; min-height: 1360px; background: #172a4666; padding: 28px; display: flex; justify-content: center;">
+  <div style="width: 800px; background: #fff; border-radius: 14px; box-shadow: 0 22px 70px #172a4650;">
+    <div style="padding: 22px 26px 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0; font-size: 20px;">People &amp; access</h2>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </div>
+
+      <!-- Users -->
+      <div class="sec" style="border-top:0; padding-top:8px; margin-top:14px;"><h3>Users</h3>
+        <ul class="clean">
+          <li><span><strong>Aly Jafferani</strong> · aly@rupanifoundation.org · <span class="pill" style="background:#e6f3f4;color:#0c7c86;">owner</span></span><span style="color:#8792a2;font-size:12px;">—</span></li>
+          <li><span><strong>Imran Ali</strong> · imran@rupanifoundationpk.org · <span class="pill" style="background:#eef1f6;color:#3a465b;">chairman</span></span><span class="link">Deactivate</span></li>
+          <li><span><strong>Sara Karim</strong> · sara@ibnsinafoundation.org · <span class="pill" style="background:#eef1f6;color:#3a465b;">member</span></span><span class="link">Deactivate</span></li>
+          <li><span><strong>Aisha Mir</strong> · aisha@rupanifoundationpk.org · <span class="pill" style="background:#eef1f6;color:#3a465b;">member</span></span><span class="link">Deactivate</span></li>
+          <li><span style="color:#8792a2;"><strong style="color:#8792a2;">Bilal Tariq</strong> · bilal@rupanifoundationusa.org · member · <em>inactive</em></span><span class="link">Reactivate</span></li>
+        </ul>
+      </div>
+
+      <!-- Add user -->
+      <div class="sec"><h3>Add a user</h3>
+        <div class="subcard">
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+            <div><span class="lbl">Email</span><div class="field">&nbsp;</div></div>
+            <div><span class="lbl">Display name</span><div class="field">&nbsp;</div></div>
+            <div><span class="lbl">Temporary password (min 12)</span><div class="field">&nbsp;</div></div>
+            <div><span class="lbl">Role</span><div class="field">Member <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div></div>
+          </div>
+          <div style="text-align:right; margin-top:12px;"><span class="btn">Create user</span></div>
+        </div>
+      </div>
+
+      <!-- Grant access -->
+      <div class="sec"><h3>Grant project access</h3>
+        <div class="subcard" style="display:flex; gap:10px; align-items:end;">
+          <div style="flex:1;"><span class="lbl">User</span><div class="field">Sara Karim <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div></div>
+          <div style="flex:1;"><span class="lbl">Project</span><div class="field">FY25 Audit <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div></div>
+          <div style="flex:0 0 150px;"><span class="lbl">Role</span><div class="field">Manager <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div></div>
+          <span class="btn">Grant</span>
+        </div>
+      </div>
+
+      <!-- Current access -->
+      <div class="sec"><h3>Current access</h3>
+        <ul class="clean">
+          <li><span>FY25 Audit · Sara Karim · <span class="pill" style="background:#eef1f6;color:#3a465b;">manager</span></span><span class="link">Revoke</span></li>
+          <li><span>Scholarships 2026 · Aisha Mir · <span class="pill" style="background:#eef1f6;color:#3a465b;">manager</span></span><span class="link">Revoke</span></li>
+          <li><span>Scholarships 2026 · Imran Ali · <span class="pill" style="background:#eef1f6;color:#3a465b;">viewer</span></span><span class="link">Revoke</span></li>
+        </ul>
+      </div>
+
+      <!-- Entities -->
+      <div class="sec"><h3>Entities</h3>
+        <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:6px 20px; font-size:13px;">
+          <div style="padding:6px 0; border-bottom:1px solid #edf0f4;">Rupani Foundation Pakistan</div>
+          <div style="padding:6px 0; border-bottom:1px solid #edf0f4;">Ibn Sina Foundation</div>
+          <div style="padding:6px 0; border-bottom:1px solid #edf0f4;">Rupani Foundation USA</div>
+          <div style="padding:6px 0; border-bottom:1px solid #edf0f4;">RDI Pakistan</div>
+          <div style="padding:6px 0; border-bottom:1px solid #edf0f4;">Apex Amanat Microfinance</div>
+          <div style="padding:6px 0; border-bottom:1px solid #edf0f4;">Tax Exempt</div>
+        </div>
+        <div class="subcard" style="margin-top:12px; display:flex; gap:10px; align-items:end;">
+          <div style="flex:1;"><span class="lbl">New entity name</span><div class="field">&nbsp;</div></div>
+          <span class="btn">Add entity</span>
+          <span class="btn quiet">Seed approved entities</span>
+        </div>
+      </div>
+
+      <!-- Project filing -->
+      <div class="sec"><h3>Project filing (entities)</h3>
+        <div class="subcard">
+          <span class="lbl">Project</span><div class="field" style="max-width:320px;">Scholarships 2026 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
+          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-top:12px; font-size:13px;">
+            <label style="display:flex; align-items:center; gap:7px;"><span style="width:16px;height:16px;border:1.5px solid #0c7c86;border-radius:4px;background:#0c7c86;display:inline-flex;align-items:center;justify-content:center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span> RDI Pakistan</label>
+            <label style="display:flex; align-items:center; gap:7px;"><span style="width:16px;height:16px;border:1.5px solid #0c7c86;border-radius:4px;background:#0c7c86;display:inline-flex;align-items:center;justify-content:center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span> RDI - Global</label>
+            <label style="display:flex; align-items:center; gap:7px;"><span style="width:16px;height:16px;border:1.5px solid #c8d0db;border-radius:4px;"></span> Rupani Foundation Pakistan</label>
+          </div>
+          <div style="font-size:12px; color:#8792a2; margin-top:8px;">A cross-entity project keeps one id with several entity links — no duplicated projects or totals.</div>
+          <div style="text-align:right; margin-top:10px;"><span class="btn">Save filing</span></div>
+        </div>
+      </div>
+
+      <!-- Notifications inbox -->
+      <div class="sec"><h3>Notifications</h3>
+        <ul class="clean">
+          <li style="font-weight:600;"><span>task submitted: Submit Q3 audit response to ZATCA</span><span class="link">Mark read</span></li>
+          <li style="font-weight:600;"><span>changes requested: Board pack for September meeting</span><span class="link">Mark read</span></li>
+          <li style="color:#667085;"><span>criticality changed: Renew microfinance operating license</span><span style="color:#8792a2;font-size:12px;">read</span></li>
+        </ul>
+        <div style="text-align:right; margin-top:10px;"><span class="btn quiet">Mark all read</span></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

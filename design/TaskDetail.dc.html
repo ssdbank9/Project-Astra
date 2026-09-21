@@ -1,0 +1,123 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; }
+    a { color: #0c7c86; } a:hover { color: #095e66; }
+    .dc-root, .dc-root * { box-sizing: border-box; font-family: "Segoe UI", system-ui, Arial, sans-serif; }
+    .sec { border-top: 1px solid #e3e7ee; padding-top: 16px; margin-top: 20px; }
+    .sec h3 { margin: 0 0 10px; font-size: 14px; }
+    .field { border: 1px solid #c8d0db; border-radius: 8px; padding: 9px 12px; font-size: 13px; background: #fff; color: #172033; display: flex; justify-content: space-between; align-items: center; }
+    .lbl { font-size: 12px; font-weight: 600; color: #3a465b; display: block; margin-bottom: 5px; }
+    .pill { border-radius: 7px; padding: 3px 9px; font-size: 12px; font-weight: 600; }
+    .btn { background: #0c7c86; color: #fff; border-radius: 8px; padding: 9px 14px; font-size: 13px; font-weight: 700; display: inline-block; }
+    .subcard { background: #f7f9fb; border: 1px solid #e6ebf1; border-radius: 8px; padding: 12px; }
+    ul.clean { list-style: none; padding: 0; margin: 8px 0 0; }
+    ul.clean li { padding: 7px 0; border-bottom: 1px solid #edf0f4; font-size: 13px; }
+  </style>
+</helmet>
+<div class="dc-root" style="width: 920px; min-height: 1360px; background: #172a4666; padding: 28px; display: flex; justify-content: center;">
+  <div style="width: 800px; background: #fff; border-radius: 14px; box-shadow: 0 22px 70px #172a4650; overflow: hidden;">
+
+    <!-- Header -->
+    <div style="padding: 22px 26px 0;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <h2 style="margin: 0; font-size: 20px;">Submit Q3 audit response to ZATCA</h2>
+          <div style="color: #667085; font-size: 12.5px; margin-top: 4px;">Ibn Sina Foundation · Tax Exempt</div>
+        </div>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </div>
+
+      <!-- Facts -->
+      <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 16px 0 4px;">
+        <div style="background: #f3f5f8; border-radius: 8px; padding: 9px 10px;"><span style="display:block;color:#667085;font-size:11px;">Owner</span><strong style="font-size:13px;">Sara Karim</strong></div>
+        <div style="background: #f3f5f8; border-radius: 8px; padding: 9px 10px;"><span style="display:block;color:#667085;font-size:11px;">Status</span><strong style="font-size:13px;">submitted</strong></div>
+        <div style="background: #f3f5f8; border-radius: 8px; padding: 9px 10px;"><span style="display:block;color:#667085;font-size:11px;">Due</span><strong style="font-size:13px;color:#c53a48;">10 Sep · overdue</strong></div>
+        <div style="background: #f3f5f8; border-radius: 8px; padding: 9px 10px;"><span style="display:block;color:#667085;font-size:11px;">Criticality</span><strong style="font-size:13px;color:#c53a48;">Critical</strong></div>
+        <div style="background: #f3f5f8; border-radius: 8px; padding: 9px 10px;"><span style="display:block;color:#667085;font-size:11px;">Revision</span><strong style="font-size:13px;">4</strong></div>
+      </div>
+      <p style="color: #3a465b; font-size: 13px; line-height: 1.5;">Prepare and file the Q3 audit response to ZATCA covering FY25 ledgers for the Tax Exempt entity. Awaiting owner acceptance of the latest submission.</p>
+    </div>
+
+    <div style="padding: 0 26px 24px;">
+
+      <!-- Lifecycle -->
+      <div class="sec"><h3>Lifecycle</h3>
+        <div style="font-size: 13px; margin-bottom: 8px;">Status: <strong>submitted</strong> — an authorized approver accepts to complete.</div>
+        <ul class="clean">
+          <li>v1 · <strong>changes requested</strong> · by Sara Karim <em style="color:#667085;">(fix cover letter figures)</em></li>
+          <li>v2 · <strong>changes requested</strong> · by Sara Karim <em style="color:#667085;">(attach reconciled ledger)</em></li>
+          <li>v3 · <strong style="color:#0c7c86;">submitted</strong> · by Sara Karim · awaiting acceptance</li>
+        </ul>
+        <div style="display: flex; gap: 10px; margin-top: 12px;">
+          <div class="subcard" style="flex: 1;"><span class="lbl">Acceptance note</span><div class="field">Approved — figures reconciled</div><div class="btn" style="margin-top:10px;">Accept &amp; complete</div></div>
+          <div class="subcard" style="flex: 1;"><span class="lbl">Reason for changes</span><div class="field">&nbsp;</div><div class="btn" style="margin-top:10px; background:#e9eef4; color:#27364c;">Request changes</div></div>
+        </div>
+        <div style="font-size:12px; color:#8792a2; margin-top:8px;">The submitter cannot accept their own work unless they are the owner.</div>
+      </div>
+
+      <!-- Criticality -->
+      <div class="sec"><h3>Criticality</h3>
+        <div style="font-size:13px;">Current: <strong style="color:#c53a48;">Critical</strong> — changes are confirmed with a reason and recorded.</div>
+        <div class="subcard" style="margin-top:10px; display:flex; gap:10px; align-items:end;">
+          <div style="flex:0 0 160px;"><span class="lbl">Set level</span><div class="field">Critical <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div></div>
+          <div style="flex:1;"><span class="lbl">Reason (evidence for this level)</span><div class="field">Statutory filing deadline; penalty on delay</div></div>
+          <div class="btn">Confirm</div>
+        </div>
+      </div>
+
+      <!-- Subtasks -->
+      <div class="sec"><h3>Subtasks</h3>
+        <div style="font-size:13px;">Roll-up: <strong>1 of 3</strong> subtasks completed — separate from this task's own declared progress (60%).</div>
+        <ul class="clean">
+          <li><a href="#">Gather FY25 ledgers</a> · completed · Sara Karim</li>
+          <li><a href="#">Reconcile donor restricted funds</a> · in_progress · Sara Karim</li>
+          <li><a href="#">Legal review of cover letter</a> · assigned · Imran Ali</li>
+        </ul>
+      </div>
+
+      <!-- Reviewers -->
+      <div class="sec"><h3>Reviewers &amp; approvers</h3>
+        <ul class="clean">
+          <li>Aly Jafferani · <span class="pill" style="background:#e6f3f4;color:#0c7c86;">approver</span></li>
+          <li>Imran Ali · <span class="pill" style="background:#eef1f6;color:#3a465b;">reviewer</span></li>
+        </ul>
+        <div class="subcard" style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+          <div class="field" style="flex:1;">Choose a person… <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
+          <div class="field" style="flex:0 0 140px;">Approver <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8792a2" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
+          <span class="pill" style="background:#e9eef4;color:#27364c;padding:8px 12px;">Add</span>
+        </div>
+      </div>
+
+      <!-- Dependencies -->
+      <div class="sec"><h3>Dependencies</h3>
+        <ul class="clean">
+          <li>Depends on: <strong>Gather FY25 ledgers</strong> <span style="color:#8792a2;">(completed — not blocking)</span></li>
+          <li>Blocks: <strong>Board sign-off on FY25 accounts</strong></li>
+        </ul>
+      </div>
+
+      <!-- History -->
+      <div class="sec"><h3>History</h3>
+        <ul class="clean">
+          <li><strong>Work submitted</strong> · 14 Sep, 09:20 · Sara Karim <em style="color:#667085;">— v3</em></li>
+          <li><strong>Criticality changed</strong> · 12 Sep, 16:05 · Aly Jafferani<br><span style="color:#667085;">High → Critical · <em>Reason: statutory deadline confirmed</em></span></li>
+          <li><strong>Changes requested</strong> · 11 Sep, 11:40 · Aly Jafferani <em style="color:#667085;">— attach reconciled ledger</em></li>
+          <li><strong>Task updated</strong> · 9 Sep, 14:02 · Sara Karim<br><span style="color:#667085;">Due date: 8 Sep → 10 Sep · <em>Reason: awaiting ledger export</em></span></li>
+          <li><strong>Task created</strong> · 2 Sep, 10:15 · Aly Jafferani</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

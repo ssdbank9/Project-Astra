@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Astra Project Tracker</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <section id="login" class="login-card">
+    <div class="brand">ASTRA</div>
+    <h1>Project command centre</h1>
+    <p>Sign in to view your authorized projects, assignments, and deadlines.</p>
+    <form id="login-form">
+      <label>Email<input id="email" type="email" autocomplete="username" required></label>
+      <label>Password<input id="password" type="password" autocomplete="current-password" required></label>
+      <button>Sign in</button>
+      <div id="login-error" class="error"></div>
+    </form>
+  </section>
+  <div id="app" hidden>
+    <header>
+      <div><span class="brand">ASTRA</span><span class="subtitle">Portfolio control</span></div>
+      <div><button id="inbox" class="quiet">🔔 <span id="unread-count">0</span></button><span id="user-name"></span><button id="logout" class="quiet">Sign out</button><button id="logout-all" class="quiet">Sign out everywhere</button></div>
+    </header>
+    <main>
+      <section class="summary">
+        <div><strong id="project-count">0</strong><span>Projects</span></div>
+        <div><strong id="task-count">0</strong><span>Visible tasks</span></div>
+        <div><strong id="overdue-count">0</strong><span>Overdue</span></div>
+        <div><strong id="attention-count">0</strong><span>Need dates</span></div>
+      </section>
+      <section class="toolbar">
+        <label>Project<select id="project-filter"><option value="">All projects</option></select></label>
+        <label>Status<select id="status-filter"><option value="">All statuses</option></select></label>
+        <label>Entity<select id="entity-filter"><option value="">All entities</option></select></label>
+        <label>Criticality<select id="crit-filter"><option value="">All criticality</option><option value="critical">Critical</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option><option value="unrated">Unrated</option></select></label>
+        <label>Due within<select id="band-filter"><option value="">Any time</option><option value="overdue">Overdue</option><option value="today">Today</option><option value="7">Next 7 days</option><option value="14">Next 14 days</option><option value="30">Next 30 days</option></select></label>
+        <label>Owner<input id="owner-filter" placeholder="Filter by person"></label>
+        <label>Sort by<select id="sort-filter"><option value="criticality">Criticality</option><option value="due_date">Due date</option></select></label>
+        <label class="inline"><input type="checkbox" id="open-only"> Open work only</label>
+        <label>Search<input id="search-box" placeholder="Tasks & projects — Enter"></label>
+        <button id="new-project">New project</button>
+        <button id="new-task">New task</button>
+        <button id="people" hidden>People</button>
+        <button id="close-project" class="quiet" hidden>Close project</button>
+        <button id="portfolio-btn" class="quiet">Portfolio</button>
+        <button id="templates-btn" class="quiet">Templates</button>
+        <button id="final-results-btn" class="quiet">Final results</button>
+        <button id="save-template-btn" class="quiet" hidden>Save project as template</button>
+        <button id="export-btn" class="quiet">Export CSV</button>
+      </section>
+      <section class="panel">
+        <div class="panel-title"><h2>Portfolio Gantt</h2><span id="as-of"></span></div>
+        <div class="legend"><i class="overdue"></i>Overdue <i class="soon"></i>Due in 7 days <i class="scheduled"></i>Scheduled <i class="blocked"></i>Blocked <i class="undated"></i>Undated <i class="critical"></i>Critical path <i class="proj-start-key"></i>Project start <i class="proj-target-key"></i>Project target</div>
+        <div id="bands" class="bands"></div>
+        <div id="gantt"></div>
+      </section>
+    </main>
+  </div>
+  <dialog id="project-dialog"><form method="dialog" id="project-form"><h2>Create project</h2><label>Name<input name="name" required></label><label>Description<textarea name="description"></textarea></label><div class="actions"><button value="cancel" class="quiet">Cancel</button><button value="default">Create</button></div><div class="error"></div></form></dialog>
+  <dialog id="task-dialog"><form method="dialog" id="task-form"><h2>Create task</h2><label>Project<select name="project_id" required></select></label><label>Task title<input name="title" required></label><label>Owner<select name="owner_user_id"><option value="">Unassigned</option></select></label><div class="grid"><label>Start date<input name="start_date" type="date"></label><label>Due date<input name="due_date" type="date"></label><label>Criticality<select name="criticality"><option value="">Unrated</option><option value="critical">Critical</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select></label><label>Progress<input name="progress" type="number" min="0" max="100"></label></div><label>Depends on (finish-to-start)<select name="predecessor_task_id"><option value="">No predecessor</option></select></label><label>Parent task (optional)<select name="parent_task_id"><option value="">No parent</option></select></label><label>Description<textarea name="description"></textarea></label><div class="actions"><button value="cancel" class="quiet">Cancel</button><button value="default">Create</button></div><div class="error"></div></form></dialog>
+  <dialog id="detail-dialog"><div id="detail-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
+  <dialog id="people-dialog"><div id="people-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
+  <dialog id="inbox-dialog"><div id="inbox-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
+  <dialog id="search-dialog"><div id="search-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
+  <dialog id="portfolio-dialog"><div id="portfolio-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
+  <dialog id="templates-dialog"><div id="templates-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
+  <dialog id="final-results-dialog"><div id="final-results-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
+  <script src="/static/app.js"></script>
+</body>
+</html>
