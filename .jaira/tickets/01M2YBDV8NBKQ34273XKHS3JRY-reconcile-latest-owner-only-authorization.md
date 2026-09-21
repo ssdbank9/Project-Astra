@@ -1,7 +1,7 @@
 ---
 id: 01M2YBDV8NBKQ34273XKHS3JRY
 title: Reconcile latest Owner-only authorization
-status: in-progress
+status: review
 ready: true
 creator: Aly Jafferani
 goal: Make every application path enforce the latest rule that protected lifecycle and all file/final-result mutations are App Owner-only while Managers retain only approved ordinary project operations.
@@ -11,13 +11,19 @@ tags:
   - astra
 blocked-by: []
 related: []
-commits: []
+commits:
+  - 9ec1279
+  - 6a82463
 created-at: 2026-09-20T02:48:19Z
-updated-at: 2026-09-21T15:41:14Z
+updated-at: 2026-09-21T15:58:04Z
 updated-by: Claude
 claimed-by: vm-6287
 claimed-at: 2026-09-21T15:35:28Z
-assignee: Aly Jafferani
+assignee: Claude
+outcome-what: "Reconciled README.md, CONTEXT.md and docs/design/authorization-matrix.md with the Owner-only rule; added 7 targeted tests proving Chairman/Viewer protected attempts are blocked, audited and notify the Owner, Manager schedule rejection becomes an Owner request, Chairman attachment removal is blocked and notified, templates/access/calendar administration is Owner-only for every non-Owner role, and every HTTP mutation route delegates to AstraService; recorded the deferred request-decision-controls and dashboard-overflow scope decisions. No service-layer change was needed on top of the transferred implementation."
+outcome-why: "The transferred implementation predated the Owner-only decisions and the public docs still said Manager, Chairman or Approver could accept directly; several matrix cells had no test."
+outcome-resolves: "Chairman read-only by global role; Managers ordinary-only with protected attempts becoming Owner requests that leave live state unchanged; attachment/final-result mutations Owner-only with read retained; attachment_removal_blocked notifies the Owner; all routes enter the service boundary (automation/offline subsystems do not exist, documented in authorization-matrix.md); matrix tests cover Owner, Chairman, Manager, Viewer; 117 tests OK."
+executed-by: Claude Fable 5.1
 ---
 
 # Reconcile latest Owner-only authorization
