@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 def app_home() -> Path:
@@ -349,3 +349,29 @@ def migrate(connection: sqlite3.Connection) -> None:
                 """
             )
             connection.execute("PRAGMA user_version = 11")
+    if version < 12:
+        with transaction(connection):
+            connection.executescript(
+                """
+                CREATE TABLE owner_action_requests (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+                    action TEXT NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    reason TEXT NOT NULL DEFAULT '',
+                    requested_by TEXT NOT NULL REFERENCES users(id),
+                    requested_at TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(status IN ('pending','approved','rejected','cancelled')),
+                    decided_by TEXT REFERENCES users(id),
+                    decided_at TEXT,
+                    decision_reason TEXT
+                );
+                CREATE INDEX idx_owner_action_requests_status
+                    ON owner_action_requests(status, requested_at);
+                CREATE INDEX idx_owner_action_requests_requester
+                    ON owner_action_requests(requested_by, requested_at);
+                """
+            )
+            connection.execute("PRAGMA user_version = 12")

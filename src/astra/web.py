@@ -105,6 +105,10 @@ class AstraHandler(BaseHTTPRequestHandler):
                     "notifications": self.service.list_notifications(user, unread_only),
                     "unread": self.service.unread_notification_count(user),
                 })
+            if path == "/api/owner-action-requests":
+                user, _ = self._require_user()
+                status = parse_qs(urlparse(self.path).query).get("status", ["pending"])[0] or None
+                return self._json({"requests": self.service.list_owner_action_requests(user, status)})
             if path == "/api/search":
                 user, _ = self._require_user()
                 term = parse_qs(urlparse(self.path).query).get("q", [""])[0]
@@ -233,14 +237,14 @@ class AstraHandler(BaseHTTPRequestHandler):
                 return self._json({"submission": submission}, HTTPStatus.CREATED)
             if path.startswith("/api/tasks/") and path.endswith("/reopen"):
                 task_id = path.split("/")[3]
-                task = self.service.reopen_task(user, task_id, payload.get("reason", ""), payload.get("new_due_date"))
-                return self._json({"task": task})
+                outcome = self.service.reopen_task(user, task_id, payload.get("reason", ""), payload.get("new_due_date"))
+                return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"task": outcome})
             if path.startswith("/api/tasks/") and path.endswith("/hold"):
                 task_id = path.split("/")[3]
-                task = self.service.set_on_hold(
+                outcome = self.service.set_on_hold(
                     user, task_id, payload.get("reason", ""), payload.get("checkpoint_date"), payload.get("owner_user_id")
                 )
-                return self._json({"task": task})
+                return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"task": outcome})
             if path.startswith("/api/tasks/") and path.endswith("/criticality"):
                 task_id = path.split("/")[3]
                 task = self.service.confirm_criticality(
@@ -259,22 +263,22 @@ class AstraHandler(BaseHTTPRequestHandler):
                 return self._json({"proposal": proposal}, HTTPStatus.CREATED)
             if path.startswith("/api/schedule-proposals/") and path.endswith("/approve"):
                 proposal_id = path.split("/")[3]
-                task = self.service.approve_schedule_proposal(user, proposal_id, payload.get("decision_reason", ""))
-                return self._json({"task": task})
+                outcome = self.service.approve_schedule_proposal(user, proposal_id, payload.get("decision_reason", ""))
+                return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"task": outcome})
             if path.startswith("/api/schedule-proposals/") and path.endswith("/reject"):
                 proposal_id = path.split("/")[3]
-                proposal = self.service.reject_schedule_proposal(user, proposal_id, payload.get("reason", ""))
-                return self._json({"proposal": proposal})
+                outcome = self.service.reject_schedule_proposal(user, proposal_id, payload.get("reason", ""))
+                return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"proposal": outcome})
             if path.startswith("/api/submissions/") and path.endswith("/accept"):
                 submission_id = path.split("/")[3]
-                submission = self.service.accept_submission(
+                outcome = self.service.accept_submission(
                     user, submission_id, payload.get("decision_note", ""), payload.get("checklist")
                 )
-                return self._json({"submission": submission})
+                return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"submission": outcome})
             if path.startswith("/api/submissions/") and path.endswith("/request-changes"):
                 submission_id = path.split("/")[3]
-                submission = self.service.request_changes(user, submission_id, payload.get("reason", ""))
-                return self._json({"submission": submission})
+                outcome = self.service.request_changes(user, submission_id, payload.get("reason", ""))
+                return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"submission": outcome})
             if path == "/api/task-reviewers":
                 self.service.add_task_reviewer(
                     user, str(payload.get("task_id", "")), str(payload.get("user_id", "")), str(payload.get("role", ""))
@@ -320,13 +324,14 @@ class AstraHandler(BaseHTTPRequestHandler):
                 return self._json({"result": result}, HTTPStatus.CREATED)
             if path.startswith("/api/projects/") and path.endswith("/close"):
                 project_id = path.split("/")[3]
-                project = self.service.close_project(
+                outcome = self.service.close_project(
                     user, project_id, payload.get("note", ""), bool(payload.get("exceptional"))
                 )
-                return self._json({"project": project})
+                return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"project": outcome})
             if path.startswith("/api/tasks/") and path.count("/") == 3:
                 task_id = path.split("/")[3]
-                return self._json({"task": self.service.update_task(user, task_id, payload)})
+                outcome = self.service.update_task(user, task_id, payload)
+                return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"task": outcome})
             self.send_error(HTTPStatus.NOT_FOUND)
         except Exception as exc:
             self._error(exc)

@@ -1,7 +1,7 @@
 const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality"};
 async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");return data}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
-function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=`${state.user.display_name} · ${state.user.global_role}`;const isOwner=state.user.global_role==="owner";document.querySelector("#new-project").hidden=!isOwner;document.querySelector("#people").hidden=!isOwner;document.querySelector("#close-project").hidden=!(isOwner||state.user.global_role==="chairman");document.querySelector("#save-template-btn").hidden=!isOwner}
+function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=`${state.user.display_name} · ${state.user.global_role}`;const isOwner=state.user.global_role==="owner";document.querySelector("#new-project").hidden=!isOwner;document.querySelector("#people").hidden=!isOwner;document.querySelector("#close-project").hidden=!isOwner;document.querySelector("#save-template-btn").hidden=!isOwner}
 async function load(){const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;updateBell();fillFilters();render()}
 function updateBell(){document.querySelector("#unread-count").textContent=state.unread||0;document.querySelector("#inbox").classList.toggle("has-unread",(state.unread||0)>0)}
 function fillFilters(){const pf=document.querySelector("#project-filter"),tp=document.querySelector('#task-form select[name="project_id"]');const selected=pf.value;pf.innerHTML='<option value="">All projects</option>';tp.innerHTML="";for(const p of state.projects){pf.add(new Option(p.status==="closed"?`${p.name} (closed)`:p.name,p.id));if(p.status!=="closed")tp.add(new Option(p.name,p.id))}pf.value=selected;const statuses=[...new Set(state.tasks.map(t=>t.status))].sort();document.querySelector("#status-filter").innerHTML='<option value="">All statuses</option>'+statuses.map(s=>`<option>${escapeHtml(s)}</option>`).join("");const ef=document.querySelector("#entity-filter"),efSel=ef.value;ef.innerHTML='<option value="">All entities</option>'+(state.entities||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`).join("");ef.value=efSel;fillPredecessors()}
@@ -255,20 +255,24 @@ document.querySelector("#people").onclick=openPeople;
 document.querySelector("#inbox").onclick=openInbox;
 async function openInbox(){
   try{
-    const data=await api("/api/notifications");
+    const [data,ownerQueue]=await Promise.all([
+      api("/api/notifications"),
+      state.user.global_role==="owner"?api("/api/owner-action-requests"):Promise.resolve({requests:[]}),
+    ]);
     state.notifications=data.notifications;state.unread=data.unread;updateBell();
-    renderInbox(data.notifications);
+    renderInbox(data.notifications,ownerQueue.requests);
     const d=document.querySelector("#inbox-dialog");if(!d.open)d.showModal();
   }catch(err){document.querySelector("#inbox-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`}
 }
-function renderInbox(items){
+function renderInbox(items,requests=[]){
   const rows=items.map(n=>{
     const when=new Date(n.created_at).toLocaleString();
     const unread=!n.read_at;
     const mark=unread?`<button type="button" class="link" data-read="${escapeHtml(n.id)}">Mark read</button>`:"read";
     return `<li class="${unread?"unread":""}"><strong>${escapeHtml(n.summary)}</strong><br><small>${escapeHtml(when)}</small> · ${mark}</li>`;
   }).join("")||"<li>No notifications.</li>";
-  document.querySelector("#inbox-body").innerHTML=`<h2>Notifications</h2>
+  const requestRows=requests.map(r=>`<li class="unread"><strong>${escapeHtml(r.action.replaceAll("_"," "))}</strong><br><small>${escapeHtml(r.requested_by_name)} · ${escapeHtml(r.task_title||r.project_name)} · ${escapeHtml(new Date(r.requested_at).toLocaleString())}</small></li>`).join("")||"<li>No pending Owner requests.</li>";
+  document.querySelector("#inbox-body").innerHTML=`<h2>Needs action</h2><ul class="people-list">${requestRows}</ul><h2>Activity</h2>
     <div class="actions"><button type="button" id="read-all" class="quiet">Mark all read</button></div>
     <ul class="people-list">${rows}</ul>`;
   document.querySelector("#read-all").addEventListener("click",markAllRead);
@@ -404,10 +408,13 @@ function buildSchedule(task){
   const props=task.schedule_proposals||[];
   const pending=props.filter(p=>p.status==="pending");
   const history=props.filter(p=>p.status!=="pending");
-  const pendingRows=pending.map(p=>`<li>Proposed <strong>${escapeHtml(p.start_date||"—")} → ${escapeHtml(p.due_date||"—")}</strong> by ${escapeHtml(p.proposed_by_name||"")} <em style="color:#667085;">(${escapeHtml(p.reason)})</em>
-    <span class="dep-remove"><button type="button" class="link" data-approve-sched="${escapeHtml(p.id)}">Approve</button>
-    <input class="sched-reject-reason" placeholder="Reason to reject" aria-label="Reason to reject">
-    <button type="button" class="link" data-reject-sched="${escapeHtml(p.id)}">Reject</button></span></li>`).join("")||"<li>No pending proposals.</li>";
+  const canDecide=task.permissions?.can_decide_protected,canRequest=task.permissions?.can_request_protected;
+  const pendingRows=pending.map(p=>{const controls=canDecide||canRequest
+    ?`<span class="dep-remove"><button type="button" class="link" data-approve-sched="${escapeHtml(p.id)}">${canDecide?"Approve":"Request Owner approval"}</button>
+      <input class="sched-reject-reason" placeholder="Reason to reject" aria-label="Reason to reject">
+      <button type="button" class="link" data-reject-sched="${escapeHtml(p.id)}">${canDecide?"Reject":"Request Owner rejection"}</button></span>`
+    :`<span class="blocked-text">Owner decision required</span>`;
+    return `<li>Proposed <strong>${escapeHtml(p.start_date||"—")} → ${escapeHtml(p.due_date||"—")}</strong> by ${escapeHtml(p.proposed_by_name||"")} <em style="color:#667085;">(${escapeHtml(p.reason)})</em>${controls}</li>`}).join("")||"<li>No pending proposals.</li>";
   const historyRows=history.map(p=>`<li>${escapeHtml(p.status)} · ${escapeHtml(p.start_date||"—")} → ${escapeHtml(p.due_date||"—")} · proposed by ${escapeHtml(p.proposed_by_name||"")}${p.decided_by_name?` · decided by ${escapeHtml(p.decided_by_name)}`:""}</li>`).join("");
   return `<div class="schedule"><h3>Schedule</h3>
     <div class="facts">
@@ -436,9 +443,11 @@ async function submitSchedule(e){
 async function decideSchedule(id,action,btn){
   const err=document.querySelector("#sched-error");if(err)err.textContent="";
   try{
-    if(action==="approve"){await api(`/api/schedule-proposals/${id}/approve`,{method:"POST",body:"{}"});}
-    else{const reason=btn.parentElement.querySelector(".sched-reject-reason").value;await api(`/api/schedule-proposals/${id}/reject`,{method:"POST",body:JSON.stringify({reason})});}
+    let outcome;
+    if(action==="approve"){outcome=await api(`/api/schedule-proposals/${id}/approve`,{method:"POST",body:"{}"});}
+    else{const reason=btn.parentElement.querySelector(".sched-reject-reason").value;outcome=await api(`/api/schedule-proposals/${id}/reject`,{method:"POST",body:JSON.stringify({reason})});}
     await load();await openDetail(detailTaskId);
+    if(outcome.request){const current=document.querySelector("#sched-error");current.style.color="#0c7c86";current.textContent="Owner request created; the live schedule is unchanged."}
   }catch(x){if(err)err.textContent=x.message}
 }
 
@@ -468,13 +477,14 @@ async function submitCriticality(e){
 }
 
 function buildLifecycle(task){
+  const canDecide=task.permissions?.can_decide_protected,canRequest=task.permissions?.can_request_protected;
   const frBySub={};(task.final_results||[]).forEach(f=>{if(f.submission_id)frBySub[f.submission_id]=f.id});
   const subs=(task.submissions||[]).map(s=>{
     const decided=s.status==="accepted"?` · accepted by ${escapeHtml(s.decided_by_name||"")}`:s.status==="changes_requested"?` · changes requested`:"";
     const note=s.note?` — ${escapeHtml(s.note)}`:"";
     const decisionNote=s.decision_note?` <em>(${escapeHtml(s.decision_note)})</em>`:"";
     let frCtl="";
-    if(s.status==="accepted"){
+    if(s.status==="accepted"&&task.permissions?.can_manage_files){
       frCtl=frBySub[s.id]
         ?` · <span class="fr-tag">★ final result</span> <button type="button" class="link" data-unmark-fr="${escapeHtml(frBySub[s.id])}">Unmark</button>`
         :` · <button type="button" class="link" data-mark-fr-sub="${escapeHtml(s.id)}">Mark as final result</button>`;
@@ -488,14 +498,16 @@ function buildLifecycle(task){
     actions+=`<form data-life="submit"><label>Submit work (note)<input name="note"></label><div class="actions"><button>Submit for acceptance</button></div></form>`;
   }
   if(task.status==="submitted"&&pending){
-    actions+=`<form data-life="accept" data-sid="${escapeHtml(pending.id)}"><label>Acceptance note<input name="decision_note"></label><div class="actions"><button>Accept &amp; complete</button></div></form>`;
-    actions+=`<form data-life="changes" data-sid="${escapeHtml(pending.id)}"><label>Reason for changes<input name="reason" required></label><div class="actions"><button>Request changes</button></div></form>`;
+    if(canDecide||canRequest){
+      actions+=`<form data-life="accept" data-sid="${escapeHtml(pending.id)}"><label>Acceptance note<input name="decision_note"></label><div class="actions"><button>${canDecide?"Accept &amp; complete":"Request Owner acceptance"}</button></div></form>`;
+      actions+=`<form data-life="changes" data-sid="${escapeHtml(pending.id)}"><label>Reason for changes<input name="reason" required></label><div class="actions"><button>${canDecide?"Request changes":"Request Owner to return changes"}</button></div></form>`;
+    }else actions+=`<p class="blocked-text">Only the App Owner can decide this submission.</p>`;
   }
-  if(task.status==="completed"){
-    actions+=`<form data-life="reopen"><label>Reason to reopen<input name="reason" required></label><label>Revised due date<input name="new_due_date" type="date" required></label><div class="actions"><button>Reopen</button></div></form>`;
+  if(task.status==="completed"&&(canDecide||canRequest)){
+    actions+=`<form data-life="reopen"><label>Reason to reopen<input name="reason" required></label><label>Revised due date<input name="new_due_date" type="date" required></label><div class="actions"><button>${canDecide?"Reopen":"Request Owner reopening"}</button></div></form>`;
   }
-  if(!terminal&&task.status!=="on_hold"){
-    actions+=`<form data-life="hold"><label>On-hold reason<input name="reason" required></label><label>Follow-up checkpoint<input name="checkpoint_date" type="date" required></label><label>Responsible owner<select name="owner_user_id"><option value="">Unassigned</option></select></label><div class="actions"><button>Put on hold</button></div></form>`;
+  if(!terminal&&task.status!=="on_hold"&&(canDecide||canRequest)){
+    actions+=`<form data-life="hold"><label>On-hold reason<input name="reason" required></label><label>Follow-up checkpoint<input name="checkpoint_date" type="date" required></label><label>Responsible owner<select name="owner_user_id"><option value="">Unassigned</option></select></label><div class="actions"><button>${canDecide?"Put on hold":"Request Owner hold"}</button></div></form>`;
   }
   return `<div class="lifecycle"><h3>Lifecycle</h3>
     <p>Status: <strong>${escapeHtml(task.status)}</strong></p>
@@ -526,26 +538,27 @@ async function lifecycleAction(e,task){
   const form=e.target,kind=form.dataset.life,err=document.querySelector("#lifecycle-error");err.textContent="";
   const body=Object.fromEntries(new FormData(form));
   try{
-    if(kind==="submit")await api(`/api/tasks/${task.id}/submit`,{method:"POST",body:JSON.stringify(body)});
-    else if(kind==="accept")await api(`/api/submissions/${form.dataset.sid}/accept`,{method:"POST",body:JSON.stringify(body)});
-    else if(kind==="changes")await api(`/api/submissions/${form.dataset.sid}/request-changes`,{method:"POST",body:JSON.stringify(body)});
-    else if(kind==="reopen")await api(`/api/tasks/${task.id}/reopen`,{method:"POST",body:JSON.stringify(body)});
-    else if(kind==="hold")await api(`/api/tasks/${task.id}/hold`,{method:"POST",body:JSON.stringify(body)});
+    let outcome;
+    if(kind==="submit")outcome=await api(`/api/tasks/${task.id}/submit`,{method:"POST",body:JSON.stringify(body)});
+    else if(kind==="accept")outcome=await api(`/api/submissions/${form.dataset.sid}/accept`,{method:"POST",body:JSON.stringify(body)});
+    else if(kind==="changes")outcome=await api(`/api/submissions/${form.dataset.sid}/request-changes`,{method:"POST",body:JSON.stringify(body)});
+    else if(kind==="reopen")outcome=await api(`/api/tasks/${task.id}/reopen`,{method:"POST",body:JSON.stringify(body)});
+    else if(kind==="hold")outcome=await api(`/api/tasks/${task.id}/hold`,{method:"POST",body:JSON.stringify(body)});
     await load();await openDetail(task.id);
+    if(outcome?.request){const current=document.querySelector("#lifecycle-error");current.style.color="#0c7c86";current.textContent="Owner request created; accepted live state is unchanged."}
   }catch(x){err.textContent=x.message}
 }
 
 function buildAttachments(task){
-  // 6G89SJ: attachment deletion is App-Owner-only; only the owner sees the Remove control.
-  const canRemoveAttachment=state.user.global_role==="owner";
+  const canManageFiles=task.permissions?.can_manage_files;
   const frByAtt={};(task.final_results||[]).forEach(f=>{if(f.attachment_id)frByAtt[f.attachment_id]=f.id});
   const rows=(task.attachments||[]).map(a=>{
     const missing=a.exists===false?' <span class="blocked-text">(file not found)</span>':"";
     const note=a.note?`<br><em style="color:#667085;">${escapeHtml(a.note)}</em>`:"";
-    const frCtl=frByAtt[a.id]
+    const frCtl=!canManageFiles?"":frByAtt[a.id]
       ?`<span class="fr-tag">★ final result</span> <button type="button" class="link" data-unmark-fr="${escapeHtml(frByAtt[a.id])}">Unmark</button>`
       :`<button type="button" class="link" data-mark-fr-att="${escapeHtml(a.id)}">Mark as final result</button>`;
-    const removeCtl=canRemoveAttachment
+    const removeCtl=canManageFiles
       ?`<button type="button" class="link" data-remove-attachment="${escapeHtml(a.id)}">Remove</button>`:"";
     return `<li><strong>${escapeHtml(a.display_name)}</strong>${missing}<br>
       <code class="att-path">${escapeHtml(a.path)}</code>
@@ -554,18 +567,19 @@ function buildAttachments(task){
       ${frCtl}
       <br><small>Added by ${escapeHtml(a.added_by_name||"")} · ${escapeHtml(new Date(a.added_at).toLocaleString())}</small>${note}</li>`;
   }).join("")||"<li>No attachments linked.</li>";
-  return `<div class="attachments"><h3>Attachments</h3>
-    <p>Links to files kept in a folder on this machine — Astra stores the link, not the file. Removing a link never deletes the file.</p>
-    <ul>${rows}</ul>
-    <form id="attachment-form">
+  const form=canManageFiles?`<form id="attachment-form">
       <label>File path<input name="path" placeholder="C:\\folder\\deliverable.pdf" required></label>
       <div class="grid"><label>Display name (optional)<input name="display_name"></label>
         <label>Note (optional)<input name="note"></label></div>
-      <div class="actions"><button>Link file</button></div><div class="error" id="attachment-error"></div></form></div>`;
+      <div class="actions"><button>Link file</button></div><div class="error" id="attachment-error"></div></form>`:`<p class="blocked-text">Read/download only. File and final-result management is App Owner-only.</p><div class="error" id="attachment-error"></div>`;
+  return `<div class="attachments"><h3>Attachments</h3>
+    <p>Links to files kept in a folder on this machine — Astra stores the link, not the file. Removing a link never deletes the file.</p>
+    <ul>${rows}</ul>
+    ${form}</div>`;
 }
 
 async function wireAttachments(task){
-  document.querySelector("#attachment-form").addEventListener("submit",async e=>{
+  document.querySelector("#attachment-form")?.addEventListener("submit",async e=>{
     e.preventDefault();const err=document.querySelector("#attachment-error");err.textContent="";
     try{await api(`/api/tasks/${task.id}/attachments`,{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});await openDetail(task.id)}
     catch(x){err.textContent=x.message}
@@ -620,8 +634,9 @@ async function submitDetailEdit(e){
   const form=e.target,error=document.querySelector("#detail-edit-error");error.textContent="";
   const body=Object.fromEntries(new FormData(form));
   try{
-    await api(`/api/tasks/${detailTaskId}`,{method:"POST",body:JSON.stringify(body)});
+    const outcome=await api(`/api/tasks/${detailTaskId}`,{method:"POST",body:JSON.stringify(body)});
     await load();await openDetail(detailTaskId);
+    if(outcome.request){const current=document.querySelector("#detail-edit-error");current.style.color="#0c7c86";current.textContent="Owner request created; accepted live state is unchanged."}
   }catch(err){error.textContent=err.message}
 }
 

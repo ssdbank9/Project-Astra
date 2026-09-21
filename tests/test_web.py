@@ -177,6 +177,46 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual(detail["task"]["status"], "completed")
         self.assertEqual(detail["task"]["accepted_submission_id"], sid)
 
+    def test_manager_protected_acceptance_returns_202_and_owner_can_list_request(self):
+        owner_cookie, owner_csrf = self._owner_session()
+        _, project = self.request(
+            "POST", "/api/projects", {"name": "Governed HTTP"}, cookie=owner_cookie, csrf=owner_csrf
+        )
+        project_id = project["project"]["id"]
+        _, manager = self.request("POST", "/api/users", {
+            "email": "http-manager@example.org", "display_name": "HTTP Manager",
+            "password": "manager password safe", "role": "member",
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        self.request("POST", "/api/project-access", {
+            "project_id": project_id, "user_id": manager["user"]["id"], "role": "manager",
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        login_response, manager_login = self.request(
+            "POST", "/api/login", {"email": "http-manager@example.org", "password": "manager password safe"}
+        )
+        manager_cookie = login_response.getheader("Set-Cookie").split(";", 1)[0]
+        manager_csrf = manager_login["csrf"]
+        _, task = self.request("POST", "/api/tasks", {
+            "project_id": project_id, "title": "Manager deliverable",
+        }, cookie=manager_cookie, csrf=manager_csrf)
+        task_id = task["task"]["id"]
+        _, submission = self.request(
+            "POST", f"/api/tasks/{task_id}/submit", {"note": "Ready"},
+            cookie=manager_cookie, csrf=manager_csrf,
+        )
+
+        response, requested = self.request(
+            "POST", f"/api/submissions/{submission['submission']['id']}/accept",
+            {"decision_note": "Manager recommendation"}, cookie=manager_cookie, csrf=manager_csrf,
+        )
+
+        self.assertEqual(response.status, 202)
+        self.assertEqual(requested["request"]["action"], "accept_submission")
+        _, detail = self.request("GET", f"/api/tasks/{task_id}", cookie=owner_cookie)
+        self.assertEqual(detail["task"]["status"], "submitted")
+        response, queue = self.request("GET", "/api/owner-action-requests", cookie=owner_cookie)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(queue["requests"][0]["requested_by_name"], "HTTP Manager")
+
     def test_governed_status_shortcut_rejected_over_http(self):
         cookie, csrf = self._owner_session()
         _, project = self.request("POST", "/api/projects", {"name": "Guard"}, cookie=cookie, csrf=csrf)
@@ -399,6 +439,68 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         response, detail = self.request("GET", f"/api/tasks/{task_id}", cookie=cookie)
         self.assertEqual(detail["task"]["attachments"], [])
+
+    def test_file_and_final_result_mutations_are_owner_only_over_http(self):
+        owner_cookie, owner_csrf = self._owner_session()
+        _, project = self.request(
+            "POST", "/api/projects", {"name": "Owner files"}, cookie=owner_cookie, csrf=owner_csrf
+        )
+        project_id = project["project"]["id"]
+        _, task = self.request("POST", "/api/tasks", {
+            "project_id": project_id, "title": "Governed evidence",
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        task_id = task["task"]["id"]
+        _, attachment = self.request("POST", f"/api/tasks/{task_id}/attachments", {
+            "path": "/evidence/owner.pdf",
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        _, submission = self.request(
+            "POST", f"/api/tasks/{task_id}/submit", {"note": "ready"},
+            cookie=owner_cookie, csrf=owner_csrf,
+        )
+        submission_id = submission["submission"]["id"]
+        self.request(
+            "POST", f"/api/submissions/{submission_id}/accept", {"decision_note": "owner accepts"},
+            cookie=owner_cookie, csrf=owner_csrf,
+        )
+        _, manager = self.request("POST", "/api/users", {
+            "email": "file-manager@example.org", "display_name": "File Manager",
+            "password": "manager password safe", "role": "member",
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        self.request("POST", "/api/project-access", {
+            "project_id": project_id, "user_id": manager["user"]["id"], "role": "manager",
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        login_response, manager_login = self.request(
+            "POST", "/api/login", {"email": "file-manager@example.org", "password": "manager password safe"}
+        )
+        manager_cookie = login_response.getheader("Set-Cookie").split(";", 1)[0]
+        manager_csrf = manager_login["csrf"]
+
+        response, detail = self.request("GET", f"/api/tasks/{task_id}", cookie=manager_cookie)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(len(detail["task"]["attachments"]), 1)
+        response, _ = self.request("POST", f"/api/tasks/{task_id}/attachments", {
+            "path": "/evidence/manager.pdf",
+        }, cookie=manager_cookie, csrf=manager_csrf)
+        self.assertEqual(response.status, 403)
+        response, _ = self.request("DELETE", "/api/task-attachments", {
+            "task_id": task_id, "attachment_id": attachment["attachment"]["id"],
+        }, cookie=manager_cookie, csrf=manager_csrf)
+        self.assertEqual(response.status, 403)
+        response, _ = self.request("POST", "/api/final-results", {
+            "task_id": task_id, "source_type": "submission", "source_id": submission_id,
+        }, cookie=manager_cookie, csrf=manager_csrf)
+        self.assertEqual(response.status, 403)
+
+        response, _ = self.request("POST", "/api/final-results", {
+            "task_id": task_id, "source_type": "submission", "source_id": submission_id,
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        self.assertEqual(response.status, 201)
+        response, listed = self.request("GET", "/api/final-results", cookie=manager_cookie)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(len(listed["results"]), 1)
+        _, notifications = self.request("GET", "/api/notifications", cookie=owner_cookie)
+        kinds = {item["kind"] for item in notifications["notifications"]}
+        self.assertIn("attachment_removal_blocked", kinds)
 
     def test_project_template_roundtrip_over_http(self):
         cookie, csrf = self._owner_session()

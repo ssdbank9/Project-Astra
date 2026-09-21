@@ -299,3 +299,34 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 - Cause: A `foreach` statement was piped without wrapping its output expression correctly.
 - Correction / prevention: Use `Get-Item` with an explicit literal-path list for the bounded reference check rather than a compound loop/pipeline expression.
 - Verification: Targeted `Get-Item` validation confirmed that the global instructions/log, all three approved design references, and `CLAUDE_HANDOFF.md` exist and are readable.
+
+### 2026-09-21 recurrence - handoff metrics loop was piped without grouping
+
+- Evidence / impact: A read-only PowerShell check for the new Claude Code handoff's line, character and code-fence counts failed before execution with `An empty pipe element is not allowed`. The handoff files had already been written and were not changed by the failed check.
+- Cause: A `foreach` statement was again piped directly instead of emitting or grouping its results, repeating the command-composition mistake recorded above.
+- Correction / prevention: Avoid compound loop/pipeline validation commands. Read each bounded file into its own variable and print each metric directly.
+- Status / verification: Recovered. Direct per-file metrics reported 610 lines and 10 balanced fence markers for `CLAUDE_CODE_HANDOFF_2026-09-21.md`, and 23 lines and 2 balanced fence markers for `CLAUDE_CODE_START_PROMPT.md`. Targeted heading/prompt searches also passed.
+
+## ASTRA-20260921-01 - authorization code changed before all public wording was reconciled
+
+- Date / project: 2026-09-21; Astra ticket `HS3JRY` Owner-only authorization reconciliation.
+- Category / status: Confirmed documentation omission; open and explicitly handed off.
+- Evidence / impact: The uncommitted service/API/UI/tests now route Manager and designated-Approver protected actions to the App Owner and remove Chairman's implicit mutation power, but `README.md` still says Manager, Chairman or a designated Approver may directly accept a submission, and `CONTEXT.md` still says an Approver may accept. A new agent or human could rely on those stale claims and misunderstand the current authority boundary.
+- Cause: Implementation and authorization-matrix documentation were updated before the older overview/domain wording received the same reconciliation pass.
+- Correction / prevention: Treat public/domain documentation as part of the authorization requirement matrix. Update `README.md` and `CONTEXT.md` before marking `HS3JRY` complete, then search all role/acceptance wording and rerun the full suite.
+- Verification: The exact stale lines and required corrections are called out in `CLAUDE_CODE_HANDOFF_2026-09-21.md` section 6.3 and in the paste-ready Claude Code prompt. Ticket `HS3JRY` remains in progress; no final-completion claim was made.
+
+## ASTRA-20260921-02 - first standalone Git export command used incompatible PowerShell parameters
+
+- Date / project: 2026-09-21; Astra standalone GitHub export.
+- Category / status: Tool-command error; recovered without changing the source workspace.
+- Evidence / impact: The first packaging attempt stopped because this PowerShell environment rejected `New-Item -LiteralPath`; a later wildcard copy also could not be paired with `Copy-Item -LiteralPath`. The abandoned temporary target contains no usable export, and no source file was modified or deleted.
+- Cause: The command assumed parameter support and combined wildcard expansion with a literal-path API.
+- Correction / prevention: Build into a new, explicitly checked target; use `New-Item -Path` and `Copy-Item -Path` only where wildcard expansion is intended; verify the complete file inventory before initializing Git.
+- Verification: The fresh `astra-project-tracker-cloud-export-20260921-v2` target was created from `git archive`, received only the intended current Astra files, and excluded local databases, virtual environments, caches, credentials and browser artifacts.
+
+### 2026-09-21 recurrence - combined secret-scan regex was parsed as PowerShell code
+
+- Evidence / impact: A read-only `rg` secret-pattern scan failed because nested quote characters ended the PowerShell string and caused part of the pattern to be parsed as a module name. No file or Git state changed.
+- Correction / prevention: Run simple fixed-string credential markers as separate bounded searches instead of embedding quoted assignment patterns in one shell command. Treat a failed hygiene scan as no evidence and rerun it successfully before publishing.
+- Status: Recovered workflow; the replacement scans and final result are recorded in the GitHub export verification.

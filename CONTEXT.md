@@ -56,10 +56,12 @@ _Avoid_: document (ambiguous), source (bare), input.
 ## Portfolio & budget
 
 **Budget**:
-A project's planned budget — one amount in one currency. It rolls up into exactly one
-entity (the project's Primary entity) so a project shared across entities is never
-counted twice. Planned only; actual/spent is not tracked yet.
-_Avoid_: cost, spend, actual (those are a separate future concept).
+A project's planned, committed and actual/spent amounts in one explicit currency,
+with variance derived from those amounts. It rolls up into exactly one entity (the
+project's Primary entity) so a project shared across entities is never counted twice.
+The current implementation stores planned amount only; committed, actual/spent and
+variance are an accepted production requirement that remains to be implemented.
+_Avoid_: silently blending currencies or presenting planned amount as actual spend.
 
 **Primary entity**:
 The single entity a project's Budget and portfolio figures count toward. For a

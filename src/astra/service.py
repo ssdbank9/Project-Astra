@@ -21,6 +21,8 @@ CRITICALITIES = {"critical", "high", "normal", "low", None}
 # revised timeline) and must go through their dedicated lifecycle actions rather
 # than a plain field update.
 GOVERNED_STATUSES = {"submitted", "completed", "on_hold", "reopened"}
+MANAGER_ORDINARY_STATUSES = {"draft", "assigned", "in_progress", "delayed"}
+PROTECTED_STATUSES = {"changes_requested", "completed", "on_hold", "cancelled", "abandoned", "reopened"}
 REVIEWER_ROLES = {"reviewer", "approver", "collaborator"}
 
 LOGIN_WINDOW_SECONDS = 900
@@ -446,7 +448,7 @@ class AstraService:
         ).fetchone())
 
     def can_manage_project(self, actor: dict, project_id: str) -> bool:
-        if actor["global_role"] in {"owner", "chairman"}:
+        if actor["global_role"] == "owner":
             return True
         row = self.db.execute(
             "SELECT role FROM memberships WHERE project_id=? AND user_id=?", (project_id, actor["id"])
@@ -527,6 +529,8 @@ class AstraService:
         criticality = payload.get("criticality") or None
         if status not in STATUSES or criticality not in CRITICALITIES:
             raise ValueError("Invalid task status or criticality.")
+        if actor["global_role"] != "owner" and status not in MANAGER_ORDINARY_STATUSES:
+            raise Forbidden("Managers may create tasks only in an ordinary working status.")
         start_date = self._date(payload.get("start_date"))
         due_date = self._date(payload.get("due_date"))
         if start_date and due_date and due_date < start_date:
@@ -578,7 +582,10 @@ class AstraService:
         criticality = merged.get("criticality") or None
         if status not in STATUSES or criticality not in CRITICALITIES:
             raise ValueError("Invalid task status or criticality.")
-        if status != before["status"] and status in GOVERNED_STATUSES:
+        status_changed = status != before["status"]
+        if status_changed and status == "submitted":
+            raise ValueError("Use the dedicated submitted action for this transition.")
+        if status_changed and actor["global_role"] == "owner" and status in GOVERNED_STATUSES:
             raise ValueError(f"Use the dedicated {status.replace('_', ' ')} action for this transition.")
         if criticality != (before.get("criticality") or None):
             raise ValueError("Use the confirm criticality action to change criticality.")
@@ -598,6 +605,14 @@ class AstraService:
             owner_user_id = self._validate_assignee(before["project_id"], payload.get("owner_user_id") or None)
         else:
             owner_user_id = before.get("owner_user_id")
+        if status_changed and actor["global_role"] != "owner" and status in PROTECTED_STATUSES:
+            return self._request_protected_action(
+                actor,
+                before,
+                "update_task_status",
+                {"status": status, "reason": reason, "expected_revision": before["revision"]},
+                reason or "",
+            )
         with transaction(self.db):
             self.db.execute(
                 """UPDATE tasks SET title=?,description=?,owner_user_id=?,status=?,criticality=?,start_date=?,due_date=?,
@@ -853,6 +868,15 @@ class AstraService:
 
     def task_detail(self, actor: dict, task_id: str) -> dict:
         task = self.get_task(actor, task_id)
+        is_owner = actor["global_role"] == "owner"
+        is_manager = self._is_project_manager(actor, task["project_id"])
+        task["permissions"] = {
+            "can_edit_ordinary": is_owner or is_manager,
+            "can_request_protected": is_manager or self._is_approver(task_id, actor["id"]),
+            "can_decide_protected": is_owner,
+            "can_manage_files": is_owner,
+            "can_read_files": True,
+        }
         task["due_state"] = self._due_state(
             task.get("due_date"), task["status"], self._today_in_timezone(task.get("project_timezone"))
         )
@@ -926,16 +950,146 @@ class AstraService:
             (task_id, user_id),
         ).fetchone())
 
-    def _require_decider(self, actor: dict, task: dict) -> None:
-        if self.can_manage_project(actor, task["project_id"]) or self._is_approver(task["id"], actor["id"]):
-            return
-        raise Forbidden("You are not authorized to decide this submission.")
+    def _is_project_manager(self, actor: dict, project_id: str) -> bool:
+        return bool(self.db.execute(
+            "SELECT 1 FROM memberships WHERE project_id=? AND user_id=? AND role='manager'",
+            (project_id, actor["id"]),
+        ).fetchone())
 
-    def _block_self_decision(self, actor: dict, submission: dict) -> None:
-        # The submitter cannot accept or review their own work unless they are the
-        # app owner; otherwise the decision routes to the owner.
-        if actor["id"] == submission["submitted_by"] and actor["global_role"] != "owner":
-            raise Forbidden("The submitter cannot decide their own work; it routes to the owner.")
+    def _request_protected_action(
+        self,
+        actor: dict,
+        task: dict,
+        action: str,
+        payload: dict | None = None,
+        reason: str = "",
+    ) -> dict:
+        if not (self._is_project_manager(actor, task["project_id"])
+                or self._is_approver(task["id"], actor["id"])):
+            self._event(
+                task["id"], actor["id"], "protected_action_blocked", None,
+                {"action": action, "payload": payload or {}}, "Actor cannot request this Owner action",
+            )
+            raise Forbidden("Only a project Manager or designated approver may request this Owner action.")
+        request_id = new_id()
+        requested_at = now_text()
+        request = {
+            "id": request_id,
+            "project_id": task["project_id"],
+            "task_id": task["id"],
+            "action": action,
+            "payload_json": json.dumps(payload or {}, default=str, sort_keys=True),
+            "reason": str(reason or "").strip(),
+            "requested_by": actor["id"],
+            "requested_at": requested_at,
+            "status": "pending",
+            "decided_by": None,
+            "decided_at": None,
+            "decision_reason": None,
+        }
+        with transaction(self.db):
+            self.db.execute(
+                "INSERT INTO owner_action_requests"
+                "(id,project_id,task_id,action,payload_json,reason,requested_by,requested_at,status)"
+                " VALUES(?,?,?,?,?,?,?,?,?)",
+                (request_id, task["project_id"], task["id"], action, request["payload_json"],
+                 request["reason"], actor["id"], requested_at, "pending"),
+            )
+            self._event(
+                task["id"], actor["id"], "protected_action_requested", None,
+                {"request_id": request_id, "action": action, "payload": payload or {}},
+                request["reason"] or None,
+            )
+        return {"request": request}
+
+    def _request_protected_project_action(
+        self,
+        actor: dict,
+        project: dict,
+        action: str,
+        payload: dict | None = None,
+        reason: str = "",
+    ) -> dict:
+        if not self._is_project_manager(actor, project["id"]):
+            event_id = new_id()
+            occurred_at = now_text()
+            self._project_event(
+                project["id"], actor["id"], "protected_action_blocked",
+                {"event_id": event_id, "action": action, "payload": payload or {}},
+                "Actor cannot request this Owner action",
+            )
+            owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
+            if owner and owner["id"] != actor["id"]:
+                self.db.execute(
+                    "INSERT OR IGNORE INTO notifications"
+                    "(id,user_id,event_id,task_id,kind,summary,created_at) VALUES(?,?,?,?,?,?,?)",
+                    (new_id(), owner["id"], event_id, None, "protected_action_blocked",
+                     f"blocked {action.replace('_', ' ')} attempt: {project['name']}", occurred_at),
+                )
+            raise Forbidden("Only a project Manager may request this Owner action.")
+        request_id = new_id()
+        requested_at = now_text()
+        request = {
+            "id": request_id,
+            "project_id": project["id"],
+            "task_id": None,
+            "action": action,
+            "payload_json": json.dumps(payload or {}, default=str, sort_keys=True),
+            "reason": str(reason or "").strip(),
+            "requested_by": actor["id"],
+            "requested_at": requested_at,
+            "status": "pending",
+            "decided_by": None,
+            "decided_at": None,
+            "decision_reason": None,
+        }
+        with transaction(self.db):
+            self.db.execute(
+                "INSERT INTO owner_action_requests"
+                "(id,project_id,task_id,action,payload_json,reason,requested_by,requested_at,status)"
+                " VALUES(?,?,?,?,?,?,?,?,?)",
+                (request_id, project["id"], None, action, request["payload_json"], request["reason"],
+                 actor["id"], requested_at, "pending"),
+            )
+            self._project_event(
+                project["id"], actor["id"], "protected_action_requested",
+                {"request_id": request_id, "action": action, "payload": payload or {}},
+                request["reason"] or None,
+            )
+            owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
+            if owner and owner["id"] != actor["id"]:
+                self.db.execute(
+                    "INSERT OR IGNORE INTO notifications"
+                    "(id,user_id,event_id,task_id,kind,summary,created_at) VALUES(?,?,?,?,?,?,?)",
+                    (new_id(), owner["id"], request_id, None, "protected_action_requested",
+                     f"{action.replace('_', ' ')} requested: {project['name']}", requested_at),
+                )
+        return {"request": request}
+
+    def list_owner_action_requests(self, actor: dict, status: str | None = "pending") -> list[dict]:
+        self.require_owner(actor)
+        params: list[str] = []
+        where = ""
+        if status:
+            if status not in {"pending", "approved", "rejected", "cancelled"}:
+                raise ValueError("Invalid owner-action request status.")
+            where = " WHERE r.status=?"
+            params.append(status)
+        rows = self.db.execute(
+            """SELECT r.*, p.name project_name, t.title task_title, u.display_name requested_by_name
+               FROM owner_action_requests r
+               JOIN projects p ON p.id=r.project_id
+               LEFT JOIN tasks t ON t.id=r.task_id
+               JOIN users u ON u.id=r.requested_by"""
+            + where + " ORDER BY r.requested_at DESC, r.id DESC",
+            params,
+        ).fetchall()
+        result = []
+        for row in rows:
+            request = dict(row)
+            request["payload"] = json.loads(request["payload_json"])
+            result.append(request)
+        return result
 
     def submit_task(self, actor: dict, task_id: str, note: str = "") -> dict:
         task = self.get_task(actor, task_id)
@@ -971,10 +1125,17 @@ class AstraService:
     def accept_submission(self, actor: dict, submission_id: str, decision_note: str = "", checklist=None) -> dict:
         submission = self.get_submission(actor, submission_id)
         task = self.get_task(actor, submission["task_id"])
-        self._require_decider(actor, task)
-        self._block_self_decision(actor, submission)
         if submission["status"] != "submitted":
             raise ValueError("Only a pending submission can be accepted.")
+        if actor["global_role"] != "owner":
+            return self._request_protected_action(
+                actor,
+                task,
+                "accept_submission",
+                {"submission_id": submission_id, "decision_note": str(decision_note or "").strip(),
+                 "checklist": checklist},
+                str(decision_note or "").strip(),
+            )
         timestamp = now_text()
         decision_note = str(decision_note).strip()
         checklist_text = json.dumps(checklist, default=str, sort_keys=True) if checklist else None
@@ -1000,13 +1161,15 @@ class AstraService:
     def request_changes(self, actor: dict, submission_id: str, reason: str) -> dict:
         submission = self.get_submission(actor, submission_id)
         task = self.get_task(actor, submission["task_id"])
-        self._require_decider(actor, task)
-        self._block_self_decision(actor, submission)
         if submission["status"] != "submitted":
             raise ValueError("Only a pending submission can be returned for changes.")
         reason = str(reason).strip()
         if not reason:
             raise ValueError("A reason is required to request changes.")
+        if actor["global_role"] != "owner":
+            return self._request_protected_action(
+                actor, task, "request_changes", {"submission_id": submission_id, "reason": reason}, reason
+            )
         timestamp = now_text()
         with transaction(self.db):
             self.db.execute(
@@ -1024,8 +1187,6 @@ class AstraService:
 
     def reopen_task(self, actor: dict, task_id: str, reason: str, new_due_date) -> dict:
         task = self.get_task(actor, task_id)
-        if not self.can_manage_project(actor, task["project_id"]):
-            raise Forbidden("Task-management access denied.")
         if task["status"] not in {"completed", "cancelled", "abandoned"}:
             raise ValueError("Only a completed, cancelled, or abandoned task can be reopened.")
         reason = str(reason).strip()
@@ -1034,6 +1195,10 @@ class AstraService:
         new_due = self._date(new_due_date)
         if not new_due:
             raise ValueError("A revised timeline (new due date) is required to reopen a task.")
+        if actor["global_role"] != "owner":
+            return self._request_protected_action(
+                actor, task, "reopen_task", {"reason": reason, "new_due_date": new_due}, reason
+            )
         timestamp = now_text()
         before = {"status": task["status"], "due_date": task.get("due_date")}
         with transaction(self.db):
@@ -1048,8 +1213,6 @@ class AstraService:
 
     def set_on_hold(self, actor: dict, task_id: str, reason: str, checkpoint_date, hold_owner_id=None) -> dict:
         task = self.get_task(actor, task_id)
-        if not self.can_manage_project(actor, task["project_id"]):
-            raise Forbidden("Task-management access denied.")
         reason = str(reason).strip()
         if not reason:
             raise ValueError("On-hold work requires a reason.")
@@ -1059,6 +1222,14 @@ class AstraService:
         hold_owner = self._validate_assignee(task["project_id"], hold_owner_id or task.get("owner_user_id"))
         if not hold_owner:
             raise ValueError("On-hold work requires a responsible owner.")
+        if actor["global_role"] != "owner":
+            return self._request_protected_action(
+                actor,
+                task,
+                "set_on_hold",
+                {"reason": reason, "checkpoint_date": checkpoint, "owner_user_id": hold_owner},
+                reason,
+            )
         timestamp = now_text()
         with transaction(self.db):
             self.db.execute(
@@ -1182,8 +1353,12 @@ class AstraService:
 
     def add_task_attachment(self, actor: dict, task_id: str, path: str, display_name: str = "", note: str = "") -> dict:
         task = self.get_task(actor, task_id)
-        if not self.can_manage_project(actor, task["project_id"]):
-            raise Forbidden("Task-management access denied.")
+        if actor["global_role"] != "owner":
+            self._event(
+                task_id, actor["id"], "attachment_add_blocked", None,
+                {"attempted_path": str(path or "").strip()}, "Owner-only file management",
+            )
+            raise Forbidden("Owner access required for file management.")
         path = str(path or "").strip()
         if not path:
             raise ValueError("A file path is required.")
@@ -1215,17 +1390,20 @@ class AstraService:
         return result
 
     def remove_task_attachment(self, actor: dict, task_id: str, attachment_id: str) -> None:
-        # Owner-controlled deletion (owner decision 2026-09-15): removing an
-        # attachment LINK is restricted to the App Owner only. Project managers
-        # may add attachments (see add_task_attachment) but not delete them.
-        self.require_owner(actor)
-        self.get_task(actor, task_id)  # validates the task exists and is visible
+        task = self.get_task(actor, task_id)  # validates existence and visibility first
         row = self.db.execute(
             "SELECT path, display_name FROM task_attachments WHERE id=? AND task_id=?",
             (attachment_id, task_id),
         ).fetchone()
         if not row:
             raise KeyError("Attachment not found.")
+        if actor["global_role"] != "owner":
+            self._event(
+                task["id"], actor["id"], "attachment_removal_blocked", None,
+                {"attachment_id": attachment_id, "display_name": row["display_name"]},
+                "Owner-only file management",
+            )
+            raise Forbidden("Owner access required for file management.")
         with transaction(self.db):
             self.db.execute("DELETE FROM task_attachments WHERE id=? AND task_id=?", (attachment_id, task_id))
             # Removing the link never touches the file on disk.
@@ -1526,8 +1704,13 @@ class AstraService:
 
     def mark_final_result(self, actor: dict, task_id: str, source_type: str, source_id: str, note: str = "") -> dict:
         task = self.get_task(actor, task_id)
-        if not self.can_manage_project(actor, task["project_id"]):
-            raise Forbidden("Task-management access denied.")
+        if actor["global_role"] != "owner":
+            self._event(
+                task_id, actor["id"], "final_result_mark_blocked", None,
+                {"source_type": source_type, "source_id": source_id},
+                "Owner-only final-result publication",
+            )
+            raise Forbidden("Owner access required for final-result publication.")
         if source_type not in {"submission", "attachment"}:
             raise ValueError("A final result is a submission or an attachment.")
         note = str(note or "").strip()
@@ -1568,8 +1751,14 @@ class AstraService:
         ).fetchone()
         if not row:
             raise KeyError("Final result not found.")
-        if not self.can_manage_project(actor, row["project_id"]):
-            raise Forbidden("Task-management access denied.")
+        self.get_task(actor, row["task_id"])
+        if actor["global_role"] != "owner":
+            self._event(
+                row["task_id"], actor["id"], "final_result_unmark_blocked", None,
+                {"result_id": result_id, "title": row["title"]},
+                "Owner-only final-result publication",
+            )
+            raise Forbidden("Owner access required for final-result publication.")
         with transaction(self.db):
             self.db.execute("DELETE FROM final_results WHERE id=?", (result_id,))
             self._event(row["task_id"], actor["id"], "final_result_unmarked", {"title": row["title"]}, None, None)
@@ -1653,14 +1842,21 @@ class AstraService:
             (project_id,),
         ).fetchall()]
         note = str(note).strip()
+        if actor["global_role"] != "owner":
+            if outstanding and not note:
+                raise ValueError("A closure request with outstanding work requires a note.")
+            return self._request_protected_project_action(
+                actor,
+                project,
+                "close_project",
+                {"note": note, "exceptional": bool(outstanding), "residual_work": outstanding},
+                note,
+            )
         if outstanding:
-            self.require_owner(actor)  # only the app owner may exceptionally close
             if not exceptional:
                 raise ValueError("This project has outstanding work; an exceptional owner closure is required.")
             if not note:
                 raise ValueError("Exceptional closure requires a note describing the residual work.")
-        elif actor["global_role"] not in {"owner", "chairman"}:
-            raise Forbidden("Only the owner or Chairman may close a project.")
         timestamp = now_text()
         with transaction(self.db):
             self.db.execute(
@@ -1763,10 +1959,16 @@ class AstraService:
     def approve_schedule_proposal(self, actor: dict, proposal_id: str, decision_reason: str = "") -> dict:
         proposal = self.get_schedule_proposal(actor, proposal_id)
         task = self.get_task(actor, proposal["task_id"])
-        if not self.can_manage_project(actor, task["project_id"]):
-            raise Forbidden("Task-management access denied.")
         if proposal["status"] != "pending":
             raise ValueError("Only a pending schedule proposal can be approved.")
+        if actor["global_role"] != "owner":
+            return self._request_protected_action(
+                actor,
+                task,
+                "approve_schedule_proposal",
+                {"proposal_id": proposal_id, "decision_reason": str(decision_reason or "").strip()},
+                str(decision_reason or "").strip(),
+            )
         timestamp = now_text()
         before = {"start_date": task.get("start_date"), "due_date": task.get("due_date")}
         after = {"start_date": proposal["start_date"], "due_date": proposal["due_date"]}
@@ -1787,13 +1989,15 @@ class AstraService:
     def reject_schedule_proposal(self, actor: dict, proposal_id: str, reason: str) -> dict:
         proposal = self.get_schedule_proposal(actor, proposal_id)
         task = self.get_task(actor, proposal["task_id"])
-        if not self.can_manage_project(actor, task["project_id"]):
-            raise Forbidden("Task-management access denied.")
         if proposal["status"] != "pending":
             raise ValueError("Only a pending schedule proposal can be rejected.")
         reason = str(reason).strip()
         if not reason:
             raise ValueError("A reason is required to reject a schedule proposal.")
+        if actor["global_role"] != "owner":
+            return self._request_protected_action(
+                actor, task, "reject_schedule_proposal", {"proposal_id": proposal_id, "reason": reason}, reason
+            )
         with transaction(self.db):
             self.db.execute(
                 "UPDATE task_schedule_proposals SET status='rejected', decided_by=?, decided_at=?, decision_reason=?"

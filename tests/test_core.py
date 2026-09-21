@@ -65,6 +65,51 @@ class AstraCoreTests(unittest.TestCase):
         with self.assertRaises(Forbidden):
             self.service.create_task(member, {"project_id": project["id"], "title": "Forbidden"})
 
+    def test_manager_can_edit_ordinary_work_but_protected_status_becomes_request(self):
+        project = self.service.create_project(self.owner, "Manager scope")
+        manager = self.service.create_user(
+            self.owner, "ordinary-manager@example.org", "Manager", "manager password safe"
+        )
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        with self.assertRaises(Forbidden):
+            self.service.create_task(manager, {
+                "project_id": project["id"], "title": "Pre-completed", "status": "completed",
+            })
+        task = self.service.create_task(manager, {
+            "project_id": project["id"], "title": "Ordinary", "status": "draft",
+        })
+        updated = self.service.update_task(manager, task["id"], {
+            "title": "Ordinary updated", "status": "in_progress", "reason": "Work started",
+        })
+        self.assertEqual((updated["title"], updated["status"]), ("Ordinary updated", "in_progress"))
+
+        outcome = self.service.update_task(manager, task["id"], {
+            "status": "cancelled", "reason": "Manager recommends cancellation",
+        })
+
+        self.assertEqual(outcome["request"]["action"], "update_task_status")
+        current = self.service.get_task(self.owner, task["id"])
+        self.assertEqual((current["title"], current["status"]), ("Ordinary updated", "in_progress"))
+
+    def test_chairman_has_organization_visibility_without_implicit_mutation_power(self):
+        project = self.service.create_project(self.owner, "Visible to Chairman")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Owner task"})
+        chairman = self.service.create_user(
+            self.owner, "chairman@example.org", "Chairman", "chairman password safe", "chairman"
+        )
+
+        self.assertEqual([p["id"] for p in self.service.list_projects(chairman)], [project["id"]])
+        self.assertEqual(self.service.get_task(chairman, task["id"])["id"], task["id"])
+        permissions = self.service.task_detail(chairman, task["id"])["permissions"]
+        self.assertFalse(permissions["can_edit_ordinary"])
+        self.assertFalse(permissions["can_request_protected"])
+        self.assertFalse(permissions["can_manage_files"])
+        self.assertTrue(permissions["can_read_files"])
+        with self.assertRaises(Forbidden):
+            self.service.create_task(chairman, {"project_id": project["id"], "title": "Not authorized"})
+        with self.assertRaises(Forbidden):
+            self.service.update_task(chairman, task["id"], {"title": "Not authorized"})
+
     def test_due_date_cannot_precede_start(self):
         project = self.service.create_project(self.owner, "Dates")
         with self.assertRaisesRegex(ValueError, "earlier"):
@@ -423,7 +468,7 @@ class AstraCoreTests(unittest.TestCase):
         self.assertEqual(self.service.revoke_user_sessions(self.owner["id"]), 2)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0)
 
-    def test_submitter_cannot_accept_own_work_unless_owner(self):
+    def test_manager_submitter_cannot_self_accept_and_routes_to_owner(self):
         project = self.service.create_project(self.owner, "Review")
         manager = self.service.create_user(self.owner, "mgr@example.org", "Manager", "manager password ok")
         self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
@@ -431,8 +476,9 @@ class AstraCoreTests(unittest.TestCase):
             "project_id": project["id"], "title": "Deliverable", "owner_user_id": manager["id"],
         })
         submission = self.service.submit_task(manager, task["id"], "Draft one")
-        with self.assertRaises(Forbidden):
-            self.service.accept_submission(manager, submission["id"])
+        outcome = self.service.accept_submission(manager, submission["id"])
+        self.assertEqual(outcome["request"]["action"], "accept_submission")
+        self.assertEqual(self.service.get_submission(self.owner, submission["id"])["status"], "submitted")
         accepted = self.service.accept_submission(self.owner, submission["id"], "Looks good")
         self.assertEqual(accepted["status"], "accepted")
         completed = self.service.get_task(self.owner, task["id"])
@@ -485,7 +531,7 @@ class AstraCoreTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(checkpoint["checkpoint_date"], "2027-02-01")
 
-    def test_designated_approver_can_accept(self):
+    def test_designated_approver_requests_owner_acceptance(self):
         project = self.service.create_project(self.owner, "Approvers")
         submitter = self.service.create_user(self.owner, "sub@example.org", "Sub", "submitter password")
         approver = self.service.create_user(self.owner, "app@example.org", "App", "approver password")
@@ -496,8 +542,79 @@ class AstraCoreTests(unittest.TestCase):
         })
         self.service.add_task_reviewer(self.owner, task["id"], approver["id"], "approver")
         submission = self.service.submit_task(submitter, task["id"], "done")
-        accepted = self.service.accept_submission(approver, submission["id"], "approved")
-        self.assertEqual(accepted["status"], "accepted")
+        outcome = self.service.accept_submission(approver, submission["id"], "recommend approval")
+        self.assertEqual(outcome["request"]["action"], "accept_submission")
+        self.assertEqual(self.service.get_submission(self.owner, submission["id"])["status"], "submitted")
+
+    def test_manager_protected_acceptance_creates_owner_request_without_mutation(self):
+        project = self.service.create_project(self.owner, "Governed review")
+        submitter = self.service.create_user(
+            self.owner, "submit@example.org", "Submitter", "submitter password safe"
+        )
+        manager = self.service.create_user(
+            self.owner, "manager@example.org", "Manager", "manager password safe"
+        )
+        self.service.grant_project_access(self.owner, project["id"], submitter["id"], "member")
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        task = self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Board paper", "owner_user_id": submitter["id"],
+        })
+        submission = self.service.submit_task(submitter, task["id"], "Ready for decision")
+
+        outcome = self.service.accept_submission(manager, submission["id"], "Manager recommends acceptance")
+
+        self.assertEqual(outcome["request"]["action"], "accept_submission")
+        self.assertEqual(outcome["request"]["status"], "pending")
+        self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], "submitted")
+        self.assertEqual(self.service.get_submission(self.owner, submission["id"])["status"], "submitted")
+        permissions = self.service.task_detail(manager, task["id"])["permissions"]
+        self.assertTrue(permissions["can_edit_ordinary"])
+        self.assertTrue(permissions["can_request_protected"])
+        self.assertFalse(permissions["can_manage_files"])
+        owner_notifications = self.service.list_notifications(self.owner)
+        self.assertEqual(owner_notifications[0]["kind"], "protected_action_requested")
+        pending = self.service.list_owner_action_requests(self.owner)
+        self.assertEqual(pending[0]["requested_by_name"], "Manager")
+        self.assertEqual(pending[0]["task_title"], "Board paper")
+        with self.assertRaises(Forbidden):
+            self.service.list_owner_action_requests(manager)
+
+    def test_manager_protected_lifecycle_attempts_queue_requests_without_mutation(self):
+        project = self.service.create_project(self.owner, "Protected lifecycle")
+        manager = self.service.create_user(
+            self.owner, "lifecycle-manager@example.org", "Manager", "manager password safe"
+        )
+        submitter = self.service.create_user(
+            self.owner, "lifecycle-submitter@example.org", "Submitter", "submitter password safe"
+        )
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        self.service.grant_project_access(self.owner, project["id"], submitter["id"], "member")
+
+        review_task = self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Review", "owner_user_id": submitter["id"],
+        })
+        submission = self.service.submit_task(submitter, review_task["id"], "Review me")
+        changes = self.service.request_changes(manager, submission["id"], "Manager recommends revision")
+        self.assertEqual(changes["request"]["action"], "request_changes")
+        self.assertEqual(self.service.get_task(self.owner, review_task["id"])["status"], "submitted")
+
+        self.service.accept_submission(self.owner, submission["id"], "Owner accepts")
+        reopen = self.service.reopen_task(manager, review_task["id"], "New information", "2027-03-01")
+        self.assertEqual(reopen["request"]["action"], "reopen_task")
+        self.assertEqual(self.service.get_task(self.owner, review_task["id"])["status"], "completed")
+
+        ordinary_task = self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Ordinary", "owner_user_id": manager["id"],
+        })
+        hold = self.service.set_on_hold(
+            manager, ordinary_task["id"], "Waiting for vendor", "2027-03-02", manager["id"]
+        )
+        self.assertEqual(hold["request"]["action"], "set_on_hold")
+        self.assertEqual(self.service.get_task(self.owner, ordinary_task["id"])["status"], "draft")
+        self.assertEqual(
+            self.db.execute("SELECT COUNT(*) FROM task_checkpoints WHERE task_id=?", (ordinary_task["id"],)).fetchone()[0],
+            0,
+        )
 
     def test_update_task_cannot_shortcut_governed_status(self):
         project = self.service.create_project(self.owner, "Guard")
@@ -526,8 +643,16 @@ class AstraCoreTests(unittest.TestCase):
         done = self.service.create_task(self.owner, {"project_id": clean["id"], "title": "Done"})
         submission = self.service.submit_task(self.owner, done["id"], "d")
         self.service.accept_submission(self.owner, submission["id"], "ok")
-        closed_clean = self.service.close_project(chairman, clean["id"])
-        self.assertEqual(closed_clean["status"], "closed")
+        with self.assertRaises(Forbidden):
+            self.service.close_project(chairman, clean["id"])
+        manager = self.service.create_user(
+            self.owner, "close-manager@example.org", "Manager", "manager password safe"
+        )
+        self.service.grant_project_access(self.owner, clean["id"], manager["id"], "manager")
+        close_request = self.service.close_project(manager, clean["id"], "Manager recommends closure")
+        self.assertEqual(close_request["request"]["action"], "close_project")
+        self.assertEqual(self.service.get_project(self.owner, clean["id"])["status"], "active")
+        closed_clean = self.service.close_project(self.owner, clean["id"], "Owner closes")
         self.assertEqual(closed_clean["closure_is_exceptional"], 0)
 
     def test_critical_path_linear_chain(self):
@@ -615,6 +740,27 @@ class AstraCoreTests(unittest.TestCase):
         self.assertEqual(self.service.get_task(self.owner, a["id"])["due_date"], "2026-10-12")  # current revised
         self.assertEqual(self.service.get_task(self.owner, b["id"])["due_date"], "2026-10-10")  # dependent NOT moved
         self.assertIn("schedule_revised", [e["event_type"] for e in self.service.task_events(self.owner, a["id"])])
+
+    def test_manager_schedule_decision_is_an_owner_request(self):
+        project = self.service.create_project(self.owner, "Governed schedule")
+        task = self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Milestone", "due_date": "2026-10-05",
+        })
+        manager = self.service.create_user(
+            self.owner, "schedule-manager@example.org", "Manager", "manager password safe"
+        )
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        proposal = self.service.propose_schedule(
+            manager, task["id"], None, "2026-10-20", "Manager proposes a new date"
+        )
+
+        outcome = self.service.approve_schedule_proposal(manager, proposal["id"], "Manager recommendation")
+
+        self.assertEqual(outcome["request"]["action"], "approve_schedule_proposal")
+        self.assertEqual(self.service.get_task(self.owner, task["id"])["due_date"], "2026-10-05")
+        self.assertEqual(self.service.get_schedule_proposal(self.owner, proposal["id"])["status"], "pending")
+        self.service.approve_schedule_proposal(self.owner, proposal["id"], "Owner approves")
+        self.assertEqual(self.service.get_task(self.owner, task["id"])["due_date"], "2026-10-20")
 
     def test_schedule_proposal_reject_is_noop_and_requires_reason(self):
         p = self.service.create_project(self.owner, "RejectSched")
@@ -802,17 +948,27 @@ class AstraCoreTests(unittest.TestCase):
         self.assertEqual(len(self.service.list_task_attachments(viewer, task["id"])), 1)
         with self.assertRaises(Forbidden):
             self.service.add_task_attachment(viewer, task["id"], "/data/x.pdf")
-        # 6G89SJ (owner decision 2026-09-15): DELETION is App-Owner-only. A project
-        # manager may add a link but must NOT be able to remove one.
+        # HS3JRY (owner decision 2026-09-20): every attachment mutation is
+        # App-Owner-only. Authorized project users retain read access.
         manager = self.service.create_user(self.owner, "mgr@example.org", "Manager", "password manager okay", "member")
         self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
-        mgr_added = self.service.add_task_attachment(manager, task["id"], "/data/mgr.pdf")
+        self.assertEqual(len(self.service.list_task_attachments(manager, task["id"])), 1)
         with self.assertRaises(Forbidden):
-            self.service.remove_task_attachment(manager, task["id"], mgr_added["id"])
+            self.service.add_task_attachment(manager, task["id"], "/data/mgr.pdf")
+        chairman = self.service.create_user(
+            self.owner, "chair@example.org", "Chairman", "password chairman okay", "chairman"
+        )
+        self.assertEqual(len(self.service.list_task_attachments(chairman, task["id"])), 1)
+        with self.assertRaises(Forbidden):
+            self.service.add_task_attachment(chairman, task["id"], "/data/chair.pdf")
+        owner_added = self.service.add_task_attachment(self.owner, task["id"], "/data/owner.pdf")
+        with self.assertRaises(Forbidden):
+            self.service.remove_task_attachment(manager, task["id"], owner_added["id"])
+        self.assertEqual(self.service.list_notifications(self.owner)[0]["kind"], "attachment_removal_blocked")
         # The App Owner can remove.
-        self.service.remove_task_attachment(self.owner, task["id"], mgr_added["id"])
+        self.service.remove_task_attachment(self.owner, task["id"], owner_added["id"])
         remaining = {a["path"] for a in self.service.list_task_attachments(self.owner, task["id"])}
-        self.assertNotIn("/data/mgr.pdf", remaining)
+        self.assertNotIn("/data/owner.pdf", remaining)
 
     def _seed_template_project(self):
         project = self.service.create_project(self.owner, "Annual Audit 2026")
@@ -986,6 +1142,37 @@ class AstraCoreTests(unittest.TestCase):
         self.assertEqual(self.service.list_final_results(member), [])
         self.service.grant_project_access(self.owner, project_a["id"], member["id"], "viewer")
         self.assertEqual(len(self.service.list_final_results(member)), 1)
+
+    def test_final_result_mutations_are_owner_only_for_every_non_owner_role(self):
+        project = self.service.create_project(self.owner, "Governed results")
+        task = self._accepted_task(project["id"], "Approved report")
+        manager = self.service.create_user(
+            self.owner, "fr-manager@example.org", "Manager", "manager password safe"
+        )
+        viewer = self.service.create_user(
+            self.owner, "fr-viewer@example.org", "Viewer", "viewer password safe"
+        )
+        chairman = self.service.create_user(
+            self.owner, "fr-chair@example.org", "Chairman", "chairman password safe", "chairman"
+        )
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        self.service.grant_project_access(self.owner, project["id"], viewer["id"], "viewer")
+
+        for actor in (manager, chairman, viewer):
+            with self.subTest(role=actor["global_role"], action="mark"):
+                with self.assertRaises(Forbidden):
+                    self.service.mark_final_result(
+                        actor, task["id"], "submission", task["submission_id"], "Unauthorized attempt"
+                    )
+        marked = self.service.mark_final_result(
+            self.owner, task["id"], "submission", task["submission_id"], "Owner publication"
+        )
+        for actor in (manager, chairman, viewer):
+            self.assertEqual(len(self.service.list_final_results(actor)), 1)
+            with self.subTest(role=actor["global_role"], action="unmark"):
+                with self.assertRaises(Forbidden):
+                    self.service.unmark_final_result(actor, marked["id"])
+        self.assertEqual(len(self.service.list_final_results(self.owner)), 1)
 
     def test_final_results_filter_by_type(self):
         project = self.service.create_project(self.owner, "Mixed")

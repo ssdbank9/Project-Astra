@@ -1,3 +1,18 @@
+# Astra repository working instructions
+
+- Treat this standalone repository as the Git source of truth. Work on a named
+  branch, keep commits scoped, and preserve unrelated work.
+- Read `CLAUDE_CODE_HANDOFF_2026-09-21.md` and
+  `pending-global-mistakes.md` before editing. The Windows-only global mistakes
+  path in historical documents is optional in a cloud container.
+- Use `.venv/bin/python tests/run.py` on Linux/macOS or
+  `.venv\Scripts\python.exe tests\run.py` on Windows. Create `.venv` and install
+  the package with `python -m pip install -e .` if the environment is absent.
+- Never commit credentials, `.env` files, private keys, a live SQLite database,
+  virtual environments, caches, or local browser artifacts.
+- `main` is the clean imported baseline. Continue the transferred authorization
+  work from `hs3jry-handoff` unless Aly directs a different branch.
+
 <!-- jaira:start -->
 ## Task tracking: jaira
 
