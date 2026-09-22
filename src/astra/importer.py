@@ -345,6 +345,21 @@ def collapse(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().casefold()
 
 
+# Leading characters Excel and LibreOffice read as the start of a formula (CWE-1236).
+FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_cell(value) -> str:
+    """A CSV cell a spreadsheet opens as text: normalized like any template value and, when
+    it starts with = + - @ tab or CR, prefixed with a single quote so a task title such as
+    =HYPERLINK(...) is shown, not evaluated, when the App Owner opens the download
+    (regression review SECURITY-2). The .xlsx path needs nothing: _inline writes inlineStr."""
+    text = normalize_text(value)
+    if text.startswith(FORMULA_PREFIXES):
+        return "'" + text
+    return text
+
+
 def split_list(value) -> list[str]:
     text = normalize_text(value)
     if not text:
@@ -1402,7 +1417,7 @@ def build_template_csv(config: TemplateConfig | None = None, *, tasks=None) -> s
     writer = csv.writer(buffer)
     writer.writerow(config.labels())
     for row in tasks or []:
-        writer.writerow([normalize_text(row.get(column.key)) for column in config.active])
+        writer.writerow([csv_cell(row.get(column.key)) for column in config.active])
     return buffer.getvalue()
 
 
@@ -2754,7 +2769,7 @@ class ImportEngine:
         writer.writerow(REPORT_COLUMNS)
         for result in self.rows:
             values = result.values
-            writer.writerow([clean_text(cell) for cell in (
+            writer.writerow([csv_cell(cell) for cell in (
                 result.number, result.key, result.action, result.level, values.get("title", ""), values.get("owner", ""),
                 values.get("start_date", ""), values.get("due_date", ""), values.get("status", ""),
                 values.get("criticality", ""), result.plan.get("task_id") or (result.existing["id"] if result.existing else ""),

