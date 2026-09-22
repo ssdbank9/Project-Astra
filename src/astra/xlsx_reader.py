@@ -23,6 +23,7 @@ interpreted safely, with the reason).
 from __future__ import annotations
 
 import io
+import math
 import posixpath
 import re
 import zipfile
@@ -68,9 +69,16 @@ class Percent(float):
 
 @dataclass(frozen=True)
 class CellError:
-    """A cell whose value exists but cannot be interpreted safely."""
+    """A cell whose value exists but cannot be interpreted safely.
+
+    ``code`` says why: ``error_value`` for an Excel error (#N/A, #REF!), ``date`` for a
+    date serial outside what a calendar can hold, ``string`` for a broken shared-string
+    reference. The importer reports the first as E_CELL_ERROR on any column and leaves
+    the date kind to the date parsers.
+    """
 
     message: str
+    code: str = "unreadable"
 
     def __str__(self) -> str:  # pragma: no cover - convenience only
         return self.message
@@ -143,16 +151,35 @@ def split_ref(ref: str) -> tuple[int, int]:
     return int(match.group(2)), column_index(match.group(1))
 
 
+# The last serial a Python date can hold (9999-12-31) in each date system.
+SERIAL_MAX_1900 = 2958465
+SERIAL_MAX_1904 = 2957003
+
+
 def serial_to_date(serial: float, date1904: bool = False):
-    """Convert an Excel serial to a date, or return a CellError when unsafe."""
+    """Convert an Excel serial to a date, or return a CellError when unsafe.
+
+    Accepts 61..2958465 (1900 system) and 0..2957003 (1904 system); anything else,
+    including nan / inf, is a CellError instead of an OverflowError (review XI3-01).
+    """
+    try:
+        serial = float(serial)
+    except (TypeError, ValueError):
+        return CellError(f"Excel date serial {serial!r} is not a number.", "date")
+    if not math.isfinite(serial):
+        return CellError(f"Excel date serial {serial!r} is not a finite number.", "date")
     if date1904:
         if serial < 0:
-            return CellError(f"Excel date serial {serial:g} is negative.")
+            return CellError(f"Excel date serial {serial:g} is negative.", "date")
+        if serial > SERIAL_MAX_1904:
+            return CellError(f"Excel date serial {serial:g} is beyond 31-12-9999; a typed date such as 20260904 is not a date serial.", "date")
         return date(1904, 1, 1) + timedelta(days=int(serial))
     if serial <= 60:
         return CellError(
-            f"Excel date serial {serial:g} falls before 1900-03-01, where Excel's calendar is ambiguous."
+            f"Excel date serial {serial:g} falls before 1900-03-01, where Excel's calendar is ambiguous.", "date"
         )
+    if serial > SERIAL_MAX_1900:
+        return CellError(f"Excel date serial {serial:g} is beyond 31-12-9999; a typed date such as 20260904 is not a date serial.", "date")
     return date(1899, 12, 30) + timedelta(days=int(serial))
 
 
@@ -372,13 +399,13 @@ def _cell_value(cell, shared_strings: list[str], date_styles: set[int], percent_
         try:
             return shared_strings[int(raw)]
         except (ValueError, IndexError):
-            return CellError("Shared string index out of range.")
+            return CellError("Shared string index out of range.", "string")
     if cell_type == "str":
         return raw
     if cell_type == "b":
         return raw.strip() in ("1", "true", "TRUE")
     if cell_type == "e":
-        return CellError(f"Excel error value {raw}.")
+        return CellError(f"Excel error value {raw}.", "error_value")
     # numeric (t="n" or absent)
     try:
         number = float(raw)

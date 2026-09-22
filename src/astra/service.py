@@ -25,6 +25,12 @@ CRITICALITIES = {"critical", "high", "normal", "low", None}
 GOVERNED_STATUSES = {"submitted", "completed", "on_hold", "reopened"}
 MANAGER_ORDINARY_STATUSES = {"draft", "assigned", "in_progress", "delayed"}
 PROTECTED_STATUSES = {"changes_requested", "completed", "on_hold", "cancelled", "abandoned", "reopened"}
+# Statuses a task may not be moved OUT of by a plain field update either: leaving them
+# needs the record its lifecycle action writes (reopen, acceptance, hold release), so a
+# Manager's attempt becomes an Owner request and the Owner is pointed at that action
+# (adversarial review AS-1, 2026-09-22).
+LOCKED_SOURCE_STATUSES = GOVERNED_STATUSES | PROTECTED_STATUSES | {"cancelled", "abandoned"}
+REOPEN_ONLY_STATUSES = {"completed", "cancelled", "abandoned"}
 REVIEWER_ROLES = {"reviewer", "approver", "collaborator"}
 
 LOGIN_WINDOW_SECONDS = 900
@@ -60,6 +66,15 @@ def row_dict(row: sqlite3.Row | None) -> dict | None:
 
 class Forbidden(PermissionError):
     pass
+
+
+class ImportBlocked(Forbidden):
+    """A non-permitted import attempt. Raised inside the import path and audited by the
+    caller once no transaction is open, so the audit row survives the rollback."""
+
+    def __init__(self, actor: dict, project: dict | None, action: str):
+        super().__init__("Only the App Owner or a Manager of the target project may import into it.")
+        self.actor, self.project, self.action = actor, project, action
 
 
 class AstraService:
@@ -607,6 +622,28 @@ class AstraService:
             owner_user_id = self._validate_assignee(before["project_id"], payload.get("owner_user_id") or None)
         else:
             owner_user_id = before.get("owner_user_id")
+        if status_changed and before["status"] in LOCKED_SOURCE_STATUSES:
+            # The source status is protected too: a Manager may only request the change and
+            # the Owner leaves completed / cancelled / abandoned through reopen_task (reason
+            # and revised due date) and submitted through the submission decision. There is
+            # no dedicated release action for on_hold, changes_requested or reopened, so the
+            # Owner's update with a reason is the recorded path out of those.
+            if actor["global_role"] != "owner":
+                return self._request_protected_action(
+                    actor,
+                    before,
+                    "update_task_status",
+                    {"status": status, "from_status": before["status"], "reason": reason,
+                     "expected_revision": before["revision"]},
+                    reason or "",
+                )
+            if before["status"] in REOPEN_ONLY_STATUSES:
+                raise ValueError(
+                    f"A {before['status']} task is not edited back into work; use the dedicated reopen task action "
+                    "(reason and revised due date) so the reopening is recorded."
+                )
+            if before["status"] == "submitted":
+                raise ValueError("A submitted task leaves review through the dedicated accept or request changes action.")
         if status_changed and actor["global_role"] != "owner" and status in PROTECTED_STATUSES:
             return self._request_protected_action(
                 actor,
@@ -2313,6 +2350,10 @@ class AstraService:
         """
         if not actor.get("active"):
             raise Forbidden("Sign in required.")
+        if actor["global_role"] != "owner" and not self._manages_any_project(actor):
+            # The template carries the configured labels, list values and hash: the same
+            # people who may read the configuration (authorization matrix row 20).
+            raise Forbidden("Only the App Owner or a project Manager may download the import template.")
         if fmt not in ("csv", "xlsx"):
             raise ValueError("Unknown template format.")
         config = self._import_config()
@@ -2467,7 +2508,15 @@ class AstraService:
         return {"projects": [dict(r) for r in rows], "can_create_project": False, "can_edit_template": False}
 
     def _import_blocked(self, actor: dict, project: dict | None, action: str) -> None:
-        """Audit a non-permitted import attempt, notify the Owner and refuse."""
+        """Refuse a non-permitted import attempt; the caller audits it (see _audit_import_blocked)."""
+        raise ImportBlocked(actor, project, action)
+
+    def _audit_import_blocked(self, blocked: ImportBlocked) -> None:
+        """Audit a blocked import attempt and notify the Owner. Runs in autocommit, after any
+        rollback, so the record is kept whatever else the request had started. Without a
+        target project only the Owner notification is written (there is no project to
+        audit against)."""
+        actor, project, action = blocked.actor, blocked.project, blocked.action
         event_id = new_id()
         occurred_at = now_text()
         label = project["name"] if project else "new project"
@@ -2484,7 +2533,6 @@ class AstraService:
                 (new_id(), owner["id"], event_id, None, "protected_action_blocked",
                  f"blocked {action.replace('_', ' ')} attempt: {label}", occurred_at),
             )
-        raise Forbidden("Only the App Owner or a Manager of the target project may import into it.")
 
     def _import_authorize(self, actor: dict, project_id: str | None, action: str) -> tuple[bool, dict | None]:
         if not actor.get("active"):
@@ -2552,29 +2600,53 @@ class AstraService:
         return engine, preview, options
 
     def import_preview(self, actor: dict, project_id: str | None, filename: str, data: bytes, options=None) -> dict:
-        """Parse and validate; writes nothing."""
-        engine, preview, options = self._import_engine(actor, project_id, filename, data, options, "import_preview")
+        """Parse and validate; writes nothing (a blocked attempt is audited)."""
+        try:
+            engine, preview, options = self._import_engine(actor, project_id, filename, data, options, "import_preview")
+        except ImportBlocked as blocked:
+            self._audit_import_blocked(blocked)
+            raise
         preview["sha256"] = importer.sha256_hex(data)
+        preview["plan_fingerprint"] = importer.plan_fingerprint(engine)
         preview["filename"] = os.path.basename(filename or "upload")
         preview["options"] = options
         preview["can_commit"] = preview["summary"]["errors"] == 0 or options["valid_rows_only"]
         return preview
 
     def import_commit(self, actor: dict, project_id: str | None, filename: str, data: bytes, options=None,
-                      expected_sha256: str | None = None) -> dict:
-        """Re-validate the same bytes and apply the plan in one transaction."""
+                      expected_sha256: str | None = None, expected_plan: str | None = None,
+                      plan_required: bool = False) -> dict:
+        """Re-validate the same bytes inside the write transaction and apply the plan.
+
+        Validation (cycle checks, the snapshot of existing tasks) and apply share one
+        ``BEGIN IMMEDIATE``, so no other writer can add a dependency or parent between the
+        two (review DI-2). ``expected_plan`` is the preview's plan fingerprint: when the
+        same bytes now produce a different plan (a key taken by a hand-made task, a task
+        edited in the meantime) the commit is refused with HTTP 409 (review DI-3). The HTTP
+        route sets ``plan_required`` so every commit over the API follows a preview.
+        """
         digest = importer.sha256_hex(data)
         if expected_sha256 and expected_sha256.casefold() != digest:
             raise importer.ImportConflict("The file changed since the preview. Run the preview again before importing.")
-        engine, preview, options = self._import_engine(actor, project_id, filename, data, options, "import_commit")
-        if preview["summary"]["errors"] and not options["valid_rows_only"]:
-            raise ValueError("The file has rows with errors. Fix them or tick 'Import valid rows only'.")
-        if not any(row["action"] != "error" for row in preview["rows"]):
-            raise ValueError("Nothing to import: every row has errors.")
         import_id = new_id()
         try:
             with transaction(self.db):
+                engine, preview, options = self._import_engine(actor, project_id, filename, data, options, "import_commit")
+                if plan_required and not expected_plan:
+                    raise ValueError("Run the preview first: the commit needs the preview's plan fingerprint (X-Plan-Fingerprint).")
+                if expected_plan and expected_plan.casefold() != importer.plan_fingerprint(engine):
+                    raise importer.ImportConflict(
+                        "The project changed since the preview (a task was added, keyed or edited in the meantime), so "
+                        "the file would now do something else; nothing was written. Run the preview again and check it."
+                    )
+                if preview["summary"]["errors"] and not options["valid_rows_only"]:
+                    raise ValueError("The file has rows with errors. Fix them or tick 'Import valid rows only'.")
+                if not any(row["action"] != "error" for row in preview["rows"]):
+                    raise ValueError("Nothing to import: every row has errors.")
                 summary = self._import_apply(actor, engine, filename, digest, import_id, options)
+        except ImportBlocked as blocked:
+            self._audit_import_blocked(blocked)
+            raise
         except sqlite3.IntegrityError as exc:
             # Another writer took one of these Import Keys between preview and commit; the
             # transaction is rolled back, and the client gets a 409 with a retry hint.

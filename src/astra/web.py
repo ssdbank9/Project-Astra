@@ -258,6 +258,7 @@ class AstraHandler(BaseHTTPRequestHandler):
                 result = self.service.import_commit(
                     user, self._header_text("X-Project-Id") or None, self._header_text("X-Filename"),
                     payload.get("_raw", b""), self._header_json("X-Options"), self._header_text("X-Sha256") or None,
+                    self._header_text("X-Plan-Fingerprint") or None, plan_required=True,
                 )
                 return self._json({"result": result}, HTTPStatus.CREATED)
             if path == "/api/notifications/read-all":
@@ -544,7 +545,8 @@ class AstraHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def _json(self, value: dict, status=HTTPStatus.OK, cookie: str | None = None):
-        payload = json.dumps(value, default=str).encode()
+        # allow_nan=False: a NaN or Infinity would be a body no browser can parse (review DI-4).
+        payload = json.dumps(value, default=str, allow_nan=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))

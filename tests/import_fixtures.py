@@ -26,11 +26,20 @@ class Styled:
 PERCENT_STYLE = 2   # cellXfs index 2 in STYLES below: built-in numFmtId 9 = "0%"
 
 
+class ErrorValue:
+    """An Excel error cell (t="e"), for example ErrorValue("#N/A")."""
+
+    def __init__(self, code):
+        self.code = code
+
+
 def _cell(ref, value, *, date_style=1):
     if value is None or value == "":
         return ""
     if isinstance(value, Styled):
         return f'<c r="{ref}" s="{value.style}"><v>{value.value}</v></c>'
+    if isinstance(value, ErrorValue):
+        return f'<c r="{ref}" t="e"><v>{escape(value.code)}</v></c>'
     if isinstance(value, bool):
         return f'<c r="{ref}" t="b"><v>{1 if value else 0}</v></c>'
     if isinstance(value, date):

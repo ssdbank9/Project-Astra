@@ -19,6 +19,7 @@ import csv
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import struct
@@ -27,8 +28,10 @@ import zipfile
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from xml.sax.saxutils import escape
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .xlsx_reader import CellError, Percent, XlsxError, XlsxTooLarge, column_letter, read_workbook
+from .xlsx_reader import (CellError, Percent, XlsxError, XlsxTooLarge, column_letter, read_workbook,
+                          serial_to_date)
 
 TEMPLATE_SHEET = "Tasks"
 README_SHEET = "README"
@@ -51,6 +54,9 @@ MAX_KEY_CHARS = 40
 MAX_LABEL_CHARS = 60
 MAX_LIST_LITERAL = 255          # Excel's limit for an inline dropdown list
 TEMPLATE_DATA_ROWS = 2000       # rows carrying validation and unlocked cells
+NUMBER_LIMIT = 1e15             # custom Number columns: finite and within +-1e15 (review DI-4)
+# A CSV cell longer than the module default (128 KiB) must reach E_CELL_TOO_LONG, not csv.Error.
+csv.field_size_limit(max(csv.field_size_limit(), 2 * MAX_FILE_BYTES))
 DATE_MIN = date(2000, 1, 1)
 DATE_MAX = date(2100, 12, 31)
 EXCEL_EPOCH = date(1899, 12, 30)
@@ -62,6 +68,7 @@ DMY_DATE = re.compile(r"^(\d{1,2})-(\d{1,2})-(\d{4})$")
 PRED_SUFFIX = re.compile(r"^(?P<key>.+?)\s*(?P<type>FS|SS|FF|SF)?\s*(?P<lag>[+-]\s*\d+\s*d(?:ays?)?)?$", re.IGNORECASE)
 LIST_SEPARATOR = ";"
 CUSTOM_PREFIX = "x_"
+CUSTOM_KEY_PATTERN = re.compile(r"^x_[a-z0-9_]{1,40}$")   # a client-supplied custom key; slug_key() output fits it
 CUSTOM_TYPES = ("text", "number", "date", "list")
 CORE_KEYS = ("import_key", "title", "start_date", "due_date", "status", "owner_email")
 
@@ -292,6 +299,10 @@ NO_IMPORT_ON_UPDATE = GOVERNED | {"changes_requested"}
 MANAGER_ORDINARY = {"draft", "assigned", "in_progress", "delayed"}
 NO_RECORD_ON_CREATE = {"submitted", "changes_requested", "completed", "on_hold", "reopened"}
 CLOSED = {"completed", "cancelled", "abandoned"}
+# Statuses an import may not move a task OUT of either (review AS-2): leaving them needs the
+# record the lifecycle action writes (reopen, acceptance, hold release), so the stored status
+# is kept - W_GOVERNED_STATUS for the Owner, W_PROTECTED_STATUS for a Manager.
+LOCKED_SOURCE = GOVERNED | PROTECTED | CLOSED
 
 
 class ImportFileError(ValueError):
@@ -336,6 +347,15 @@ def split_list(value) -> list[str]:
 
 def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def plan_fingerprint(engine) -> str:
+    """What the validated plan would do: sha256 over the sorted (Import Key, action, existing
+    task id) triples. Preview returns it and commit compares it, so a plan that changed under
+    the same bytes (a key taken by a hand-made task, a task edited meanwhile) is refused
+    instead of silently turning a create into an update (review DI-3)."""
+    items = sorted((result.key, result.action, (result.existing or {}).get("id") or "") for result in engine.rows)
+    return hashlib.sha256(json.dumps(items, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def excel_serial(day: date) -> int:
@@ -502,9 +522,13 @@ class TemplateConfig:
                     raise ValueError(f"Column label '{label}' is longer than {MAX_LABEL_CHARS} characters.")
                 if not key or not key.startswith(CUSTOM_PREFIX):
                     key = slug_key(label)
+                elif not CUSTOM_KEY_PATTERN.match(key):
+                    # The key names a defined range and a validation formula in the workbook.
+                    raise ValueError(f"Column '{label}': key '{key}' must be x_ followed by 1-40 lower-case letters, digits or underscores.")
                 base, suffix = key, 2
                 while key in seen_keys or key in COLUMN_BY_KEY:
-                    key = f"{base}_{suffix}"
+                    tail = f"_{suffix}"
+                    key = base[:len(CUSTOM_PREFIX) + 40 - len(tail)] + tail
                     suffix += 1
                 kind = str(raw.get("type") or "text").strip().casefold()
                 if kind not in CUSTOM_TYPES:
@@ -1130,7 +1154,7 @@ class _TemplateWorkbook:
         names = []
         for index, (name, _, values) in enumerate(self.lists, start=1):
             letter = column_letter(index)
-            names.append(f'<definedName name="{name}">{LISTS_SHEET}!${letter}$2:${letter}${len(values) + 1}</definedName>')
+            names.append(f'<definedName name="{_xml(name)}">{LISTS_SHEET}!${letter}$2:${letter}${len(values) + 1}</definedName>')
         return "".join(names)
 
     def marker_sheet(self) -> str:
@@ -1544,6 +1568,35 @@ def _read_project_sheet(sheet, file_warnings: list[str], date1904: bool = False)
             header[key] = parsed.isoformat()
         else:
             header[key] = normalize_text(raw)
+    resolve_project_header(header, file_warnings)
+    return header
+
+
+def resolve_project_header(header: dict, file_warnings: list[str]) -> dict:
+    """Validate the typed Project-sheet values Astra stores as project settings and put the
+    resolved value back, naming the substituted default in a file warning (review DI-5).
+    The preview therefore shows what a created project would get, not what was typed."""
+    tz = header.get("timezone")
+    if tz:
+        known = next((label for label in TIMEZONE_LABELS if label.casefold() == tz.casefold()), None)
+        if known:
+            header["timezone"] = known
+        else:
+            try:
+                ZoneInfo(tz)
+            except (ZoneInfoNotFoundError, ValueError):
+                file_warnings.append(f"Project sheet, Timezone: '{tz}' is not a known timezone (for example "
+                                     f"{', '.join(TIMEZONE_LABELS[:3])}); Asia/Karachi will be used.")
+                header["timezone"] = "Asia/Karachi"
+    days = header.get("working_days")
+    if days and days not in WORKING_DAY_LABELS:
+        known = next((label for label in WORKING_DAY_LABELS if collapse(label) == collapse(days)), None)
+        if known:
+            header["working_days"] = known
+        else:
+            file_warnings.append(f"Project sheet, Working Days: '{days}' is not one of {', '.join(WORKING_DAY_LABELS)}; "
+                                 "Every day will be used.")
+            header["working_days"] = "Every day"
     return header
 
 
@@ -1563,6 +1616,11 @@ def _read_people_sheet(sheet) -> list[dict]:
 
 def _decode_csv(data: bytes) -> tuple[str, list[str]]:
     warnings = []
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        raise ImportFileError(
+            "The CSV is UTF-16 encoded (Excel's 'Unicode Text' format). Save it as 'CSV UTF-8 (comma delimited)' "
+            "and upload it again, or upload the .xlsx template."
+        )
     if data.startswith(b"\xef\xbb\xbf"):
         data = data[3:]
     try:
@@ -1578,7 +1636,14 @@ def _parse_csv(data: bytes, config: TemplateConfig) -> ParsedUpload:
         delimiter = csv.Sniffer().sniff(text[:4096], delimiters=",;\t").delimiter
     except csv.Error:
         delimiter = ","
-    records = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+    try:
+        # newline='' lets the csv module see CR, LF and CRLF line endings itself.
+        records = list(csv.reader(io.StringIO(text, newline=""), delimiter=delimiter))
+    except csv.Error as exc:
+        raise ImportFileError(
+            f"The CSV could not be read line by line ({exc}). Save it again from Excel as 'CSV UTF-8 (comma "
+            "delimited)' with one task per line, or upload the .xlsx template instead."
+        ) from exc
     header_index = None
     for index, record in enumerate(records[:30]):
         keys = {column.key for column in (config.match_header(cell)[0] for cell in record) if column}
@@ -1644,14 +1709,18 @@ def parse_date_cell(value, *, allow_serial: bool, date1904: bool = False):
     elif isinstance(value, (int, float)):
         if not allow_serial:
             return None, f"'{value}' is not a date. Use dd-mm-yyyy."
+        serial = float(value)
+        if not math.isfinite(serial):
+            return None, f"'{value}' is not a date; the cell holds an infinite or undefined number."
         if date1904:
-            if float(value) < 0:
+            if serial < 0:
                 return None, f"Excel date serial {value} is negative."
-            parsed = date.fromordinal(date(1904, 1, 1).toordinal() + int(value))
-        else:
-            if float(value) <= 60:
-                return None, f"Excel date serial {value} is before 01-03-1900 and cannot be interpreted safely."
-            parsed = date.fromordinal(EXCEL_EPOCH.toordinal() + int(value))
+        elif serial <= 60:
+            return None, f"Excel date serial {value} is before 01-03-1900 and cannot be interpreted safely."
+        converted = serial_to_date(serial, date1904)   # range-checked: CellError beyond 31-12-9999
+        if isinstance(converted, CellError):
+            return None, converted.message + " Type the date as dd-mm-yyyy."
+        parsed = converted
     else:
         text = normalize_text(value)
         match = DMY_DATE.match(text)
@@ -1708,6 +1777,9 @@ def parse_number(value):
             number = float(text)
         except ValueError:
             return None, f"'{text}' is not a number."
+    if not math.isfinite(number) or abs(number) > NUMBER_LIMIT:
+        # nan / inf are not JSON and would break every screen that reads the task.
+        return None, f"'{normalize_text(value)}' is not a finite number within \u00b11e15."
     return (int(number) if number.is_integer() else number), None
 
 
@@ -1766,15 +1838,15 @@ def parse_predecessor(item: str, known_keys: set[str]):
     """Return (key, dependency_type, lag_text, error). A suffix (FS+2d) is only
     split off when the bare text is not itself a known key."""
     text = item.strip()
-    if text in known_keys:
-        return text, "FS", "", None
+    if text.upper() in known_keys:   # Import Keys are canonical upper case
+        return text.upper(), "FS", "", None
     match = PRED_SUFFIX.match(text)
     if match and (match.group("type") or match.group("lag")):
         key = match.group("key").strip()
         if KEY_PATTERN.match(key):
-            return key, (match.group("type") or "FS").upper(), (match.group("lag") or "").replace(" ", ""), None
+            return key.upper(), (match.group("type") or "FS").upper(), (match.group("lag") or "").replace(" ", ""), None
     if KEY_PATTERN.match(text):
-        return text, "FS", "", None
+        return text.upper(), "FS", "", None
     return None, None, None, f"'{text}' is not a valid Import Key."
 
 
@@ -1879,7 +1951,9 @@ class ImportEngine:
                 task = dict(row)
                 self.existing_by_id[task["id"]] = task
                 if task.get("import_key"):
-                    self.existing_by_key[task["import_key"]] = task
+                    # Keys are matched in canonical upper case: the template's own uniqueness
+                    # rule (COUNTIF) is case-insensitive, so t-001 and T-001 are one task.
+                    self.existing_by_key[task["import_key"].upper()] = task
             for row in self.db.execute(
                 """SELECT d.predecessor_task_id p, d.successor_task_id s FROM task_dependencies d
                    JOIN tasks t ON t.id=d.successor_task_id WHERE t.project_id=?""", (self.project_id,)
@@ -1961,6 +2035,7 @@ class ImportEngine:
         self.rows = [self._validate_row(row) for row in parsed.rows]
         self._check_duplicate_keys()
         self._check_project_column()
+        self._check_project_header()
         self._wire_parents()
         self._wire_dependencies()
         self._propagate_invalid()
@@ -1970,7 +2045,21 @@ class ImportEngine:
 
     def _validate_row(self, row: ParsedRow) -> RowResult:
         result = RowResult(number=row.number)
-        cells = row.cells
+        cells = dict(row.cells)
+        # An Excel error value (#N/A, #REF!) or an unreadable cell is never imported as text
+        # (review XI3-03). Date columns keep their own, more specific E_DATE_INVALID wording
+        # for an out-of-range date serial.
+        for key in list(cells):
+            value = cells[key]
+            if not isinstance(value, CellError):
+                continue
+            column = self.config.by_key.get(key)
+            if value.code != "error_value" and column is not None and column.kind in ("date", "date_due"):
+                continue
+            result.add("error", "E_CELL_ERROR",
+                       f"The cell cannot be read: {value.message.rstrip('.')}. Fix the formula or type the value.",
+                       column.label if column else key)
+            del cells[key]
         text = {key: normalize_text(value) for key, value in cells.items()}
         for key, value in text.items():
             if len(value) > MAX_CELL_CHARS:
@@ -1983,7 +2072,7 @@ class ImportEngine:
                               if key in self.config.by_key)
             result.add("warning", "W_HEADER_ALIAS", f"Columns matched by alias: {pairs}.")
 
-        key = text.get("import_key", "")
+        key = text.get("import_key", "").upper()   # canonical form, see _load_context
         result.key = key
         if not key:
             result.add("error", "E_KEY_MISSING", "Import Key is required.", "Import Key")
@@ -2136,7 +2225,7 @@ class ImportEngine:
             "status_value": status_value, "progress": progress, "criticality": criticality,
             "criticality_given": bool(text.get("criticality")), "milestone": milestone,
             "next_action": next_action, "reason": text.get("reason", ""), "attachments": attachments,
-            "entities": entity_ids, "extras": extras, "parent_key": text.get("parent_key", ""),
+            "entities": entity_ids, "extras": extras, "parent_key": text.get("parent_key", "").upper(),
             "pred_items": pred_items, "project_text": text.get("project", ""), "extra_notes": [],
         }
         return result
@@ -2165,6 +2254,23 @@ class ImportEngine:
                 result.add("error", "E_PROJECT_MISMATCH",
                            f"The Project sheet names '{sheet_name}' but the chosen target is '{target_name}'. "
                            "Pick the matching project on the Import screen or fix the Project sheet.", "Project sheet")
+
+    def _check_project_header(self) -> None:
+        """Planned Finish before Planned Start on the Project sheet (review DI-5): an error on
+        every row when the sheet would create the project, a file warning otherwise (the
+        sheet's dates are never applied to an existing project)."""
+        start, target = self.project_header.get("start_date"), self.project_header.get("target_date")
+        if not (start and target and target < start):
+            return
+        message = (f"The Project sheet's Planned Finish Date {display_date(target)} is before its Planned Start Date "
+                   f"{display_date(start)}.")
+        if self.project is None:
+            for result in self.rows:
+                result.add("error", "E_PROJECT_DATES",
+                           message + " Fix the Project sheet; the project cannot be created with these dates.",
+                           "Project sheet")
+        else:
+            self.file_warnings.append(message + " The Project sheet's dates are not applied to an existing project.")
 
     def _check_people(self, people: list[dict]) -> list[dict]:
         """Cross-check the People sheet: who the App Owner still has to add or grant."""
@@ -2247,7 +2353,8 @@ class ImportEngine:
                 else:
                     if len(seen) > 2:
                         result.add("warning", "W_PARENT_DEPTH",
-                                   "Steps nested more than two levels deep render as one level in the Gantt.",
+                                   "This row is a step of a step: the Gantt shows it nested under its parent step. "
+                                   "Keep hierarchies to task > step where you can.",
                                    "Parent Key")
 
     def _propagate_invalid(self) -> None:
@@ -2360,7 +2467,7 @@ class ImportEngine:
                 "criticality": plan["criticality"], "start_date": plan["start_date"], "due_date": plan["due_date"],
                 "progress": plan["progress"], "is_milestone": 1 if plan.get("milestone") else 0,
                 "next_action_note": plan["next_action"] or None,
-                "import_extras": json.dumps(plan["extras"], ensure_ascii=False, sort_keys=True) if plan["extras"] else None,
+                "import_extras": json.dumps(plan["extras"], ensure_ascii=False, sort_keys=True, allow_nan=False) if plan["extras"] else None,
             }
             display_status = status
         else:
@@ -2396,7 +2503,18 @@ class ImportEngine:
                     if existing["status"] in ("draft", "assigned"):
                         target = existing["status"]
                 if target != existing["status"]:
-                    if self.is_owner and target in NO_IMPORT_ON_UPDATE:
+                    if existing["status"] in LOCKED_SOURCE:
+                        # Leaving a governed / protected / closed status needs the lifecycle record
+                        # (reopen, acceptance, hold release); the stored status stays (review AS-2).
+                        if self.is_owner:
+                            result.add("warning", "W_GOVERNED_STATUS",
+                                       f"Leaving status '{existing['status']}' needs its lifecycle action in Astra (reopen, "
+                                       f"accept or release the hold); the status was left as '{existing['status']}'.", "Status")
+                        else:
+                            result.add("warning", "W_PROTECTED_STATUS",
+                                       f"Status '{existing['status']}' is an Owner decision; changing it is requested in Astra, "
+                                       f"not by import. The status was left as '{existing['status']}'.", "Status")
+                    elif self.is_owner and target in NO_IMPORT_ON_UPDATE:
                         result.add("warning", "W_GOVERNED_STATUS",
                                    f"Status '{target}' needs its lifecycle action in Astra; the status was left as "
                                    f"'{existing['status']}'.", "Status")
@@ -2419,7 +2537,7 @@ class ImportEngine:
                         current = {}
                 merged = {**current, **plan["extras"]}
                 if merged != current:
-                    change("import_extras", json.dumps(merged, ensure_ascii=False, sort_keys=True))
+                    change("import_extras", json.dumps(merged, ensure_ascii=False, sort_keys=True, allow_nan=False))
             notes = ([plan["notes"]] if plan["notes"] else []) + plan["extra_notes"]
             base_description = fields.get("description", existing.get("description") or "")
             missing = [note for note in notes if note not in base_description]
@@ -2587,6 +2705,9 @@ class ImportEngine:
                         f"UPDATE tasks SET {assignments}, updated_at=?, revision=revision+1 WHERE id=?",
                         (*fields.values(), timestamp, task_id),
                     )
+                else:
+                    # Only lists or the parent changed: the row still moved (review DI-6).
+                    self.db.execute("UPDATE tasks SET updated_at=?, revision=revision+1 WHERE id=?", (timestamp, task_id))
                 if plan["baseline_due"]:
                     self.db.execute(
                         "UPDATE tasks SET baseline_start_date=start_date, baseline_due_date=? WHERE id=?"
@@ -2622,11 +2743,23 @@ class ImportEngine:
             task_id = id_of[result.key]
             after = dict(self.db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
             service._event(task_id, actor_id, "task_created", None, after, result.plan["reason"])
-        for result in updated:  # pass 3b: update events
+        for result in updated:  # pass 3b: update events (list additions ride in after_json, review DI-6)
             task_id = result.existing["id"]
-            if result.plan["fields"] or result.plan["baseline_due"]:
+            plan = result.plan
+            additions = {}
+            if plan["new_people"]:
+                additions["people_added"] = [{"user_id": user_id, "role": role} for user_id, role in plan["new_people"]]
+            if plan["new_attachments"]:
+                additions["attachments_added"] = [path for path, _ in plan["new_attachments"]]
+            if plan["new_predecessors"]:
+                additions["predecessors_added"] = list(plan["new_predecessors"])
+            if plan["entities"]:
+                additions["entities_added"] = list(plan["entities"])
+            if plan["fields"] or plan["baseline_due"] or additions:
                 after = dict(self.db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
-                service._event(task_id, actor_id, "task_updated", result.existing, after, result.plan["reason"])
+                if additions:
+                    after["import_additions"] = additions
+                service._event(task_id, actor_id, "task_updated", result.existing, after, plan["reason"])
             if result.plan.get("criticality_change"):
                 old, new = result.plan["criticality_change"]
                 service._event(task_id, actor_id, "criticality_changed", {"criticality": old}, {"criticality": new},

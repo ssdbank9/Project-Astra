@@ -876,7 +876,7 @@ async function openImport(){
 }
 function setImportStep(step){
   const order=["upload","review","confirm"];
-  document.querySelectorAll("#import-steps .step").forEach(li=>{
+  document.querySelectorAll("#import-steps .wiz-step").forEach(li=>{
     const mine=li.dataset.step;const done=order.indexOf(mine)<order.indexOf(step);
     li.classList.toggle("is-done",done);
     if(mine===step)li.setAttribute("aria-current","step");else li.removeAttribute("aria-current");
@@ -903,7 +903,7 @@ function renderImportUpload(){
     <p class="muted">Choose the target project, download the template and fill its <strong>Project</strong> and <strong>Tasks</strong> sheets (dates as dd-mm-yyyy; the Example sheet shows worked rows), then upload it here. With a project chosen the download already lists that project's tasks with their Import Keys, so a re-upload updates them instead of duplicating; add new rows at the bottom. Nothing is written until you confirm in step 3. An import never deletes.</p>
     <div class="import-links"><a href="/api/import/template.xlsx" id="import-template-xlsx" download>Download template (.xlsx)</a><a href="/api/import/template.csv" id="import-template-csv" download>Download template (.csv)</a>${settings}</div>
     <label>Target project<select id="import-project">${createOption}${options}</select></label>
-    <div id="import-drop" class="dropzone" tabindex="0" role="button" aria-describedby="import-file-name"><strong>Drop your .xlsx or .csv here</strong><span>or press Enter / click to choose a file</span><input type="file" id="import-file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="visually-hidden" tabindex="-1"></div>
+    <div id="import-drop" class="dropzone" tabindex="0" role="button" aria-describedby="import-file-name"><strong>Drop your .xlsx or .csv here</strong><span>or press Enter / click to choose a file</span><input type="file" id="import-file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="sr-only" tabindex="-1"></div>
     <div id="import-file-name" class="muted">${importState.file?escapeHtml(`Selected: ${importState.file.name} (${Math.ceil(importState.file.size/1024)} KB)`):"No file selected."}</div>
     <div class="import-options">
       <label class="inline"><input type="checkbox" id="import-valid-only"> Import valid rows only (rows with errors are skipped)</label>
@@ -954,7 +954,7 @@ function fmtChange(value,change){
 function renderImportReview(){
   const p=importState.preview,s=p.summary;
   const chips=[["create","Create",s.create],["update","Update",s.update],["unchanged","Unchanged",s.unchanged],["warnings","Warnings",s.warnings],["errors","Errors",s.errors]]
-    .map(([k,label,n])=>`<button type="button" class="chip" data-kind="${k}" data-filter="${k}" aria-pressed="${importState.filter===k}">${escapeHtml(label)} <strong>${n}</strong></button>`).join("");
+    .map(([k,label,n])=>`<button type="button" class="import-chip" data-kind="${k}" data-filter="${k}" aria-pressed="${importState.filter===k}">${escapeHtml(label)} <strong>${n}</strong></button>`).join("");
   const project=s.project||{};
   const projectLine=project.create?`<strong>${escapeHtml(project.name||"")}</strong> (a new project will be created)`:`<strong>${escapeHtml(project.name||"")}</strong>`;
   const header=p.project_header||{};
@@ -992,14 +992,14 @@ function renderImportReview(){
     <div class="actions"><button type="button" class="quiet" id="import-back">Back</button><button type="button" id="import-commit-btn"${canCommit?"":" disabled"}>Import ${importable} row${importable===1?"":"s"}</button></div>
     <div class="error" id="import-error"></div>`;
   if(!canCommit)importError(importable?"Rows with errors block the import. Fix them in the template, or go back and tick “Import valid rows only”.":"Nothing can be imported until the errors are fixed.");
-  document.querySelectorAll("#import-body .chip").forEach(chip=>chip.addEventListener("click",()=>{importState.filter=importState.filter===chip.dataset.filter?"":chip.dataset.filter;applyImportFilter()}));
+  document.querySelectorAll("#import-body .import-chip").forEach(chip=>chip.addEventListener("click",()=>{importState.filter=importState.filter===chip.dataset.filter?"":chip.dataset.filter;applyImportFilter()}));
   applyImportFilter();
   document.querySelector("#import-back").addEventListener("click",()=>renderImportStep("upload"));
   document.querySelector("#import-commit-btn").addEventListener("click",runImportCommit);
 }
 function applyImportFilter(){
   const f=importState.filter;
-  document.querySelectorAll("#import-body .chip").forEach(c=>c.setAttribute("aria-pressed",String(c.dataset.filter===f)));
+  document.querySelectorAll("#import-body .import-chip").forEach(c=>c.setAttribute("aria-pressed",String(c.dataset.filter===f)));
   document.querySelectorAll("#import-body .import-table tbody tr").forEach(tr=>{
     let show=true;
     if(f==="errors")show=tr.dataset.level==="error";
@@ -1011,7 +1011,8 @@ function applyImportFilter(){
 async function runImportCommit(){
   const button=document.querySelector("#import-commit-btn");button.disabled=true;button.textContent="Importing…";importError("");
   try{
-    const {result}=await apiUpload("/api/import/commit",importState.file,{...importHeaders(),"X-Sha256":importState.preview.sha256});
+    // The server refuses the commit (409) when the bytes or the plan they produce changed since the preview.
+    const {result}=await apiUpload("/api/import/commit",importState.file,{...importHeaders(),"X-Sha256":importState.preview.sha256,"X-Plan-Fingerprint":importState.preview.plan_fingerprint||""});
     importState.result=result;await load();renderImportStep("confirm");
   }catch(err){importError(err.message);button.disabled=false;button.textContent="Retry import"}
 }
@@ -1050,7 +1051,7 @@ async function renderTemplateSettings(){
   body.innerHTML=`
     <h3>Template settings</h3>
     <p class="muted">Choose which columns the template carries, rename or reorder them, and add your own. Simple (the default) is nine columns with pre-filled keys; Full is the complete set with Project and People sheets. Core columns (Import Key, Title, Start Date, Due Date, Status, Owner Email) stay fixed. Saving changes the template's version: files downloaded before the change are rejected on upload and must be downloaded again.${cfg.updated_at?` Last saved ${escapeHtml(new Date(cfg.updated_at).toLocaleString())}${cfg.updated_by_name?` by ${escapeHtml(cfg.updated_by_name)}`:""}.`:""}</p>
-    <div class="import-summary" role="group" aria-label="Presets"><span class="muted">Presets:</span><button type="button" class="chip" data-preset="simple">Simple (${(cfg.presets?.simple||[]).length} columns)</button><button type="button" class="chip" data-preset="full">Full (${(cfg.presets?.full||[]).length} columns)</button></div>
+    <div class="import-summary" role="group" aria-label="Presets"><span class="muted">Presets:</span><button type="button" class="import-chip" data-preset="simple">Simple (${(cfg.presets?.simple||[]).length} columns)</button><button type="button" class="import-chip" data-preset="full">Full (${(cfg.presets?.full||[]).length} columns)</button></div>
     <ol class="col-list" id="tpl-cols">${items}</ol>
     <form id="tpl-add" class="add-col">
       <label>New column label<input name="label" maxlength="60" required></label>

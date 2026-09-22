@@ -310,6 +310,66 @@ class AstraWebTests(unittest.TestCase):
                         f"{header} does not call an AstraService method",
                     )
 
+    def test_manager_cannot_edit_a_completed_task_back_into_work_over_http(self):
+        # AS-1 over HTTP: 202 with a request row, the task itself unchanged.
+        service = self.server.service
+        owner = dict(service.db.execute("SELECT * FROM users WHERE global_role='owner'").fetchone())
+        manager = service.create_user(owner, "http-manager@example.org", "Manager", "manager password safe")
+        project = service.create_project(owner, "Source guard HTTP")
+        service.grant_project_access(owner, project["id"], manager["id"], "manager")
+        task = service.create_task(owner, {"project_id": project["id"], "title": "Done", "owner_user_id": manager["id"]})
+        submission = service.submit_task(manager, task["id"], "done")
+        service.accept_submission(owner, submission["id"], "ok")
+        cookie, csrf = self._login_as("http-manager@example.org", "manager password safe")
+        response, payload = self.request("POST", f"/api/tasks/{task['id']}", {
+            "status": "in_progress", "reason": "oops",
+        }, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 202)
+        self.assertEqual(payload["request"]["action"], "update_task_status")
+        response, payload = self.request("GET", f"/api/tasks/{task['id']}", cookie=cookie)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["task"]["status"], "completed")
+
+    def test_stylesheet_declares_each_bare_class_once_and_the_import_dialog_uses_namespaced_classes(self):
+        # Merged-state review MS-1..MS-6: the Gantt steps (D73AQW) and the import dialog (C9KPH6)
+        # both declared bare .step, .chip and .muted, so whichever rule came last repainted the
+        # other feature while the suite stayed green. A bare single-class selector may be
+        # declared once at top level (a grouped list such as `.summary div, .panel, .toolbar` is a
+        # shared base, not a second declaration), and the import dialog only uses namespaced classes.
+        from pathlib import Path
+        static = Path(inspect.getfile(AstraHandler)).parent / "static"
+        raw_css = (static / "style.css").read_text(encoding="utf-8")
+        css = re.sub(r"/\*.*?\*/", "", raw_css, flags=re.S)
+        counts, depth, selector_start = {}, 0, 0
+        for index, char in enumerate(css):
+            if char == "{":
+                if depth == 0:
+                    selector = css[selector_start:index].strip()
+                    if re.fullmatch(r"\.[A-Za-z0-9_-]+", selector):   # rules inside @media may repeat a selector
+                        counts[selector] = counts.get(selector, 0) + 1
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    selector_start = index + 1
+        self.assertEqual(depth, 0, "unbalanced braces in style.css")
+        duplicates = sorted(name for name, n in counts.items() if n > 1)
+        self.assertEqual(duplicates, [], f"bare class selectors declared more than once: {duplicates}")
+        for expected in (".wiz-steps", ".wiz-step", ".wiz-n", ".import-chip", ".sr-only"):
+            self.assertIn(expected, counts)
+        import_block = raw_css[raw_css.index("/* C9KPH6"):raw_css.index("/* end C9KPH6 */")]
+        self.assertNotRegex(import_block, r"(?m)^\.(step|steps|step-n|chip|muted|visually-hidden)\b")
+        html = (static / "index.html").read_text(encoding="utf-8")
+        self.assertNotRegex(html, r'class="(step|steps|step-n|chip)[" ]')
+        self.assertIn('<li class="wiz-step" data-step="upload"', html)
+        script = (static / "app.js").read_text(encoding="utf-8")
+        import_section = script[script.index("async function openImport"):]
+        self.assertNotRegex(import_section, r'class="(step|steps|step-n|chip)[" ]')
+        self.assertNotIn("#import-steps .step\"", import_section)
+        self.assertNotIn("visually-hidden", import_section)
+        self.assertIn('querySelectorAll("#import-steps .wiz-step")', import_section)
+        self.assertIn('class="import-chip"', import_section)
+
     def test_governed_status_shortcut_rejected_over_http(self):
         cookie, csrf = self._owner_session()
         _, project = self.request("POST", "/api/projects", {"name": "Guard"}, cookie=cookie, csrf=csrf)
