@@ -75,6 +75,9 @@ CUSTOM_PREFIX = "x_"
 CUSTOM_KEY_PATTERN = re.compile(r"^x_[a-z0-9_]{1,40}$")   # a client-supplied custom key; slug_key() output fits it
 CUSTOM_TYPES = ("text", "number", "date", "list")
 CORE_KEYS = ("import_key", "title", "start_date", "due_date", "status", "owner_email")
+# What a Manager sees for any person the file names who cannot be assigned here, whatever the
+# reason (regression review SECURITY-4); the App Owner gets the precise finding instead.
+NEUTRAL_PERSON_MESSAGE = "'{text}' is not an active member of this project; ask the App Owner to grant access, then re-import."
 
 
 @dataclass(frozen=True)
@@ -1988,7 +1991,23 @@ class ImportEngine:
 
     # ---- context ---------------------------------------------------------
     def _load_context(self) -> None:
-        users = self.db.execute("SELECT id,email,display_name,active,global_role FROM users").fetchall()
+        if self.is_owner:
+            users = self.db.execute("SELECT id,email,display_name,active,global_role FROM users").fetchall()
+        else:
+            # A Manager's file is matched only against the accounts the Manager can already
+            # see: the list_assignable_users set (active members of the target project plus
+            # the App Owner and chairman) and themselves. Matched against every account, the
+            # preview's findings were an oracle for the whole directory the Manager is refused
+            # at GET /api/users - existence, deactivation, membership and display name ->
+            # email, 2,000 probes per upload (regression review SECURITY-4).
+            users = self.db.execute(
+                """SELECT id,email,display_name,active,global_role FROM users u
+                   WHERE u.active=1 AND (
+                       u.id=? OR u.global_role IN ('owner','chairman')
+                       OR EXISTS(SELECT 1 FROM memberships m WHERE m.user_id=u.id AND m.project_id=?)
+                   )""",
+                (self.actor["id"], self.project_id),
+            ).fetchall()
         self.users_by_email = {row["email"].casefold(): dict(row) for row in users}
         self.users_by_name: dict[str, list[dict]] = {}
         for row in users:
@@ -2056,29 +2075,44 @@ class ImportEngine:
                    f"{user['email']} will be given {role} access to the new project.", column)
 
     def _resolve_person(self, text: str, result: RowResult, column: str):
-        """Return a user dict or None, adding findings. Email first, then a unique display name."""
+        """Return a user dict or None, adding findings. Email first, then a unique display name.
+
+        The App Owner, who may read the user directory, gets the precise reason for a miss.
+        Anyone else matches only against the accounts they can already see (_load_context) and
+        gets one neutral finding whatever the reason, so a preview cannot tell an unknown email
+        from a deactivated or non-member account (regression review SECURITY-4).
+        """
         text = text.strip()
         if "@" in text:
             user = self.users_by_email.get(text.casefold())
             if not user:
-                result.add("warning", "W_UNRESOLVED_PERSON", f"No Astra user has the email '{text}'.", column)
-                return None
+                return self._person_miss(text, result, column, "W_UNRESOLVED_PERSON",
+                                         f"No Astra user has the email '{text}'.")
         else:
             matches = self.users_by_name.get(collapse(text), [])
-            if len(matches) != 1:
-                reason = "matches several users" if matches else "is not an Astra user"
-                result.add("warning", "W_UNRESOLVED_PERSON",
-                           f"'{text}' {reason}; use the person's email.", column)
+            if len(matches) > 1:
+                result.add("warning", "W_UNRESOLVED_PERSON", f"'{text}' matches several users; use the person's email.", column)
                 return None
+            if not matches:
+                return self._person_miss(text, result, column, "W_UNRESOLVED_PERSON",
+                                         f"'{text}' is not an Astra user; use the person's email.")
             user = matches[0]
             result.add("warning", "W_PERSON_BY_NAME", f"'{text}' was matched by name to {user['email']}.", column)
         if not self._eligible(user):
             where = "the new project" if not self.project_id else "this project"
             what = "is deactivated and cannot be granted access" if not user.get("active") else f"has no access to {where}; grant access, then re-import"
-            result.add("warning", "W_PERSON_NOT_ELIGIBLE", f"{user['email']} {what}.", column)
-            return None
+            return self._person_miss(text, result, column, "W_PERSON_NOT_ELIGIBLE", f"{user['email']} {what}.")
         self._note_grant(user, result, column)
         return user
+
+    def _person_miss(self, text: str, result: RowResult, column: str, code: str, detail: str):
+        """Record that ``text`` names nobody the row may be assigned to: the detailed finding
+        for the App Owner, the one neutral text for everyone else."""
+        if self.is_owner:
+            result.add("warning", code, detail, column)
+        else:
+            result.add("warning", "W_PERSON_NOT_ELIGIBLE", NEUTRAL_PERSON_MESSAGE.format(text=text), column)
+        return None
 
     def _default_reason(self, row: RowResult) -> str:
         return self.default_reason or f"Excel import {self.filename} row {row.number}"
@@ -2343,7 +2377,13 @@ class ImportEngine:
                                     if person["name"] else "Row has no email.")
             else:
                 user = self.users_by_email.get(email.casefold())
-                if not user:
+                if not self.is_owner:
+                    # One status and one text for every miss (regression review SECURITY-4).
+                    if not user or not self._eligible(user):
+                        entry["status"] = "no_access"
+                        entry["message"] = (f"People row {person['row']}: {email} is not an active member of this "
+                                            "project; the App Owner adds the account or grants access.")
+                elif not user:
                     entry["status"] = "unknown_user"
                     entry["message"] = f"People row {person['row']}: {email} is not an Astra user; the App Owner adds the account first."
                 elif not user.get("active"):

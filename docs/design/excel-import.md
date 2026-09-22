@@ -34,8 +34,19 @@ Manager's row cannot take a completed, on-hold, cancelled or submitted task back
 People are matched by work email (a bare display name is accepted only when it
 matches exactly one active user, with a `W_PERSON_BY_NAME` warning). A person who
 is not an active Astra user, or has no access to the target project, leaves the
-task unassigned with `W_UNRESOLVED_PERSON` / `W_PERSON_NOT_ELIGIBLE`. The App Owner
-therefore prepares the project first, in the **People** panel:
+task unassigned with `W_UNRESOLVED_PERSON` / `W_PERSON_NOT_ELIGIBLE`. Who is
+matched, and what a miss says, follows the actor's view of the directory
+(regression review SECURITY-4, 2026-09-22): the App Owner, who may read
+`/api/users`, is matched against every account and sees the precise reason (no
+such email, deactivated, no access, name not found); a Manager's file is matched
+only against the people the Manager can already see — the `list_assignable_users`
+set: active members of the target project plus the App Owner and chairman — and
+every miss, whatever its reason, is the one `W_PERSON_NOT_ELIGIBLE` text
+`'<text>' is not an active member of this project; ask the App Owner to grant
+access, then re-import.` The People sheet cross-check follows the same rule
+(`unknown_user` / `inactive` / `no_access` for the Owner, always `no_access` with
+one text for a Manager), so a preview cannot be used to enumerate accounts. The
+App Owner therefore prepares the project first, in the **People** panel:
 
 1. **Add user** for each person named in the sheet (email, display name, password,
    role `member`; `chairman` only for organization-wide read).

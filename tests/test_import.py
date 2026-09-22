@@ -1331,6 +1331,67 @@ class ImportServiceTests(unittest.TestCase):
         # the surrogate and noncharacter cases, straight through the writer
         self.assertEqual(importer.clean_text("a\ud800b\ufffec\uffffd\te\nf"), "abcd\te\nf")
 
+    def test_manager_preview_cannot_enumerate_accounts_through_person_findings(self):
+        # Regression review SECURITY-4 (2026-09-22): a Manager is refused GET /api/users, yet a
+        # preview naming guessed emails and display names in Owner Email returned, per row,
+        # whether the account exists, is deactivated or is a member, and the email behind any
+        # display name in the directory - 2,000 unlogged probes per upload.
+        outsider = self.service.create_user(self.owner, "out@example.org", "Olga Outsider", "outsider password ok", "member")
+        self.service.grant_project_access(self.owner, self.other["id"], outsider["id"], "member")
+        gone = self.service.create_user(self.owner, "dead@example.org", "Dora Deactivated", "deactivated password", "member")
+        self.service.grant_project_access(self.owner, self.project["id"], gone["id"], "member")
+        self.service.set_user_active(self.owner, gone["id"], False)
+        probes = ["out@example.org", "Olga Outsider", "nosuch@example.org", "Nobody Real", "dead@example.org", "Dora Deactivated"]
+        rows = [{"import_key": f"P-{i}", "title": f"probe {i}", "owner_email": probe} for i, probe in enumerate(probes, 1)]
+        rows += [{"import_key": "V-1", "title": "member by email", "owner_email": "viewer@example.org"},
+                 {"import_key": "V-2", "title": "manager by name", "owner_email": "Waseem"},
+                 {"import_key": "V-3", "title": "chairman by name", "owner_email": "Chair"}]
+        _, preview = self.preview(self.jamal, rows)
+        by_key = {r["import_key"]: r for r in preview["rows"]}
+        templates = set()
+        for i, probe in enumerate(probes, 1):
+            row = by_key[f"P-{i}"]
+            with self.subTest(probe=probe):
+                self.assertEqual(self.codes(row), ["W_PERSON_NOT_ELIGIBLE"])
+                message = row["findings"][0]["message"]
+                self.assertFalse(row["values"]["owner"])
+                for leak in ("deactivated", "No Astra user", "has no access", "matched by name", "is not an Astra user"):
+                    self.assertNotIn(leak, message)
+                if "@" not in probe:
+                    self.assertNotIn("@", message)          # a display name never resolves to an email
+                templates.add(message.replace(probe, "<text>"))
+        self.assertEqual(templates, {importer.NEUTRAL_PERSON_MESSAGE.format(text="<text>")})
+        # people the Manager can already see (the assignable-users set) still resolve, by email or name
+        self.assertEqual((self.codes(by_key["V-1"]), by_key["V-1"]["values"]["owner"]), ([], "Viewer"))
+        self.assertEqual((self.codes(by_key["V-2"]), by_key["V-2"]["values"]["owner"]), (["W_PERSON_BY_NAME"], "Waseem"))
+        self.assertEqual((self.codes(by_key["V-3"]), by_key["V-3"]["values"]["owner"]), (["W_PERSON_BY_NAME"], "Chair"))
+        # the App Owner, who may read the directory, keeps the detailed findings
+        _, owner_preview = self.preview(self.owner, rows)
+        owner_rows = {r["import_key"]: r for r in owner_preview["rows"]}
+        owner_messages = lambda key: [f["message"] for f in owner_rows[key]["findings"]]
+        self.assertIn("out@example.org has no access to this project; grant access, then re-import.", owner_messages("P-1"))
+        self.assertIn("'Olga Outsider' was matched by name to out@example.org.", owner_messages("P-2"))
+        self.assertIn("No Astra user has the email 'nosuch@example.org'.", owner_messages("P-3"))
+        self.assertIn("'Nobody Real' is not an Astra user; use the person's email.", owner_messages("P-4"))
+        self.assertIn("dead@example.org is deactivated and cannot be granted access.", owner_messages("P-5"))
+        self.assertIn("'Dora Deactivated' is not an Astra user; use the person's email.", owner_messages("P-6"))
+        # the People sheet is the same oracle: one status and one text for a Manager
+        people = [("out@example.org", "Olga Outsider", "Member", ""), ("nosuch@example.org", "Nobody", "Member", ""),
+                  ("dead@example.org", "Dora", "Member", ""), ("viewer@example.org", "Viewer", "Member", "")]
+        data = filled_template([{"import_key": "Q-1", "title": "q"}], people=people)
+        manager_people = self.service.import_preview(self.jamal, self.project["id"], "people.xlsx", data)
+        self.assertEqual({p["email"]: p["status"] for p in manager_people["people"]},
+                         {"out@example.org": "no_access", "nosuch@example.org": "no_access",
+                          "dead@example.org": "no_access", "viewer@example.org": "ok"})
+        people_warnings = [w for w in manager_people["file_warnings"] if w.startswith("People row")]
+        self.assertEqual(len(people_warnings), 3)
+        self.assertEqual({re.sub(r"^People row \d+: \S+ ", "", w) for w in people_warnings},
+                         {"is not an active member of this project; the App Owner adds the account or grants access."})
+        owner_people = self.service.import_preview(self.owner, self.project["id"], "people.xlsx", data)
+        self.assertEqual({p["email"]: p["status"] for p in owner_people["people"]},
+                         {"out@example.org": "no_access", "nosuch@example.org": "unknown_user",
+                          "dead@example.org": "inactive", "viewer@example.org": "ok"})
+
 
 class PredecessorSyntaxTests(unittest.TestCase):
     """parse_predecessor is a hand-written linear split (regression review SECURITY-1); these
