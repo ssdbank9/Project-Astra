@@ -60,9 +60,11 @@ _Avoid_: document (ambiguous), source (bare), input.
 
 **Import template**:
 The locked Excel workbook (or its CSV twin) that Astra generates from the App Owner's
-current column configuration: a `Tasks` sheet with a protected header row, dropdowns
-and dd-mm-yyyy date validation, a `README` sheet, and a hidden `_astra` sheet whose
-version marker is a hash of the configuration. Uploads must match the header row of
+current column configuration: `README`, `Project` (the project header), `Tasks` (a
+protected header row, dropdowns from a hidden `Lists` sheet, dd-mm-yyyy date validation,
+pre-filled Import Keys), a locked `Example`, a `People` sheet in the Full preset, and a
+very-hidden `_astra` sheet whose version marker is a hash of the configuration. Two
+presets exist: Simple (nine columns, the default) and Full (eighteen). Uploads must match the header row of
 the current configuration exactly; a template downloaded before the App Owner changed
 the columns is rejected. _Avoid_: spreadsheet (bare), sheet (bare), upload format.
 

@@ -46,25 +46,91 @@ The Owner sees the Manager's import in the Inbox (`import committed: <file> into
 <project>`) and in the project activity (`import_committed`), plus the usual
 per-task change notifications.
 
-## The template
+## The template (workbook v2)
 
 `GET /api/import/template.xlsx` (and `.csv`) is generated at request time from the
-current configuration with `zipfile`; nothing is stored on disk.
+current configuration with `zipfile`; nothing is stored on disk. The workbook has
+six sheets in the Simple preset and seven in the Full preset (designed in
+`workbook-spec.md` and `build_simple.py`, 2026-09-22, and reproduced by the stdlib
+builder in `importer._TemplateWorkbook`):
 
-- Sheet `Tasks`: one header row (locked, bold, frozen), one example row with Import
-  Key `EXAMPLE-001` (the importer refuses it, so it must be overwritten or deleted),
-  2,000 unlocked data rows with data validation: dropdowns for Status, Criticality,
-  Milestone and custom list columns; date validation `01-01-2000..31-12-2100` on
-  Start Date, Due Date, Original Due Date and custom date columns, cells formatted
-  `dd-mm-yyyy`; whole-number validation on `% Complete` (0..100) and
-  `Duration (days)` (1..3660); text-length validation on Import Key (1..40) and
-  Title (1..200). Sheet protection (SHA-512 hash, password `astra-template`, which
-  is a guard against accidental edits and not a secret) allows formatting and
-  inserting/deleting rows but forbids inserting, deleting or sorting columns.
-- Sheet `README`: filling rules and the column list, fully locked.
-- Sheet `_astra` (hidden): `AstraTemplateVersion` = hash of the active column
-  configuration; `AstraHeaderFingerprint` = the header labels. Defined names of the
-  same two names point at these cells.
+| Sheet | Read by the importer | Protection | Purpose |
+| --- | --- | --- | --- |
+| `README` | no | fully locked | Simple: eight short steps. Full: five steps, twelve rules, header-colour legend, a column dictionary generated from the same metadata as the sheet, and the list of columns the Owner can switch on |
+| `Project` | **yes** (project header) | labels and guidance locked, Value column unlocked | Simple: Project Name (required), Project Manager Email, Timezone. Full: also Description, Filing Entity, Sponsor / Executive Owner Email, Working Days, Planned Start / Finish, Plan As-of Date, Source Document, Prepared By |
+| `Tasks` | **yes** | header and structure locked; `A2:R2001` unlocked; rows may be inserted, deleted and filtered; columns may not | header row 1 = configured labels, frozen at `C2`, autofilter, 2,000 data rows with validation |
+| `Example` | never | fully locked, grey tab, italic text | Simple: `EX-001` a task and `EX-001.1` its step. Full: three worked rows (`EX-001` a High task, `EX-001.1` a Delayed action-item step with Original Due Date, `EX-002` a Critical milestone waiting on `EX-001`) |
+| `People` | **yes** (cross-check only) | header locked, `A2:D201` unlocked, column E computed | Full preset (or any column beyond the Simple set) only: Email, Full Name, Role on project, Notes, "Used in Tasks" (`COUNTIF` over Owner Email and Collaborators) |
+| `Lists` | no | hidden, locked | named ranges `Lists_Status`, `Lists_Criticality`, `Lists_Type`, `Lists_YesNo`, `Lists_ProjectRole`, `Lists_Timezone`, `Lists_WorkingDays`, `Lists_Entity` and `Lists_<key>` for each custom list column |
+| `_astra` | **yes** (marker) | veryHidden, locked | `B1` configuration hash (`52cd3da7813769c1` for the Simple default, `53133bf237fe9b3c` for Full), `B2` header fingerprint, `B3` family, `B4` build time; defined names `AstraTemplateVersion` and `AstraHeaderFingerprint` |
+
+Tasks validation, per column kind: Import Key `LEN 1..40`, no spaces, `COUNTIF` uniqueness;
+Title 1..200 characters; Parent Key must be another row's key (warning style, so keys
+already in Astra pass); Owner Email has an `@` and a dot, no spaces or `;`; Collaborators,
+Reviewers, Approvers contain `@` and no commas; Start Date and Original Due Date are dates
+between 01-01-2000 and 31-12-2100; Due Date is a date in range and `>= Start Date`; Status,
+Criticality, Milestone and custom list columns are dropdowns from the named ranges;
+`% Complete` 0..100; Duration 1..3660; Next Action <= 200 characters; other text <= 4000.
+Date cells carry the `dd-mm-yyyy` number format. Conditional formats mark a blank Import
+Key or Title on a row that has content, a Due Date before its Start Date, and band even rows.
+Header colours: navy = core, slate = optional built-in, teal = Owner-added.
+
+Sheet protection (SHA-512 hash, password `astra-template`, a guard against accidental
+edits and not a secret) is applied to every sheet. Column widths follow the reference
+design. Header hover comments from the openpyxl reference are not emitted (they need a
+VML part); the same text is in the input messages and the README dictionary.
+
+### Presets: Simple (default) and Full
+
+Two presets live in `importer.PRESETS`; the Owner applies either from Template settings
+(`PUT /api/import/template-config` with `{"preset": "simple"|"full"}`) and may still
+toggle, rename, reorder or add columns afterwards. All 25 columns stay defined in either
+preset; a preset only changes the `enabled` flags.
+
+- **Simple** (the built-in default; hash `52cd3da7813769c1`, family
+  `astra-import-simple`): nine columns — Import Key, Title, Step of (Key) (= Parent Key),
+  Owner Email, Start Date, Due Date, Status, Criticality, Notes. The template's Import Key
+  cells carry the formula `=IF(B2="","","T-"&TEXT(ROW()-1,"000"))`, so a key such as
+  `T-001` appears as soon as a Title is typed and untouched rows stay blank; the user may
+  overwrite it. A row whose only cell is an Import Key is ignored by the importer. The
+  workbook has six sheets: an eight-line README, a three-row Project sheet (Project Name
+  required, Project Manager Email, Timezone dropdown defaulting to Asia/Karachi), Tasks,
+  a two-row Example (a task and a step), hidden Lists and veryHidden `_astra`. No People
+  sheet.
+- **Full** (workbook v2; hash `53133bf237fe9b3c`, family `astra-import-v2`): 18 columns —
+  Import Key, Title, Type, Parent Key, Owner Email, Collaborators, Start Date, Due Date,
+  Original Due Date, Status, % Complete, Criticality, Predecessors, Next Action / Decision
+  Needed, Reason (if delayed or changed), Risk / Dependency, Description, Notes. Off:
+  Duration (days), Reviewers, Approvers, Attachment Links, Project, Entity, Milestone. The
+  workbook adds the twelve-row Project sheet, the three-row Example and the People sheet
+  described above; the same extended shape is generated whenever any column outside the
+  Simple set is enabled.
+
+`Type` (custom list Task / Milestone / Action item, key `x_type`) supersedes the Yes/No
+Milestone column: `Milestone` sets `tasks.is_milestone` (and Start = Due when one date is
+given); Task and Action item stay ordinary tasks with the label kept in `import_extras`.
+`Risk / Dependency` (custom text, key `x_risk_dependency`) is kept read-only on the task
+until a RAID register exists. The importer accepts a workbook with or without the Project
+and People sheets.
+
+### Project and People sheets on upload
+
+- The `Project` sheet is the project header. When the Owner imports without choosing a
+  target, its Project Name finds an existing project (case-insensitive) or creates one
+  with the sheet's description (plus a "Sponsor / Executive Owner" line), timezone
+  (validated, default Asia/Karachi), working days (`Every day` / `Mon-Fri` / `Mon-Sat` /
+  `Sun-Thu`), planned start and finish, manager (email of an active user; also granted the
+  `manager` membership) and filing entity (existing active entity only). When a target is
+  chosen — always the case for a Manager — a Project Name that differs from the chosen
+  project puts `E_PROJECT_MISMATCH` on every row. Plan As-of Date and Source Document are
+  recorded in the import summary.
+- The `People` sheet is cross-checked in preview: each row is `ready`, `unknown_user`,
+  `inactive`, `no_access` or `group` (a name without an email) with a message naming the
+  People row, so the App Owner knows exactly which accounts to add or grant before the
+  Manager uploads. Users are never created by import.
+- The `Example` sheet is ignored, and any Import Key starting with `EXAMPLE-` or `EX-` is
+  refused (`E_EXAMPLE_ROW`).
+- Only the sheet named `Tasks` is read for rows; `Lists` is ignored.
 
 ### Built-in columns (default order)
 
@@ -85,9 +151,9 @@ current configuration with `zipfile`; nothing is stored on disk.
 | % Complete | `tasks.progress` | 0..100, `45%` and `0.45` accepted |
 | Criticality | `tasks.criticality` | Critical, High, Normal, Low or blank |
 | Predecessors | `task_dependencies` (finish-to-start) | `;`-separated Import Keys; `FS+2d` suffixes are recorded in Notes with `W_LAG_IGNORED` |
-| Milestone | `tasks.is_milestone` | Yes/No; with one date, start = due |
-| Next Action | `tasks.next_action_note` | shown as the task's next action while it is open |
-| Reason | `task_events.reason` | default `Excel import <file> row <n>` |
+| Milestone (off by default) | `tasks.is_milestone` | Yes/No; superseded by the `Type` list column; with one date, start = due |
+| Next Action / Decision Needed | `tasks.next_action_note` | shown as the task's next action while it is open |
+| Reason (if delayed or changed) | `task_events.reason` | default `Excel import <file> row <n>` |
 | Notes | `tasks.description` "Notes:" section | also receives anything that could not be stored exactly |
 | Attachment Links | `task_attachments` | Owner only; links, never bytes |
 
@@ -111,8 +177,8 @@ by Managers.
 - `.xlsx` (from the template) or `.csv`; `.xlsm`, `.xlsb`, `.xls` are refused. 5 MB,
   2,000 rows, 40 columns, 4,000 characters per cell.
 - `.xlsx`: the `_astra` marker must equal the current configuration hash and the
-  header row must equal the configured labels in order; mismatches are listed by
-  column letter. Dates may be real Excel date cells (1900 and 1904 systems; serials
+  `Tasks` header row must equal the configured labels in order; mismatches are listed by
+  column letter. The `Project` and `People` sheets are read by name when present. Dates may be real Excel date cells (1900 and 1904 systems; serials
   at or below 60 are refused as ambiguous) or `dd-mm-yyyy` / `yyyy-mm-dd` text.
 - `.csv`: UTF-8 (BOM stripped) with a cp1252 fallback warning; delimiter sniffed
   (`,` `;` tab); headers match the configured labels, or the built-in default
@@ -158,10 +224,11 @@ criticality, task_id, findings`, dates dd-mm-yyyy).
 An **Import** button appears beside **Templates** for the Owner and for anyone who
 manages at least one project (`GET /api/import/targets`). The dialog has three
 steps — Upload (template links, target project, drop zone or file picker, options),
-Review (summary chips that filter the table, per-row badge and findings, `old → new`
-cells, Back / Import N rows), Confirm (counts, project, report link). The Owner also
-gets **Template settings** inside the dialog: enable/disable, rename, reorder, add
-and remove custom columns, reset, save. Colouring is class-based with `data-level`
+Review (summary chips that filter the table, the Project-sheet header line, a People
+panel listing who the Owner still has to add or grant, per-row badge and findings,
+`old → new` cells, Back / Import N rows), Confirm (counts, project, report link). The Owner also
+gets **Template settings** inside the dialog: Simple / Full preset buttons,
+enable/disable, rename, reorder, add and remove custom columns, reset, save. Colouring is class-based with `data-level`
 attributes (CSP `style-src 'self'`), every level is also a word, the dialog closes
 on Escape and returns focus to the opener, and the table stacks into cards under
 760 px.

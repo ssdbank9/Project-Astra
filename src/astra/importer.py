@@ -25,7 +25,7 @@ import struct
 import unicodedata
 import zipfile
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
 from xml.sax.saxutils import escape
 
 from .xlsx_reader import CellError, XlsxError, column_letter, read_workbook
@@ -39,6 +39,7 @@ FINGERPRINT_NAME = "AstraHeaderFingerprint"
 # password is documented so the App Owner can unlock a sheet deliberately.
 TEMPLATE_SHEET_PASSWORD = "astra-template"
 EXAMPLE_KEY = "EXAMPLE-001"
+EXAMPLE_KEY_PREFIXES = ("EXAMPLE-", "EX-")
 
 MAX_FILE_BYTES = 5 * 1024 * 1024
 MAX_ROWS = 2000
@@ -76,6 +77,9 @@ class Column:
     width: int = 16
     example: str = ""
     prompt: str = ""
+    note: str = ""                 # one line of context (README / header guidance)
+    target: str = ""               # where the value lands in Astra (README dictionary)
+    vkind: str = "long"            # Excel validation kind: key|key_ref|key_list|text|short|long|email|email_list|date|date_due|list|percent|int
 
 
 STATUS_LABELS = (
@@ -85,63 +89,171 @@ STATUS_LABELS = (
     ("Cancelled", "cancelled"), ("Abandoned", "abandoned"), ("Reopened", "reopened"),
 )
 CRITICALITY_LABELS = ("Critical", "High", "Normal", "Low")
+TYPE_LABELS = ("Task", "Milestone", "Action item")
+PROJECT_ROLE_LABELS = ("Manager", "Member", "Viewer")
+TIMEZONE_LABELS = ("Asia/Karachi", "Asia/Dubai", "Asia/Kolkata", "Europe/London", "America/New_York",
+                   "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto", "UTC")
+WORKING_DAY_LABELS = {"Every day": "0123456", "Mon-Fri": "01234", "Mon-Sat": "012345", "Sun-Thu": "01236"}
+# Approved baseline entities (service.APPROVED_ENTITIES); duplicated to avoid an import cycle.
+ENTITY_LABELS = ("Rupani Foundation USA", "Rupani Foundation Pakistan", "Rupani IB College", "Apex & Co",
+                 "Apex Amanat Microfinance", "Ibn Sina Medical College", "Ibn Sina Foundation",
+                 "RDI - Global", "RDI Pakistan", "Tax Exempt")
 
 COLUMNS: tuple[Column, ...] = (
     Column("Import Key", "import_key", "string", required=True,
-           aliases=("Key", "ID", "UID", "Task ID", "External ID", "#"), width=14, example="RA-001",
-           prompt="Stable id for this row. Re-importing the same key updates the task instead of duplicating it."),
-    Column("Project", "project", "string", aliases=("Project Name",), width=30,
-           example="Rupani Academy — DP & CP Implementation Roadmap",
-           prompt="Leave blank when you pick the project on the Import screen. App Owner only."),
-    Column("Entity", "entity", "string_list", aliases=("Entities", "Filing Entity"), width=20, example="",
-           prompt="Existing entity names, separated by ';'. App Owner only."),
+           aliases=("Key", "ID", "UID", "Task ID", "External ID", "#"), width=14, example="RA-001", vkind="key",
+           prompt="Required. A short stable id such as RA-001. Letters, digits, . _ - only, no spaces, unique in this sheet. Re-importing the same key UPDATES that task instead of duplicating it.",
+           note="Stable id for the row. Parent Key and Predecessors refer to it. Never renumber after the first import.",
+           target="tasks.import_key (unique per project) - drives create vs update"),
+    Column("Project", "project", "string", aliases=("Project Name",), width=30, example="", vkind="text",
+           prompt="Leave blank; the Project sheet and the Import screen name the project.",
+           target="projects.name"),
+    Column("Entity", "entity", "string_list", aliases=("Entities", "Filing Entity"), width=20, example="", vkind="long",
+           prompt="Existing entity names separated by ;  App Owner only.", target="project_entities"),
     Column("Parent Key", "parent_key", "string",
-           aliases=("Parent", "Subtask Of", "Parent ID", "Parent Import Key"), width=12, example="",
-           prompt="Import Key of the task this row is a step of."),
+           aliases=("Parent", "Subtask Of", "Parent ID", "Parent Import Key"), width=12, example="", vkind="key_ref",
+           prompt="Optional. Import Key of the task this row is a STEP of. Leave blank for a top-level task.",
+           note="Makes this row a step (subtask). The parent must be another row in this sheet or an existing task's key.",
+           target="tasks.parent_task_id"),
     Column("Title", "title", "string", required=True,
-           aliases=("Task", "Task Name", "Name", "Action Item / Deliverable", "Action / Deliverable"), width=48,
-           example="Submit CP application and upload evidence receipt", prompt="Required. Up to 200 characters."),
-    Column("Description", "description", "text", aliases=("Details", "Notes/Description"), width=36,
-           example="Application to the IB for Career-related Programme candidacy."),
+           aliases=("Task", "Task Name", "Name", "Action Item / Deliverable", "Action / Deliverable"), width=46,
+           example="Submit accreditation application and upload the evidence receipt", vkind="text",
+           prompt="Required. What has to be delivered, up to 200 characters. One row per task, step, milestone or action item.",
+           note="The task name shown in Astra's list, board and Gantt.", target="tasks.title"),
+    Column("Description", "description", "text", aliases=("Details", "Notes/Description"), width=40,
+           example="Application for Career-related Programme candidacy. Acceptance: receipt uploaded to the shared drive.", vkind="long",
+           prompt="Optional. Scope, acceptance criteria, links to minutes. Replaces the description on re-import only when non-empty.",
+           note="Free text.", target="tasks.description"),
     Column("Owner Email", "owner_email", "email",
            aliases=("Owner", "Task Owner", "Assignee", "Responsible", "Assigned To"), width=26,
-           example="jamal@example.org", prompt="One work email of a user who already has access to the project."),
-    Column("Collaborators", "collaborators", "email_list", aliases=("Collaborator Emails", "Contributors"), width=26,
-           example="", prompt="Emails separated by ';'."),
-    Column("Reviewers", "reviewers", "email_list", aliases=("Reviewer Emails",), width=22, example="",
-           prompt="Emails separated by ';'."),
-    Column("Approvers", "approvers", "email_list", aliases=("Approver Emails",), width=22, example="",
-           prompt="Emails separated by ';'."),
-    Column("Start Date", "start_date", "date", aliases=("Start", "Planned Start"), width=13, example="01-09-2026",
-           prompt="A real date (dd-mm-yyyy). Never type TBD here; use Notes."),
+           example="jamal@example.org", vkind="email",
+           prompt="One work email of a person who already exists in Astra and has access to the project. Exactly one accountable owner per row; put helpers in Collaborators.",
+           note="Matched by email, never by name. Unknown email -> the row imports unassigned with a warning.",
+           target="tasks.owner_user_id via users.email"),
+    Column("Collaborators", "collaborators", "email_list", aliases=("Collaborator Emails", "Contributors"), width=28,
+           example="waseem@example.org", vkind="email_list",
+           prompt="Optional. Emails separated by ; (semicolon). Groups such as 'Academic Team' cannot be assigned - name the people.",
+           note="People who help deliver. Import adds, never removes.", target="task_reviewers(role=collaborator)"),
+    Column("Reviewers", "reviewers", "email_list", aliases=("Reviewer Emails",), width=22, example="", vkind="email_list",
+           prompt="Emails separated by ;", target="task_reviewers(role=reviewer)"),
+    Column("Approvers", "approvers", "email_list", aliases=("Approver Emails",), width=22, example="", vkind="email_list",
+           prompt="Emails separated by ;", target="task_reviewers(role=approver)"),
+    Column("Start Date", "start_date", "date", aliases=("Start", "Planned Start"), width=13, example="01-09-2026", vkind="date",
+           prompt="Optional. A real date. Shows as dd-mm-yyyy. If unsure how your Excel reads dates, type yyyy-mm-dd (e.g. 2026-09-07). Never type TBD here - put it in Notes.",
+           note="Displayed dd-mm-yyyy. Blank = unscheduled.", target="tasks.start_date"),
     Column("Due Date", "due_date", "date",
            aliases=("Due", "Finish", "End Date", "Deadline", "Due / Milestone", "Revised Due Date"), width=13,
-           example="07-09-2026", prompt="A real date (dd-mm-yyyy). Never type TBD here; use Notes."),
-    Column("Duration (days)", "duration_days", "integer", aliases=("Duration", "Days"), width=10, example="",
-           prompt="Whole days, used only when one of Start/Due is blank."),
+           example="15-09-2026", vkind="date_due",
+           prompt="Optional. A real date on or after Start Date. Shows as dd-mm-yyyy; type yyyy-mm-dd if unsure. Never type TBD, Immediate or 'Sept 7-10' here - put the wording in Notes.",
+           note="The current committed date. If it moved, keep the first commitment in Original Due Date.", target="tasks.due_date"),
+    Column("Duration (days)", "duration_days", "integer", aliases=("Duration", "Days"), width=10, example="", vkind="int",
+           prompt="Whole days, used only when one of Start/Due is blank.", target="derived: fills the missing date"),
     Column("Original Due Date", "baseline_due_date", "date",
-           aliases=("Baseline Due", "Baseline Finish", "Original Deadline"), width=13, example="",
-           prompt="Only when the sheet already carries a revised date. App Owner only."),
+           aliases=("Baseline Due", "Baseline Finish", "Original Deadline"), width=13, example="15-09-2026", vkind="date",
+           prompt="Optional. The date first committed, if Due Date has since been revised. Blank = same as Due Date.",
+           note="Becomes the baseline once and is never overwritten later. App Owner import only; a Manager's import leaves it for the Owner.",
+           target="tasks.baseline_due_date"),
     Column("Status", "status", "enum", allowed=tuple(label for label, _ in STATUS_LABELS), width=16,
-           example="Draft", prompt="Pick from the list. Delayed / On hold / Cancelled need a Reason."),
+           example="Assigned", vkind="list",
+           prompt="Pick from the list. Blank = Draft (Assigned when Owner Email is filled). Delayed / On hold / Cancelled / Abandoned / Reopened need a Reason.",
+           note="Completed, Submitted, On hold and Reopened are accepted on first import only; later changes need their lifecycle action in Astra.",
+           target="tasks.status"),
     Column("% Complete", "progress", "integer", aliases=("Percent Complete", "Progress", "PercentComplete", "Complete %"),
-           width=10, example="", prompt="Whole number 0-100."),
-    Column("Criticality", "criticality", "enum", allowed=CRITICALITY_LABELS, width=12, example="High",
-           prompt="Critical, High, Normal, Low or blank (Unrated)."),
+           width=10, example="0", vkind="percent",
+           prompt="Optional. Whole number 0-100 (type 40, not 40%). Astra never invents a percentage.",
+           note="Declared progress; separate from accepted-step roll-up.", target="tasks.progress"),
+    Column("Criticality", "criticality", "enum", allowed=CRITICALITY_LABELS, width=12, example="High", vkind="list",
+           prompt="Optional. Critical, High, Normal or Low. Blank = Unrated (shown as such).",
+           note="Changing it on re-import needs a Reason.", target="tasks.criticality"),
     Column("Predecessors", "predecessors", "string_list", aliases=("Depends On", "Predecessor Keys", "Blocked By"),
-           width=18, example="", prompt="Import Keys this row waits for (finish-to-start), separated by ';'."),
-    Column("Milestone", "milestone", "boolean", allowed=("Yes", "No"), width=10, example="No",
-           prompt="Yes or No."),
-    Column("Next Action", "next_action", "string", aliases=("Next Step", "Decision / Support Required", "Decision / Support"),
-           width=32, example="Confirm vendor/approach", prompt="Up to 200 characters."),
-    Column("Reason", "reason", "string", aliases=("Reason if Delayed / At Risk", "Change Reason"), width=26, example="",
-           prompt="Why the status or dates changed. Required by Astra for Delayed / On hold / Cancelled."),
-    Column("Notes", "notes", "text", aliases=("Comments", "Risk / Dependency", "Remarks"), width=36,
-           example="Due as written in the source: Immediate", prompt="Free text, appended to the description."),
+           width=18, example="EX-001", vkind="key_list",
+           prompt="Optional. Import Keys this row waits for, separated by ; (finish-to-start). Example: RA-001; RA-002",
+           note="Finish-to-start only today. SS/FF/SF suffixes and lags (RA-001SS+2d) are kept in Notes until Astra supports them.",
+           target="task_dependencies (finish_to_start)"),
+    Column("Milestone", "milestone", "boolean", allowed=("Yes", "No"), width=10, example="No", vkind="list",
+           prompt="Yes / No (superseded by Type).", target="tasks.is_milestone"),
+    Column("Next Action / Decision Needed", "next_action", "string",
+           aliases=("Next Action", "Next Step", "Decision / Support Required", "Decision / Support"), width=34,
+           example="Confirm the evidence checklist with the registrar", vkind="short",
+           prompt="Optional, up to 200 characters. The very next step, or the decision / support the owner needs from leadership.",
+           note="Shown as the task's Next action while the task is open.", target="tasks.next_action_note"),
+    Column("Reason (if delayed or changed)", "reason", "string",
+           aliases=("Reason", "Reason if Delayed / At Risk", "Change Reason"), width=28,
+           example="Two departments returned receipts a week late", vkind="long",
+           prompt="Why the status or dates changed. Required for Delayed / On hold / Cancelled / Abandoned / Reopened and for any date, status or criticality change on re-import.",
+           note="Recorded in the task's audit trail.", target="task_events.reason"),
+    Column("Notes", "notes", "text", aliases=("Comments", "Remarks"), width=40,
+           example="Example row - see README. Source minute: Board 28-08-2026 item 4.", vkind="long",
+           prompt="Optional. Anything Astra has no column for: the original prose date (TBD, Ongoing), a group owner, context.",
+           note="Appended to the description as a 'Notes:' section; nothing in the sheet is silently lost.",
+           target="tasks.description (Notes: section)"),
     Column("Attachment Links", "attachment_links", "string_list", aliases=("Attachments", "Links", "Evidence Links"),
-           width=30, example="", prompt="Paths or URLs separated by ';'. App Owner only."),
+           width=30, example="", vkind="long",
+           prompt="Paths or URLs separated by ;  App Owner import only.", target="task_attachments"),
 )
 COLUMN_BY_KEY = {column.key: column for column in COLUMNS}
+
+# The "Full" preset (workbook v2, 2026-09-22): 18 of 25 columns on. The App Owner
+# switches presets or single columns in Template settings; custom columns keep the
+# x_ prefix.
+FULL_TEMPLATE_COLUMNS: tuple[dict, ...] = (
+    {"key": "import_key", "label": "Import Key", "enabled": True, "custom": False},
+    {"key": "title", "label": "Title", "enabled": True, "custom": False},
+    {"key": "x_type", "label": "Type", "enabled": True, "custom": True, "type": "list",
+     "values": list(TYPE_LABELS), "required": False},
+    {"key": "parent_key", "label": "Parent Key", "enabled": True, "custom": False},
+    {"key": "owner_email", "label": "Owner Email", "enabled": True, "custom": False},
+    {"key": "collaborators", "label": "Collaborators", "enabled": True, "custom": False},
+    {"key": "start_date", "label": "Start Date", "enabled": True, "custom": False},
+    {"key": "due_date", "label": "Due Date", "enabled": True, "custom": False},
+    {"key": "baseline_due_date", "label": "Original Due Date", "enabled": True, "custom": False},
+    {"key": "status", "label": "Status", "enabled": True, "custom": False},
+    {"key": "progress", "label": "% Complete", "enabled": True, "custom": False},
+    {"key": "criticality", "label": "Criticality", "enabled": True, "custom": False},
+    {"key": "predecessors", "label": "Predecessors", "enabled": True, "custom": False},
+    {"key": "next_action", "label": "Next Action / Decision Needed", "enabled": True, "custom": False},
+    {"key": "reason", "label": "Reason (if delayed or changed)", "enabled": True, "custom": False},
+    {"key": "x_risk_dependency", "label": "Risk / Dependency", "enabled": True, "custom": True, "type": "text",
+     "values": [], "required": False},
+    {"key": "description", "label": "Description", "enabled": True, "custom": False},
+    {"key": "notes", "label": "Notes", "enabled": True, "custom": False},
+    {"key": "duration_days", "label": "Duration (days)", "enabled": False, "custom": False},
+    {"key": "reviewers", "label": "Reviewers", "enabled": False, "custom": False},
+    {"key": "approvers", "label": "Approvers", "enabled": False, "custom": False},
+    {"key": "attachment_links", "label": "Attachment Links", "enabled": False, "custom": False},
+    {"key": "project", "label": "Project", "enabled": False, "custom": False},
+    {"key": "entity", "label": "Entity", "enabled": False, "custom": False},
+    {"key": "milestone", "label": "Milestone", "enabled": False, "custom": False},
+)
+# The "Simple" preset is the built-in default (Aly, 2026-09-22): nine columns, keys
+# pre-filled in the template. Every other column stays defined but off.
+SIMPLE_ENABLED: tuple[tuple[str, str], ...] = (
+    ("import_key", "Import Key"), ("title", "Title"), ("parent_key", "Step of (Key)"), ("owner_email", "Owner Email"),
+    ("start_date", "Start Date"), ("due_date", "Due Date"), ("status", "Status"), ("criticality", "Criticality"),
+    ("notes", "Notes"),
+)
+SIMPLE_TEMPLATE_COLUMNS: tuple[dict, ...] = tuple(
+    [{"key": key, "label": label, "enabled": True, "custom": False} for key, label in SIMPLE_ENABLED]
+    + [{**item, "enabled": False} for item in FULL_TEMPLATE_COLUMNS if item["key"] not in {k for k, _ in SIMPLE_ENABLED}]
+)
+PRESETS = {"simple": SIMPLE_TEMPLATE_COLUMNS, "full": FULL_TEMPLATE_COLUMNS}
+DEFAULT_TEMPLATE_COLUMNS = SIMPLE_TEMPLATE_COLUMNS
+SIMPLE_KEYS = frozenset(key for key, _ in SIMPLE_ENABLED)
+SIMPLE_PROMPTS = {
+    "import_key": "Filled in for you (T-001, T-002 ...) as soon as you type the Title. You may overwrite it with your own short id (letters, digits, . _ -, no spaces, unique). Keep it the same on every re-upload.",
+    "title": "Required. The task, step or action item, up to 200 characters. One row each.",
+    "parent_key": "Optional. The Import Key of the task this row is a step of (for example T-001). Leave blank for a top-level task.",
+    "notes": "Optional. Anything else: the decision or support needed, a risk, the wording of an unknown date (TBD), who else helps.",
+}
+TYPE_COLUMN_KEY = "x_type"           # custom list column whose "Milestone" value sets tasks.is_milestone
+CUSTOM_PROMPTS = {
+    "x_type": ("Task = ordinary work. Milestone = zero-length event (Start = Due). Action item = a committed follow-up from a meeting. Blank = Task.",
+               "Milestone rows are drawn as zero-length events and their moves are Owner-protected.",
+               "Milestone -> tasks.is_milestone; label kept in tasks.import_extras"),
+    "x_risk_dependency": ("Optional. One line on what could derail this row or what it depends on outside this plan.",
+                          "Kept with the task (read-only) until Astra has a RAID register.",
+                          "tasks.import_extras['x_risk_dependency']"),
+}
 
 _STATUS_BY_LABEL = {label.casefold(): code for label, code in STATUS_LABELS}
 STATUS_SYNONYMS = {
@@ -263,17 +375,43 @@ class ActiveColumn:
     def prompt(self) -> str:
         if self.builtin:
             return self.builtin.prompt or self.builtin.kind
+        if self.key in CUSTOM_PROMPTS:
+            return CUSTOM_PROMPTS[self.key][0]
         if self.kind == "list":
             return "Pick from the list: " + ", ".join(self.values)
         if self.kind == "date":
-            return "A real date (dd-mm-yyyy)."
+            return "A real date (dd-mm-yyyy; type yyyy-mm-dd if unsure)."
         if self.kind == "number":
             return "A number."
-        return "Free text."
+        return "Free text, up to 4000 characters."
+
+    @property
+    def note(self) -> str:
+        if self.builtin:
+            return self.builtin.note
+        return CUSTOM_PROMPTS.get(self.key, ("", "", ""))[1]
+
+    @property
+    def target(self) -> str:
+        if self.builtin:
+            return self.builtin.target
+        return CUSTOM_PROMPTS.get(self.key, ("", "", f"tasks.import_extras['{self.key}']"))[2]
+
+    @property
+    def vkind(self) -> str:
+        if self.builtin:
+            return self.builtin.vkind
+        return {"list": "list", "date": "date", "number": "number"}.get(self.kind, "long")
+
+    @property
+    def core(self) -> bool:
+        return self.key in CORE_KEYS
 
     @property
     def width(self) -> int:
-        return self.builtin.width if self.builtin else 18
+        if self.builtin:
+            return self.builtin.width
+        return {"list": 14, "date": 13, "number": 12}.get(self.kind, 30)
 
     @property
     def example(self) -> str:
@@ -308,7 +446,17 @@ class TemplateConfig:
 
     @classmethod
     def default(cls) -> "TemplateConfig":
-        return cls([{"key": column.key, "label": column.header, "enabled": True, "custom": False} for column in COLUMNS])
+        return cls.preset("simple")
+
+    @classmethod
+    def preset(cls, name: str) -> "TemplateConfig":
+        if name not in PRESETS:
+            raise ValueError(f"Unknown preset '{name}'. Use one of: {', '.join(PRESETS)}.")
+        return cls.normalize([dict(item) for item in PRESETS[name]])
+
+    def is_extended(self) -> bool:
+        """True when anything beyond the Simple preset's nine columns is enabled."""
+        return any(column.key not in SIMPLE_KEYS for column in self.active)
 
     @classmethod
     def from_json(cls, text: str | None) -> "TemplateConfig":
@@ -401,6 +549,8 @@ class TemplateConfig:
             "core_keys": list(CORE_KEYS),
             "hash": self.hash(),
             "labels": list(self.labels()),
+            "presets": {name: [item["key"] for item in columns if item["enabled"]] for name, columns in PRESETS.items()},
+            "extended": self.is_extended(),
         }
 
     def to_json(self) -> str:
@@ -416,6 +566,10 @@ class TemplateConfig:
 
     def labels(self) -> tuple:
         return tuple(column.label for column in self.active)
+
+    def fingerprint(self) -> str:
+        """Header fingerprint written to _astra!B2 (labels only; informational)."""
+        return hashlib.sha256("|".join(self.labels()).encode("utf-8")).hexdigest()[:16]
 
     def match_header(self, text: str):
         """Return (column, matched_by_alias) for a header cell, or (None, False)."""
@@ -434,7 +588,96 @@ class TemplateConfig:
         return None, False
 
 
-# --------------------------------------------------------------------------- template workbook
+# --------------------------------------------------------------------------- template workbook (v2)
+#
+# Seven sheets: README (locked), Project (label / value / guidance; Value column
+# unlocked), Tasks (header row 1 from the configuration, 2,000 unlocked data rows,
+# frozen header, autofilter, dropdowns from named ranges, date and shape rules),
+# Example (three worked rows, fully locked), People (email, name, role, notes, a
+# computed "Used in Tasks" count), Lists (hidden; the named ranges the dropdowns
+# read) and _astra (veryHidden; B1 configuration hash, B2 header fingerprint, B3
+# template family, B4 build time). Written with zipfile only. Header hover
+# comments from the openpyxl reference need a VML part and are not emitted; their
+# text lives in the input messages and the README dictionary instead.
+
+TEMPLATE_FAMILY = "astra-import-v2"
+SIMPLE_FAMILY = "astra-import-simple"
+PROJECT_SHEET = "Project"
+PEOPLE_SHEET = "People"
+EXAMPLE_SHEET = "Example"
+LISTS_SHEET = "Lists"
+PEOPLE_ROWS = 200
+NAVY, SLATE, TEAL, PALE_RED, GREY, PALE_GREY, BAND, WHITE = (
+    "FF172A46", "FF475467", "FF0F6E6E", "FFFEE4E2", "FF667085", "FFF2F4F7", "FFF8FAFC", "FFFFFFFF")
+
+# cellXfs indices written by _styles_xml
+XF_LOCKED, XF_HEAD_CORE, XF_HEAD_OPTIONAL, XF_HEAD_CUSTOM = 0, 1, 2, 3
+XF_TEXT, XF_DATE, XF_INT, XF_NUMBER, XF_CENTER = 4, 5, 6, 7, 8
+XF_WRAP_LOCKED, XF_EX_TEXT, XF_EX_DATE, XF_EX_CENTER, XF_TITLE, XF_SUBTLE = 9, 10, 11, 12, 13, 14
+XF_LABEL_REQ, XF_LABEL, XF_GUIDANCE, XF_FORMULA, XF_HEAD_SLATE_PLAIN, XF_DATE_LOCKED = 15, 16, 17, 18, 19, 20
+
+PROJECT_FIELDS = (
+    # (label, kind, required, guidance, astra target)
+    ("Project Name", "text", True, "The project as it should appear in Astra. Pick the same project on the Import screen; the App Owner may create it from this row.", "projects.name"),
+    ("Description", "long", False, "One paragraph: purpose, scope, the meeting or mandate it comes from.", "projects.description"),
+    ("Filing Entity", "list:Lists_Entity", False, "The approved entity this project rolls up to. Leave blank if unsure; the App Owner files it in Astra.", "project_entities (App Owner only)"),
+    ("Project Manager Email", "email", False, "The person who manages the project day to day. Must already exist in Astra (see People).", "projects.manager_user_id + memberships(role=manager)"),
+    ("Sponsor / Executive Owner Email", "email", False, "The executive accountable for the outcome.", "not stored yet - written into the description on import"),
+    ("Timezone", "list:Lists_Timezone", False, "Governs what 'end of day' means for due dates. Default Asia/Karachi.", "projects.timezone"),
+    ("Working Days", "list:Lists_WorkingDays", False, "Which weekdays count as working days. Default: Every day (Astra's permissive calendar).", "projects.working_days"),
+    ("Planned Start Date", "date", False, "First planned working day of the project (dd-mm-yyyy; type yyyy-mm-dd if unsure).", "projects.start_date"),
+    ("Planned Finish Date", "date", False, "Target completion date (informational; never constrains tasks).", "projects.target_date"),
+    ("Plan As-of Date", "date", False, "The date this plan was last reviewed (for example the meeting date).", "import record note"),
+    ("Source Document", "text", False, "Original file, version or minute reference this workbook was built from.", "import record note"),
+    ("Prepared By Email", "email", False, "Who filled this workbook in.", "informational; the importer records the logged-in user"),
+)
+SIMPLE_PROJECT_FIELDS = (
+    ("Project Name", "text", True, "The project as it should appear in Astra. Pick the same project on the Import screen; the App Owner may create it from this row.", "projects.name"),
+    ("Project Manager Email", "email", False, "Who runs the project day to day. Must already exist in Astra.", "projects.manager_user_id"),
+    ("Timezone", "list:Lists_Timezone", False, "What 'end of day' means for due dates. Default Asia/Karachi.", "projects.timezone"),
+)
+PROJECT_FIELD_KEYS = {
+    "Project Name": "name", "Description": "description", "Filing Entity": "entity",
+    "Project Manager Email": "manager_email", "Sponsor / Executive Owner Email": "sponsor_email",
+    "Timezone": "timezone", "Working Days": "working_days", "Planned Start Date": "start_date",
+    "Planned Finish Date": "target_date", "Plan As-of Date": "as_of_date", "Source Document": "source_document",
+    "Prepared By Email": "prepared_by_email",
+}
+PEOPLE_HEADERS = (
+    ("Email", 30, "Work email exactly as the App Owner created it in Astra. This is what Tasks!Owner Email must match."),
+    ("Full Name", 26, "Display name for the App Owner to use when creating the account."),
+    ("Role on project", 16, "Manager (runs the project, may import), Member (does work) or Viewer (read only)."),
+    ("Notes", 40, "Anything the App Owner needs: team, title, whether the account already exists."),
+    ("Used in Tasks", 13, "Computed: how many Tasks rows name this email as Owner or Collaborator. 0 = not referenced."),
+)
+SIMPLE_EXAMPLE_ROWS = (
+    {"import_key": "EX-001", "title": "Submit accreditation application and upload the evidence receipt",
+     "owner_email": "jamal@example.org", "start_date": date(2026, 9, 1), "due_date": date(2026, 9, 15), "status": "Assigned",
+     "criticality": "High", "notes": "Example row. Decision needed: confirm the evidence checklist with the registrar."},
+    {"import_key": "EX-001.1", "title": "Collect signed evidence receipts from all departments", "parent_key": "EX-001",
+     "owner_email": "waseem@example.org", "start_date": date(2026, 9, 1), "due_date": date(2026, 9, 12), "status": "In progress",
+     "criticality": "Normal", "notes": "A step: 'Step of (Key)' points at EX-001."},
+)
+EXAMPLE_ROWS = (
+    {"import_key": "EX-001", "title": "Submit accreditation application and upload the evidence receipt", "x_type": "Task",
+     "owner_email": "jamal@example.org", "collaborators": "waseem@example.org", "start_date": date(2026, 9, 1),
+     "due_date": date(2026, 9, 15), "baseline_due_date": date(2026, 9, 15), "status": "Assigned", "progress": 0,
+     "criticality": "High", "next_action": "Confirm the evidence checklist with the registrar",
+     "x_risk_dependency": "Portal closes 20-09-2026; late submission slips a full cycle",
+     "description": "Application for Career-related Programme candidacy. Acceptance: receipt uploaded to the shared drive.",
+     "notes": "Example row - see README. Source minute: Board 28-08-2026 item 4.", "milestone": "No"},
+    {"import_key": "EX-001.1", "title": "Collect signed evidence receipts from all departments", "x_type": "Action item",
+     "parent_key": "EX-001", "owner_email": "waseem@example.org", "collaborators": "sajjad@example.org; jamal@example.org",
+     "start_date": date(2026, 9, 1), "due_date": date(2026, 9, 12), "baseline_due_date": date(2026, 9, 8),
+     "status": "Delayed", "progress": 40, "criticality": "Normal",
+     "next_action": "Chase the two departments that have not signed", "reason": "Two departments returned receipts a week late",
+     "notes": "A step: Parent Key points at EX-001. Original Due Date kept because Due Date moved.", "duration_days": 12},
+    {"import_key": "EX-002", "title": "Board approves the final DP/CP subject list", "x_type": "Milestone",
+     "owner_email": "aly@example.org", "start_date": date(2026, 9, 30), "due_date": date(2026, 9, 30), "status": "Assigned",
+     "criticality": "Critical", "predecessors": "EX-001", "next_action": "Table the subject list at the September board meeting",
+     "notes": "A milestone: Start = Due. Waits for EX-001 (finish-to-start).", "milestone": "Yes"},
+)
+
 
 def _inline(ref: str, text: str, style: int) -> str:
     return f'<c r="{ref}" s="{style}" t="inlineStr"><is><t xml:space="preserve">{_xml_text(text)}</t></is></c>'
@@ -444,20 +687,38 @@ def _number(ref: str, value, style: int) -> str:
     return f'<c r="{ref}" s="{style}"><v>{value}</v></c>'
 
 
-def _protection_xml(hash_value: str, salt_value: str, spin: int, *, allow_edit_rows: bool) -> str:
-    # In <sheetProtection> a "1" LOCKS the action. Widening columns and adding or
-    # removing data rows stay allowed on the Tasks sheet; inserting or deleting
-    # columns and sorting are locked so the header contract survives.
-    rows = "0" if allow_edit_rows else "1"
+def _formula(ref: str, formula: str, style: int) -> str:
+    # No cached <v>: Excel computes on open (workbook has fullCalcOnLoad).
+    return f'<c r="{ref}" s="{style}" t="str"><f>{_xml_text(formula)}</f></c>'
+
+
+def _cell(ref: str, value, style_text: int, style_date: int, style_number: int) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, date):
+        return _number(ref, excel_serial(value), style_date)
+    if isinstance(value, bool):
+        return _inline(ref, "Yes" if value else "No", style_text)
+    if isinstance(value, (int, float)):
+        return _number(ref, value, style_number)
+    return _inline(ref, str(value), style_text)
+
+
+def _protection_xml(hash_value: str, salt_value: str, spin: int, *, allow_rows: bool = False,
+                    allow_filter: bool = False) -> str:
+    # In <sheetProtection> a "1" LOCKS the action. Widening columns stays allowed
+    # everywhere; adding or removing rows and filtering only where asked for.
+    rows = "0" if allow_rows else "1"
     return (
         f'<sheetProtection algorithmName="SHA-512" hashValue="{hash_value}" saltValue="{salt_value}" '
         f'spinCount="{spin}" sheet="1" objects="1" scenarios="1" formatCells="1" formatColumns="0" '
         f'formatRows="{rows}" insertColumns="1" insertRows="{rows}" insertHyperlinks="1" deleteColumns="1" '
-        f'deleteRows="{rows}" sort="1" autoFilter="1" pivotTables="1" selectLockedCells="0" selectUnlockedCells="0"/>'
+        f'deleteRows="{rows}" sort="1" autoFilter="{"0" if allow_filter else "1"}" pivotTables="1" '
+        f'selectLockedCells="0" selectUnlockedCells="0"/>'
     )
 
 
-def _validation(kind: str, sqref: str, prompt_title: str, prompt: str, error: str, **attrs) -> str:
+def _validation(kind: str, sqref: str, prompt_title: str, prompt: str, error: str, *, style: str = "stop", **attrs) -> str:
     formulas = ""
     if "formula1" in attrs:
         formulas += f"<formula1>{_xml_text(attrs.pop('formula1'))}</formula1>"
@@ -466,229 +727,607 @@ def _validation(kind: str, sqref: str, prompt_title: str, prompt: str, error: st
     extra = "".join(f' {name}="{_xml(value)}"' for name, value in attrs.items())
     return (
         f'<dataValidation type="{kind}"{extra} allowBlank="1" showInputMessage="1" showErrorMessage="1" '
-        f'errorStyle="stop" errorTitle="Astra import template" error="{_xml(error[:255])}" '
+        f'errorStyle="{style}" errorTitle="Astra import template" error="{_xml(error[:255])}" '
         f'promptTitle="{_xml(prompt_title[:32])}" prompt="{_xml(prompt[:255])}" sqref="{sqref}">{formulas}</dataValidation>'
     )
 
 
-def readme_lines(config: TemplateConfig) -> list[str]:
-    status_list = ", ".join(label for label, _ in STATUS_LABELS)
-    lines = [
-        "Astra import template — how to fill the Tasks sheet",
-        f"Template version {config.hash()}. Keep the header row exactly as it is: Astra checks it on upload, "
-        "and rejects a template downloaded before the App Owner changed the column settings.",
-        "",
-        "1. One row per task or step. Keep Import Key stable forever — it is how a re-import updates a task instead of duplicating it.",
-        f"2. Delete or overwrite the example row (Import Key {EXAMPLE_KEY}); Astra refuses to import it.",
-        "3. Dates must be real dates, shown as dd-mm-yyyy (for example 07-09-2026). Never type TBD, Immediate or 'Sept 7-10' in a date column — put that text in Notes and leave the date blank.",
-        "4. People by work email. The person must already exist in Astra and have access to the project (the App Owner adds users and grants access in the People panel).",
-        "5. A step (subtask) is a row whose Parent Key is another row's Import Key or the key of a task already in the project.",
-        "6. Predecessors = the Import Keys this row waits for (finish-to-start), separated by ';'.",
-        f"7. Status values: {status_list}. Synonyms such as Not Started, Done, Delayed/At Risk, Blocked are accepted.",
-        "   Delayed, On hold, Cancelled, Abandoned and Reopened need a Reason. Completed, Submitted, On hold and Reopened are recorded on first import only and are skipped on re-import because they need their lifecycle action in Astra.",
-        "8. Criticality: Critical, High, Normal, Low or blank (Unrated). Milestone: Yes or No. % Complete: 0-100.",
-        "9. Project, Entity, Original Due Date and Attachment Links are applied only when the App Owner imports; a project Manager's import skips them with a warning.",
-        "10. Anything Astra cannot store exactly is written to the task's Notes and listed in the import report. Nothing is deleted by an import and an existing baseline is never overwritten.",
-        "11. Preview first: the Import screen shows every row with its warnings and errors before anything is written.",
-        f"12. The Tasks and README sheets are protected against accidental edits (password: {TEMPLATE_SHEET_PASSWORD}). Data rows are editable; the header is not.",
-        "",
-        "Columns:",
+def _cf_rule(sqref: str, formula: str, dxf: int, priority: int) -> str:
+    return (f'<conditionalFormatting sqref="{sqref}"><cfRule type="expression" dxfId="{dxf}" priority="{priority}">'
+            f'<formula>{_xml_text(formula)}</formula></cfRule></conditionalFormatting>')
+
+
+def _sheet(body: str, *, tab: str | None = None) -> str:
+    pr = f'<sheetPr><tabColor rgb="{tab}"/></sheetPr>' if tab else ""
+    return (
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' + pr + body + '</worksheet>'
+    )
+
+
+def _styles_xml() -> str:
+    def xf(num_fmt=0, font=0, fill=0, *, unlocked=False, align="", border=1):
+        attrs = f'numFmtId="{num_fmt}" fontId="{font}" fillId="{fill}" borderId="{border}" xfId="0"'
+        if num_fmt:
+            attrs += ' applyNumberFormat="1"'
+        if font:
+            attrs += ' applyFont="1"'
+        if fill:
+            attrs += ' applyFill="1"'
+        if align:
+            attrs += ' applyAlignment="1"'
+        if unlocked:
+            attrs += ' applyProtection="1"'
+        inner = (f"<alignment {align}/>" if align else "") + ('<protection locked="0"/>' if unlocked else "")
+        return f"<xf {attrs}>{inner}</xf>" if inner else f"<xf {attrs}/>"
+
+    wrap, center, top = 'wrapText="1" vertical="top"', 'horizontal="center" vertical="top"', 'vertical="top"'
+    head = 'horizontal="center" vertical="center" wrapText="1"'
+    xfs = [
+        xf(),                                                   # 0 locked default
+        xf(0, 1, 2, align=head),                                # 1 header core (navy)
+        xf(0, 1, 3, align=head),                                # 2 header optional (slate)
+        xf(0, 1, 4, align=head),                                # 3 header custom (teal)
+        xf(0, 0, 0, unlocked=True, align=wrap),                 # 4 unlocked text
+        xf(164, 0, 0, unlocked=True, align=center),             # 5 unlocked date
+        xf(1, 0, 0, unlocked=True, align=center),               # 6 unlocked integer
+        xf(2, 0, 0, unlocked=True, align=center),               # 7 unlocked number
+        xf(0, 0, 0, unlocked=True, align=center),               # 8 unlocked centred text (keys, lists)
+        xf(0, 0, 0, align=wrap),                                # 9 locked wrapped text
+        xf(0, 2, 0, align=wrap),                                # 10 example text (italic grey)
+        xf(164, 2, 0, align=center),                            # 11 example date
+        xf(0, 2, 0, align=center),                              # 12 example centred
+        xf(0, 3, 2, align='vertical="center"', border=0),       # 13 README title (white on navy)
+        xf(0, 4, 0, align=wrap, border=0),                      # 14 README subtle grey
+        xf(0, 1, 2, align=top),                                 # 15 Project label required (navy)
+        xf(0, 5, 5, align=top),                                 # 16 Project label (bold on pale grey)
+        xf(0, 4, 0, align=wrap),                                # 17 guidance (grey, wrapped)
+        xf(0, 4, 0, align='horizontal="center"'),               # 18 formula cell (grey, locked)
+        xf(0, 1, 3, align='vertical="center"'),                 # 19 slate header, no wrap
+        xf(164, 0, 0, align=center),                            # 20 locked date
     ]
-    for column in config.active:
-        flags = " (required)" if column.required else ""
-        lines.append(f"{column.label}{flags}: {column.prompt}")
-    return lines
-
-
-def build_template_xlsx(config: TemplateConfig | None = None) -> bytes:
-    """Return the locked Astra template workbook for this configuration (zipfile, no dependencies)."""
-    config = config or TemplateConfig.default()
-    salt = os.urandom(16)
-    spin = 100000
-    hash_value = _protection_hash(TEMPLATE_SHEET_PASSWORD, salt, spin)
-    salt_value = base64.b64encode(salt).decode("ascii")
-    last_row = TEMPLATE_DATA_ROWS + 1
-    columns = config.active
-    last_col = column_letter(len(columns))
-
-    # ---- styles: 0 default locked, 1 header, 2 unlocked text, 3 unlocked date, 4 wrapped text, 5 unlocked integer, 6 unlocked number
-    styles = (
+    return (
         '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
         f'<numFmts count="1"><numFmt numFmtId="164" formatCode="{DISPLAY_DATE_FORMAT}"/></numFmts>'
-        '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font>'
-        '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>'
-        '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
-        '<fill><patternFill patternType="solid"><fgColor rgb="FF172A46"/><bgColor indexed="64"/></patternFill></fill></fills>'
-        '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+        '<fonts count="6">'
+        '<font><sz val="11"/><color rgb="FF101828"/><name val="Calibri"/></font>'
+        f'<font><b/><sz val="11"/><color rgb="{WHITE}"/><name val="Calibri"/></font>'
+        f'<font><i/><sz val="11"/><color rgb="{GREY}"/><name val="Calibri"/></font>'
+        f'<font><b/><sz val="16"/><color rgb="{WHITE}"/><name val="Calibri"/></font>'
+        f'<font><sz val="10"/><color rgb="{GREY}"/><name val="Calibri"/></font>'
+        '<font><b/><sz val="11"/><color rgb="FF101828"/><name val="Calibri"/></font>'
+        '</fonts>'
+        '<fills count="7"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+        f'<fill><patternFill patternType="solid"><fgColor rgb="{NAVY}"/><bgColor indexed="64"/></patternFill></fill>'
+        f'<fill><patternFill patternType="solid"><fgColor rgb="{SLATE}"/><bgColor indexed="64"/></patternFill></fill>'
+        f'<fill><patternFill patternType="solid"><fgColor rgb="{TEAL}"/><bgColor indexed="64"/></patternFill></fill>'
+        f'<fill><patternFill patternType="solid"><fgColor rgb="{PALE_GREY}"/><bgColor indexed="64"/></patternFill></fill>'
+        f'<fill><patternFill patternType="solid"><fgColor rgb="{PALE_RED}"/><bgColor indexed="64"/></patternFill></fill>'
+        '</fills>'
+        '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'
+        '<border><left style="thin"><color rgb="FFD0D5DD"/></left><right style="thin"><color rgb="FFD0D5DD"/></right>'
+        '<top style="thin"><color rgb="FFD0D5DD"/></top><bottom style="thin"><color rgb="FFD0D5DD"/></bottom><diagonal/></border></borders>'
         '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-        '<cellXfs count="7">'
-        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
-        '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1">'
-        '<alignment vertical="center" wrapText="1"/></xf>'
-        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyProtection="1"><protection locked="0"/></xf>'
-        '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyProtection="1">'
-        '<protection locked="0"/></xf>'
-        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>'
-        '<xf numFmtId="1" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyProtection="1">'
-        '<protection locked="0"/></xf>'
-        '<xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyProtection="1">'
-        '<protection locked="0"/></xf>'
-        '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'
+        f'<cellXfs count="{len(xfs)}">{"".join(xfs)}</cellXfs>'
+        '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+        f'<dxfs count="2"><dxf><fill><patternFill patternType="solid"><fgColor rgb="{PALE_RED}"/><bgColor rgb="{PALE_RED}"/></patternFill></fill></dxf>'
+        f'<dxf><fill><patternFill patternType="solid"><fgColor rgb="{BAND}"/><bgColor rgb="{BAND}"/></patternFill></fill></dxf></dxfs>'
+        '</styleSheet>'
     )
 
-    def data_style(column: ActiveColumn) -> int:
-        if column.kind == "date":
-            return 3
-        if column.kind == "integer":
-            return 5
-        if column.kind == "number":
-            return 6
-        return 2
 
-    cols = "".join(
-        f'<col min="{index}" max="{index}" width="{column.width}" customWidth="1" style="{data_style(column)}"/>'
-        for index, column in enumerate(columns, start=1)
-    )
-    header_cells = "".join(
-        _inline(f"{column_letter(index)}1", column.label, 1) for index, column in enumerate(columns, start=1)
-    )
-    example_cells = []
-    for index, column in enumerate(columns, start=1):
-        ref = f"{column_letter(index)}2"
-        value = EXAMPLE_KEY if column.key == "import_key" else column.example
-        if not value:
-            continue
-        if column.kind == "date":
-            parsed, _ = parse_date_cell(value, allow_serial=False)
-            example_cells.append(_number(ref, excel_serial(parsed), 3))
+class _TemplateWorkbook:
+    """Builds the seven-sheet template for one configuration."""
+
+    def __init__(self, config: TemplateConfig, *, tasks=None, project=None, people=None):
+        self.config = config
+        self.columns = config.active
+        self.extended = config.is_extended()
+        self.family = TEMPLATE_FAMILY if self.extended else SIMPLE_FAMILY
+        self.project_fields = PROJECT_FIELDS if self.extended else SIMPLE_PROJECT_FIELDS
+        self.example_rows = list(EXAMPLE_ROWS if self.extended else SIMPLE_EXAMPLE_ROWS)
+        self.tasks = tasks or []
+        self.project = project or {}
+        self.people = people or []
+        self.letter = {column.key: column_letter(index) for index, column in enumerate(self.columns, start=1)}
+        self.last_col = column_letter(len(self.columns))
+        self.last_row = TEMPLATE_DATA_ROWS + 1
+        salt = os.urandom(16)
+        self.spin = 100000
+        self.hash_value = _protection_hash(TEMPLATE_SHEET_PASSWORD, salt, self.spin)
+        self.salt_value = base64.b64encode(salt).decode("ascii")
+        self.lists: list[tuple[str, str, tuple]] = [
+            ("Lists_Status", "Status", tuple(label for label, _ in STATUS_LABELS)),
+            ("Lists_Criticality", "Criticality", CRITICALITY_LABELS),
+            ("Lists_Type", "Type", TYPE_LABELS),
+            ("Lists_YesNo", "Yes / No", ("Yes", "No")),
+            ("Lists_ProjectRole", "Role on project", PROJECT_ROLE_LABELS),
+            ("Lists_Timezone", "Timezone", TIMEZONE_LABELS),
+            ("Lists_WorkingDays", "Working days", tuple(WORKING_DAY_LABELS)),
+            ("Lists_Entity", "Entity", ENTITY_LABELS),
+        ]
+        for column in self.columns:  # custom list columns get their own named range
+            if column.custom and column.kind == "list":
+                self.lists.append((f"Lists_{column.key}", column.label, tuple(column.values)))
+
+    def protect(self, **kwargs) -> str:
+        return _protection_xml(self.hash_value, self.salt_value, self.spin, **kwargs)
+
+    def prompt(self, column: ActiveColumn) -> str:
+        if not self.extended and column.key in SIMPLE_PROMPTS:
+            return SIMPLE_PROMPTS[column.key]
+        return column.prompt
+
+    def list_name(self, column: ActiveColumn) -> str:
+        if column.custom:
+            return f"Lists_{column.key}"
+        return {"status": "Lists_Status", "criticality": "Lists_Criticality", "milestone": "Lists_YesNo"}.get(column.key, "")
+
+    # ---- Tasks / Example ---------------------------------------------------
+    def data_styles(self, column: ActiveColumn, *, example: bool) -> tuple[int, int, int]:
+        """(text style, date style, number style) for a data cell of this column."""
+        if example:
+            return (XF_EX_CENTER if column.vkind in ("key", "key_ref", "list", "percent", "int", "date", "date_due", "number") else XF_EX_TEXT,
+                    XF_EX_DATE, XF_EX_CENTER)
+        if column.vkind in ("date", "date_due"):
+            return XF_DATE, XF_DATE, XF_DATE
+        if column.vkind in ("percent", "int"):
+            return XF_INT, XF_DATE, XF_INT
+        if column.vkind == "number":
+            return XF_NUMBER, XF_DATE, XF_NUMBER
+        if column.vkind in ("key", "key_ref", "list"):
+            return XF_CENTER, XF_DATE, XF_CENTER
+        return XF_TEXT, XF_DATE, XF_INT
+
+    def header_row(self) -> str:
+        cells = []
+        for index, column in enumerate(self.columns, start=1):
+            style = XF_HEAD_CUSTOM if column.custom else (XF_HEAD_CORE if column.core else XF_HEAD_OPTIONAL)
+            cells.append(_inline(f"{column_letter(index)}1", column.label, style))
+        return f'<row r="1" ht="34" customHeight="1">{"".join(cells)}</row>'
+
+    def task_rows(self, rows, *, example: bool) -> str:
+        out = []
+        styles = [self.data_styles(column, example=example) for column in self.columns]
+        last = len(rows) + 1 if example else self.last_row
+        for number in range(2, last + 1):
+            row = rows[number - 2] if number - 2 < len(rows) else {}
+            cells = []
+            for index, column in enumerate(self.columns, start=1):
+                text_style, date_style, number_style = styles[index - 1]
+                ref = f"{column_letter(index)}{number}"
+                cell = _cell(ref, row.get(column.key), text_style, date_style, number_style)
+                if not cell and column.key == "import_key" and not example:
+                    # Pre-filled key: appears as T-001, T-002 ... once the Title is typed; the user may overwrite it.
+                    title_col = self.letter["title"]
+                    cell = _formula(ref, f'IF({title_col}{number}="","","T-"&TEXT(ROW()-1,"000"))', text_style)
+                cells.append(cell or f'<c r="{ref}" s="{text_style}"/>')
+            long = any(len(str(value or "")) > 60 for value in row.values())
+            height = ' ht="48" customHeight="1"' if row and (example or long) else ""
+            out.append(f'<row r="{number}"{height}>{"".join(cells)}</row>')
+        return "".join(out)
+
+    def task_validations(self) -> str:
+        key_col = self.letter["import_key"]
+        start_col = self.letter["start_date"]
+        keys_range = f"${key_col}$2:${key_col}${self.last_row}"
+        rules = []
+        for column in self.columns:
+            letter = self.letter[column.key]
+            rng = f"{letter}2:{letter}{self.last_row}"
+            c = f"{letter}2"
+            label, prompt, kind = column.label, self.prompt(column), column.vkind
+            if kind == "key":
+                rules.append(_validation("custom", rng, label, prompt,
+                    "Import Key: 1-40 characters, no spaces, letters/digits/._- only, and unique in this sheet.",
+                    formula1=f'AND(LEN({c})>0,LEN({c})<=40,ISERROR(FIND(" ",{c})),COUNTIF({keys_range},{c})=1)'))
+            elif kind == "key_ref":
+                rules.append(_validation("custom", rng, label, prompt,
+                    "Parent Key must be the Import Key of another row in this sheet (or of a task already in Astra - press Yes to keep it).",
+                    style="warning", formula1=f'AND({c}<>{key_col}2,COUNTIF({keys_range},{c})=1)'))
+            elif kind == "key_list":
+                rules.append(_validation("custom", rng, label, prompt,
+                    "Separate keys with ; (semicolon), not commas, and do not list the row's own key.",
+                    style="warning", formula1=f'AND(ISERROR(FIND(",",{c})),ISERROR(FIND({key_col}2,{c})))'))
+            elif kind == "text":
+                rules.append(_validation("textLength", rng, label, prompt, f"{label} must be 1 to 200 characters.",
+                                         operator="between", formula1="1", formula2="200"))
+            elif kind == "short":
+                rules.append(_validation("textLength", rng, label, prompt, "Up to 200 characters.",
+                                         operator="lessThanOrEqual", formula1="200"))
+            elif kind == "long":
+                rules.append(_validation("textLength", rng, label, prompt, "Up to 4000 characters.",
+                                         operator="lessThanOrEqual", formula1="4000"))
+            elif kind == "email":
+                rules.append(_validation("custom", rng, label, prompt, "Enter one work email (name@domain), no spaces, no names.",
+                    formula1=f'AND(ISNUMBER(FIND("@",{c})),ISERROR(FIND(" ",{c})),ISNUMBER(FIND(".",{c},FIND("@",{c})+1)),ISERROR(FIND(";",{c})),LEN({c})<=254)'))
+            elif kind == "email_list":
+                rules.append(_validation("custom", rng, label, prompt, "Emails only, separated by ; (semicolon). Names and commas are not accepted.",
+                    formula1=f'AND(ISNUMBER(FIND("@",{c})),ISERROR(FIND(",",{c})))'))
+            elif kind == "date":
+                rules.append(_validation("date", rng, label, prompt,
+                    "Enter a real date between 01-01-2000 and 31-12-2100 (type yyyy-mm-dd if unsure). Put TBD or wording in Notes and leave this blank.",
+                    operator="between", formula1=str(excel_serial(DATE_MIN)), formula2=str(excel_serial(DATE_MAX))))
+            elif kind == "date_due":
+                rules.append(_validation("custom", rng, label, prompt,
+                    "Due Date must be a real date between 01-01-2000 and 31-12-2100 and not before Start Date. Put TBD or wording in Notes.",
+                    formula1=f'AND(ISNUMBER({c}),{c}>=DATE(2000,1,1),{c}<=DATE(2100,12,31),OR({start_col}2="",{c}>={start_col}2))'))
+            elif kind == "percent":
+                rules.append(_validation("whole", rng, label, prompt, "Enter a whole number from 0 to 100.",
+                                         operator="between", formula1="0", formula2="100"))
+            elif kind == "int":
+                rules.append(_validation("whole", rng, label, prompt, "Enter a whole number of days (1 to 3660).",
+                                         operator="between", formula1="1", formula2="3660"))
+            elif kind == "number":
+                rules.append(_validation("decimal", rng, label, prompt, "Enter a number.",
+                                         operator="between", formula1="-1000000000000", formula2="1000000000000"))
+            elif kind == "list":
+                rules.append(_validation("list", rng, label, prompt, "Choose a value from the dropdown list.",
+                                         formula1=self.list_name(column)))
+        return f'<dataValidations count="{len(rules)}">{"".join(rules)}</dataValidations>'
+
+    def task_conditional_formats(self) -> str:
+        a, t = self.letter["import_key"], self.letter["title"]
+        s, d = self.letter["start_date"], self.letter["due_date"]
+        row_has_data = f"COUNTA(${a}2:${self.last_col}2)>0"
+        return "".join([
+            _cf_rule(f"{a}2:{a}{self.last_row}", f'AND(${a}2="",{row_has_data})', 0, 1),
+            _cf_rule(f"{t}2:{t}{self.last_row}", f'AND(${t}2="",{row_has_data})', 0, 2),
+            _cf_rule(f"{d}2:{d}{self.last_row}", f"AND(ISNUMBER(${s}2),ISNUMBER(${d}2),${d}2<${s}2)", 0, 3),
+            _cf_rule(f"{a}2:{self.last_col}{self.last_row}", "MOD(ROW(),2)=0", 1, 4),
+        ])
+
+    def tasks_sheet(self, rows, *, example: bool) -> str:
+        cols = []
+        for index, column in enumerate(self.columns, start=1):
+            text_style = self.data_styles(column, example=example)[0]
+            style = XF_LOCKED if example else text_style
+            cols.append(f'<col min="{index}" max="{index}" width="{column.width}" customWidth="1" style="{style}"/>')
+        selected = ' tabSelected="1"' if rows and not example else ""
+        body = (
+            f'<dimension ref="A1:{self.last_col}{max(1, len(rows) + 1)}"/>'
+            f'<sheetViews><sheetView{selected} workbookViewId="0">'
+            + ('<pane xSplit="2" ySplit="1" topLeftCell="C2" activePane="bottomRight" state="frozen"/>'
+               '<selection pane="topRight" activeCell="C1" sqref="C1"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/>'
+               '<selection pane="bottomRight" activeCell="C2" sqref="C2"/>' if not example else "")
+            + '</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>'
+            f'<cols>{"".join(cols)}</cols>'
+            f'<sheetData>{self.header_row()}{self.task_rows(rows, example=example)}</sheetData>'
+        )
+        if example:
+            body += self.protect()
         else:
-            example_cells.append(_inline(ref, value, data_style(column)))
-    validations = []
-    for index, column in enumerate(columns, start=1):
-        letters = column_letter(index)
-        sqref = f"{letters}2:{letters}{last_row}"
-        if column.kind in ("enum", "boolean", "list"):
-            validations.append(_validation(
-                "list", sqref, column.label, column.prompt, "Choose a value from the list.",
-                formula1='"' + ",".join(column.values) + '"',
-            ))
-        elif column.kind == "date":
-            validations.append(_validation(
-                "date", sqref, column.label, "A real date between 01-01-2000 and 31-12-2100 (dd-mm-yyyy).",
-                "Enter a real date between 01-01-2000 and 31-12-2100. Put TBD or prose in Notes instead.",
-                operator="between", formula1=str(excel_serial(DATE_MIN)), formula2=str(excel_serial(DATE_MAX)),
-            ))
-        elif column.key == "progress":
-            validations.append(_validation(
-                "whole", sqref, column.label, column.prompt, "Enter a whole number from 0 to 100.",
-                operator="between", formula1="0", formula2="100",
-            ))
-        elif column.key == "duration_days":
-            validations.append(_validation(
-                "whole", sqref, column.label, column.prompt, "Enter a whole number of days (1 to 3660).",
-                operator="between", formula1="1", formula2="3660",
-            ))
-        elif column.kind == "number":
-            validations.append(_validation(
-                "decimal", sqref, column.label, column.prompt, "Enter a number.",
-                operator="between", formula1="-1000000000000", formula2="1000000000000",
-            ))
-        elif column.key == "import_key":
-            validations.append(_validation(
-                "textLength", sqref, column.label, column.prompt, f"Import Key must be 1 to {MAX_KEY_CHARS} characters.",
-                operator="between", formula1="1", formula2=str(MAX_KEY_CHARS),
-            ))
-        elif column.key == "title":
-            validations.append(_validation(
-                "textLength", sqref, column.label, column.prompt, f"Title must be 1 to {MAX_TITLE_CHARS} characters.",
-                operator="between", formula1="1", formula2=str(MAX_TITLE_CHARS),
-            ))
-        else:
-            validations.append(_validation("custom", sqref, column.label, column.prompt, column.prompt, formula1="TRUE"))
-    tasks_sheet = (
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
-        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        f'<dimension ref="A1:{last_col}2"/>'
-        '<sheetViews><sheetView tabSelected="1" workbookViewId="0">'
-        '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
-        '<selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>'
-        '<sheetFormatPr defaultRowHeight="15"/>'
-        f'<cols>{cols}</cols>'
-        f'<sheetData><row r="1" ht="30" customHeight="1">{header_cells}</row><row r="2">{"".join(example_cells)}</row></sheetData>'
-        + _protection_xml(hash_value, salt_value, spin, allow_edit_rows=True)
-        + f'<dataValidations count="{len(validations)}">{"".join(validations)}</dataValidations>'
-        '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>'
-        '</worksheet>'
-    )
+            body += self.protect(allow_rows=True, allow_filter=True)
+            body += f'<autoFilter ref="A1:{self.last_col}{self.last_row}"/>'
+            body += self.task_conditional_formats()
+            body += self.task_validations()
+        body += '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>'
+        return _sheet(body, tab=GREY if example else NAVY)
 
-    lines = readme_lines(config)
-    readme_rows = "".join(
-        f'<row r="{index}">{_inline(f"A{index}", line, 4)}</row>' for index, line in enumerate(lines, start=1) if line
-    )
-    readme_sheet = (
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        f'<dimension ref="A1:A{len(lines)}"/>'
-        '<sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/>'
-        '<cols><col min="1" max="1" width="120" customWidth="1" style="4"/></cols>'
-        f'<sheetData>{readme_rows}</sheetData>'
-        + _protection_xml(hash_value, salt_value, spin, allow_edit_rows=False)
-        + '</worksheet>'
-    )
-    marker_sheet = (
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        '<dimension ref="A1:B2"/><sheetViews><sheetView workbookViewId="0"/></sheetViews>'
-        '<sheetFormatPr defaultRowHeight="15"/><sheetData>'
-        f'<row r="1">{_inline("A1", MARKER_NAME, 0)}{_inline("B1", config.hash(), 0)}</row>'
-        f'<row r="2">{_inline("A2", FINGERPRINT_NAME, 0)}{_inline("B2", "|".join(config.labels()), 0)}</row>'
-        '</sheetData>' + _protection_xml(hash_value, salt_value, spin, allow_edit_rows=False) + '</worksheet>'
-    )
-    workbook = (
-        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
-        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        '<workbookPr/><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="20000" windowHeight="12000"/></bookViews>'
-        f'<sheets><sheet name="{TEMPLATE_SHEET}" sheetId="1" r:id="rId1"/>'
-        f'<sheet name="{README_SHEET}" sheetId="2" r:id="rId2"/>'
-        f'<sheet name="{MARKER_SHEET}" sheetId="3" state="hidden" r:id="rId3"/></sheets>'
-        f'<definedNames><definedName name="{MARKER_NAME}">{MARKER_SHEET}!$B$1</definedName>'
-        f'<definedName name="{FINGERPRINT_NAME}">{MARKER_SHEET}!$B$2</definedName></definedNames>'
-        '</workbook>'
-    )
-    workbook_rels = (
-        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>'
-        '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/>'
-        '<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-        '</Relationships>'
-    )
-    root_rels = (
-        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
-        '</Relationships>'
-    )
-    content_types = (
-        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-        '<Default Extension="xml" ContentType="application/xml"/>'
-        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-        '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-        '<Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-        '</Types>'
-    )
-    declaration = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("[Content_Types].xml", declaration + content_types)
-        archive.writestr("_rels/.rels", declaration + root_rels)
-        archive.writestr("xl/workbook.xml", declaration + workbook)
-        archive.writestr("xl/_rels/workbook.xml.rels", declaration + workbook_rels)
-        archive.writestr("xl/styles.xml", declaration + styles)
-        archive.writestr("xl/worksheets/sheet1.xml", declaration + tasks_sheet)
-        archive.writestr("xl/worksheets/sheet2.xml", declaration + readme_sheet)
-        archive.writestr("xl/worksheets/sheet3.xml", declaration + marker_sheet)
-    return buffer.getvalue()
+    # ---- Project ---------------------------------------------------------
+    def project_sheet(self) -> str:
+        rows = [f'<row r="1" ht="24" customHeight="1">{_inline("A1", "Field", XF_HEAD_SLATE_PLAIN)}'
+                f'{_inline("B1", "Value (fill in)", XF_HEAD_SLATE_PLAIN)}{_inline("C1", "Guidance", XF_HEAD_SLATE_PLAIN)}</row>']
+        rules = []
+        for number, (label, kind, required, guidance, target) in enumerate(self.project_fields, start=2):
+            ref = f"B{number}"
+            value = self.project.get(PROJECT_FIELD_KEYS[label])
+            cells = [_inline(f"A{number}", label + (" *" if required else ""), XF_LABEL_REQ if required else XF_LABEL)]
+            if kind == "date":
+                cells.append(_cell(ref, value, XF_DATE, XF_DATE, XF_DATE) or f'<c r="{ref}" s="{XF_DATE}"/>')
+                rules.append(_validation("date", ref, label, guidance, "Enter a real date (type yyyy-mm-dd if unsure).",
+                                         operator="between", formula1=str(excel_serial(DATE_MIN)), formula2=str(excel_serial(DATE_MAX))))
+            else:
+                cells.append(_cell(ref, value, XF_TEXT, XF_DATE, XF_TEXT) or f'<c r="{ref}" s="{XF_TEXT}"/>')
+                if kind.startswith("list:"):
+                    rules.append(_validation("list", ref, label, guidance, "Choose from the list.", formula1=kind.split(":", 1)[1]))
+                elif kind == "email":
+                    rules.append(_validation("custom", ref, label, guidance, "Enter one work email (name@domain).",
+                                             formula1=f'AND(ISNUMBER(FIND("@",{ref})),ISERROR(FIND(" ",{ref})))'))
+                elif kind == "text":
+                    rules.append(_validation("textLength", ref, label, guidance, "1 to 200 characters.",
+                                             operator="between", formula1="1", formula2="200"))
+                else:
+                    rules.append(_validation("textLength", ref, label, guidance, "Up to 4000 characters.",
+                                             operator="lessThanOrEqual", formula1="4000"))
+            cells.append(_inline(f"C{number}", f"{guidance}  Astra: {target}", XF_GUIDANCE))
+            rows.append(f'<row r="{number}" ht="36" customHeight="1">{"".join(cells)}</row>')
+        body = (
+            f'<dimension ref="A1:C{len(self.project_fields) + 1}"/>'
+            '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
+            '<selection pane="bottomLeft" activeCell="B2" sqref="B2"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>'
+            '<cols><col min="1" max="1" width="30" customWidth="1"/><col min="2" max="2" width="46" customWidth="1"/>'
+            '<col min="3" max="3" width="70" customWidth="1"/></cols>'
+            f'<sheetData>{"".join(rows)}</sheetData>'
+            + self.protect()
+            + _cf_rule("B2", '$B$2=""', 0, 1)
+            + f'<dataValidations count="{len(rules)}">{"".join(rules)}</dataValidations>'
+        )
+        return _sheet(body, tab=SLATE)
+
+    # ---- People ----------------------------------------------------------
+    def people_sheet(self) -> str:
+        owner_col, collab_col = self.letter["owner_email"], self.letter.get("collaborators")
+        head = "".join(
+            _inline(f"{column_letter(index)}1", text, XF_HEAD_CORE if index <= 2 else XF_HEAD_OPTIONAL)
+            for index, (text, _, _) in enumerate(PEOPLE_HEADERS, start=1)
+        )
+        rows = [f'<row r="1" ht="30" customHeight="1">{head}</row>']
+        last = PEOPLE_ROWS + 1
+        for number in range(2, last + 1):
+            values = self.people[number - 2] if number - 2 < len(self.people) else ()
+            cells = []
+            for index in range(1, 5):
+                value = values[index - 1] if index - 1 < len(values) else ""
+                cells.append(_cell(f"{column_letter(index)}{number}", value, XF_TEXT, XF_DATE, XF_TEXT) or "")
+            usage = f'COUNTIF(Tasks!${owner_col}$2:${owner_col}${self.last_row},A{number})'
+            if collab_col:
+                usage += f'+COUNTIF(Tasks!${collab_col}$2:${collab_col}${self.last_row},"*"&A{number}&"*")'
+            cells.append(_formula(f"E{number}", f'IF(A{number}="","",{usage})', XF_FORMULA))
+            rows.append(f'<row r="{number}">{"".join(cells)}</row>')
+        rules = [
+            _validation("custom", f"A2:A{last}", "Email", PEOPLE_HEADERS[0][2],
+                        "One work email (name@domain), no spaces, unique in this sheet.",
+                        formula1=f'AND(ISNUMBER(FIND("@",A2)),ISERROR(FIND(" ",A2)),COUNTIF($A$2:$A${last},A2)=1)'),
+            _validation("textLength", f"B2:B{last}", "Full Name", PEOPLE_HEADERS[1][2], "1 to 120 characters.",
+                        operator="between", formula1="1", formula2="120"),
+            _validation("list", f"C2:C{last}", "Role on project", PEOPLE_HEADERS[2][2], "Choose Manager, Member or Viewer.",
+                        formula1="Lists_ProjectRole"),
+        ]
+        cols = "".join(
+            f'<col min="{index}" max="{index}" width="{width}" customWidth="1" style="{XF_TEXT if index <= 4 else XF_FORMULA}"/>'
+            for index, (_, width, _) in enumerate(PEOPLE_HEADERS, start=1)
+        )
+        body = (
+            f'<dimension ref="A1:E{last}"/>'
+            '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
+            '<selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>'
+            f'<cols>{cols}</cols><sheetData>{"".join(rows)}</sheetData>'
+            + self.protect(allow_rows=True)
+            + _cf_rule(f"A2:A{last}", 'AND($A2="",COUNTA($B2:$D2)>0)', 0, 1)
+            + f'<dataValidations count="{len(rules)}">{"".join(rules)}</dataValidations>'
+        )
+        return _sheet(body, tab=SLATE)
+
+    # ---- Lists / marker ----------------------------------------------------
+    def lists_sheet(self) -> str:
+        rows: dict[int, list[str]] = {}
+        cols = []
+        for index, (_, title, values) in enumerate(self.lists, start=1):
+            letter = column_letter(index)
+            rows.setdefault(1, []).append(_inline(f"{letter}1", title, XF_HEAD_SLATE_PLAIN))
+            for number, value in enumerate(values, start=2):
+                rows.setdefault(number, []).append(_inline(f"{letter}{number}", value, XF_LOCKED))
+            width = max(14, max((len(v) for v in values), default=10) + 2)
+            cols.append(f'<col min="{index}" max="{index}" width="{width}" customWidth="1"/>')
+        sheet_rows = "".join(f'<row r="{number}">{"".join(cells)}</row>' for number, cells in sorted(rows.items()))
+        body = (f'<dimension ref="A1:{column_letter(len(self.lists))}{max(rows)}"/>'
+                '<sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/>'
+                f'<cols>{"".join(cols)}</cols><sheetData>{sheet_rows}</sheetData>' + self.protect())
+        return _sheet(body, tab=GREY)
+
+    def list_defined_names(self) -> str:
+        names = []
+        for index, (name, _, values) in enumerate(self.lists, start=1):
+            letter = column_letter(index)
+            names.append(f'<definedName name="{name}">{LISTS_SHEET}!${letter}$2:${letter}${len(values) + 1}</definedName>')
+        return "".join(names)
+
+    def marker_sheet(self) -> str:
+        built = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = [(MARKER_NAME, self.config.hash()), (FINGERPRINT_NAME, self.config.fingerprint()),
+                ("AstraTemplateFamily", self.family), ("AstraTemplateBuilt", built)]
+        sheet_rows = "".join(
+            f'<row r="{number}">{_inline(f"A{number}", key, XF_LOCKED)}{_inline(f"B{number}", value, XF_LOCKED)}</row>'
+            for number, (key, value) in enumerate(rows, start=1)
+        )
+        body = ('<dimension ref="A1:B4"/><sheetViews><sheetView workbookViewId="0"/></sheetViews>'
+                '<sheetFormatPr defaultRowHeight="15"/><cols><col min="1" max="2" width="26" customWidth="1"/></cols>'
+                f'<sheetData>{sheet_rows}</sheetData>' + self.protect())
+        return _sheet(body)
+
+    # ---- README ------------------------------------------------------------
+    def readme_sheet(self) -> str:
+        if not self.extended:
+            return self.simple_readme_sheet()
+        rows, merges = [], []
+        number = 0
+
+        def line(text: str, style: int = XF_WRAP_LOCKED, *, height: int | None = None, merge: bool = True):
+            nonlocal number
+            number += 1
+            ht = f' ht="{height}" customHeight="1"' if height else ""
+            fill = ""
+            if style == XF_TITLE:
+                fill = "".join(f'<c r="{column_letter(i)}{number}" s="{XF_TITLE}"/>' for i in range(2, 6))
+            rows.append(f'<row r="{number}"{ht}>{_inline(f"A{number}", text, style)}{fill}</row>')
+            if merge:
+                merges.append(f'<mergeCell ref="A{number}:E{number}"/>')
+
+        line("Astra import template  -  how to fill this workbook", XF_TITLE, height=30)
+        line(f"Template family {self.family}  |  column set {self.config.hash()}  |  dates display dd-mm-yyyy  |  "
+             f"built {date.today():%d-%m-%Y}", XF_SUBTLE)
+        line("")
+        line("Five steps", XF_LABEL, merge=True)
+        for text in (
+            "1. Project sheet: fill the Value column. Project Name is required; everything else helps the App Owner set the project up correctly.",
+            "2. People sheet: list every person who will appear in Tasks (Owner Email, Collaborators) with their work email and role. Send it to the App Owner, who creates the accounts and grants project access BEFORE you upload. Astra never creates users from a file.",
+            "3. Tasks sheet: one row per task, step, milestone or action item. Only Import Key and Title are required; fill the rest as far as you know it. Look at the Example sheet first - it shows a task, a delayed step under it and a milestone that waits for the task.",
+            "4. Do not touch the header row, do not add or hide columns, do not paste over the header. The sheets are protected against that; if you need another column, ask the App Owner to add it in Astra (Import > Template settings) and download the template again.",
+            "5. Upload in Astra (Import). You see a preview of every row with its warnings and errors before anything is written. Fix, re-upload, then confirm. Nothing is deleted by an import and an existing baseline is never overwritten.",
+        ):
+            line(text, height=32)
+        line("")
+        line("Rules that make the upload seamless", XF_LABEL)
+        status_list = ", ".join(label for label, _ in STATUS_LABELS)
+        for text in (
+            "Import Key is the row's permanent id (RA-001, WEB-12, M-3). Keep it forever: re-importing the same key updates the task; a new key creates a new task. Parent Key and Predecessors refer to it.",
+            "Dates are real dates only. Cells display dd-mm-yyyy. If your Excel reads dates month-first, type yyyy-mm-dd (2026-09-07) and it will still display 07-09-2026. Never type TBD, Immediate, Ongoing or 'Sept 7-10' into a date cell - the cell will refuse it; write that wording in Notes and leave the date blank.",
+            "One accountable owner per row, by work email. Helpers go in Collaborators, separated by ; (semicolon). A group such as 'Academic Team' cannot own a task - name a person and mention the group in Notes.",
+            f"Status: {status_list}. Blank = Draft (Assigned once an owner is given). Delayed, On hold, Cancelled, Abandoned and Reopened need a Reason. Completed, Submitted, On hold and Reopened are taken on the FIRST import only; afterwards those transitions happen in Astra, where their records are kept.",
+            "Type: Task, Milestone or Action item. A Milestone is a zero-length event - give it one date (Start = Due). An Action item is a committed follow-up from a meeting; it behaves like a task.",
+            "A step (subtask) is a row whose Parent Key is another row's Import Key. Predecessors are the Import Keys this row waits for (finish-to-start); separate several with ; .",
+            "Original Due Date is the first commitment, Due Date is the current one. Fill Original Due Date only when the date has already moved; otherwise Astra records the first Due Date as the baseline automatically.",
+            "% Complete is a whole number 0-100 you declare; Astra never invents one. Criticality is Critical, High, Normal, Low or blank (Unrated).",
+            "Anything Astra has no column for goes in Notes. Nothing in the sheet is silently lost: the preview lists what landed where.",
+            "App Owner-only cells: Original Due Date, Filing Entity, Attachment Links, Project and Entity. A project Manager's import keeps them for the Owner and says so in the preview.",
+            f"Protection: all sheets are protected against accidental edits (password: {TEMPLATE_SHEET_PASSWORD}). Data cells are open; headers and structure are not. The App Owner may unlock a sheet deliberately, but a changed header row is rejected on upload.",
+            f"Limits: {MAX_ROWS:,} task rows, 5 MB, {MAX_TITLE_CHARS} characters per Title, {MAX_CELL_CHARS:,} per text cell. Save as .xlsx (not .xlsm/.xls).",
+        ):
+            line(text, height=32)
+        line("")
+        line("Header colours", XF_LABEL)
+        for text, style in (("Navy header = core column (always present; Import Key and Title are required)", XF_HEAD_CORE),
+                            ("Slate header = optional built-in column (the App Owner can hide or rename it)", XF_HEAD_OPTIONAL),
+                            ("Teal header = column added by the App Owner for this organisation", XF_HEAD_CUSTOM)):
+            line(text, style)
+        line("Pale red cell = required value missing on a row that has content, or a Due Date before its Start Date.", XF_SUBTLE)
+        line("")
+        line("Tasks columns", XF_LABEL)
+        number += 1
+        heads = ("Column", "Required", "What to enter", "Example", "Where it lands in Astra")
+        rows.append(f'<row r="{number}">' + "".join(
+            _inline(f"{column_letter(i)}{number}", head, XF_HEAD_SLATE_PLAIN) for i, head in enumerate(heads, start=1)) + "</row>")
+        for column in self.columns:
+            number += 1
+            example = ""
+            for sample in self.example_rows:
+                if sample.get(column.key) not in (None, ""):
+                    example = sample[column.key]
+                    break
+            example = example.strftime("%d-%m-%Y") if isinstance(example, date) else str(example)
+            required = "yes" if column.required else ("core" if column.core else "no")
+            values = (column.label, required, column.prompt, example, column.target)
+            rows.append(f'<row r="{number}" ht="48" customHeight="1">' + "".join(
+                _inline(f"{column_letter(i)}{number}", value, XF_LABEL if i == 1 else XF_WRAP_LOCKED)
+                for i, value in enumerate(values, start=1)) + "</row>")
+        line("")
+        disabled = [item["label"] for item in self.config.columns if not item.get("enabled", True)]
+        if disabled:
+            line("Columns the App Owner can switch on in Astra (Import > Template settings): " + ", ".join(disabled)
+                 + ". The header row of a downloaded template always matches the current setting.", XF_SUBTLE, height=32)
+        body = (
+            f'<dimension ref="A1:E{number}"/>'
+            '<sheetViews><sheetView showGridLines="0" workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/>'
+            '<cols><col min="1" max="1" width="30" customWidth="1"/><col min="2" max="2" width="12" customWidth="1"/>'
+            '<col min="3" max="3" width="70" customWidth="1"/><col min="4" max="4" width="34" customWidth="1"/>'
+            '<col min="5" max="5" width="46" customWidth="1"/></cols>'
+            f'<sheetData>{"".join(rows)}</sheetData>' + self.protect()
+            + f'<mergeCells count="{len(merges)}">{"".join(merges)}</mergeCells>'
+        )
+        return _sheet(body, tab=TEAL)
+
+    def simple_readme_sheet(self) -> str:
+        lines = [
+            ("Astra import - how to fill this workbook", XF_TITLE, 30),
+            (f"Template {self.family} | column set {self.config.hash()} | dates show as dd-mm-yyyy", XF_SUBTLE, 22),
+            ("1. Project sheet: type the project name (required); add the manager's email and timezone if you know them.", XF_WRAP_LOCKED, 34),
+            ("2. Tasks sheet: one row per task or action item. Only the Title is required; the Import Key fills itself (T-001, T-002 ...). Leave it alone unless you have your own ids.", XF_WRAP_LOCKED, 34),
+            ("3. Dates: real dates only, shown dd-mm-yyyy. If your Excel reads dates month-first, type 2026-09-07 and it will show 07-09-2026. Never type TBD or 'Sept 7-10' in a date cell - write it in Notes and leave the date blank.", XF_WRAP_LOCKED, 34),
+            ("4. Owner: one work email per row, of a person who already has access in Astra. Status and Criticality are dropdowns; blank Status = Draft, blank Criticality = Unrated.", XF_WRAP_LOCKED, 34),
+            ("5. Steps: to make a row a step of another task, put that task's Import Key in 'Step of (Key)'.", XF_WRAP_LOCKED, 34),
+            ("6. Do not change, add or delete columns and do not paste over the header - the sheet is protected for that reason. See the Example sheet for a filled task and step.", XF_WRAP_LOCKED, 34),
+            ("7. Upload in Astra (Import). You get a preview of every row with warnings before anything is written. Nothing is deleted by an import.", XF_WRAP_LOCKED, 34),
+            ("8. Need more columns (collaborators, % complete, predecessors, original due date ...)? The App Owner can switch them on in Import > Template settings and you download the template again.", XF_WRAP_LOCKED, 34),
+        ]
+        rows = "".join(
+            f'<row r="{number}" ht="{height}" customHeight="1">{_inline(f"A{number}", text, style)}</row>'
+            for number, (text, style, height) in enumerate(lines, start=1)
+        )
+        body = (
+            f'<dimension ref="A1:A{len(lines)}"/>'
+            '<sheetViews><sheetView showGridLines="0" workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/>'
+            '<cols><col min="1" max="1" width="110" customWidth="1"/></cols>'
+            f'<sheetData>{rows}</sheetData>' + self.protect()
+        )
+        return _sheet(body, tab=TEAL)
+
+    # ---- package -----------------------------------------------------------
+    def build(self) -> bytes:
+        sheets = [
+            (README_SHEET, self.readme_sheet(), ""),
+            (PROJECT_SHEET, self.project_sheet(), ""),
+            (TEMPLATE_SHEET, self.tasks_sheet(self.tasks, example=False), ""),
+            (EXAMPLE_SHEET, self.tasks_sheet(self.example_rows, example=True), ""),
+        ]
+        if self.extended or self.people:
+            sheets.append((PEOPLE_SHEET, self.people_sheet(), ""))
+        sheets += [
+            (LISTS_SHEET, self.lists_sheet(), ' state="hidden"'),
+            (MARKER_SHEET, self.marker_sheet(), ' state="veryHidden"'),
+        ]
+        active = 2 if self.tasks else 0
+        sheet_tags = "".join(
+            f'<sheet name="{_xml(name)}" sheetId="{index}"{state} r:id="rId{index}"/>'
+            for index, (name, _, state) in enumerate(sheets, start=1)
+        )
+        defined = (
+            self.list_defined_names()
+            + f'<definedName name="{MARKER_NAME}">{MARKER_SHEET}!$B$1</definedName>'
+            + f'<definedName name="{FINGERPRINT_NAME}">{MARKER_SHEET}!$B$2</definedName>'
+        )
+        workbook = (
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            f'<workbookPr/><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="20000" windowHeight="12000" activeTab="{active}"/></bookViews>'
+            f'<sheets>{sheet_tags}</sheets><definedNames>{defined}</definedNames>'
+            '<calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>'
+        )
+        rels = "".join(
+            f'<Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{index}.xml"/>'
+            for index in range(1, len(sheets) + 1)
+        )
+        rels += (f'<Relationship Id="rId{len(sheets) + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
+                 'Target="styles.xml"/>')
+        overrides = "".join(
+            f'<Override PartName="/xl/worksheets/sheet{index}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            for index in range(1, len(sheets) + 1)
+        )
+        content_types = (
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+            + overrides + '</Types>'
+        )
+        root_rels = (
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>'
+            '</Relationships>'
+        )
+        core = (
+            '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" '
+            'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+            f'<dc:title>Astra import template ({self.family})</dc:title><dc:creator>Astra</dc:creator></cp:coreProperties>'
+        )
+        declaration = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("[Content_Types].xml", declaration + content_types)
+            archive.writestr("_rels/.rels", declaration + root_rels)
+            archive.writestr("docProps/core.xml", declaration + core)
+            archive.writestr("xl/workbook.xml", declaration + workbook)
+            archive.writestr("xl/_rels/workbook.xml.rels", declaration
+                             + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                             + rels + '</Relationships>')
+            archive.writestr("xl/styles.xml", declaration + _styles_xml())
+            for index, (_, xml, _) in enumerate(sheets, start=1):
+                archive.writestr(f"xl/worksheets/sheet{index}.xml", declaration + xml)
+        return buffer.getvalue()
+
+
+def build_template_xlsx(config: TemplateConfig | None = None, *, tasks=None, project=None, people=None) -> bytes:
+    """Return the locked Astra template workbook for this configuration (zipfile, no dependencies).
+
+    ``tasks`` (dicts keyed by column key), ``project`` (dict keyed by PROJECT_FIELD_KEYS
+    values) and ``people`` (tuples Email, Full Name, Role, Notes) pre-fill the sheets;
+    the blank template passes none of them.
+    """
+    return _TemplateWorkbook(config or TemplateConfig.default(), tasks=tasks, project=project, people=people).build()
 
 
 def build_template_csv(config: TemplateConfig | None = None) -> str:
@@ -696,7 +1335,6 @@ def build_template_csv(config: TemplateConfig | None = None) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(config.labels())
-    writer.writerow([EXAMPLE_KEY if column.key == "import_key" else column.example for column in config.active])
     return buffer.getvalue()
 
 
@@ -716,6 +1354,8 @@ class ParsedUpload:
     unknown_columns: list[str]
     file_warnings: list[str]
     sheet_name: str = ""
+    project_header: dict = field(default_factory=dict)     # Project sheet: key -> value (dates as ISO)
+    people: list = field(default_factory=list)             # People sheet rows: {row, email, name, role, notes}
 
 
 def detect_format(filename: str, data: bytes) -> str:
@@ -764,11 +1404,11 @@ def _parse_xlsx(data: bytes, config: TemplateConfig) -> ParsedUpload:
             "settings). Download the template again and move your rows into it."
         )
     sheet = workbook.sheet(TEMPLATE_SHEET)
-    if sheet is None:
-        candidates = [s for s in workbook.sheets if not s.hidden and s.name not in (README_SHEET, MARKER_SHEET)]
-        sheet = candidates[0] if candidates else None
     if sheet is None or not sheet.rows:
         raise ImportFileError(f"The workbook has no '{TEMPLATE_SHEET}' sheet with data. " + _template_hint())
+    file_warnings: list[str] = []
+    project_header = _read_project_sheet(workbook.sheet(PROJECT_SHEET), file_warnings)
+    people = _read_people_sheet(workbook.sheet(PEOPLE_SHEET))
     header_row_number = min(sheet.rows)
     labels = config.labels()
     width = max(sheet.max_col, len(labels))
@@ -804,11 +1444,53 @@ def _parse_xlsx(data: bytes, config: TemplateConfig) -> ParsedUpload:
             if value is None or value == "":
                 continue
             cells[column.key] = value
-        if cells:
-            rows.append(ParsedRow(number=number, cells=cells))
+        if not cells or set(cells) == {"import_key"}:
+            continue  # blank row, or only the template's pre-filled key
+        rows.append(ParsedRow(number=number, cells=cells))
     if len(rows) > MAX_ROWS:
         raise ImportFileError(f"The sheet has more than {MAX_ROWS} data rows. Split the file and import in parts.")
-    return ParsedUpload(format="xlsx", rows=rows, unknown_columns=[], file_warnings=[], sheet_name=sheet.name)
+    return ParsedUpload(format="xlsx", rows=rows, unknown_columns=[], file_warnings=file_warnings, sheet_name=sheet.name,
+                        project_header=project_header, people=people)
+
+
+def _read_project_sheet(sheet, file_warnings: list[str]) -> dict:
+    """Label / Value rows of the Project sheet -> {key: value}; dates become ISO text."""
+    if sheet is None:
+        return {}
+    labels = {collapse(label): key for label, key in PROJECT_FIELD_KEYS.items()}
+    date_keys = {"start_date", "target_date", "as_of_date"}
+    header: dict = {}
+    for number, values in sheet.iter_rows(2):
+        label = normalize_text(values[0]).rstrip("*").strip() if values else ""
+        key = labels.get(collapse(label))
+        if not key:
+            continue
+        raw = values[1] if len(values) > 1 else None
+        if raw is None or raw == "":
+            continue
+        if key in date_keys:
+            parsed, error = parse_date_cell(raw, allow_serial=True)
+            if error:
+                file_warnings.append(f"Project sheet, {label}: {error} The value was ignored.")
+                continue
+            header[key] = parsed.isoformat()
+        else:
+            header[key] = normalize_text(raw)
+    return header
+
+
+def _read_people_sheet(sheet) -> list[dict]:
+    if sheet is None:
+        return []
+    people = []
+    for number, values in sheet.iter_rows(4):
+        if number == 1:
+            continue
+        email, name, role, notes = (normalize_text(value) for value in (values + [None] * 4)[:4])
+        if not any((email, name, role, notes)):
+            continue
+        people.append({"row": number, "email": email, "name": name, "role": role, "notes": notes})
+    return people
 
 
 def _decode_csv(data: bytes) -> tuple[str, list[str]]:
@@ -1082,6 +1764,8 @@ class ImportEngine:
         self.unknown_columns: list[str] = []
         self.file_warnings: list[str] = []
         self.file_format = ""
+        self.project_header: dict = {}
+        self.people: list[dict] = []
         self._load_context()
 
     # ---- context ---------------------------------------------------------
@@ -1165,6 +1849,8 @@ class ImportEngine:
         self.unknown_columns = parsed.unknown_columns
         self.file_warnings = list(parsed.file_warnings)
         self.file_format = parsed.format
+        self.project_header = dict(parsed.project_header)
+        self.people = self._check_people(parsed.people)
         self.rows = [self._validate_row(row) for row in parsed.rows]
         self._check_duplicate_keys()
         self._check_project_column()
@@ -1197,8 +1883,8 @@ class ImportEngine:
             result.add("error", "E_KEY_INVALID",
                        f"'{key}' is not a valid Import Key (letters, digits, . _ - up to {MAX_KEY_CHARS} characters).",
                        "Import Key")
-        elif key == EXAMPLE_KEY:
-            result.add("error", "E_EXAMPLE_ROW", "This is the template's example row. Delete it or give it a real key.",
+        elif key.upper().startswith(EXAMPLE_KEY_PREFIXES):
+            result.add("error", "E_EXAMPLE_ROW", "This is an example row (Import Key starts with EX-). Give it a real key.",
                        "Import Key")
         existing = self.existing_by_key.get(key) if key else None
         if key and not existing:
@@ -1220,6 +1906,37 @@ class ImportEngine:
         elif len(title) > MAX_TITLE_CHARS:
             result.add("error", "E_TITLE_TOO_LONG", f"Title has {len(title)} characters; the limit is {MAX_TITLE_CHARS}.", "Title")
 
+        allow_serial = self.file_format == "xlsx"
+        extras = {}
+        for column in self.config.active:
+            if not column.custom:
+                continue
+            raw = cells.get(column.key)
+            if raw is None or raw == "":
+                if column.required and result.action == "create":
+                    result.add("error", "E_REQUIRED", f"'{column.label}' is required.", column.label)
+                continue
+            if column.kind == "date":
+                parsed, error = parse_date_cell(raw, allow_serial=allow_serial)
+                value = parsed.isoformat() if parsed else None
+            elif column.kind == "number":
+                value, error = parse_number(raw)
+            elif column.kind == "list":
+                value, error = None, None
+                wanted = collapse(normalize_text(raw))
+                for option in column.values:
+                    if collapse(option) == wanted:
+                        value = option
+                if value is None:
+                    error = f"'{normalize_text(raw)}' is not one of: {', '.join(column.values)}."
+            else:
+                value, error = normalize_text(raw), None
+            if error:
+                result.add("error", "E_CUSTOM_INVALID", error, column.label)
+            elif value is not None:
+                extras[column.key] = value
+
+
         owner = None
         if text.get("owner_email"):
             owner = self._resolve_person(text["owner_email"], result, "Owner Email")
@@ -1232,7 +1949,6 @@ class ImportEngine:
                     ids.append(user["id"])
             people_lists[role] = ids
 
-        allow_serial = self.file_format == "xlsx"
         dates = {}
         for date_key, label in (("start_date", "Start Date"), ("due_date", "Due Date"), ("baseline_due_date", "Original Due Date")):
             parsed, error = parse_date_cell(cells.get(date_key), allow_serial=allow_serial)
@@ -1258,6 +1974,9 @@ class ImportEngine:
         milestone, error = parse_boolean(cells.get("milestone"))
         if error:
             result.add("error", "E_MILESTONE_INVALID", error, "Milestone")
+        if milestone is None and TYPE_COLUMN_KEY in extras:
+            # Type = Milestone is the v2 way of saying "zero-length event"; other types stay tasks.
+            milestone = extras[TYPE_COLUMN_KEY] == "Milestone"
         if milestone and (start or due) and not (start and due):
             start = due = start or due
         if dates["baseline_due_date"] and is_manager_import:
@@ -1302,35 +2021,6 @@ class ImportEngine:
                     else:
                         entity_ids.append(entity["id"])
 
-        extras = {}
-        for column in self.config.active:
-            if not column.custom:
-                continue
-            raw = cells.get(column.key)
-            if raw is None or raw == "":
-                if column.required and result.action == "create":
-                    result.add("error", "E_REQUIRED", f"'{column.label}' is required.", column.label)
-                continue
-            if column.kind == "date":
-                parsed, error = parse_date_cell(raw, allow_serial=allow_serial)
-                value = parsed.isoformat() if parsed else None
-            elif column.kind == "number":
-                value, error = parse_number(raw)
-            elif column.kind == "list":
-                value, error = None, None
-                wanted = collapse(normalize_text(raw))
-                for option in column.values:
-                    if collapse(option) == wanted:
-                        value = option
-                if value is None:
-                    error = f"'{normalize_text(raw)}' is not one of: {', '.join(column.values)}."
-            else:
-                value, error = normalize_text(raw), None
-            if error:
-                result.add("error", "E_CUSTOM_INVALID", error, column.label)
-            elif value is not None:
-                extras[column.key] = value
-
         pred_items = split_list(cells.get("predecessors"))
         result.plan = {
             "title": title, "description": text.get("description", ""), "notes": text.get("notes", ""),
@@ -1357,12 +2047,45 @@ class ImportEngine:
 
     def _check_project_column(self) -> None:
         target_name = (self.project or {}).get("name") or self.new_project_name or ""
+        sheet_name = self.project_header.get("name", "")
+        sheet_mismatch = bool(sheet_name and target_name and collapse(sheet_name) != collapse(target_name))
         for result in self.rows:
             text = result.plan.get("project_text", "")
             if text and target_name and collapse(text) != collapse(target_name):
                 result.add("error", "E_PROJECT_MISMATCH",
                            f"Project '{text}' does not match the target project '{target_name}'. Leave the cell blank or fix it.",
                            "Project")
+            if sheet_mismatch:
+                result.add("error", "E_PROJECT_MISMATCH",
+                           f"The Project sheet names '{sheet_name}' but the chosen target is '{target_name}'. "
+                           "Pick the matching project on the Import screen or fix the Project sheet.", "Project sheet")
+
+    def _check_people(self, people: list[dict]) -> list[dict]:
+        """Cross-check the People sheet: who the App Owner still has to add or grant."""
+        report = []
+        for person in people:
+            entry = {**person, "status": "ok", "message": ""}
+            email = person["email"]
+            if not email:
+                entry["status"] = "group" if person["name"] else "incomplete"
+                entry["message"] = (f"'{person['name']}' has no email; a group cannot own a task - list its members."
+                                    if person["name"] else "Row has no email.")
+            else:
+                user = self.users_by_email.get(email.casefold())
+                if not user:
+                    entry["status"] = "unknown_user"
+                    entry["message"] = f"People row {person['row']}: {email} is not an Astra user; the App Owner adds the account first."
+                elif not user.get("active"):
+                    entry["status"] = "inactive"
+                    entry["message"] = f"People row {person['row']}: {email} is deactivated."
+                elif not self._eligible(user):
+                    entry["status"] = "no_access"
+                    where = "the new project" if not self.project_id else "this project"
+                    entry["message"] = f"People row {person['row']}: {email} has no access to {where}; the App Owner grants it."
+            if entry["status"] not in ("ok",):
+                self.file_warnings.append(entry["message"])
+            report.append(entry)
+        return report
 
     def _row_index(self) -> dict[str, RowResult]:
         return {result.key: result for result in self.rows if result.key}
@@ -1663,6 +2386,8 @@ class ImportEngine:
             "file_warnings": self.file_warnings,
             "format": self.file_format,
             "custom_columns": [{"key": c.key, "label": c.label} for c in self.config.active if c.custom],
+            "project_header": self.project_header,
+            "people": self.people,
         }
 
     def report_csv(self) -> str:

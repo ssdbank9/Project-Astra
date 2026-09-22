@@ -203,6 +203,9 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .change s { color: #8792a2; }
 .import-notes { background: #f7f9fb; border: 1px solid #e6ebf1; border-radius: 8px; padding: 8px 12px; font-size: .82rem; margin: 6px 0; }
 .import-result .facts { margin: 12px 0; }
+.import-people { background: #f7f9fb; border: 1px solid #e6ebf1; border-radius: 8px; padding: 8px 12px; font-size: .84rem; margin: 6px 0; }
+.import-people summary { cursor: pointer; font-weight: 650; }
+.import-people li { padding: 4px 0; }
 .import-fields { margin-top: 12px; }
 .import-fields dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 6px 0; font-size: .86rem; }
 .import-fields dt { color: #667085; }
@@ -218,6 +221,8 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .add-col label.inline { flex-direction: row; align-items: center; gap: 6px; white-space: nowrap; }
 .add-col label.inline input { width: auto; }
 .import-body .actions { position: sticky; bottom: 0; background: white; padding: 12px 0 4px; margin-top: 12px; }
+.import-body h3:focus { outline: none; }
+#import-dialog button:disabled { opacity: .55; cursor: not-allowed; }
 .import-body .error.is-info { color: var(--teal); }
 @media (max-width: 760px) {
   .import-options, .add-col { grid-template-columns: 1fr; }

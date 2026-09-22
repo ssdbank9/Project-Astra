@@ -34,6 +34,8 @@ class ImportServiceTests(unittest.TestCase):
         self.service.grant_project_access(self.owner, self.project["id"], self.jamal["id"], "manager")
         self.service.grant_project_access(self.owner, self.project["id"], self.waseem["id"], "manager")
         self.service.grant_project_access(self.owner, self.project["id"], self.viewer["id"], "viewer")
+        # Most tests exercise every column: switch the Owner's template to the Full preset.
+        self.service.set_import_template_config(self.owner, {"preset": "full"})
 
     def tearDown(self):
         self.db.close()
@@ -48,9 +50,17 @@ class ImportServiceTests(unittest.TestCase):
             {"import_key": "RA-002", "title": "Awareness sessions", "owner_email": "waseem@example.org",
              "start_date": "2026-09-07", "due_date": date(2026, 9, 10), "status": "In Progress", "predecessors": "RA-001",
              "criticality": "High"},
-            {"import_key": "RA-003", "title": "Prepare handouts", "parent_key": "RA-002", "milestone": "Yes",
-             "due_date": "09-09-2026"},
+            {"import_key": "RA-003", "title": "Prepare handouts", "parent_key": "RA-002", "x_type": "Milestone",
+             "due_date": "09-09-2026", "x_risk_dependency": "Printer capacity"},
         ]
+
+    def enable_all_columns(self):
+        """Owner switches every built-in column on (Entity, Attachment Links, Project, Milestone...)."""
+        config = self.service.get_import_template_config(self.owner)
+        for item in config["columns"]:
+            item["enabled"] = True
+        self.service.set_import_template_config(self.owner, {"columns": config["columns"]})
+        return self.service._import_config()
 
     def preview(self, actor, rows, project_id=None, **options):
         data = filled_template(rows)
@@ -72,19 +82,37 @@ class ImportServiceTests(unittest.TestCase):
         self.assertEqual(filename, "astra-import-template.xlsx")
         self.assertIn("spreadsheetml", content_type)
         workbook = read_workbook(payload)
-        self.assertEqual([s.name for s in workbook.sheets], ["Tasks", "README", "_astra"])
-        self.assertTrue(workbook.sheets[2].hidden)
+        self.assertEqual([s.name for s in workbook.sheets],
+                         ["README", "Project", "Tasks", "Example", "People", "Lists", "_astra"])
+        self.assertEqual([s.hidden for s in workbook.sheets], [False, False, False, False, False, True, True])
         config = self.service._import_config()
+        self.assertEqual(config.hash(), "53133bf237fe9b3c")  # the v2 column set
+        self.assertEqual(len(config.active), 18)
         self.assertEqual(workbook.sheet("Tasks").row_values(1), list(config.labels()))
-        self.assertEqual(workbook.sheet("Tasks").cell(2, 1), importer.EXAMPLE_KEY)
+        self.assertEqual(workbook.sheet("Tasks").max_row, 1)  # no example row on Tasks
+        self.assertEqual(workbook.sheet("Example").row_values(1), list(config.labels()))
+        self.assertEqual(workbook.sheet("Example").cell(2, 1), "EX-001")
+        self.assertEqual(workbook.sheet("Example").max_row, 4)
         self.assertEqual(workbook.sheet("_astra").cell(1, 2), config.hash())
+        self.assertEqual(workbook.sheet("_astra").cell(2, 2), config.fingerprint())
+        self.assertEqual(workbook.sheet("_astra").cell(3, 2), importer.TEMPLATE_FAMILY)
         self.assertEqual(workbook.defined_names["AstraTemplateVersion"], "_astra!$B$1")
+        self.assertEqual(workbook.defined_names["Lists_Status"], "Lists!$A$2:$A$12")
+        self.assertEqual(workbook.sheet("Project").cell(2, 1), "Project Name *")
+        self.assertEqual(workbook.sheet("People").row_values(1)[:3], ["Email", "Full Name", "Role on project"])
         import zipfile
         import io
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-            tasks_xml = archive.read("xl/worksheets/sheet1.xml").decode()
-            readme_xml = archive.read("xl/worksheets/sheet2.xml").decode()
+            tasks_xml = archive.read("xl/worksheets/sheet3.xml").decode()
+            readme_xml = archive.read("xl/worksheets/sheet1.xml").decode()
+            project_xml = archive.read("xl/worksheets/sheet2.xml").decode()
             styles_xml = archive.read("xl/styles.xml").decode()
+            workbook_xml = archive.read("xl/workbook.xml").decode()
+        self.assertIn('state="veryHidden"', workbook_xml)
+        self.assertIn('<autoFilter ref="A1:R2001"/>', tasks_xml)
+        self.assertIn('autoFilter="0"', tasks_xml)
+        self.assertIn('<sheetProtection', project_xml)
+        self.assertIn('<c r="B2" s="4"/>', project_xml)  # Value column unlocked
         self.assertIn('<sheetProtection algorithmName="SHA-512"', tasks_xml)
         self.assertIn('insertColumns="1"', tasks_xml)
         self.assertIn('deleteColumns="1"', tasks_xml)
@@ -95,22 +123,91 @@ class ImportServiceTests(unittest.TestCase):
         self.assertIn('<sheetProtection', readme_xml)
         self.assertIn('formatCode="dd-mm-yyyy"', styles_xml)
         self.assertIn('<protection locked="0"/>', styles_xml)
-        # dropdowns for Status, Criticality, Milestone and date validation on the three date columns
-        status_col = importer.column_letter(list(config.labels()).index("Status") + 1)
-        self.assertIn(f'sqref="{status_col}2:{status_col}2001"><formula1>"Draft,Assigned,In progress', tasks_xml)
-        self.assertIn('<formula1>"Critical,High,Normal,Low"</formula1>', tasks_xml)
-        self.assertIn('<formula1>"Yes,No"</formula1>', tasks_xml)
-        self.assertEqual(tasks_xml.count('type="date" operator="between"'), 3)
+        # dropdowns from named ranges, date validation on Start / Original, Due >= Start rule, key uniqueness rule
+        labels = list(config.labels())
+        status_col = importer.column_letter(labels.index("Status") + 1)
+        self.assertIn(f'sqref="{status_col}2:{status_col}2001"><formula1>Lists_Status</formula1>', tasks_xml)
+        self.assertIn("<formula1>Lists_Criticality</formula1>", tasks_xml)
+        self.assertIn("<formula1>Lists_x_type</formula1>", tasks_xml)
+        self.assertEqual(tasks_xml.count('type="date" operator="between"'), 2)
         self.assertIn(f"<formula1>{importer.excel_serial(importer.DATE_MIN)}</formula1>", tasks_xml)
+        self.assertIn("COUNTIF($A$2:$A$2001,A2)=1", tasks_xml)
+        due_col = importer.column_letter(labels.index("Due Date") + 1)
+        start_col = importer.column_letter(labels.index("Start Date") + 1)
+        self.assertIn(f'OR({start_col}2="",{due_col}2&gt;={start_col}2)', tasks_xml)  # >= is XML-escaped
+        self.assertIn('ISNUMBER(FIND("@",', tasks_xml)
+        self.assertEqual(tasks_xml.count("<conditionalFormatting"), 4)
         csv_payload, csv_name, _ = self.service.import_template(self.owner, "csv")
         self.assertEqual(csv_name, "astra-import-template.csv")
-        self.assertEqual(csv_payload.decode("utf-8-sig").splitlines()[0], ",".join(config.labels()).replace("Duration (days)", "Duration (days)"))
+        self.assertEqual(csv_payload.decode("utf-8-sig").splitlines(), [",".join(f'"{l}"' if "," in l else l for l in labels)])
 
-    def test_template_download_round_trips_through_the_parser(self):
+    def test_simple_preset_is_the_default_and_full_is_one_call_away(self):
+        self.service.set_import_template_config(self.owner, {"reset": True})
+        config = self.service.get_import_template_config(self.owner)
+        self.assertEqual(config["hash"], "52cd3da7813769c1")  # template-config-simple.json
+        self.assertEqual(config["labels"], ["Import Key", "Title", "Step of (Key)", "Owner Email", "Start Date", "Due Date",
+                                            "Status", "Criticality", "Notes"])
+        self.assertFalse(config["extended"])
+        self.assertEqual(len(config["presets"]["simple"]), 9)
+        self.assertEqual(len(config["presets"]["full"]), 18)
+        self.assertEqual(len(config["columns"]), 25)  # everything stays defined, just off
         payload, _, _ = self.service.import_template(self.owner, "xlsx")
-        data, preview = payload, self.service.import_preview(self.owner, self.project["id"], "template.xlsx", payload)
+        workbook = read_workbook(payload)
+        self.assertEqual([s.name for s in workbook.sheets], ["README", "Project", "Tasks", "Example", "Lists", "_astra"])
+        self.assertEqual(workbook.sheet("_astra").cell(1, 2), "52cd3da7813769c1")
+        self.assertEqual(workbook.sheet("_astra").cell(3, 2), importer.SIMPLE_FAMILY)
+        self.assertEqual(workbook.sheet("Project").max_row, 4)   # name, manager email, timezone
+        self.assertEqual(workbook.sheet("Example").max_row, 3)   # a task and a step
+        self.assertLessEqual(workbook.sheet("README").max_row, 10)
+        import io
+        import zipfile
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            tasks_xml = archive.read("xl/worksheets/sheet3.xml").decode()
+        self.assertIn('<c r="A2" s="8" t="str"><f>IF(B2="","","T-"&amp;TEXT(ROW()-1,"000"))</f></c>', tasks_xml)
+        self.assertIn('<c r="A2001" s="8" t="str"><f>IF(B2001=', tasks_xml)
+        # the blank template (formula cells without cached values) has nothing to import
+        preview = self.service.import_preview(self.owner, self.project["id"], "template.xlsx", payload)
+        self.assertEqual(preview["summary"]["rows"], 0)
+        # a row carrying only a (pre-filled) key is ignored; a filled row imports with the simple columns
+        simple = self.service._import_config()
+        rows = [{"import_key": "T-001"}, {"import_key": "T-002", "title": "Only nine columns", "parent_key": "",
+                 "owner_email": "jamal@example.org", "due_date": "07-09-2026", "status": "Not started", "notes": "Fine"}]
+        preview = self.service.import_preview(self.owner, self.project["id"], "simple.xlsx", filled_template(rows, simple))
         self.assertEqual(preview["summary"]["rows"], 1)
+        self.assertEqual(preview["rows"][0]["import_key"], "T-002")
+        self.assertEqual(preview["rows"][0]["level"], "ok")
+        full = self.service.set_import_template_config(self.owner, {"preset": "full"})
+        self.assertEqual(full["hash"], "53133bf237fe9b3c")
+        self.assertTrue(full["extended"])
+        self.assertIn("People", [s.name for s in read_workbook(self.service.import_template(self.owner, "xlsx")[0]).sheets])
+        with self.assertRaisesRegex(ValueError, "Unknown preset"):
+            self.service.set_import_template_config(self.owner, {"preset": "huge"})
+
+    def test_template_download_round_trips_through_the_parser_and_example_keys_are_refused(self):
+        payload, _, _ = self.service.import_template(self.owner, "xlsx")
+        preview = self.service.import_preview(self.owner, self.project["id"], "template.xlsx", payload)
+        self.assertEqual(preview["summary"]["rows"], 0)  # the Example sheet is never read
+        self.assertEqual(preview["people"], [])
+        rows = [{"import_key": "EX-001", "title": "Copied from Example"}, {"import_key": "example-7", "title": "Also example"},
+                {"import_key": "EXTRA-1", "title": "A real key that merely starts with EX"}]
+        _, preview = self.preview(self.owner, rows)
         self.assertIn("E_EXAMPLE_ROW", self.codes(preview["rows"][0]))
+        self.assertIn("E_EXAMPLE_ROW", self.codes(preview["rows"][1]))
+        self.assertEqual(preview["rows"][2]["level"], "ok")
+
+    def test_filled_template_built_by_astra_round_trips(self):
+        # build_template_xlsx can pre-fill Tasks, Project and People: the result must parse like an upload.
+        rows = [{"import_key": "P-1", "title": "Pre-filled", "x_type": "Milestone", "due_date": date(2026, 10, 1)}]
+        payload = importer.build_template_xlsx(
+            self.service._import_config(), tasks=rows,
+            project={"name": "Rupani Academy", "timezone": "Asia/Karachi"},
+            people=[("jamal@example.org", "Jamal", "Manager", "")],
+        )
+        preview = self.service.import_preview(self.owner, self.project["id"], "prefilled.xlsx", payload)
+        self.assertEqual(preview["summary"]["create"], 1)
+        self.assertTrue(preview["rows"][0]["values"]["milestone"])
+        self.assertEqual(preview["project_header"]["name"], "Rupani Academy")
+        self.assertEqual(preview["people"][0]["status"], "ok")
 
     # -- parsing and validation ----------------------------------------
     def test_preview_reports_rows_and_writes_nothing(self):
@@ -147,7 +244,7 @@ class ImportServiceTests(unittest.TestCase):
         config = self.service._import_config()
         headers = list(config.labels())
         headers[1], headers[2] = headers[2], headers[1]
-        with self.assertRaisesRegex(ValueError, "B: expected 'Project', found 'Entity'"):
+        with self.assertRaisesRegex(ValueError, "B: expected 'Title', found 'Type'"):
             self.service.import_preview(self.owner, self.project["id"], "x.xlsx", filled_template(self.rows(), headers=headers))
         with self.assertRaisesRegex(ValueError, "template has changed"):
             self.service.import_preview(self.owner, self.project["id"], "x.xlsx", filled_template(self.rows(), marker="stale"))
@@ -239,7 +336,13 @@ class ImportServiceTests(unittest.TestCase):
         self.assertEqual(second["criticality"], "high")
         self.assertTrue(second["is_blocked"])
         self.assertEqual(third["parent_task_id"], second["id"])
-        self.assertEqual(third["is_milestone"], 1)
+        self.assertEqual(third["is_milestone"], 1)  # Type = Milestone
+        self.assertEqual(second["is_milestone"], 0)
+        third_detail = self.service.task_detail(self.owner, third["id"])
+        self.assertEqual(third_detail["imported_fields"], [
+            {"key": "x_risk_dependency", "label": "Risk / Dependency", "value": "Printer capacity"},
+            {"key": "x_type", "label": "Type", "value": "Milestone"},
+        ])
         self.assertEqual((third["start_date"], third["due_date"]), ("2026-09-09", "2026-09-09"))
         events = self.service.task_events(self.owner, second["id"])
         self.assertEqual([e["event_type"] for e in events], ["task_created", "dependency_added"])
@@ -317,37 +420,62 @@ class ImportServiceTests(unittest.TestCase):
         with self.assertRaises(importer.ImportConflict):
             self.commit(self.owner, self.rows(), sha="0" * 64)
 
-    def test_owner_creates_project_from_project_column(self):
+    def test_owner_creates_project_from_the_project_sheet(self):
+        self.service.seed_default_entities(self.owner)
         rows = self.rows()
         for row in rows:
-            row["project"] = "Brand New Roadmap"
             row.pop("owner_email", None)
-        data = filled_template(rows)
+        header = {
+            "Project Name": "Brand New Roadmap", "Description": "Roll-out plan", "Filing Entity": "Rupani IB College",
+            "Project Manager Email": "jamal@example.org", "Sponsor / Executive Owner Email": "aly@example.org",
+            "Timezone": "Europe/London", "Working Days": "Mon-Fri", "Planned Start Date": date(2026, 9, 1),
+            "Planned Finish Date": "31-08-2028", "Plan As-of Date": "28-08-2026", "Source Document": "v001 workbook",
+        }
+        people = [("jamal@example.org", "Jamal", "Manager", ""), ("nobody@example.org", "Nobody", "Member", ""),
+                  ("", "Academic Team", "", "group")]
+        data = filled_template(rows, project=header, people=people)
         preview = self.service.import_preview(self.owner, None, "new.xlsx", data)
         self.assertTrue(preview["summary"]["project"]["create"])
         self.assertEqual(preview["summary"]["project"]["name"], "Brand New Roadmap")
+        self.assertEqual(preview["project_header"]["start_date"], "2026-09-01")
+        self.assertEqual(preview["project_header"]["target_date"], "2028-08-31")
+        statuses = {p["email"] or p["name"]: p["status"] for p in preview["people"]}
+        self.assertEqual(statuses, {"jamal@example.org": "no_access", "nobody@example.org": "unknown_user", "Academic Team": "group"})
+        self.assertTrue(any("People row 3: nobody@example.org is not an Astra user" in w for w in preview["file_warnings"]))
         result = self.service.import_commit(self.owner, None, "new.xlsx", data, {}, None)
         self.assertTrue(result["project"]["create"])
-        names = [p["name"] for p in self.service.list_projects(self.owner)]
-        self.assertIn("Brand New Roadmap", names)
+        self.assertEqual(result["plan_as_of"], "2026-08-28")
+        self.assertEqual(result["source_document"], "v001 workbook")
+        project = self.service.get_project(self.owner, result["project"]["id"])
+        self.assertEqual(project["name"], "Brand New Roadmap")
+        self.assertEqual(project["timezone"], "Europe/London")
+        self.assertEqual(project["working_days"], "01234")
+        self.assertEqual((project["start_date"], project["target_date"]), ("2026-09-01", "2028-08-31"))
+        self.assertEqual(project["manager_user_id"], self.jamal["id"])
+        self.assertIn("Sponsor / Executive Owner: aly@example.org", project["description"])
+        self.assertEqual([e["name"] for e in project["entities"]], ["Rupani IB College"])
+        self.assertEqual([m["role"] for m in self.service.list_memberships(self.owner, project["id"])], ["manager"])
         self.assertEqual(len(self.service.list_tasks(self.owner, result["project"]["id"])), 3)
-        rows[0]["project"] = "Somewhere else"
-        _, preview = self.preview(self.owner, rows)
-        self.assertIn("E_PROJECT_MISMATCH", self.codes(preview["rows"][0]))
+        # an existing project named in the sheet is reused, not duplicated
+        preview = self.service.import_preview(self.owner, None, "again.xlsx", data)
+        self.assertFalse(preview["summary"]["project"]["create"])
+        self.assertEqual(preview["summary"]["update"] + preview["summary"]["unchanged"], 3)
 
     # -- authorization ---------------------------------------------------
     def test_manager_imports_into_own_project_with_protected_actions_downgraded(self):
+        config = self.enable_all_columns()
         rows = self.rows()
         rows[0]["status"] = "Completed"
         rows[0]["baseline_due_date"] = "01-09-2026"
         rows[0]["attachment_links"] = "\\\\server\\file.pdf"
         rows[0]["entity"] = "Rupani IB College"
-        _, preview = self.preview(self.waseem, rows)
+        data = filled_template(rows, config)
+        preview = self.service.import_preview(self.waseem, self.project["id"], "demo.xlsx", data)
         codes = self.codes(preview["rows"][0])
         for code in ("W_PROTECTED_STATUS", "W_BASELINE_SKIPPED", "W_ATTACHMENTS_SKIPPED", "W_ENTITY_SKIPPED"):
             self.assertIn(code, codes)
         self.assertEqual(preview["rows"][0]["values"]["status"], "assigned")
-        result = self.commit(self.waseem, rows)
+        result = self.service.import_commit(self.waseem, self.project["id"], "demo.xlsx", data, {}, None)
         self.assertEqual(result["create"], 3)
         first = self.task_by_key("RA-001")
         self.assertEqual(first["status"], "assigned")
@@ -357,10 +485,14 @@ class ImportServiceTests(unittest.TestCase):
         self.assertIn("import_committed", kinds)
         self.assertIn("task_created", kinds)
         # a Manager cannot create a project from the file
-        for row in rows:
-            row["project"] = "Managers cannot create"
         with self.assertRaisesRegex(ValueError, "only the App Owner"):
-            self.service.import_preview(self.waseem, None, "x.xlsx", filled_template(rows))
+            self.service.import_preview(self.waseem, None, "x.xlsx",
+                                        filled_template(rows, config, project={"Project Name": "Managers cannot create"}))
+        # the Project sheet must name the chosen project
+        mismatch = filled_template(self.rows(), config, project={"Project Name": "Some other plan"})
+        preview = self.service.import_preview(self.waseem, self.project["id"], "x.xlsx", mismatch)
+        self.assertTrue(all("E_PROJECT_MISMATCH" in self.codes(r) for r in preview["rows"]))
+        self.assertIn("Project sheet names 'Some other plan'", preview["rows"][0]["findings"][-1]["message"])
 
     def test_manager_into_unmanaged_project_viewer_and_chairman_are_blocked_and_owner_notified(self):
         data = filled_template(self.rows())
@@ -394,13 +526,13 @@ class ImportServiceTests(unittest.TestCase):
     # -- template configuration -----------------------------------------
     def test_template_config_round_trip_custom_column_and_stale_template(self):
         config = self.service.get_import_template_config(self.owner)
-        self.assertEqual(config["version"], 0)
+        version = config["version"]
         self.assertEqual(config["labels"][0], "Import Key")
         old_hash = config["hash"]
         columns = config["columns"]
-        # disable Entity, rename Notes, move Title to the front, add a list column and a date column
+        # disable % Complete, rename Notes, move Title to the front, add a list column and a date column
         for item in columns:
-            if item["key"] == "entity":
+            if item["key"] == "progress":
                 item["enabled"] = False
             if item["key"] == "notes":
                 item["label"] = "Remarks"
@@ -410,14 +542,14 @@ class ImportServiceTests(unittest.TestCase):
         columns.append({"label": "Budget line", "type": "list", "values": ["Capex", "Opex"], "required": True, "custom": True})
         columns.append({"label": "Review date", "type": "date", "custom": True})
         saved = self.service.set_import_template_config(self.owner, {"columns": columns})
-        self.assertEqual(saved["version"], 1)
+        self.assertEqual(saved["version"], version + 1)
         self.assertNotEqual(saved["hash"], old_hash)
         self.assertEqual(saved["labels"][0], "Title")
-        self.assertNotIn("Entity", saved["labels"])
+        self.assertNotIn("% Complete", saved["labels"])
         self.assertIn("Remarks", saved["labels"])
         self.assertIn("Budget line", saved["labels"])
         custom = [c for c in saved["columns"] if c.get("custom")]
-        self.assertEqual([c["key"] for c in custom], ["x_budget_line", "x_review_date"])
+        self.assertEqual([c["key"] for c in custom], ["x_type", "x_risk_dependency", "x_budget_line", "x_review_date"])
         # the template reflects the configuration
         payload, _, _ = self.service.import_template(self.owner, "xlsx")
         workbook = read_workbook(payload)
@@ -425,12 +557,16 @@ class ImportServiceTests(unittest.TestCase):
         import io
         import zipfile
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-            tasks_xml = archive.read("xl/worksheets/sheet1.xml").decode()
+            tasks_xml = archive.read("xl/worksheets/sheet3.xml").decode()
+            lists_xml = archive.read("xl/worksheets/sheet6.xml").decode()
+            workbook_xml = archive.read("xl/workbook.xml").decode()
         budget_col = importer.column_letter(saved["labels"].index("Budget line") + 1)
-        self.assertIn(f'sqref="{budget_col}2:{budget_col}2001"><formula1>"Capex,Opex"</formula1>', tasks_xml)
-        self.assertEqual(tasks_xml.count('type="date" operator="between"'), 4)
+        self.assertIn(f'sqref="{budget_col}2:{budget_col}2001"><formula1>Lists_x_budget_line</formula1>', tasks_xml)
+        self.assertIn('<definedName name="Lists_x_budget_line">Lists!$', workbook_xml)
+        self.assertIn(">Capex<", lists_xml)
+        self.assertEqual(tasks_xml.count('type="date" operator="between"'), 3)
         # a template downloaded before the change is rejected
-        stale = filled_template(self.rows(), config=importer.TemplateConfig.default())
+        stale = filled_template(self.rows(), config=importer.TemplateConfig.preset("full"))
         with self.assertRaisesRegex(ValueError, "template has changed"):
             self.service.import_preview(self.owner, self.project["id"], "stale.xlsx", stale)
         # custom values import into import_extras and show in task detail
@@ -451,6 +587,7 @@ class ImportServiceTests(unittest.TestCase):
             {"key": "x_budget_line", "label": "Budget line", "value": "Opex"},
             {"key": "x_review_date", "label": "Review date", "value": "15-09-2026"},
         ])
+        self.assertEqual(preview["rows"][0]["values"]["extras"], {"x_budget_line": "Opex", "x_review_date": "2026-09-15"})
         # re-import updates the value; required custom column blank on create is an error
         rows[0]["x_budget_line"] = "Capex"
         rows.append({"import_key": "RA-010", "title": "Needs budget"})
@@ -462,10 +599,11 @@ class ImportServiceTests(unittest.TestCase):
                                    {"valid_rows_only": True}, None)
         detail = self.service.task_detail(self.owner, self.task_by_key("RA-001")["id"])
         self.assertEqual(detail["imported_fields"][0]["value"], "Capex")
-        # reset
+        # reset returns to the Simple default
         reset = self.service.set_import_template_config(self.owner, {"reset": True})
-        self.assertEqual(reset["hash"], old_hash)
-        self.assertEqual(reset["version"], 2)
+        self.assertEqual(reset["hash"], importer.TemplateConfig.default().hash())
+        self.assertNotEqual(reset["hash"], old_hash)
+        self.assertEqual(reset["version"], version + 2)
 
     def test_template_config_validation_and_authorization(self):
         default = self.service.get_import_template_config(self.owner)["columns"]
@@ -483,7 +621,7 @@ class ImportServiceTests(unittest.TestCase):
         broken = [dict(c) for c in default] + [{"label": "Empty list", "type": "list", "values": [], "custom": True}]
         with self.assertRaisesRegex(ValueError, "at least one allowed value"):
             self.service.set_import_template_config(self.owner, {"columns": broken})
-        too_many = [dict(c) for c in default] + [{"label": f"Extra {i}", "type": "text", "custom": True} for i in range(20)]
+        too_many = [dict(c) for c in default] + [{"label": f"Extra {i}", "type": "text", "custom": True} for i in range(25)]
         with self.assertRaisesRegex(ValueError, "at most 40"):
             self.service.set_import_template_config(self.owner, {"columns": too_many})
         with self.assertRaises(Forbidden):
@@ -491,7 +629,7 @@ class ImportServiceTests(unittest.TestCase):
         self.assertFalse(self.service.get_import_template_config(self.waseem)["can_edit"])
         with self.assertRaises(Forbidden):
             self.service.get_import_template_config(self.viewer)
-        self.assertEqual(self.service.get_import_template_config(self.owner)["version"], 0)
+        self.assertEqual(self.service.get_import_template_config(self.owner)["version"], 1)  # setUp's preset only
 
 
 class ImportHttpTests(unittest.TestCase):
@@ -508,6 +646,7 @@ class ImportHttpTests(unittest.TestCase):
         self.project = service.create_project(self.owner, "HTTP import")
         service.grant_project_access(self.owner, self.project["id"], self.manager["id"], "manager")
         service.grant_project_access(self.owner, self.project["id"], self.viewer["id"], "viewer")
+        service.set_import_template_config(self.owner, {"preset": "full"})
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
@@ -669,13 +808,22 @@ class ImportHttpTests(unittest.TestCase):
         response, payload = self.request("PUT", "/api/import/template-config", {"columns": columns}, cookie=cookie, csrf=csrf)
         self.assertEqual(response.status, 200)
         self.assertIn("Cost centre", payload["config"]["labels"])
-        self.assertEqual(payload["config"]["version"], 1)
+        self.assertEqual(payload["config"]["version"], 2)
         response, payload = self.request("POST", "/api/import/preview", cookie=cookie, csrf=csrf, raw=stale,
                                          headers=self.upload_headers(self.project["id"]))
         self.assertEqual(response.status, 400)
         self.assertIn("template has changed", payload["error"])
         response, _ = self.request("PUT", "/api/import/template-config", {"columns": columns}, cookie=cookie)
         self.assertEqual(response.status, 403)
+        # presets over HTTP
+        response, payload = self.request("PUT", "/api/import/template-config", {"preset": "simple"}, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(len(payload["config"]["labels"]), 9)
+        response, payload = self.request("PUT", "/api/import/template-config", {"preset": "full"}, cookie=cookie, csrf=csrf)
+        self.assertEqual(len(payload["config"]["labels"]), 18)
+        response, payload = self.request("POST", "/api/import/preview", cookie=cookie, csrf=csrf, raw=stale,
+                                         headers=self.upload_headers(self.project["id"]))
+        self.assertEqual(response.status, 200)  # the Full preset is the shape the file was built against
 
     def test_put_routes_delegate_to_the_service_layer(self):
         source = inspect.getsource(AstraHandler.do_PUT)

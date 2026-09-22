@@ -2284,6 +2284,8 @@ class AstraService:
         self.require_owner(actor)
         if payload is None or payload.get("reset"):
             config = importer.TemplateConfig.default()
+        elif payload.get("preset"):
+            config = importer.TemplateConfig.preset(str(payload["preset"]))
         else:
             config = importer.TemplateConfig.normalize(payload.get("columns", []))
         with transaction(self.db):
@@ -2384,10 +2386,13 @@ class AstraService:
         parsed = importer.parse_upload(filename, data, config)
         new_project_name = None
         if project is None:
+            header_name = parsed.project_header.get("name")
             names = sorted({importer.normalize_text(row.cells.get("project")) for row in parsed.rows
                             if importer.normalize_text(row.cells.get("project"))})
+            if header_name:
+                names = [header_name]
             if not names:
-                raise ValueError("Choose a target project, or fill the Project column so Astra knows where the rows go.")
+                raise ValueError("Choose a target project, or fill the Project sheet so Astra knows where the rows go.")
             if len(names) > 1:
                 raise ValueError("The file names several projects (" + "; ".join(names) + "). Import one project per file.")
             matches = self.db.execute(
@@ -2431,11 +2436,7 @@ class AstraService:
         import_id = new_id()
         with transaction(self.db):
             if engine.project is None:
-                project_id = new_id()
-                self.db.execute(
-                    "INSERT INTO projects(id,name,description,timezone,created_at,created_by) VALUES(?,?,?,?,?,?)",
-                    (project_id, engine.new_project_name, "", "Asia/Karachi", now_text(), actor["id"]),
-                )
+                project_id = self._create_project_from_header(actor, engine.new_project_name, engine.project_header)
                 engine.project = {"id": project_id, "name": engine.new_project_name}
                 engine.project_id = project_id
             else:
@@ -2444,6 +2445,10 @@ class AstraService:
             summary["project"] = {"id": project_id, "name": engine.project["name"], "create": engine.new_project_name is not None}
             summary["filename"] = os.path.basename(filename or "upload")
             summary["sha256"] = digest
+            header = engine.project_header
+            if header.get("as_of_date") or header.get("source_document"):
+                summary["plan_as_of"] = header.get("as_of_date")
+                summary["source_document"] = header.get("source_document")
             self._project_event(
                 project_id, actor["id"], "import_committed",
                 {"import_id": import_id, "filename": summary["filename"], "sha256": digest,
@@ -2468,6 +2473,43 @@ class AstraService:
         summary["import_id"] = import_id
         summary["report_url"] = f"/api/imports/{import_id}/report.csv"
         return summary
+
+    def _create_project_from_header(self, actor: dict, name: str, header: dict) -> str:
+        """Owner-only: the Project sheet of the workbook becomes the new project. Runs inside the import transaction."""
+        project_id = new_id()
+        description = header.get("description", "")
+        if header.get("sponsor_email"):
+            description = (description + "\n\n" if description else "") + f"Sponsor / Executive Owner: {header['sponsor_email']}"
+        timezone_name = header.get("timezone") or "Asia/Karachi"
+        try:
+            ZoneInfo(timezone_name)
+        except (ZoneInfoNotFoundError, ValueError):
+            timezone_name = "Asia/Karachi"
+        working_days = importer.WORKING_DAY_LABELS.get(header.get("working_days", ""), "0123456")
+        manager_id = None
+        if header.get("manager_email"):
+            row = self.db.execute(
+                "SELECT id FROM users WHERE email=? AND active=1", (normalize_email(header["manager_email"]),)
+            ).fetchone()
+            manager_id = row["id"] if row else None
+        self.db.execute(
+            """INSERT INTO projects(id,name,description,manager_user_id,timezone,working_days,start_date,target_date,
+               created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (project_id, name, description, manager_id, timezone_name, working_days,
+             header.get("start_date"), header.get("target_date"), now_text(), actor["id"]),
+        )
+        if manager_id:
+            self.db.execute(
+                "INSERT INTO memberships VALUES(?,?,?,?,?) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role",
+                (project_id, manager_id, "manager", now_text(), actor["id"]),
+            )
+        if header.get("entity"):
+            entity = self.db.execute(
+                "SELECT id FROM entities WHERE name=? COLLATE NOCASE AND active=1", (header["entity"],)
+            ).fetchone()
+            if entity:
+                self.db.execute("INSERT OR IGNORE INTO project_entities VALUES(?,?)", (project_id, entity["id"]))
+        return project_id
 
     def list_imports(self, actor: dict, project_id: str | None = None) -> list[dict]:
         if not actor.get("active"):

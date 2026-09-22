@@ -900,7 +900,7 @@ function renderImportUpload(){
   const selected=document.querySelector("#project-filter").value;
   document.querySelector("#import-body").innerHTML=`
     <h3>Upload a filled template</h3>
-    <p class="muted">Download the template, fill its <strong>Tasks</strong> sheet (dates as dd-mm-yyyy), then upload it here. Nothing is written until you confirm in step 3. Re-importing a file updates tasks by Import Key; it never deletes.</p>
+    <p class="muted">Download the template, fill its <strong>Project</strong>, <strong>People</strong> and <strong>Tasks</strong> sheets (dates as dd-mm-yyyy; the Example sheet shows three worked rows), then upload it here. Nothing is written until you confirm in step 3. Re-importing a file updates tasks by Import Key; it never deletes.</p>
     <div class="import-links"><a href="/api/import/template.xlsx" download>Download template (.xlsx)</a><a href="/api/import/template.csv" download>Download template (.csv)</a>${settings}</div>
     <label>Target project<select id="import-project">${createOption}${options}</select></label>
     <div id="import-drop" class="dropzone" tabindex="0" role="button" aria-describedby="import-file-name"><strong>Drop your .xlsx or .csv here</strong><span>or press Enter / click to choose a file</span><input type="file" id="import-file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="visually-hidden" tabindex="-1"></div>
@@ -939,6 +939,7 @@ async function runImportPreview(){
   try{const {preview}=await apiUpload("/api/import/preview",file,importHeaders());importState.preview=preview;importState.filter="";renderImportStep("review")}
   catch(err){importError(err.message);button.disabled=false;button.textContent="Preview"}
 }
+function fmtDmy(iso){if(!iso)return "";const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso);return m?`${m[3]}-${m[2]}-${m[1]}`:iso}
 function fmtChange(value,change){
   if(!change)return escapeHtml(value??"");
   return `<span class="change"><s>${escapeHtml(change.from||"—")}</s> → ${escapeHtml(change.to||"—")}</span>`;
@@ -949,7 +950,13 @@ function renderImportReview(){
     .map(([k,label,n])=>`<button type="button" class="chip" data-kind="${k}" data-filter="${k}" aria-pressed="${importState.filter===k}">${escapeHtml(label)} <strong>${n}</strong></button>`).join("");
   const project=s.project||{};
   const projectLine=project.create?`<strong>${escapeHtml(project.name||"")}</strong> (a new project will be created)`:`<strong>${escapeHtml(project.name||"")}</strong>`;
-  const notes=[...(p.file_warnings||[]).map(w=>`<div>${escapeHtml(w)}</div>`),(p.unknown_columns||[]).length?`<div>Columns not imported: ${escapeHtml(p.unknown_columns.join(", "))}</div>`:""].filter(Boolean).join("");
+  const header=p.project_header||{};
+  const headerBits=[header.manager_email?`manager ${header.manager_email}`:"",header.timezone?escapeHtml(header.timezone):"",header.start_date?`planned ${escapeHtml(fmtDmy(header.start_date))} → ${escapeHtml(fmtDmy(header.target_date)||"—")}`:"",header.as_of_date?`plan as of ${escapeHtml(fmtDmy(header.as_of_date))}`:""].filter(Boolean).join(" · ");
+  const projectSheet=header.name?`<div>Project sheet: <strong>${escapeHtml(header.name)}</strong>${headerBits?` · ${headerBits}`:""}</div>`:"";
+  const peopleRows=(p.people||[]).map(x=>`<li data-status="${escapeHtml(x.status)}"><span class="badge" data-level="${x.status==="ok"?"ok":"warning"}">${escapeHtml(x.status==="ok"?"ready":x.status.replace("_"," "))}</span> ${escapeHtml(x.email||x.name)}${x.name&&x.email?` · ${escapeHtml(x.name)}`:""}${x.role?` · ${escapeHtml(x.role)}`:""}${x.message?`<br><small>${escapeHtml(x.message)}</small>`:""}</li>`).join("");
+  const people=peopleRows?`<details class="import-people"${(p.people||[]).some(x=>x.status!=="ok")?" open":""}><summary>People sheet: ${p.people.length} listed, ${p.people.filter(x=>x.status!=="ok").length} for the App Owner to add or grant</summary><ul class="findings">${peopleRows}</ul></details>`:"";
+  const fileWarnings=(p.file_warnings||[]).filter(w=>!/^People row|has no email/.test(w));
+  const notes=[projectSheet,...fileWarnings.map(w=>`<div>${escapeHtml(w)}</div>`),(p.unknown_columns||[]).length?`<div>Columns not imported: ${escapeHtml(p.unknown_columns.join(", "))}</div>`:""].filter(Boolean).join("");
   const custom=p.custom_columns||[];
   const head=["Row","Key","Action","Title","Owner","Start","Due","Status","Criticality",...custom.map(c=>c.label),"Findings"];
   const rows=p.rows.map(r=>{
@@ -972,6 +979,7 @@ function renderImportReview(){
     <p class="muted">Target: ${projectLine}${s.not_in_file?` · ${s.not_in_file} existing task(s) not in this file stay untouched`:""}. Errors block their row${p.options.valid_rows_only?" and are skipped":"; fix them in the template or tick “Import valid rows only” in step 1"}.</p>
     <div class="import-summary">${chips}</div>
     ${notes?`<div class="import-notes">${notes}</div>`:""}
+    ${people}
     <div class="import-table-wrap"><table class="import-table"><thead><tr>${head.map(h=>`<th scope="col">${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>
     <div class="actions"><button type="button" class="quiet" id="import-back">Back</button><button type="button" id="import-commit-btn"${canCommit?"":" disabled"}>Import ${importable} row${importable===1?"":"s"}</button></div>
     <div class="error" id="import-error"></div>`;
@@ -1033,7 +1041,8 @@ async function renderTemplateSettings(){
   }).join("");
   body.innerHTML=`
     <h3>Template settings</h3>
-    <p class="muted">Choose which columns the template carries, rename or reorder them, and add your own. Core columns (Import Key, Title, Start Date, Due Date, Status, Owner Email) stay fixed. Saving changes the template's version: files downloaded before the change are rejected on upload and must be downloaded again.${cfg.updated_at?` Last saved ${escapeHtml(new Date(cfg.updated_at).toLocaleString())}${cfg.updated_by_name?` by ${escapeHtml(cfg.updated_by_name)}`:""}.`:""}</p>
+    <p class="muted">Choose which columns the template carries, rename or reorder them, and add your own. Simple (the default) is nine columns with pre-filled keys; Full is the complete set with Project and People sheets. Core columns (Import Key, Title, Start Date, Due Date, Status, Owner Email) stay fixed. Saving changes the template's version: files downloaded before the change are rejected on upload and must be downloaded again.${cfg.updated_at?` Last saved ${escapeHtml(new Date(cfg.updated_at).toLocaleString())}${cfg.updated_by_name?` by ${escapeHtml(cfg.updated_by_name)}`:""}.`:""}</p>
+    <div class="import-summary" role="group" aria-label="Presets"><span class="muted">Presets:</span><button type="button" class="chip" data-preset="simple">Simple (${(cfg.presets?.simple||[]).length} columns)</button><button type="button" class="chip" data-preset="full">Full (${(cfg.presets?.full||[]).length} columns)</button></div>
     <ol class="col-list" id="tpl-cols">${items}</ol>
     <form id="tpl-add" class="add-col">
       <label>New column label<input name="label" maxlength="60" required></label>
@@ -1060,6 +1069,11 @@ async function renderTemplateSettings(){
     cfg.columns.push({key:"",label:String(f.label||"").trim(),enabled:true,custom:true,type:f.type,values,required:f.required==="on"});
     renderTemplateSettings();
   });
+  document.querySelectorAll("#import-body [data-preset]").forEach(b=>b.addEventListener("click",()=>{
+    readBack();const on=new Set((cfg.presets||{})[b.dataset.preset]||[]);
+    cfg.columns.forEach(col=>{col.enabled=core.has(col.key)||on.has(col.key)});
+    renderTemplateSettings();document.querySelector("#tpl-error").textContent=`${b.dataset.preset==="simple"?"Simple":"Full"} preset applied - press Save template to keep it.`;
+  }));
   document.querySelector("#tpl-cancel").addEventListener("click",()=>{importState.settings=null;renderImportStep("upload")});
   document.querySelector("#tpl-reset").addEventListener("click",async()=>{
     if(!confirm("Reset the import template to its default columns? Custom columns are removed from the template (values already imported stay on their tasks)."))return;

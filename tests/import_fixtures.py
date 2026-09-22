@@ -9,7 +9,7 @@ import zipfile
 from datetime import date
 from xml.sax.saxutils import escape
 
-from astra.importer import EXCEL_EPOCH, MARKER_NAME, MARKER_SHEET, TEMPLATE_SHEET, TemplateConfig
+from astra.importer import EXCEL_EPOCH, MARKER_NAME, MARKER_SHEET, PROJECT_FIELDS, TEMPLATE_SHEET, TemplateConfig
 from astra.xlsx_reader import column_letter
 
 NS = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
@@ -100,14 +100,18 @@ def workbook_bytes(sheets, *, date1904=False, shared_strings=None, absolute_targ
     return buffer.getvalue()
 
 
-def filled_template(rows, config=None, *, marker=None, headers=None):
+def filled_template(rows, config=None, *, marker=None, headers=None, project=None, people=None):
     """A workbook shaped like the Astra template: Tasks sheet with the configured
-    header row plus ``rows`` (dicts keyed by column key), and the hidden marker sheet.
+    header row plus ``rows`` (dicts keyed by column key), the hidden marker sheet
+    and, when given, a Project sheet (``{label: value}``) and a People sheet
+    (tuples of Email, Full Name, Role, Notes).
 
     Dates given as ``datetime.date`` become real Excel date cells; strings are kept
     as typed so prose dates can be exercised.
     """
-    config = config or TemplateConfig.default()
+    # Tests exercise every column, so the fixture defaults to the Full preset (the
+    # service tests switch the Owner's configuration to Full in setUp).
+    config = config or TemplateConfig.preset("full")
     labels = list(headers) if headers is not None else list(config.labels())
     keys = [column.key for column in config.active]
     matrix = [labels]
@@ -116,5 +120,15 @@ def filled_template(rows, config=None, *, marker=None, headers=None):
     tasks = sheet_xml(matrix)
     marker_value = marker if marker is not None else config.hash()
     marker_sheet = sheet_xml([[MARKER_NAME, marker_value]])
-    return workbook_bytes([(TEMPLATE_SHEET, tasks), ("README", sheet_xml([["notes"]])), (MARKER_SHEET, marker_sheet)],
-                          hidden=(MARKER_SHEET,), defined_names={MARKER_NAME: f"{MARKER_SHEET}!$B$1"})
+    sheets = [("README", sheet_xml([["notes"]]))]
+    if project is not None:
+        project_rows = [["Field", "Value (fill in)", "Guidance"]]
+        for label, _, required, _, _ in PROJECT_FIELDS:
+            project_rows.append([label + (" *" if required else ""), project.get(label, ""), ""])
+        sheets.append(("Project", sheet_xml(project_rows)))
+    sheets.append((TEMPLATE_SHEET, tasks))
+    sheets.append(("Example", sheet_xml([labels, ["EX-001", "Example task"] + [""] * (len(labels) - 2)])))
+    if people is not None:
+        sheets.append(("People", sheet_xml([["Email", "Full Name", "Role on project", "Notes"], *[list(row) for row in people]])))
+    sheets.append((MARKER_SHEET, marker_sheet))
+    return workbook_bytes(sheets, hidden=(MARKER_SHEET,), defined_names={MARKER_NAME: f"{MARKER_SHEET}!$B$1"})
