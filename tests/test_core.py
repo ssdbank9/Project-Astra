@@ -1450,6 +1450,37 @@ class AstraCoreTests(unittest.TestCase):
         self.assertIn("2026-04-15", updated["after_json"])
         self.assertEqual(updated["reason"], "Client moved the date")
 
+    def test_list_subtasks_returns_step_schedule_shape(self):
+        # D73AQW: the Gantt step segments and the detail dialog share one subtask
+        # shape, so list_subtasks must carry the schedule and ownership fields.
+        project = self.service.create_project(self.owner, "Steps")
+        parent = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Board pack"})
+        step = self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Draft pack", "parent_task_id": parent["id"],
+            "owner_user_id": self.owner["id"], "start_date": "2026-10-05", "due_date": "2026-10-09",
+            "criticality": "high", "progress": 40,
+        })
+        undated = self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Circulate", "parent_task_id": parent["id"],
+        })
+        by_id = {s["id"]: s for s in self.service.list_subtasks(self.owner, parent["id"])}
+        self.assertEqual(set(by_id), {step["id"], undated["id"]})
+        dated = by_id[step["id"]]
+        self.assertEqual(dated["start_date"], "2026-10-05")
+        self.assertEqual(dated["due_date"], "2026-10-09")
+        self.assertEqual(dated["criticality"], "high")
+        self.assertEqual(dated["progress"], 40)
+        self.assertEqual(dated["parent_task_id"], parent["id"])
+        self.assertEqual(dated["owner_user_id"], self.owner["id"])
+        self.assertEqual(dated["owner_name"], "Owner")
+        # Undated steps stay in the list with explicit nulls; nothing invents dates.
+        self.assertIsNone(by_id[undated["id"]]["start_date"])
+        self.assertIsNone(by_id[undated["id"]]["due_date"])
+        self.assertIsNone(by_id[undated["id"]]["owner_user_id"])
+        detail = self.service.task_detail(self.owner, parent["id"])
+        self.assertEqual({s["id"] for s in detail["subtasks"]}, {step["id"], undated["id"]})
+        self.assertTrue(all("start_date" in s and "criticality" in s for s in detail["subtasks"]))
+
 
 if __name__ == "__main__":
     unittest.main()

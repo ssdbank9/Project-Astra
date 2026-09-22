@@ -48,9 +48,86 @@ function renderBands(tasks){
     `<div class="band ${cls}"><strong>${count}</strong><span>${escapeHtml(label)}</span></div>`).join("");
 }
 function fmtTick(d){return d.toLocaleDateString(undefined,{month:"short",day:"numeric"})}
+// D73AQW: a task's steps are its subtasks. They render as colour-coded segments inside the
+// parent bar (hue = step index, Okabe-Ito order), expand to child rows on request, share one
+// tooltip on hover and focus, and click through to the step's own record. Colour is never the
+// only carrier: every segment shows its index, the legend pairs index with colour, and the
+// Schedule table twin shows the same rows as text.
+const STEP_HUES=7;
+const CLOSED_STATUSES=["completed","cancelled","abandoned"];
+const STATUS_LABELS={draft:"Draft",assigned:"Assigned",in_progress:"In progress",submitted:"Submitted",changes_requested:"Changes requested",completed:"Completed",on_hold:"On hold",delayed:"Delayed",cancelled:"Cancelled",abandoned:"Abandoned",reopened:"Reopened"};
+const tipMeta=new Map();
+// localStorage holds per-viewer conveniences only (expanded parents, chart/table choice).
+const storage={get(k,f){try{const v=localStorage.getItem(k);return v==null?f:JSON.parse(v)}catch(e){return f}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const storedExpanded=storage.get("astra.gantt.expanded",[]);
+const expandedParents=new Set(Array.isArray(storedExpanded)?storedExpanded:[]);
+const phoneMQ=window.matchMedia?window.matchMedia("(max-width: 760px)"):{matches:false};
+function currentView(){const stored=storage.get("astra.gantt.view",null);if(stored==="table"||stored==="chart")return stored;return phoneMQ.matches?"table":"chart"}
+// ISO dates parse as UTC midnight, so format them in UTC too or viewers west of UTC see the day before.
+function fmtDay(iso){if(!iso)return "—";return new Date(iso).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"})}
+function statusLabel(s){return STATUS_LABELS[s]||String(s||"").replace(/_/g," ")}
+function initials(name){return (name||"").split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0].toUpperCase()).join("")}
+function dueText(t){if(t.due_state==="undated")return "No due date";if(t.due_state==="closed")return "Closed";const d=t.days_to_due;if(d==null)return "";if(d<0)return `${-d} day${d===-1?"":"s"} overdue`;if(d===0)return "Due today";return `Due in ${d} day${d===1?"":"s"}`}
+function stepOrder(children){return children.slice().sort((a,b)=>{const da=a.start_date||a.due_date||"9999",db=b.start_date||b.due_date||"9999";return da<db?-1:da>db?1:String(a.title||"").localeCompare(String(b.title||""))})}
+function stepHue(idx){return ((idx-1)%STEP_HUES)+1}
+function stepDays(t){const s=t.start_date||t.due_date,e=t.due_date||t.start_date;return Math.round((Date.parse(e)-Date.parse(s))/86400000)+1}
+function stateClass(t){return t.is_critical_path?"critical":(t.is_blocked?"blocked":t.due_state)}
+function tipLines(t,idx,total,extra){
+  const head=idx?`Step ${idx} of ${total} · ${t.title}`:t.title;
+  const owner=`Owner: ${t.owner_name||"Unassigned"}`;
+  const dated=t.start_date||t.due_date;
+  const n=dated?stepDays(t):0;
+  const when=dated?`${fmtDay(t.start_date||t.due_date)} → ${fmtDay(t.due_date||t.start_date)} · ${n} day${n===1?"":"s"}`:"No dates yet";
+  const st=[statusLabel(t.status),dueText(t),t.criticality||"Unrated"];
+  if(t.is_critical_path)st.push("Critical path");if(t.is_blocked)st.push("Blocked");
+  return [head,owner,when,st.filter(Boolean).join(" · "),...(extra||[]),"Click for details & history"];
+}
+// Registers the tooltip text for an element and returns its data-tip + aria-label attributes.
+// GF-8: the label is short (position and name); the detail lives in the tooltip, which is
+// linked by aria-describedby only while it is visible, so nothing is read twice.
+function tipAttrs(t,idx,total,extra){const lines=tipLines(t,idx,total,extra);tipMeta.set(t.id,lines);const label=idx?`Step ${idx} of ${total}, ${t.title}`:(total?`${t.title}, ${total} step${total===1?"":"s"}`:t.title);return `data-tip="${escapeHtml(t.id)}" aria-label="${escapeHtml(label)}"`}
+function groupSteps(tasks){
+  const visible=new Set(tasks.map(t=>t.id));
+  // Step index comes from ALL children of a parent (state.tasks), so a step keeps its
+  // number and colour whatever the filters hide; only the drawn set follows the filters.
+  const allChildren=new Map();
+  for(const t of state.tasks){if(t.parent_task_id){if(!allChildren.has(t.parent_task_id))allChildren.set(t.parent_task_id,[]);allChildren.get(t.parent_task_id).push(t)}}
+  const stepIndex=new Map();
+  for(const kids of allChildren.values()){const ordered=stepOrder(kids);ordered.forEach((k,i)=>stepIndex.set(k.id,{idx:i+1,total:ordered.length}))}
+  const childrenOf=new Map(),top=[];
+  for(const t of tasks){
+    if(t.parent_task_id&&visible.has(t.parent_task_id)){if(!childrenOf.has(t.parent_task_id))childrenOf.set(t.parent_task_id,[]);childrenOf.get(t.parent_task_id).push(t)}
+    else top.push(t);
+  }
+  for(const [pid,kids] of childrenOf)childrenOf.set(pid,stepOrder(kids));
+  return {top,childrenOf,stepIndex,visible,hasSteps:childrenOf.size>0};
+}
+function dateExtent(t,kids){
+  const vals=[];const add=x=>{if(x.start_date||x.due_date){vals.push(Date.parse(x.start_date||x.due_date),Date.parse(x.due_date||x.start_date))}};
+  add(t);kids.forEach(add);
+  return vals.length?{start:Math.min(...vals),end:Math.max(...vals)}:null;
+}
+// CSP is style-src 'self', so inline style attributes are dropped by the browser. Positions
+// travel as data-x / data-w percentages and are applied through the CSSOM after insertion.
+function applyGeometry(root){root.querySelectorAll("[data-x]").forEach(n=>{n.style.left=`${n.dataset.x}%`;if(n.dataset.w!=null)n.style.width=`${n.dataset.w}%`})}
+// GF-6: a re-render (resize, filter, view change) replaces the chart's DOM. If focus was inside it,
+// remember which control held it (kind + id attribute) and put focus back on its replacement.
+const FOCUS_ATTRS=["data-detail","data-more","data-expand"],FOCUS_KINDS=["step","track","chip","link","expand","step-more"];
+function focusKeyIn(root){const a=document.activeElement;if(!a||!root.contains(a))return null;const attr=FOCUS_ATTRS.find(x=>a.hasAttribute(x));if(!attr)return null;const kind=FOCUS_KINDS.find(k=>a.classList.contains(k));return `${kind?"."+kind:""}[${attr}="${CSS.escape(a.getAttribute(attr))}"]`}
+function restoreFocus(root,sel){if(!sel)return;const n=root.querySelector(sel);if(n&&!n.closest("[hidden]"))n.focus({preventScroll:true})}
 function renderGantt(tasks){
-  const el=document.querySelector("#gantt");
-  if(!tasks.length){el.innerHTML='<div class="empty">No tasks match these filters. Undated or unassigned work will appear here rather than being hidden.</div>';return}
+  const el=document.querySelector("#gantt"),tableEl=document.querySelector("#schedule-table");
+  const focusKey=focusKeyIn(el);
+  tipMeta.clear();hideTip();
+  const showTable=currentView()==="table";
+  document.querySelector("#view-table").checked=showTable;
+  el.hidden=showTable;tableEl.hidden=!showTable;
+  const groups=groupSteps(tasks);
+  document.querySelector("#step-legend").hidden=!groups.hasSteps;
+  if(!tasks.length){const empty='<div class="empty">No tasks match these filters. Undated or unassigned work will appear here rather than being hidden.</div>';el.innerHTML=empty;tableEl.innerHTML=empty;return}
+  if(showTable){renderScheduleTable(groups,tableEl);el.innerHTML="";return}
+  tableEl.innerHTML="";
+  const {top,childrenOf,stepIndex,visible}=groups;
   const dated=tasks.filter(t=>t.start_date||t.due_date);
   // 5WZ4A8: project start/target markers for each project shown in the view.
   const projIds=[...new Set(tasks.map(t=>t.project_id))];
@@ -70,32 +147,184 @@ function renderGantt(tasks){
   const span=Math.max(1,max-min);
   const pct=d=>(d-min)/span*100;
   const inRange=x=>x>=0&&x<=100;
-  const markerFlags=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-flag ${m.kind}" style="left:${x}%">${escapeHtml(m.label)}</span>`:""}).join("");
-  const markerLines=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-line ${m.kind}" style="left:${x}%"></span>`:""}).join("");
+  const markerFlags=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-flag ${m.kind}" data-x="${x}">${escapeHtml(m.label)}</span>`:""}).join("");
+  const markerLines=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-line ${m.kind}" data-x="${x}"></span>`:""}).join("");
   // weekly calendar ticks
   const ticks=[];const t0=new Date(min);t0.setHours(0,0,0,0);
   for(let t=t0.getTime();t<=max.getTime();t+=7*86400000)ticks.push(new Date(t));
   const now=new Date();now.setHours(0,0,0,0);
   const todayPct=pct(now);const showToday=todayPct>=0&&todayPct<=100;
-  const axis=ticks.map(d=>`<span class="axis-tick" style="left:${pct(d)}%"><b>${d.getDate()}</b> ${escapeHtml(d.toLocaleDateString(undefined,{month:"short"}))}</span>`).join("");
-  const todayFlag=showToday?`<span class="today-flag" style="left:${todayPct}%">Today</span>`:"";
+  const axis=ticks.map(d=>`<span class="axis-tick" data-x="${pct(d)}"><b>${d.getDate()}</b> ${escapeHtml(d.toLocaleDateString(undefined,{month:"short"}))}</span>`).join("");
+  const todayFlag=showToday?`<span class="today-flag" data-x="${todayPct}">Today</span>`:"";
   const header=`<div class="gantt-row gantt-head"><div class="task-name gantt-head-cap">Project / task</div><div class="task-meta gantt-head-cap">Owner · due · next action</div><div class="timeline axis">${axis}${markerLines}${markerFlags}${todayFlag}</div></div>`;
-  const rows=tasks.map(t=>{
-    let bar;
-    if(!t.start_date&&!t.due_date){bar=`<span class="bar undated">Date required</span>`}
+  const todayLine=showToday?`<span class="today-line" data-x="${todayPct}"></span>`:"";
+  // Pixel estimate of the timeline column (grid: 260px name, 210px meta, rest timeline).
+  const tlw=Math.max(700,(el.clientWidth||1180)-470);
+  const stepButton=(k,g)=>{
+    const m=stepIndex.get(k.id);const closed=CLOSED_STATUSES.includes(k.status);
+    const cls=["step",`step-c${stepHue(m.idx)}`,m.idx>STEP_HUES?"wrap":"",g.lane?"lane-2":"",closed?"done":"",k.status==="on_hold"?"hold":"",k.is_critical_path?"crit":"",g.solo?"solo":""].filter(Boolean).join(" ");
+    const glyph=k.status==="completed"?"✓":(closed?"×":(k.status==="on_hold"?"∥":""));
+    const showTitle=g.px>=72,showOwner=g.px>=110&&k.owner_name;
+    const ttl=showTitle?`<span class="ttl">${glyph?glyph+" ":""}${escapeHtml(k.title)}</span>`:(glyph?`<span class="ttl">${glyph}</span>`:"");
+    const own=showOwner?`<i class="own" aria-hidden="true">${escapeHtml(initials(k.owner_name))}</i>`:"";
+    return `<button type="button" class="${cls}" data-detail="${escapeHtml(k.id)}" data-idx="${m.idx}" tabindex="${g.solo?0:-1}" ${tipAttrs(k,m.idx,m.total)} data-x="${g.x}" data-w="${g.w}"><span class="step-label"><b class="idx">${m.idx}</b>${ttl}${own}</span></button>`;
+  };
+  const stepListItem=k=>{const m=stepIndex.get(k.id);return `<li><button type="button" class="link" data-detail="${escapeHtml(k.id)}"><i class="sw step-c${stepHue(m.idx)}${m.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${m.idx}</i> Step ${m.idx} · ${escapeHtml(k.title)}</button> <span class="muted">${escapeHtml(k.owner_name||"Unassigned")} · ${escapeHtml(k.start_date||"—")} → ${escapeHtml(k.due_date||"—")} · ${escapeHtml(statusLabel(k.status))}</span></li>`};
+  const row=(t,depth)=>{
+    const id=escapeHtml(t.id);
+    const kids=childrenOf.get(t.id)||[];
+    const meta=stepIndex.get(t.id);
+    const isStep=depth>0&&!!meta;
+    const expanded=expandedParents.has(t.id);
+    const ownDates=!!(t.start_date||t.due_date);
+    // GF-2: a dated parent's track is sized and tinted from its OWN dates. Steps that run past them
+    // overhang onto a dashed neutral extension and are named in the tooltip and the meta column.
+    // Only a parent without dates takes its extent from its steps (the dashed "derived" track).
+    const ext=ownDates?dateExtent(t,[]):dateExtent(t,kids);
+    const undatedKids=kids.filter(k=>!k.start_date&&!k.due_date),nUndated=undatedKids.length;
+    // GF-1/GF-16: the "n steps need dates" chip lives in the meta column, never on the timeline, so
+    // it can never cover a step and shows whether or not the parent itself has dates.
+    const undatedChip=nUndated?`<br><button type="button" class="chip step-undated" data-detail="${id}" aria-label="${nUndated} step${nUndated===1?"":"s"} of ${escapeHtml(t.title)} need${nUndated===1?"s":""} dates; open the task">${nUndated} step${nUndated===1?"":"s"} need${nUndated===1?"s":""} dates</button>`:"";
+    let bar,tall=false,derived="",overrunText="",metaMore="";
+    if(!ext){bar=`<span class="bar undated">Date required</span>`}
     else{
-      const start=new Date(t.start_date||t.due_date),end=new Date(t.due_date||t.start_date);
-      const left=Math.max(0,pct(start)),width=Math.max(.8,(end-start+86400000)/span*100);
-      const cls=t.is_critical_path?"critical":(t.is_blocked?"blocked":t.due_state);
-      bar=`<span class="bar ${cls}" style="left:${left}%;width:${width}%">${escapeHtml(t.title)}</span>`;
+      const left=Math.max(0,pct(ext.start)),width=Math.max(.8,(ext.end-ext.start+86400000)/span*100);
+      // A parent with no dates of its own gets a dashed "derived" track (its extent comes
+      // from its steps) rather than the static grey "Date required" chip styling.
+      const cls=kids.length&&!ownDates?"derived":stateClass(t);
+      if(kids.length){
+        const datedKids=kids.filter(k=>k.start_date||k.due_date);
+        const barPx=width/100*tlw,maxLanes=barPx>=160?2:1;
+        const laneEnd=[],drawn=[],overflow=[],overruns=[];
+        let extStart=ext.start,extEnd=ext.end;
+        for(const k of datedKids){
+          const ks=Date.parse(k.start_date||k.due_date),ke=Date.parse(k.due_date||k.start_date);
+          if(ownDates){
+            const idx=stepIndex.get(k.id).idx;
+            if(ks<ext.start){const d=Math.round((ext.start-ks)/86400000);overruns.push(`Step ${idx} starts ${d} day${d===1?"":"s"} before the parent`);extStart=Math.min(extStart,ks)}
+            if(ke>ext.end){const d=Math.round((ke-ext.end)/86400000);overruns.push(`Step ${idx} ends ${d} day${d===1?"":"s"} after the parent`);extEnd=Math.max(extEnd,ke)}
+          }
+          const wPct=(ke-ks+86400000)/span*100,px=wPct/100*tlw;
+          if(px<8){overflow.push(k);continue}
+          let lane=-1;for(let i=0;i<maxLanes;i++){if(laneEnd[i]==null||laneEnd[i]<ks){lane=i;break}}
+          if(lane<0){overflow.push(k);continue}
+          laneEnd[lane]=ke;
+          // Track-relative geometry; a step outside the parent's dates overhangs (x<0 or x+w>100).
+          drawn.push({k,g:{lane,px,x:(pct(ks)-left)/width*100,w:wPct/width*100}});
+        }
+        tall=laneEnd.length>1;
+        const extBefore=extStart<ext.start?`<i class="track-ext before" data-x="${(pct(extStart)-left)/width*100}" data-w="${(pct(ext.start)-pct(extStart))/width*100}"></i>`:"";
+        const extAfter=extEnd>ext.end?`<i class="track-ext after" data-x="100" data-w="${(pct(extEnd)-pct(ext.end))/width*100}"></i>`:"";
+        if(overruns.length)overrunText=overruns.map(o=>`<br><span class="overrun-text">${escapeHtml(o)}</span>`).join("");
+        const segs=drawn.map(({k,g})=>stepButton(k,g)).join("");
+        // GF-1/GF-7: +N sits just outside the track's right edge, or its left edge when the track ends
+        // near the timeline's end, or in the meta column when the track spans the whole timeline, so
+        // neither it nor its 44px hit area can ever cover a drawn step.
+        const need=40/tlw*100,place=100-(left+width)>=need?"":(left>=need?" flip":" in-meta");
+        const moreBtn=overflow.length?`<button type="button" class="step-more${place}" data-more="${id}" aria-expanded="false" aria-controls="more-${id}" aria-label="${overflow.length} more step${overflow.length===1?"":"s"} not drawn at this scale (too small or overlapping); open the list">+${overflow.length}</button>`:"";
+        const more=place===" in-meta"?"":moreBtn;
+        const moreList=overflow.length?`<div class="step-more-list" id="more-${id}" data-x="${place===" in-meta"?0:Math.min(left,68)}" hidden><p class="muted">${overflow.length} more step${overflow.length===1?"":"s"} not drawn at this scale (too small or overlapping)</p><ul>${overflow.map(stepListItem).join("")}</ul></div>`:"";
+        // In the meta column the list follows its button, so the disclosure stays adjacent in Tab order.
+        if(place===" in-meta")metaMore=`<br>${moreBtn}${moreList}`;
+        if(!ownDates)derived=`<br><span class="chip derived">Dates from steps</span>`;
+        bar=`<div class="bar track ${cls}${tall?" lanes-2":""}${expanded?" is-expanded":""}" role="group" tabindex="0" data-detail="${id}" ${tipAttrs(t,null,kids.length,overruns)} data-x="${left}" data-w="${width}">${extBefore}${extAfter}${segs}${more}</div>${place===" in-meta"?"":moreList}`;
+      }
+      else if(isStep){bar=stepButton(t,{lane:0,px:width/100*tlw,x:left,w:Math.min(100-left,width),solo:true})}
+      else{bar=`<button type="button" class="bar plain ${cls}" data-detail="${id}" ${tipAttrs(t,null,0)} data-x="${left}" data-w="${width}"><span class="bar-label">${escapeHtml(t.title)}</span></button>`}
     }
-    const todayLine=showToday?`<span class="today-line" style="left:${todayPct}%"></span>`:"";
     const blocked=t.is_blocked?`<br><span class="blocked-text">Blocked by ${escapeHtml(t.blocked_by.map(item=>item.title).join(", "))}</span>`:"";
     const cp=t.is_critical_path?`<br><span class="cp-text">On critical path</span>`:"";
-    return `<div class="gantt-row"><div class="task-name">${escapeHtml(t.project_name)}<br><small>${escapeHtml(t.title)}</small><br><button type="button" class="link" data-detail="${escapeHtml(t.id)}">Details &amp; history</button></div><div class="task-meta">${escapeHtml(t.owner_name||"Unassigned")}<br>${escapeHtml(t.due_date||"No due date")} · ${escapeHtml(t.criticality||"Unrated")}${blocked}${cp}<br><span class="next-action">Next: ${escapeHtml(t.next_action||"—")}</span></div><div class="timeline">${markerLines}${todayLine}${bar}</div></div>`;
-  }).join("");
-  el.innerHTML=header+rows;
+    const expandBtn=kids.length?`<button type="button" class="expand" data-expand="${id}" aria-expanded="${expanded}" aria-controls="steps-${id}" aria-label="${expanded?"Hide":"Show"} ${kids.length} step${kids.length===1?"":"s"} of ${escapeHtml(t.title)}">${expanded?"▾":"▸"}</button>`:"";
+    const swatch=isStep?`<i class="sw step-c${stepHue(meta.idx)}${meta.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${meta.idx}</i> `:"";
+    const nameTop=isStep?`<span class="step-kicker">${swatch}Step ${meta.idx} of ${meta.total}</span>`:escapeHtml(t.project_name);
+    const name=`<div class="task-name${isStep?" is-step":""}"><div class="name-wrap">${expandBtn}<div>${nameTop}<br><small>${escapeHtml(t.title)}</small>${kids.length?`<br><small class="muted">${kids.length} step${kids.length===1?"":"s"}</small>`:""}<br><button type="button" class="link" data-detail="${id}">Details &amp; history</button></div></div></div>`;
+    const metaCol=`<div class="task-meta">${escapeHtml(t.owner_name||"Unassigned")}<br>${escapeHtml(t.due_date||"No due date")} · ${escapeHtml(t.criticality||"Unrated")}${derived}${undatedChip}${metaMore}${overrunText}${blocked}${cp}<br><span class="next-action">Next: ${escapeHtml(t.next_action||"—")}</span></div>`;
+    const html=`<div class="gantt-row${isStep?" step-row":""}">${name}${metaCol}<div class="timeline${tall?" tall":""}">${markerLines}${todayLine}${bar}</div></div>`;
+    if(!kids.length)return html;
+    return html+`<div class="step-rows" id="steps-${id}" role="group" aria-label="Steps of ${escapeHtml(t.title)}"${expanded?"":" hidden"}>${kids.map(k=>row(k,depth+1)).join("")}</div>`;
+  };
+  el.innerHTML=header+top.map(t=>row(t,0)).join("");
+  applyGeometry(el);
+  restoreFocus(el,focusKey);
 }
+function renderScheduleTable(groups,tableEl){
+  const {top,childrenOf,stepIndex}=groups;
+  let steps=0;const rows=[];
+  const cell=v=>`<td>${escapeHtml(v??"—")}</td>`;
+  const walk=(t,parent)=>{
+    const kids=childrenOf.get(t.id)||[];const m=stepIndex.get(t.id);const isStep=!!parent;
+    const link=`<button type="button" class="link" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>`;
+    const stepNo=isStep?`<i class="sw step-c${stepHue(m.idx)}${m.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${m.idx}</i><span class="sr-only">Step ${m.idx}</span> of ${m.total}`:"—";
+    rows.push(`<tr class="${isStep?"step-tr":"task-tr"}">${cell(t.project_name)}<td>${isStep?escapeHtml(parent.title):link}</td><td>${stepNo}</td><td>${isStep?link:"—"}</td>${cell(t.owner_name||"Unassigned")}${cell(t.start_date||"—")}${cell(t.due_date||"—")}${cell(statusLabel(t.status))}${cell(dueText(t)||t.due_state)}<td>${t.is_critical_path?"Yes":"No"}</td></tr>`);
+    if(isStep)steps++;
+    kids.forEach(k=>walk(k,t));
+  };
+  top.forEach(t=>walk(t,null));
+  const asOf=document.querySelector("#as-of").textContent;
+  const head=["Project","Task","Step #","Step","Owner","Start","Due","Status","Due state","Critical path"].map(h=>`<th scope="col">${h}</th>`).join("");
+  tableEl.innerHTML=`<table class="sched-table"><caption>Schedule table · ${top.length} task${top.length===1?"":"s"}, ${steps} step${steps===1?"":"s"} · same filters as the Gantt · ${escapeHtml(asOf)}</caption><thead><tr>${head}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
+}
+// Shared tooltip (WCAG 1.4.13: hoverable, persistent, dismissible). Shown on hover after a
+// short delay and on keyboard focus; never the title attribute.
+const tipEl=document.querySelector("#step-tip");
+let tipTimer=null,tipFor=null;
+function placeTip(target){const r=target.getBoundingClientRect();const tw=tipEl.offsetWidth,th=tipEl.offsetHeight;const left=Math.min(Math.max(8,r.left),Math.max(8,window.innerWidth-tw-8));let top=r.bottom+8;if(top+th>window.innerHeight-8)top=r.top-th-8;tipEl.style.left=`${left}px`;tipEl.style.top=`${Math.max(8,top)}px`}
+function showTip(target){const lines=tipMeta.get(target.dataset.tip);if(!lines)return;clearTimeout(tipTimer);tipTimer=null;if(tipFor&&tipFor!==target)tipFor.removeAttribute("aria-describedby");tipFor=target;tipEl.innerHTML=lines.map((l,i)=>`<span class="${i===0?"tip-head":(i===lines.length-1?"tip-hint":"")}">${escapeHtml(l)}</span>`).join("");tipEl.hidden=false;target.setAttribute("aria-describedby","step-tip");placeTip(target)}
+function hideTip(){clearTimeout(tipTimer);tipTimer=null;if(tipFor){tipFor.removeAttribute("aria-describedby");tipFor=null}if(tipEl)tipEl.hidden=true}
+function announce(msg){const live=document.querySelector("#gantt-live");if(!live)return;live.textContent="";setTimeout(()=>{live.textContent=msg},30)}
+// GF-6: when the list being closed holds focus (Escape on a link), focus returns to its +N button.
+function closeMoreLists(){document.querySelectorAll(".step-more-list:not([hidden])").forEach(l=>{const held=l.contains(document.activeElement);l.hidden=true;const b=document.querySelector(`[aria-controls="${CSS.escape(l.id)}"]`);if(b){b.setAttribute("aria-expanded","false");if(held)b.focus()}})}
+function toggleSteps(id){
+  const btn=document.querySelector(`[data-expand="${CSS.escape(id)}"]`),rows=document.getElementById(`steps-${id}`);
+  if(!btn||!rows)return;
+  const open=rows.hidden;rows.hidden=!open;
+  btn.setAttribute("aria-expanded",String(open));btn.textContent=open?"▾":"▸";
+  btn.setAttribute("aria-label",(btn.getAttribute("aria-label")||"").replace(/^(Show|Hide)/,open?"Hide":"Show"));
+  if(open)expandedParents.add(id);else expandedParents.delete(id);
+  storage.set("astra.gantt.expanded",[...expandedParents]);
+  btn.closest(".gantt-row")?.querySelector(".track")?.classList.toggle("is-expanded",open);
+  const n=rows.querySelectorAll(":scope > .gantt-row").length;
+  announce(open?`Steps expanded, ${n} row${n===1?"":"s"}`:"Steps collapsed");
+}
+function toggleMore(btn){const list=document.getElementById(btn.getAttribute("aria-controls"));if(!list)return;const open=list.hidden;closeMoreLists();if(open){list.hidden=false;btn.setAttribute("aria-expanded","true");hideTip()}}
+(function wireGantt(){
+  const gantt=document.querySelector("#gantt");
+  // The +N button and its list are DOM children of the track but not part of it: they never raise
+  // the track's tooltip (GF-8).
+  const isMore=n=>!!(n&&n.closest&&n.closest(".step-more,.step-more-list"));
+  gantt.addEventListener("mouseover",e=>{if(isMore(e.target))return;const t=e.target.closest("[data-tip]");if(!t||t===tipFor)return;clearTimeout(tipTimer);tipTimer=setTimeout(()=>showTip(t),150)});
+  gantt.addEventListener("mouseout",e=>{const t=e.target.closest("[data-tip]");if(!t)return;const to=e.relatedTarget;if(to&&((t.contains(to)&&!isMore(to))||tipEl.contains(to)))return;clearTimeout(tipTimer);tipTimer=setTimeout(()=>{if(!tipEl.matches(":hover"))hideTip()},120)});
+  tipEl.addEventListener("mouseleave",()=>hideTip());
+  // GF-8: only the focused element itself carries a tooltip (never an ancestor track when focus lands
+  // on +N), and losing focus clears the tooltip and aria-describedby of that same element.
+  gantt.addEventListener("focusin",e=>{if(e.target.matches("[data-tip]"))showTip(e.target)});
+  gantt.addEventListener("focusout",e=>{if(e.target.matches("[data-tip]")&&e.target===tipFor)hideTip()});
+  // Roving focus inside a parent bar: the bar is the tab stop, arrows move between its steps.
+  gantt.addEventListener("keydown",e=>{
+    if(e.key==="Escape"){hideTip();closeMoreLists();return}
+    const track=e.target.closest(".track");
+    if(!track)return;
+    const steps=[...track.querySelectorAll(".step")];
+    const cur=e.target.closest(".step");
+    let i=cur?steps.indexOf(cur):-1;
+    if(["ArrowRight","ArrowLeft","Home","End"].includes(e.key)){
+      if(!steps.length)return;
+      if(e.key==="ArrowRight")i=Math.min(steps.length-1,i+1);
+      else if(e.key==="ArrowLeft")i=i<0?steps.length-1:Math.max(0,i-1);
+      else if(e.key==="Home")i=0;else i=steps.length-1;
+      e.preventDefault();steps[i].focus();return;
+    }
+    if((e.key==="Enter"||e.key===" ")&&e.target===track){e.preventDefault();hideTip();openDetail(track.dataset.detail)}
+  });
+  // Escape must also close a hover-only tooltip or an open +N list while focus is still on body,
+  // so it is bound on document; the #gantt keydown branch above keeps the focused-step case.
+  document.addEventListener("keydown",e=>{if(e.key==="Escape"){hideTip();closeMoreLists()}});
+  document.addEventListener("click",e=>{if(!e.target.closest(".step-more,.step-more-list"))closeMoreLists()});
+  window.addEventListener("scroll",()=>{if(tipFor)placeTip(tipFor)},true);
+  document.querySelector("#view-table").onchange=e=>{storage.set("astra.gantt.view",e.target.checked?"table":"chart");render()};
+  if(phoneMQ.addEventListener)phoneMQ.addEventListener("change",()=>{if(state.user)render()});
+  let resizeTimer;window.addEventListener("resize",()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(state.user)render()},150)});
+})();
 function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 document.querySelector("#login-form").addEventListener("submit",async e=>{e.preventDefault();try{const data=await api("/api/login",{method:"POST",body:JSON.stringify({email:e.target.querySelector("#email").value,password:e.target.querySelector("#password").value})});Object.assign(state,data);showApp();await load()}catch(err){document.querySelector("#login-error").textContent=err.message}});
 document.querySelector("#logout").onclick=async()=>{await api("/api/logout",{method:"POST",body:"{}"});state.user=state.csrf=null;showLogin()};
@@ -302,7 +531,19 @@ const EVENT_LABELS={import_committed:"Import committed",task_created:"Task creat
 const DIFF_FIELDS=[["title","Title"],["status","Status"],["criticality","Criticality"],["start_date","Start date"],["due_date","Due date"],["progress","Progress"],["description","Description"]];
 let detailTaskId=null;
 
-document.querySelector("#gantt").addEventListener("click",e=>{const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail)});
+document.querySelector("#gantt").addEventListener("click",e=>{
+  const ex=e.target.closest("[data-expand]");if(ex){toggleSteps(ex.dataset.expand);return}
+  const more=e.target.closest("[data-more]");if(more){toggleMore(more);return}
+  const b=e.target.closest("[data-detail]");
+  if(b){
+    // GF-6: a link inside a +N list hands focus to its +N button first, so closing the dialog
+    // returns focus to a visible control instead of body.
+    const list=b.closest(".step-more-list");
+    if(list){const btn=document.querySelector(`[aria-controls="${CSS.escape(list.id)}"]`);if(btn)btn.focus()}
+    hideTip();closeMoreLists();openDetail(b.dataset.detail);
+  }
+});
+document.querySelector("#schedule-table").addEventListener("click",e=>{const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail)});
 
 async function openDetail(taskId){
   detailTaskId=taskId;
@@ -348,7 +589,10 @@ function renderDetail(task,events){
     <form id="crit-form"><label>Set level<select name="criticality">${crit}</select></label>
       <label>Reason (evidence for this level)<input name="reason" required></label>
       <div class="actions"><button>Confirm criticality</button></div><div class="error" id="crit-error"></div></form></div>`;
+  // D73AQW: a step opened from the Gantt can return to its parent task.
+  const parentLink=task.parent_task_id?`<p class="parent-link"><button type="button" class="link" data-detail="${escapeHtml(task.parent_task_id)}">◂ Parent: ${escapeHtml(task.parent_title||"parent task")}</button></p>`:"";
   document.querySelector("#detail-body").innerHTML=`
+    ${parentLink}
     <h2>${escapeHtml(task.title)}</h2>
     <div class="facts">${facts}</div>
     <p class="desc">${escapeHtml(task.description||"No description.")}</p>
@@ -398,7 +642,7 @@ function renderDetail(task,events){
   document.querySelectorAll("#detail-body [data-unmark-fr]").forEach(b=>b.addEventListener("click",()=>unmarkFinalResult(task.id,b.dataset.unmarkFr)));
   document.querySelector("#crit-form").addEventListener("submit",submitCriticality);
   document.querySelector("#parent-form").addEventListener("submit",submitParent);
-  document.querySelectorAll(".subtasks [data-detail]").forEach(b=>b.addEventListener("click",()=>openDetail(b.dataset.detail)));
+  document.querySelectorAll("#detail-body .subtasks [data-detail], #detail-body .parent-link [data-detail]").forEach(b=>b.addEventListener("click",()=>openDetail(b.dataset.detail)));
   document.querySelector("#sched-form").addEventListener("submit",submitSchedule);
   document.querySelectorAll("#detail-body [data-approve-sched]").forEach(b=>b.addEventListener("click",()=>decideSchedule(b.dataset.approveSched,"approve")));
   document.querySelectorAll("#detail-body [data-reject-sched]").forEach(b=>b.addEventListener("click",()=>decideSchedule(b.dataset.rejectSched,"reject",b)));
@@ -454,7 +698,8 @@ async function decideSchedule(id,action,btn){
 
 function buildSubtasks(task){
   const rollup=task.subtask_rollup||{total:0,completed:0};
-  const rows=(task.subtasks||[]).map(s=>`<li><button type="button" class="link" data-detail="${escapeHtml(s.id)}">${escapeHtml(s.title)}</button> · ${escapeHtml(s.status)} · ${escapeHtml(s.owner_name||"Unassigned")}</li>`).join("")||"<li>No subtasks.</li>";
+  // D73AQW: same order, index and swatch as the Gantt segments, so dialog and bar agree.
+  const rows=stepOrder(task.subtasks||[]).map((s,i)=>{const n=i+1;return `<li><i class="sw step-c${stepHue(n)}${n>STEP_HUES?" wrap":""}" aria-hidden="true">${n}</i> <button type="button" class="link" data-detail="${escapeHtml(s.id)}">Step ${n} · ${escapeHtml(s.title)}</button> · ${escapeHtml(statusLabel(s.status))} · ${escapeHtml(s.owner_name||"Unassigned")} · ${escapeHtml(s.start_date||"—")} → ${escapeHtml(s.due_date||"—")}${s.criticality?` · ${escapeHtml(s.criticality)}`:""}</li>`}).join("")||"<li>No subtasks.</li>";
   const candidates=state.tasks.filter(t=>t.project_id===task.project_id&&t.id!==task.id);
   const parentOptions=candidates.map(t=>`<option value="${escapeHtml(t.id)}"${t.id===task.parent_task_id?" selected":""}>${escapeHtml(t.title)}</option>`).join("");
   return `<div class="subtasks"><h3>Subtasks</h3>

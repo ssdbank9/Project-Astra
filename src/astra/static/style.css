@@ -9,6 +9,17 @@
   --blue: #3478c5;
   --purple: #7257b5;
   --gray: #8792a2;
+  --crit: #a01f2b;
+  --ink: #172033;
+  /* D73AQW: step identity hues (Okabe-Ito, colour-blind safe), their tints on white (22%; 35% for
+     hues 5-7) and a darker "edge" per hue (same hue and saturation, lower lightness) used for the
+     segment's bottom stripe and 1px border. GF-3: the edge is what separates a segment from its own
+     tint, from every track tint and from white at >= 3:1 (WCAG 1.4.11); tests/test_web.py
+     AstraStaticAssetTests recomputes the ratios from these tokens. Hue = which step; state stays on
+     glyph, text and ring. Tint + dark ink keeps text >= 4.5:1. */
+  --step-1: #0072B2; --step-2: #D55E00; --step-3: #009E73; --step-4: #CC79A7; --step-5: #E69F00; --step-6: #56B4E9; --step-7: #F0E442;
+  --step-1-tint: #C7E0EE; --step-2-tint: #F6DCC7; --step-3-tint: #C7EAE0; --step-4-tint: #F4E2EC; --step-5-tint: #F6DDA6; --step-6-tint: #C4E5F7; --step-7-tint: #FAF6BD;
+  --step-1-edge: #0072B2; --step-2-edge: #D05C00; --step-3-edge: #00916A; --step-4-edge: #C25F96; --step-5-edge: #A67300; --step-6-edge: #1985C2; --step-7-edge: #8B830B;
 }
 * { box-sizing: border-box; }
 body { margin: 0; }
@@ -59,10 +70,15 @@ main { max-width: 1480px; margin: auto; padding: 24px; }
 #gantt { overflow: auto; border-top: 1px solid #e3e7ee; }
 .gantt-row { display: grid; grid-template-columns: 260px 210px minmax(700px, 1fr); min-height: 48px; border-bottom: 1px solid #edf0f4; align-items: center; }
 .task-name { padding: 8px; font-weight: 650; }
-.task-meta { color: #667085; font-size: .82rem; padding: 8px; }
+.task-meta { position: relative; color: #667085; font-size: .82rem; padding: 8px; }
 .task-meta .blocked-text { color: var(--purple); font-weight: 700; }
-.timeline { position: relative; height: 34px; background-image: linear-gradient(to right, #edf0f4 1px, transparent 1px); background-size: calc(100% / 12) 100%; }
-.bar { position: absolute; top: 7px; height: 20px; border-radius: 5px; min-width: 8px; color: white; font-size: .72rem; padding: 2px 6px; overflow: hidden; white-space: nowrap; }
+.timeline { position: relative; height: 38px; background-image: linear-gradient(to right, #edf0f4 1px, transparent 1px); background-size: calc(100% / 12) 100%; }
+.timeline.tall { height: 58px; }
+.bar { position: absolute; top: 8px; height: 22px; border-radius: 5px; min-width: 8px; color: white; font-size: .72rem; padding: 2px 6px; overflow: hidden; white-space: nowrap; }
+.bar.today { background: var(--amber); }
+.bar.closed { background: var(--gray); }
+button.bar.plain { display: flex; align-items: center; margin: 0; border: 0; font-weight: 650; text-align: left; cursor: pointer; }
+.bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar.overdue { background: var(--red); }
 .bar.soon { background: var(--amber); }
 .bar.scheduled { background: var(--blue); }
@@ -80,9 +96,9 @@ main { max-width: 1480px; margin: auto; padding: 24px; }
 .axis-tick { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; font-size: 11px; color: #33465f; padding-left: 6px; border-left: 1px solid #ccd5df; white-space: nowrap; }
 .axis-tick b { font-weight: 800; margin-right: 3px; }
 .today-flag { position: absolute; top: 3px; transform: translateX(-50%); background: var(--teal); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 5px; white-space: nowrap; z-index: 1; }
-.today-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--teal); z-index: 1; }
+.today-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--teal); z-index: 1; pointer-events: none; } /* decorative: never intercepts a step's hover or click */
 /* 5WZ4A8: project schedule markers on the timeline */
-.proj-line { position: absolute; top: 0; bottom: 0; width: 0; z-index: 1; }
+.proj-line { position: absolute; top: 0; bottom: 0; width: 0; z-index: 1; pointer-events: none; }
 .proj-line.start { border-left: 2px dashed #7a5af5; }
 .proj-line.target { border-left: 2px dashed #d1495b; }
 .proj-flag { position: absolute; top: 20px; transform: translateX(-50%); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 5px; white-space: nowrap; z-index: 2; }
@@ -171,7 +187,6 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .dropzone { border: 2px dashed #b9c4d2; border-radius: 12px; padding: 26px; text-align: center; background: #f7f9fb; cursor: pointer; margin: 14px 0; display: flex; flex-direction: column; gap: 6px; align-items: center; }
 .dropzone:focus-visible, .dropzone.is-over { outline: 3px solid var(--teal); outline-offset: 2px; background: #e9f6f7; border-color: var(--teal); }
 .dropzone span { color: #667085; font-size: .84rem; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .import-options { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; align-items: end; }
 .import-options label.inline { flex-direction: row; align-items: center; gap: 8px; }
 .import-options label.inline input { width: auto; }
@@ -236,10 +251,113 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   .import-body .actions { flex-wrap: wrap; }
 }
 /* end C9KPH6 */
+
+/* D73AQW: visible, colour-coded task steps inside the parent bar ------------------------- */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.muted { color: #667085; font-weight: 500; }
+.view-controls { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 18px; }
+.view-controls .legend { margin: 12px 0; flex-wrap: wrap; row-gap: 6px; }
+.view-toggle { font-size: .84rem; margin: 0; min-height: 44px; padding: 0 4px; }
+.view-toggle input { width: 18px; height: 18px; margin: 0; }
+.bar:focus-visible, .step:focus-visible, .track:focus-visible, .expand:focus-visible, .step-more:focus-visible, .chip:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; z-index: 4; }
+/* The parent bar is a light "track" tinted by state; steps sit inside it. */
+.bar.track { top: 7px; height: 24px; padding: 0; border-radius: 6px; overflow: visible; color: inherit; cursor: pointer; background: #eef1f5; border: 1px solid var(--gray); box-shadow: none; }
+.bar.track.overdue { background: #f7dfe1; border-color: var(--red); }
+.bar.track.soon, .bar.track.today { background: #f9ecd6; border-color: var(--amber); }
+.bar.track.scheduled { background: #dfeaf7; border-color: var(--blue); }
+.bar.track.blocked { background: #e9e3f5; border-color: var(--purple); }
+.bar.track.closed { background: #eef1f5; border-color: var(--gray); }
+.bar.track.critical { background: #f5dfe1; border-color: var(--crit); box-shadow: 0 0 0 2px rgba(160,31,43,.18); }
+.bar.track.derived { background: #f3f5f8; border-style: dashed; border-color: var(--gray); }
+.bar.track.lanes-2 { height: 44px; }
+.bar.track.is-expanded .step { opacity: .82; }
+/* One step segment: tint fill, edge-coloured border and bottom stripe, dark text, index label always. */
+.step { position: absolute; top: 2px; height: 18px; min-width: 8px; margin: 0; padding: 0 5px; border: 1px solid var(--edge, var(--gray)); border-radius: 3px; background: var(--tint, #e9eef4); box-shadow: inset 0 -3px 0 var(--edge, var(--gray)); color: var(--ink); font-size: .7rem; font-weight: 700; line-height: 16px; text-align: left; cursor: pointer; overflow: visible; transition: transform .12s ease, box-shadow .12s ease; }
+.step::before { content: ""; position: absolute; left: 0; right: 0; top: -13px; bottom: -13px; } /* 44px hit area */
+.step:hover { transform: translateY(-1px); z-index: 2; }
+.bar.track.lanes-2 .step.lane-2 { top: 23px; z-index: 1; }
+/* Two-lane track (44px): keep each hit area inside its own lane so a later lane-1 step never
+   paints over the visible top of a lane-2 step (lane 1 owns 0-23px, lane 2 owns 20-44px). */
+.bar.track.lanes-2 .step:not(.lane-2)::before { top: -13px; bottom: -3px; }
+.bar.track.lanes-2 .step.lane-2::before { top: -3px; bottom: -13px; }
+.step-label { display: flex; align-items: center; gap: 4px; height: 100%; overflow: hidden; white-space: nowrap; }
+.step .idx { flex: none; }
+.step .ttl { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.step .own { flex: none; margin-left: auto; font-style: normal; font-size: .62rem; font-weight: 800; background: var(--ink); color: #fff; border-radius: 999px; padding: 0 5px; line-height: 14px; }
+.step-c1, .sw.step-c1 { --hue: var(--step-1); --tint: var(--step-1-tint); --edge: var(--step-1-edge); }
+.step-c2, .sw.step-c2 { --hue: var(--step-2); --tint: var(--step-2-tint); --edge: var(--step-2-edge); }
+.step-c3, .sw.step-c3 { --hue: var(--step-3); --tint: var(--step-3-tint); --edge: var(--step-3-edge); }
+.step-c4, .sw.step-c4 { --hue: var(--step-4); --tint: var(--step-4-tint); --edge: var(--step-4-edge); }
+.step-c5, .sw.step-c5 { --hue: var(--step-5); --tint: var(--step-5-tint); --edge: var(--step-5-edge); }
+.step-c6, .sw.step-c6 { --hue: var(--step-6); --tint: var(--step-6-tint); --edge: var(--step-6-edge); }
+.step-c7, .sw.step-c7 { --hue: var(--step-7); --tint: var(--step-7-tint); --edge: var(--step-7-edge); }
+/* GF-10: the 8th+ step repeats the hue with a DOUBLED bottom stripe; on-hold keeps the diagonal
+   hatching, so both can show on one segment and neither is mistaken for the other. */
+.step.wrap, .sw.wrap { box-shadow: inset 0 -3px 0 var(--edge), inset 0 -4px 0 var(--tint), inset 0 -6px 0 var(--edge); }
+.step.done { filter: saturate(.45); color: #47536a; }
+.step.hold { background-image: repeating-linear-gradient(135deg, transparent 0 4px, rgba(23,32,51,.16) 4px 6px); }
+.step.crit { box-shadow: inset 0 -3px 0 var(--edge), 0 0 0 1.5px var(--crit); }
+.step.crit.wrap { box-shadow: inset 0 -3px 0 var(--edge), inset 0 -4px 0 var(--tint), inset 0 -6px 0 var(--edge), 0 0 0 1.5px var(--crit); }
+/* GF-2: a step that runs past its parent's dates overhangs onto a dashed neutral extension. */
+.track-ext { position: absolute; top: -1px; height: 24px; border: 1px dashed var(--gray); background: #f3f5f8; pointer-events: none; }
+.track-ext.after { border-left: 0; border-radius: 0 6px 6px 0; }
+.track-ext.before { border-right: 0; border-radius: 6px 0 0 6px; }
+.bar.track.lanes-2 .track-ext { height: 44px; }
+.task-meta .overrun-text { color: #7a4d00; font-weight: 600; }
+.step.solo { top: 8px; height: 22px; line-height: 22px; font-size: .74rem; }
+/* GF-1/GF-7: +N sits just outside the track (right edge, or left edge with .flip when the track ends
+   near the timeline's end) with the same 44px hit area as a step, so it never covers a drawn step. */
+.step-more { position: absolute; left: 100%; margin: 0 0 0 4px; top: 2px; height: 18px; padding: 0 7px; border-radius: 3px; background: var(--ink); color: #fff; font-size: .66rem; font-weight: 800; line-height: 18px; z-index: 2; }
+.step-more.flip { left: auto; right: 100%; margin: 0 4px 0 0; }
+.task-meta .step-more { position: relative; left: auto; top: auto; margin: 2px 0 0; }
+.task-meta .step-more::before { left: -4px; right: -4px; top: -4px; bottom: -4px; } /* 26px, clear of the meta text lines */
+.step-more::before { content: ""; position: absolute; left: 0; right: 0; top: -13px; bottom: -13px; }
+.step-more-list { position: absolute; top: 100%; z-index: 6; background: #fff; border: 1px solid #d8dee7; border-radius: 8px; box-shadow: 0 10px 30px #172a4630; padding: 8px 12px; min-width: 320px; font-size: .8rem; }
+.step-more-list p { margin: 2px 0 6px; font-size: .74rem; }
+.step-more-list ul { list-style: none; margin: 0; padding: 0; }
+.step-more-list li { padding: 6px 0; border-bottom: 1px solid #edf0f4; }
+.step-more-list li:last-child { border-bottom: 0; }
+/* Chips live in the meta column (static flow), never on the timeline (GF-1). */
+.chip { position: relative; display: inline-flex; align-items: center; height: 18px; line-height: 16px; margin: 2px 0 0; padding: 0 8px; border-radius: 999px; font-size: .68rem; font-weight: 700; border: 1px dashed var(--gray); background: #fff; color: #47536a; white-space: nowrap; }
+.chip.step-undated { cursor: pointer; }
+.chip.step-undated::before { content: ""; position: absolute; left: -4px; right: -4px; top: -4px; bottom: -4px; } /* 26px hit area */
+.sw { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 1px solid var(--edge, var(--gray)); border-radius: 4px; background: var(--tint, #e9eef4); box-shadow: inset 0 -3px 0 var(--edge, var(--gray)); color: var(--ink); font-size: .68rem; font-weight: 800; font-style: normal; vertical-align: middle; }
+.legend i.sw { width: 18px; height: 18px; border-radius: 4px; margin: 0 3px 0 6px; }
+.step-legend { flex-wrap: wrap; margin: 14px 0 0; row-gap: 6px; }
+.legend-cap { color: #47536a; }
+.name-wrap { display: flex; align-items: flex-start; gap: 4px; }
+.expand { flex: none; width: 32px; height: 44px; margin: -8px 0 0 -6px; padding: 0; background: none; color: #47536a; border-radius: 6px; font-size: 1rem; line-height: 1; transition: background .12s ease; }
+.expand:hover { background: #eef1f5; }
+.step-rows .gantt-row { background: #fafbfc; }
+.step-rows .task-name { padding-left: 44px; }
+.step-kicker { color: #47536a; font-size: .78rem; font-weight: 700; }
+/* Shared tooltip: text only, dark surface, no title attribute. */
+#step-tip { position: fixed; z-index: 50; max-width: 320px; background: var(--ink); color: #fff; padding: 10px 12px; border-radius: 8px; font-size: .8rem; line-height: 1.4; box-shadow: 0 12px 30px #172a4650; display: flex; flex-direction: column; gap: 2px; }
+#step-tip[hidden] { display: none; }
+#step-tip .tip-head { font-weight: 700; }
+#step-tip .tip-hint { color: #b7c1cf; font-size: .72rem; margin-top: 4px; }
+.parent-link { margin: 0 0 8px; }
+.subtasks li .sw { margin-right: 2px; }
+/* Schedule table: the structured twin of the Gantt (same rows, same filters). */
+#schedule-table { overflow: auto; border-top: 1px solid #e3e7ee; }
+.sched-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+.sched-table caption { text-align: left; color: #667085; font-size: .8rem; padding: 10px 0; }
+.sched-table th, .sched-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eaecf0; vertical-align: top; }
+.sched-table th { font-size: .72rem; text-transform: uppercase; color: #667085; letter-spacing: .04em; white-space: nowrap; }
+.sched-table tr.task-tr td { font-weight: 700; }
+.sched-table tr.step-tr td:nth-child(2) { color: #667085; font-weight: 500; }
+.sched-table .link { font-size: inherit; text-align: left; }
+@media (prefers-reduced-motion: reduce) {
+  .step, .bar, .expand, #step-tip { transition: none; }
+  .step:hover { transform: none; }
+}
 @media (max-width: 760px) {
   .summary { grid-template-columns: 1fr 1fr; }
   .bands { grid-template-columns: repeat(3, 1fr); }
   .toolbar { align-items: stretch; flex-direction: column; }
   .toolbar label { min-width: 0; }
   .gantt-row { grid-template-columns: 200px 170px minmax(600px, 1fr); }
+  .step-legend, .view-controls .legend { font-size: .76rem; }
+  .sched-table { font-size: .78rem; }
+  .sched-table th, .sched-table td { padding: 8px 6px; }
 }
