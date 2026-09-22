@@ -38,11 +38,11 @@ dialog and the Gantt share one shape.
 - Colour is never the only carrier: the index label is always on the segment, the legend
   pairs index with colour, and the Schedule table twin carries the same rows as text.
 - Steps that would draw under 8px, or have no free lane (overlapping steps use up to two
-  lanes), fold into a `+N` disclosure that lists them: "+N not drawn at this scale (too small
-  or overlapping)". `+N` sits just outside the track's right edge, or its left edge when the
-  track ends near the end of the timeline, or in the meta column (with its list) when the
-  track spans the whole timeline, so it never covers a drawn step; it has the same 44px hit
-  area as a step (GF-1, GF-7).
+  lanes), fold into a `+N` disclosure that lists them, labelled
+  "+N not drawn at this scale (too small or overlapping)". `+N` sits just outside the
+  track's right edge, or its left edge when the track ends near the end of the timeline, or
+  in the meta column (with its list) when the track spans the whole timeline, so it never
+  covers a drawn step; it has the same 44px hit area as a step (GF-1, GF-7).
 - Undated steps are never placed on the bar. The "n steps need dates" chip lives in the meta
   column, whether or not the parent itself has dates, and opens the parent (GF-1, GF-16).
 - Owner is shown as an initials chip on wide segments and always in the tooltip.
