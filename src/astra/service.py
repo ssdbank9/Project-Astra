@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from . import importer
 from .auth import hash_password, normalize_email
 from .db import transaction
 
@@ -782,6 +783,9 @@ class AstraService:
         status = task["status"]
         if status in {"completed", "cancelled", "abandoned"}:
             return "None"
+        if task.get("next_action_note"):
+            # A human-written next action (imported from the sheet) wins over the derived rule while the task is open.
+            return task["next_action_note"]
         if task.get("is_blocked"):
             return "Blocked by predecessors"
         if status == "submitted":
@@ -892,6 +896,7 @@ class AstraService:
             "completed": sum(1 for s in subtasks if s["status"] == "completed"),
         }
         task["baseline"] = {"start_date": task.get("baseline_start_date"), "due_date": task.get("baseline_due_date")}
+        task["imported_fields"] = self._imported_fields(task)
         task["schedule_proposals"] = self.list_schedule_proposals(actor, task_id)
         if task.get("due_date"):
             today = self._today_in_timezone(task.get("project_timezone"))
@@ -2236,3 +2241,287 @@ class AstraService:
         if days <= 7:
             return "soon"
         return "scheduled"
+
+    # --- Excel / CSV import (C9KPH6) ---
+    #
+    # The service is the authorization boundary: the App Owner may import into any
+    # project and is the only one who may create a project from a file; a project
+    # Manager may import into the projects they manage, with every Owner-only
+    # action downgraded to a per-row warning by the engine. Viewers, members and
+    # read-only Chairmen are blocked, audited and the Owner is notified.
+
+    IMPORT_OPTION_KEYS = {"valid_rows_only", "default_reason"}
+
+    def _import_config(self) -> importer.TemplateConfig:
+        row = self.db.execute("SELECT config_json FROM import_template_config WHERE id=1").fetchone()
+        return importer.TemplateConfig.from_json(row["config_json"] if row else None)
+
+    def _manages_any_project(self, actor: dict) -> bool:
+        return bool(self.db.execute(
+            "SELECT 1 FROM memberships WHERE user_id=? AND role='manager' LIMIT 1", (actor["id"],)
+        ).fetchone())
+
+    def get_import_template_config(self, actor: dict) -> dict:
+        if not actor.get("active"):
+            raise Forbidden("Import access denied.")
+        if actor["global_role"] != "owner" and not self._manages_any_project(actor):
+            raise Forbidden("Only the App Owner and project Managers may read the import template settings.")
+        row = self.db.execute("SELECT * FROM import_template_config WHERE id=1").fetchone()
+        config = importer.TemplateConfig.from_json(row["config_json"] if row else None)
+        result = config.to_dict()
+        result["version"] = row["version"] if row else 0
+        result["updated_at"] = row["updated_at"] if row else None
+        updated_by = None
+        if row and row["updated_by"]:
+            user = self.db.execute("SELECT display_name FROM users WHERE id=?", (row["updated_by"],)).fetchone()
+            updated_by = user["display_name"] if user else None
+        result["updated_by_name"] = updated_by
+        result["custom_types"] = list(importer.CUSTOM_TYPES)
+        result["can_edit"] = actor["global_role"] == "owner"
+        return result
+
+    def set_import_template_config(self, actor: dict, payload: dict) -> dict:
+        self.require_owner(actor)
+        if payload is None or payload.get("reset"):
+            config = importer.TemplateConfig.default()
+        else:
+            config = importer.TemplateConfig.normalize(payload.get("columns", []))
+        with transaction(self.db):
+            row = self.db.execute("SELECT version FROM import_template_config WHERE id=1").fetchone()
+            version = (row["version"] if row else 0) + 1
+            self.db.execute(
+                "INSERT INTO import_template_config(id,version,config_json,updated_at,updated_by) VALUES(1,?,?,?,?)"
+                " ON CONFLICT(id) DO UPDATE SET version=excluded.version, config_json=excluded.config_json,"
+                " updated_at=excluded.updated_at, updated_by=excluded.updated_by",
+                (version, config.to_json(), now_text(), actor["id"]),
+            )
+        return self.get_import_template_config(actor)
+
+    def import_template(self, actor: dict, fmt: str) -> tuple[bytes, str, str]:
+        """The template a signed-in user downloads; built from the current configuration."""
+        if not actor.get("active"):
+            raise Forbidden("Sign in required.")
+        config = self._import_config()
+        if fmt == "csv":
+            return (importer.build_template_csv(config).encode("utf-8-sig"), "astra-import-template.csv",
+                    "text/csv; charset=utf-8")
+        if fmt == "xlsx":
+            return (importer.build_template_xlsx(config), "astra-import-template.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        raise ValueError("Unknown template format.")
+
+    def import_targets(self, actor: dict) -> dict:
+        """Projects the actor may import into, and whether they may create one from a file."""
+        if not actor.get("active"):
+            raise Forbidden("Sign in required.")
+        if actor["global_role"] == "owner":
+            rows = self.db.execute(
+                "SELECT id, name FROM projects WHERE status<>'closed' ORDER BY name COLLATE NOCASE"
+            ).fetchall()
+            return {"projects": [dict(r) for r in rows], "can_create_project": True, "can_edit_template": True}
+        rows = self.db.execute(
+            """SELECT p.id, p.name FROM projects p JOIN memberships m ON m.project_id=p.id
+               WHERE m.user_id=? AND m.role='manager' AND p.status<>'closed' ORDER BY p.name COLLATE NOCASE""",
+            (actor["id"],),
+        ).fetchall()
+        return {"projects": [dict(r) for r in rows], "can_create_project": False, "can_edit_template": False}
+
+    def _import_blocked(self, actor: dict, project: dict | None, action: str) -> None:
+        """Audit a non-permitted import attempt, notify the Owner and refuse."""
+        event_id = new_id()
+        occurred_at = now_text()
+        label = project["name"] if project else "new project"
+        if project:
+            self._project_event(
+                project["id"], actor["id"], "protected_action_blocked",
+                {"event_id": event_id, "action": action, "payload": {}}, "Actor cannot import into this project",
+            )
+        owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
+        if owner and owner["id"] != actor["id"]:
+            self.db.execute(
+                "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (new_id(), owner["id"], event_id, None, "protected_action_blocked",
+                 f"blocked {action.replace('_', ' ')} attempt: {label}", occurred_at),
+            )
+        raise Forbidden("Only the App Owner or a Manager of the target project may import into it.")
+
+    def _import_authorize(self, actor: dict, project_id: str | None, action: str) -> tuple[bool, dict | None]:
+        if not actor.get("active"):
+            raise Forbidden("Sign in required.")
+        is_owner = actor["global_role"] == "owner"
+        project = None
+        if project_id:
+            project = row_dict(self.db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
+            if not project:
+                raise KeyError("Project not found.")
+            if project["status"] == "closed":
+                raise ValueError("This project is closed; reopen it before importing.")
+        if not is_owner:
+            if not project:
+                if actor["global_role"] == "chairman" or not self._manages_any_project(actor):
+                    self._import_blocked(actor, None, action)
+                raise ValueError("Choose the project you manage as the import target; only the App Owner may import without one.")
+            if not self._is_project_manager(actor, project["id"]):
+                self._import_blocked(actor, project, action)
+        return is_owner, project
+
+    @staticmethod
+    def _import_options(options) -> dict:
+        options = dict(options or {})
+        unknown = set(options) - AstraService.IMPORT_OPTION_KEYS
+        if unknown:
+            raise ValueError(f"Unknown import option(s): {', '.join(sorted(unknown))}.")
+        return {
+            "valid_rows_only": bool(options.get("valid_rows_only")),
+            "default_reason": str(options.get("default_reason") or "").strip()[:200],
+        }
+
+    def _import_engine(self, actor: dict, project_id: str | None, filename: str, data: bytes, options: dict, action: str):
+        is_owner, project = self._import_authorize(actor, project_id, action)
+        options = self._import_options(options)
+        config = self._import_config()
+        parsed = importer.parse_upload(filename, data, config)
+        new_project_name = None
+        if project is None:
+            names = sorted({importer.normalize_text(row.cells.get("project")) for row in parsed.rows
+                            if importer.normalize_text(row.cells.get("project"))})
+            if not names:
+                raise ValueError("Choose a target project, or fill the Project column so Astra knows where the rows go.")
+            if len(names) > 1:
+                raise ValueError("The file names several projects (" + "; ".join(names) + "). Import one project per file.")
+            matches = self.db.execute(
+                "SELECT * FROM projects WHERE name=? COLLATE NOCASE", (names[0],)
+            ).fetchall()
+            if len(matches) > 1:
+                raise ValueError(f"Several projects are named '{names[0]}'; choose the target project explicitly.")
+            if matches:
+                project = dict(matches[0])
+                if project["status"] == "closed":
+                    raise ValueError("This project is closed; reopen it before importing.")
+            else:
+                new_project_name = names[0]
+        engine = importer.ImportEngine(
+            self.db, config, actor=actor, is_owner=is_owner, project=project, new_project_name=new_project_name,
+            filename=filename, options=options,
+        )
+        preview = engine.validate(parsed)
+        return engine, preview, options
+
+    def import_preview(self, actor: dict, project_id: str | None, filename: str, data: bytes, options=None) -> dict:
+        """Parse and validate; writes nothing."""
+        engine, preview, options = self._import_engine(actor, project_id, filename, data, options, "import_preview")
+        preview["sha256"] = importer.sha256_hex(data)
+        preview["filename"] = os.path.basename(filename or "upload")
+        preview["options"] = options
+        preview["can_commit"] = preview["summary"]["errors"] == 0 or options["valid_rows_only"]
+        return preview
+
+    def import_commit(self, actor: dict, project_id: str | None, filename: str, data: bytes, options=None,
+                      expected_sha256: str | None = None) -> dict:
+        """Re-validate the same bytes and apply the plan in one transaction."""
+        digest = importer.sha256_hex(data)
+        if expected_sha256 and expected_sha256.casefold() != digest:
+            raise importer.ImportConflict("The file changed since the preview. Run the preview again before importing.")
+        engine, preview, options = self._import_engine(actor, project_id, filename, data, options, "import_commit")
+        if preview["summary"]["errors"] and not options["valid_rows_only"]:
+            raise ValueError("The file has rows with errors. Fix them or tick 'Import valid rows only'.")
+        if not any(row["action"] != "error" for row in preview["rows"]):
+            raise ValueError("Nothing to import: every row has errors.")
+        import_id = new_id()
+        with transaction(self.db):
+            if engine.project is None:
+                project_id = new_id()
+                self.db.execute(
+                    "INSERT INTO projects(id,name,description,timezone,created_at,created_by) VALUES(?,?,?,?,?,?)",
+                    (project_id, engine.new_project_name, "", "Asia/Karachi", now_text(), actor["id"]),
+                )
+                engine.project = {"id": project_id, "name": engine.new_project_name}
+                engine.project_id = project_id
+            else:
+                project_id = engine.project["id"]
+            summary = engine.apply(self, project_id, import_id, valid_rows_only=options["valid_rows_only"])
+            summary["project"] = {"id": project_id, "name": engine.project["name"], "create": engine.new_project_name is not None}
+            summary["filename"] = os.path.basename(filename or "upload")
+            summary["sha256"] = digest
+            self._project_event(
+                project_id, actor["id"], "import_committed",
+                {"import_id": import_id, "filename": summary["filename"], "sha256": digest,
+                 "counts": {k: summary[k] for k in ("rows", "create", "update", "unchanged", "skipped_errors", "dependencies")}},
+                None,
+            )
+            self.db.execute(
+                "INSERT INTO imports(id,project_id,actor_user_id,filename,sha256,created_at,summary_json,report_csv)"
+                " VALUES(?,?,?,?,?,?,?,?)",
+                (import_id, project_id, actor["id"], summary["filename"], digest, now_text(),
+                 json.dumps(summary, default=str, sort_keys=True), engine.report_csv()),
+            )
+            owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
+            if owner and owner["id"] != actor["id"]:
+                self.db.execute(
+                    "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at)"
+                    " VALUES(?,?,?,?,?,?,?)",
+                    (new_id(), owner["id"], import_id, None, "import_committed",
+                     f"import committed: {summary['filename']} into {engine.project['name']}"
+                     f" ({summary['create']} created, {summary['update']} updated)", now_text()),
+                )
+        summary["import_id"] = import_id
+        summary["report_url"] = f"/api/imports/{import_id}/report.csv"
+        return summary
+
+    def list_imports(self, actor: dict, project_id: str | None = None) -> list[dict]:
+        if not actor.get("active"):
+            raise Forbidden("Sign in required.")
+        query = ("SELECT i.id, i.project_id, i.filename, i.sha256, i.created_at, i.summary_json, i.actor_user_id,"
+                 " u.display_name actor_name, p.name project_name FROM imports i"
+                 " LEFT JOIN users u ON u.id=i.actor_user_id LEFT JOIN projects p ON p.id=i.project_id")
+        clauses, params = [], []
+        if project_id:
+            clauses.append("i.project_id=?")
+            params.append(project_id)
+        if actor["global_role"] != "owner":
+            clauses.append("(i.actor_user_id=? OR EXISTS(SELECT 1 FROM memberships m WHERE m.project_id=i.project_id"
+                           " AND m.user_id=? AND m.role='manager'))")
+            params.extend([actor["id"], actor["id"]])
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY i.created_at DESC LIMIT 200"
+        result = []
+        for row in self.db.execute(query, params).fetchall():
+            item = dict(row)
+            item["summary"] = json.loads(item.pop("summary_json") or "{}")
+            result.append(item)
+        return result
+
+    def import_report(self, actor: dict, import_id: str) -> dict:
+        if not actor.get("active"):
+            raise Forbidden("Sign in required.")
+        row = row_dict(self.db.execute("SELECT * FROM imports WHERE id=?", (import_id,)).fetchone())
+        if not row:
+            raise KeyError("Import not found.")
+        allowed = (actor["global_role"] == "owner" or row["actor_user_id"] == actor["id"]
+                   or (row["project_id"] and self._is_project_manager(actor, row["project_id"])))
+        if not allowed:
+            raise Forbidden("Import report access denied.")
+        stamp = row["created_at"][:19].replace(":", "-")
+        return {"filename": f"astra-import-report-{stamp}.csv", "csv": row["report_csv"], "import": row}
+
+    def _imported_fields(self, task: dict) -> list[dict]:
+        """Custom template columns stored on the task, labelled from the current configuration."""
+        raw = task.get("import_extras")
+        if not raw:
+            return []
+        try:
+            extras = json.loads(raw)
+        except ValueError:
+            return []
+        config = self._import_config()
+        labels = {item["key"]: item["label"] for item in config.columns if item.get("custom")}
+        result = []
+        for key in sorted(extras):
+            value = extras[key]
+            column = config.by_key.get(key)
+            if column is not None and column.kind == "date":
+                value = importer.display_date(value)
+            result.append({"key": key, "label": labels.get(key, key), "value": value})
+        return result

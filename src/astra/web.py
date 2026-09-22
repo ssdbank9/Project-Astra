@@ -10,14 +10,22 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from .auth import new_token, token_digest, verify_password
 from .db import connect, database_path
+from .importer import ImportConflict
 from .service import AstraService, Forbidden, now_text
 
 
 SESSION_COOKIE = "astra_session"
+JSON_MAX_BYTES = 1_000_000
+# Raw file uploads (Excel/CSV import) get their own ceiling; JSON stays at 1 MB.
+IMPORT_MAX_BYTES = 5 * 1024 * 1024
+
+
+class PayloadTooLarge(ValueError):
+    pass
 
 
 def _as_of_slug(as_of: str | None) -> str:
@@ -113,6 +121,24 @@ class AstraHandler(BaseHTTPRequestHandler):
                 user, _ = self._require_user()
                 term = parse_qs(urlparse(self.path).query).get("q", [""])[0]
                 return self._json({"results": self.service.search(user, term)})
+            if path in ("/api/import/template.xlsx", "/api/import/template.csv"):
+                user, _ = self._require_user()
+                payload, filename, content_type = self.service.import_template(user, path.rsplit(".", 1)[1])
+                return self._download(payload, filename, content_type)
+            if path == "/api/import/targets":
+                user, _ = self._require_user()
+                return self._json({"targets": self.service.import_targets(user)})
+            if path == "/api/import/template-config":
+                user, _ = self._require_user()
+                return self._json({"config": self.service.get_import_template_config(user)})
+            if path == "/api/imports":
+                user, _ = self._require_user()
+                project = parse_qs(urlparse(self.path).query).get("project_id", [None])[0]
+                return self._json({"imports": self.service.list_imports(user, project)})
+            if path.startswith("/api/imports/") and path.endswith("/report.csv"):
+                user, _ = self._require_user()
+                report = self.service.import_report(user, path.split("/")[3])
+                return self._download(report["csv"].encode("utf-8-sig"), report["filename"], "text/csv; charset=utf-8")
             if path == "/api/export":
                 user, _ = self._require_user()
                 query = parse_qs(urlparse(self.path).query)
@@ -221,6 +247,18 @@ class AstraHandler(BaseHTTPRequestHandler):
                 project_id = path.split("/")[3]
                 project = self.service.set_primary_entity(user, project_id, payload.get("entity_id"))
                 return self._json({"project": project})
+            if path == "/api/import/preview":
+                preview = self.service.import_preview(
+                    user, self._header_text("X-Project-Id") or None, self._header_text("X-Filename"),
+                    payload.get("_raw", b""), self._header_json("X-Options"),
+                )
+                return self._json({"preview": preview})
+            if path == "/api/import/commit":
+                result = self.service.import_commit(
+                    user, self._header_text("X-Project-Id") or None, self._header_text("X-Filename"),
+                    payload.get("_raw", b""), self._header_json("X-Options"), self._header_text("X-Sha256") or None,
+                )
+                return self._json({"result": result}, HTTPStatus.CREATED)
             if path == "/api/notifications/read-all":
                 return self._json({"read": self.service.mark_all_notifications_read(user)})
             if path.startswith("/api/notifications/") and path.endswith("/read"):
@@ -338,6 +376,23 @@ class AstraHandler(BaseHTTPRequestHandler):
         finally:
             self.db.close()
 
+    def do_PUT(self):
+        self.db = connect(self.server.db_path)
+        self._service = AstraService(self.db)
+        try:
+            path = urlparse(self.path).path
+            payload = self._body()
+            user, csrf = self._require_user()
+            if self.headers.get("X-CSRF-Token") != csrf:
+                raise Forbidden("Invalid request token.")
+            if path == "/api/import/template-config":
+                return self._json({"config": self.service.set_import_template_config(user, payload)})
+            self.send_error(HTTPStatus.NOT_FOUND)
+        except Exception as exc:
+            self._error(exc)
+        finally:
+            self.db.close()
+
     def do_DELETE(self):
         self.db = connect(self.server.db_path)
         self._service = AstraService(self.db)
@@ -449,10 +504,39 @@ class AstraHandler(BaseHTTPRequestHandler):
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
-        if length > 1_000_000:
+        content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().casefold()
+        if content_type and content_type != "application/json":
+            # Raw upload (import): bytes are handed to the service untouched.
+            if length > IMPORT_MAX_BYTES:
+                raise PayloadTooLarge("The file is larger than 5 MB.")
+            return {"_raw": self.rfile.read(length), "_content_type": content_type}
+        if length > JSON_MAX_BYTES:
             raise ValueError("Request is too large.")
         raw = self.rfile.read(length)
         return json.loads(raw or b"{}")
+
+    def _header_text(self, name: str) -> str:
+        # Header values travel percent-encoded so non-ASCII filenames survive HTTP.
+        return unquote(self.headers.get(name, "") or "").strip()
+
+    def _header_json(self, name: str) -> dict:
+        text = self._header_text(name)
+        if not text:
+            return {}
+        value = json.loads(text)
+        if not isinstance(value, dict):
+            raise ValueError(f"{name} must be a JSON object.")
+        return value
+
+    def _download(self, payload: bytes, filename: str, content_type: str):
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(payload)
 
     def _json(self, value: dict, status=HTTPStatus.OK, cookie: str | None = None):
         payload = json.dumps(value, default=str).encode()
@@ -529,6 +613,10 @@ class AstraHandler(BaseHTTPRequestHandler):
     def _error(self, exc: Exception):
         if isinstance(exc, Forbidden):
             return self._json({"error": str(exc)}, HTTPStatus.FORBIDDEN)
+        if isinstance(exc, ImportConflict):
+            return self._json({"error": str(exc)}, HTTPStatus.CONFLICT)
+        if isinstance(exc, PayloadTooLarge):
+            return self._json({"error": str(exc)}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
         if isinstance(exc, KeyError):
             return self._json({"error": str(exc).strip("'")}, HTTPStatus.NOT_FOUND)
         if isinstance(exc, (ValueError, json.JSONDecodeError)):

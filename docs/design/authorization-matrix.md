@@ -16,6 +16,8 @@ decision.
 | Mark/unmark final results | Yes | No | No | No |
 | Read authorized attachment/final-result records | Yes | Yes | Yes | Yes |
 | Publish templates, administer access, or configure calendars | Yes | No | No | No |
+| Import tasks from Excel/CSV into an existing project (`import_preview` / `import_commit`) | Yes | Managed projects only; Owner-only row actions (Original Due Date, Entity, Attachment Links, protected statuses) are skipped with a per-row warning | Blocked, audited and Owner notified | Blocked, audited and Owner notified |
+| Create a project from an import file, or change the import template configuration | Yes | No (may read the configuration) | No | No |
 
 `Chairman` is retained as an organization-wide read role for compatibility. It
 no longer grants implicit mutation power through `can_manage_project`. A person

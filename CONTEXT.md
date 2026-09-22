@@ -56,6 +56,30 @@ under the machine boundary (`_machine`) — cited by its `manifest` path. Read-o
 authoritative originals live outside `_machine` and are not read by default.
 _Avoid_: document (ambiguous), source (bare), input.
 
+## Import
+
+**Import template**:
+The locked Excel workbook (or its CSV twin) that Astra generates from the App Owner's
+current column configuration: a `Tasks` sheet with a protected header row, dropdowns
+and dd-mm-yyyy date validation, a `README` sheet, and a hidden `_astra` sheet whose
+version marker is a hash of the configuration. Uploads must match the header row of
+the current configuration exactly; a template downloaded before the App Owner changed
+the columns is rejected. _Avoid_: spreadsheet (bare), sheet (bare), upload format.
+
+**Import Key**:
+The stable per-project identifier a user gives each row of the template. Re-importing a
+file updates the task that carries the same Import Key instead of creating a duplicate;
+Parent Key and Predecessors refer to it. It is stored on `tasks.import_key`.
+_Avoid_: task id (that is Astra's internal id), row number, external id.
+
+**Import (preview / commit)**:
+The two-step load of a filled template. Preview parses and validates every row (OK /
+warning / error) and writes nothing; commit re-validates the same bytes and applies the
+plan in one transaction. The App Owner may import into any project and is the only one
+who may create a project from a file; a project Manager may import into projects they
+manage, with Owner-only actions skipped per row as warnings.
+_Avoid_: upload (bare), sync, bulk edit.
+
 ## Portfolio & budget
 
 **Budget**:

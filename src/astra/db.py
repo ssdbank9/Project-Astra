@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 def app_home() -> Path:
@@ -375,3 +375,35 @@ def migrate(connection: sqlite3.Connection) -> None:
                 """
             )
             connection.execute("PRAGMA user_version = 12")
+    if version < 13:
+        with transaction(connection):
+            connection.executescript(
+                """
+                ALTER TABLE tasks ADD COLUMN import_key TEXT;
+                ALTER TABLE tasks ADD COLUMN is_milestone INTEGER NOT NULL DEFAULT 0
+                    CHECK(is_milestone IN (0,1));
+                ALTER TABLE tasks ADD COLUMN next_action_note TEXT;
+                ALTER TABLE tasks ADD COLUMN import_extras TEXT;
+                CREATE UNIQUE INDEX idx_tasks_import_key
+                    ON tasks(project_id, import_key) WHERE import_key IS NOT NULL;
+                CREATE TABLE imports (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+                    actor_user_id TEXT NOT NULL REFERENCES users(id),
+                    filename TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    summary_json TEXT NOT NULL,
+                    report_csv TEXT NOT NULL
+                );
+                CREATE INDEX idx_imports_project ON imports(project_id, created_at);
+                CREATE TABLE import_template_config (
+                    id INTEGER PRIMARY KEY CHECK(id = 1),
+                    version INTEGER NOT NULL,
+                    config_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    updated_by TEXT REFERENCES users(id)
+                );
+                """
+            )
+            connection.execute("PRAGMA user_version = 13")

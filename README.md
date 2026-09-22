@@ -41,7 +41,13 @@ This first vertical slice provides:
   declared progress, cycle-safe re-parenting, and clickable subtasks;
 - a durable in-app notification inbox: the owner gets an idempotent record of every task change
   made by someone else (in-app only; marking read never deletes or approves anything); and
-- portfolio and per-project Gantt views with overdue and upcoming highlighting.
+- portfolio and per-project Gantt views with overdue and upcoming highlighting; and
+- Excel/CSV import of tasks and Gantt rows from a locked, Owner-configurable template
+  (dropdowns, date validation, version marker): the App Owner imports anywhere and may create
+  a project from the file, a project Manager imports into the projects they manage with
+  Owner-only actions downgraded to warnings, every upload is previewed row by row before one
+  transactional commit that creates or updates tasks by Import Key, never deletes, records
+  audit events and stores a downloadable report (see `docs/design/excel-import.md`).
 
 Integrity rules enforced at the service boundary: task titles cannot be blanked on
 update, task assignees must be active and authorized on the task's project, and
