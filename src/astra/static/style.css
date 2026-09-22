@@ -11,10 +11,15 @@
   --gray: #8792a2;
   --crit: #a01f2b;
   --ink: #172033;
-  /* D73AQW: step identity hues (Okabe-Ito, colour-blind safe) and their 22% tints on white.
-     Hue = which step; state stays on border, glyph and text. Tint + dark ink keeps text >= 4.5:1. */
+  /* D73AQW: step identity hues (Okabe-Ito, colour-blind safe), their tints on white (22%; 35% for
+     hues 5-7) and a darker "edge" per hue (same hue and saturation, lower lightness) used for the
+     segment's bottom stripe and 1px border. GF-3: the edge is what separates a segment from its own
+     tint, from every track tint and from white at >= 3:1 (WCAG 1.4.11); tests/test_web.py
+     AstraStaticAssetTests recomputes the ratios from these tokens. Hue = which step; state stays on
+     glyph, text and ring. Tint + dark ink keeps text >= 4.5:1. */
   --step-1: #0072B2; --step-2: #D55E00; --step-3: #009E73; --step-4: #CC79A7; --step-5: #E69F00; --step-6: #56B4E9; --step-7: #F0E442;
-  --step-1-tint: #C7E0EE; --step-2-tint: #F6DCC7; --step-3-tint: #C7EAE0; --step-4-tint: #F4E2EC; --step-5-tint: #FAEAC7; --step-6-tint: #DAEFFA; --step-7-tint: #FCF9D5;
+  --step-1-tint: #C7E0EE; --step-2-tint: #F6DCC7; --step-3-tint: #C7EAE0; --step-4-tint: #F4E2EC; --step-5-tint: #F6DDA6; --step-6-tint: #C4E5F7; --step-7-tint: #FAF6BD;
+  --step-1-edge: #0072B2; --step-2-edge: #D05C00; --step-3-edge: #00916A; --step-4-edge: #C25F96; --step-5-edge: #A67300; --step-6-edge: #1985C2; --step-7-edge: #8B830B;
 }
 * { box-sizing: border-box; }
 body { margin: 0; }
@@ -65,7 +70,7 @@ main { max-width: 1480px; margin: auto; padding: 24px; }
 #gantt { overflow: auto; border-top: 1px solid #e3e7ee; }
 .gantt-row { display: grid; grid-template-columns: 260px 210px minmax(700px, 1fr); min-height: 48px; border-bottom: 1px solid #edf0f4; align-items: center; }
 .task-name { padding: 8px; font-weight: 650; }
-.task-meta { color: #667085; font-size: .82rem; padding: 8px; }
+.task-meta { position: relative; color: #667085; font-size: .82rem; padding: 8px; }
 .task-meta .blocked-text { color: var(--purple); font-weight: 700; }
 .timeline { position: relative; height: 38px; background-image: linear-gradient(to right, #edf0f4 1px, transparent 1px); background-size: calc(100% / 12) 100%; }
 .timeline.tall { height: 58px; }
@@ -91,9 +96,9 @@ button.bar.plain { display: flex; align-items: center; margin: 0; border: 0; fon
 .axis-tick { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; font-size: 11px; color: #33465f; padding-left: 6px; border-left: 1px solid #ccd5df; white-space: nowrap; }
 .axis-tick b { font-weight: 800; margin-right: 3px; }
 .today-flag { position: absolute; top: 3px; transform: translateX(-50%); background: var(--teal); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 5px; white-space: nowrap; z-index: 1; }
-.today-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--teal); z-index: 1; }
+.today-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--teal); z-index: 1; pointer-events: none; } /* decorative: never intercepts a step's hover or click */
 /* 5WZ4A8: project schedule markers on the timeline */
-.proj-line { position: absolute; top: 0; bottom: 0; width: 0; z-index: 1; }
+.proj-line { position: absolute; top: 0; bottom: 0; width: 0; z-index: 1; pointer-events: none; }
 .proj-line.start { border-left: 2px dashed #7a5af5; }
 .proj-line.target { border-left: 2px dashed #d1495b; }
 .proj-flag { position: absolute; top: 20px; transform: translateX(-50%); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 5px; white-space: nowrap; z-index: 2; }
@@ -182,8 +187,8 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .bar.track.derived { background: #f3f5f8; border-style: dashed; border-color: var(--gray); }
 .bar.track.lanes-2 { height: 44px; }
 .bar.track.is-expanded .step { opacity: .82; }
-/* One step segment: tint fill, solid stripe of its hue, dark text, index label always. */
-.step { position: absolute; top: 2px; height: 18px; min-width: 8px; margin: 0; padding: 0 5px; border: 0; border-radius: 3px; background: var(--tint, #e9eef4); box-shadow: inset 0 -3px 0 var(--hue, var(--gray)), inset 0 0 0 1px #fff; color: var(--ink); font-size: .7rem; font-weight: 700; line-height: 18px; text-align: left; cursor: pointer; overflow: visible; transition: transform .12s ease, box-shadow .12s ease; }
+/* One step segment: tint fill, edge-coloured border and bottom stripe, dark text, index label always. */
+.step { position: absolute; top: 2px; height: 18px; min-width: 8px; margin: 0; padding: 0 5px; border: 1px solid var(--edge, var(--gray)); border-radius: 3px; background: var(--tint, #e9eef4); box-shadow: inset 0 -3px 0 var(--edge, var(--gray)); color: var(--ink); font-size: .7rem; font-weight: 700; line-height: 16px; text-align: left; cursor: pointer; overflow: visible; transition: transform .12s ease, box-shadow .12s ease; }
 .step::before { content: ""; position: absolute; left: 0; right: 0; top: -13px; bottom: -13px; } /* 44px hit area */
 .step:hover { transform: translateY(-1px); z-index: 2; }
 .bar.track.lanes-2 .step.lane-2 { top: 23px; z-index: 1; }
@@ -195,29 +200,44 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .step .idx { flex: none; }
 .step .ttl { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .step .own { flex: none; margin-left: auto; font-style: normal; font-size: .62rem; font-weight: 800; background: var(--ink); color: #fff; border-radius: 999px; padding: 0 5px; line-height: 14px; }
-.step-c1, .sw.step-c1 { --hue: var(--step-1); --tint: var(--step-1-tint); }
-.step-c2, .sw.step-c2 { --hue: var(--step-2); --tint: var(--step-2-tint); }
-.step-c3, .sw.step-c3 { --hue: var(--step-3); --tint: var(--step-3-tint); }
-.step-c4, .sw.step-c4 { --hue: var(--step-4); --tint: var(--step-4-tint); }
-.step-c5, .sw.step-c5 { --hue: var(--step-5); --tint: var(--step-5-tint); }
-.step-c6, .sw.step-c6 { --hue: var(--step-6); --tint: var(--step-6-tint); }
-.step-c7, .sw.step-c7 { --hue: var(--step-7); --tint: var(--step-7-tint); }
-.step.wrap { background-image: repeating-linear-gradient(135deg, transparent 0 5px, rgba(23,32,51,.14) 5px 7px); } /* 8th+ step: same hue, hatched */
+.step-c1, .sw.step-c1 { --hue: var(--step-1); --tint: var(--step-1-tint); --edge: var(--step-1-edge); }
+.step-c2, .sw.step-c2 { --hue: var(--step-2); --tint: var(--step-2-tint); --edge: var(--step-2-edge); }
+.step-c3, .sw.step-c3 { --hue: var(--step-3); --tint: var(--step-3-tint); --edge: var(--step-3-edge); }
+.step-c4, .sw.step-c4 { --hue: var(--step-4); --tint: var(--step-4-tint); --edge: var(--step-4-edge); }
+.step-c5, .sw.step-c5 { --hue: var(--step-5); --tint: var(--step-5-tint); --edge: var(--step-5-edge); }
+.step-c6, .sw.step-c6 { --hue: var(--step-6); --tint: var(--step-6-tint); --edge: var(--step-6-edge); }
+.step-c7, .sw.step-c7 { --hue: var(--step-7); --tint: var(--step-7-tint); --edge: var(--step-7-edge); }
+/* GF-10: the 8th+ step repeats the hue with a DOUBLED bottom stripe; on-hold keeps the diagonal
+   hatching, so both can show on one segment and neither is mistaken for the other. */
+.step.wrap, .sw.wrap { box-shadow: inset 0 -3px 0 var(--edge), inset 0 -4px 0 var(--tint), inset 0 -6px 0 var(--edge); }
 .step.done { filter: saturate(.45); color: #47536a; }
 .step.hold { background-image: repeating-linear-gradient(135deg, transparent 0 4px, rgba(23,32,51,.16) 4px 6px); }
-.step.crit { box-shadow: inset 0 -3px 0 var(--hue), inset 0 0 0 1px #fff, 0 0 0 1.5px var(--crit); }
+.step.crit { box-shadow: inset 0 -3px 0 var(--edge), 0 0 0 1.5px var(--crit); }
+.step.crit.wrap { box-shadow: inset 0 -3px 0 var(--edge), inset 0 -4px 0 var(--tint), inset 0 -6px 0 var(--edge), 0 0 0 1.5px var(--crit); }
+/* GF-2: a step that runs past its parent's dates overhangs onto a dashed neutral extension. */
+.track-ext { position: absolute; top: -1px; height: 24px; border: 1px dashed var(--gray); background: #f3f5f8; pointer-events: none; }
+.track-ext.after { border-left: 0; border-radius: 0 6px 6px 0; }
+.track-ext.before { border-right: 0; border-radius: 6px 0 0 6px; }
+.bar.track.lanes-2 .track-ext { height: 44px; }
+.task-meta .overrun-text { color: #7a4d00; font-weight: 600; }
 .step.solo { top: 8px; height: 22px; line-height: 22px; font-size: .74rem; }
-.step-more { position: absolute; right: 2px; top: 2px; height: 18px; margin: 0; padding: 0 7px; border-radius: 3px; background: var(--ink); color: #fff; font-size: .66rem; font-weight: 800; line-height: 18px; z-index: 2; }
+/* GF-1/GF-7: +N sits just outside the track (right edge, or left edge with .flip when the track ends
+   near the timeline's end) with the same 44px hit area as a step, so it never covers a drawn step. */
+.step-more { position: absolute; left: 100%; margin: 0 0 0 4px; top: 2px; height: 18px; padding: 0 7px; border-radius: 3px; background: var(--ink); color: #fff; font-size: .66rem; font-weight: 800; line-height: 18px; z-index: 2; }
+.step-more.flip { left: auto; right: 100%; margin: 0 4px 0 0; }
+.task-meta .step-more { position: relative; left: auto; top: auto; margin: 2px 0 0; }
+.task-meta .step-more::before { left: -4px; right: -4px; top: -4px; bottom: -4px; } /* 26px, clear of the meta text lines */
+.step-more::before { content: ""; position: absolute; left: 0; right: 0; top: -13px; bottom: -13px; }
 .step-more-list { position: absolute; top: 100%; z-index: 6; background: #fff; border: 1px solid #d8dee7; border-radius: 8px; box-shadow: 0 10px 30px #172a4630; padding: 8px 12px; min-width: 320px; font-size: .8rem; }
 .step-more-list p { margin: 2px 0 6px; font-size: .74rem; }
 .step-more-list ul { list-style: none; margin: 0; padding: 0; }
 .step-more-list li { padding: 6px 0; border-bottom: 1px solid #edf0f4; }
 .step-more-list li:last-child { border-bottom: 0; }
-.chip { position: absolute; top: 10px; height: 18px; line-height: 16px; margin: 0; padding: 0 8px; border-radius: 999px; font-size: .68rem; font-weight: 700; border: 1px dashed var(--gray); background: #fff; color: #47536a; white-space: nowrap; }
+/* Chips live in the meta column (static flow), never on the timeline (GF-1). */
+.chip { position: relative; display: inline-flex; align-items: center; height: 18px; line-height: 16px; margin: 2px 0 0; padding: 0 8px; border-radius: 999px; font-size: .68rem; font-weight: 700; border: 1px dashed var(--gray); background: #fff; color: #47536a; white-space: nowrap; }
 .chip.step-undated { cursor: pointer; }
-.chip.step-undated::before { content: ""; position: absolute; left: 0; right: 0; top: -13px; bottom: -13px; }
-.chip.derived { position: static; display: inline-block; margin-top: 2px; }
-.sw { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; background: var(--tint, #e9eef4); box-shadow: inset 0 -3px 0 var(--hue, var(--gray)), inset 0 0 0 1px #fff; color: var(--ink); font-size: .68rem; font-weight: 800; font-style: normal; vertical-align: middle; }
+.chip.step-undated::before { content: ""; position: absolute; left: -4px; right: -4px; top: -4px; bottom: -4px; } /* 26px hit area */
+.sw { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 1px solid var(--edge, var(--gray)); border-radius: 4px; background: var(--tint, #e9eef4); box-shadow: inset 0 -3px 0 var(--edge, var(--gray)); color: var(--ink); font-size: .68rem; font-weight: 800; font-style: normal; vertical-align: middle; }
 .legend i.sw { width: 18px; height: 18px; border-radius: 4px; margin: 0 3px 0 6px; }
 .step-legend { flex-wrap: wrap; margin: 14px 0 0; row-gap: 6px; }
 .legend-cap { color: #47536a; }

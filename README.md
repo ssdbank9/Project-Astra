@@ -40,8 +40,13 @@ This first vertical slice provides:
 - parent/subtask hierarchy with a completed/total roll-up shown separately from a task's own
   declared progress, cycle-safe re-parenting, and clickable subtasks;
 - a durable in-app notification inbox: the owner gets an idempotent record of every task change
-  made by someone else (in-app only; marking read never deletes or approves anything); and
-- portfolio and per-project Gantt views with overdue and upcoming highlighting.
+  made by someone else (in-app only; marking read never deletes or approves anything);
+- portfolio and per-project Gantt views with overdue and upcoming highlighting; and
+- task steps (subtasks) drawn as numbered, colour-coded segments inside the parent's Gantt
+  bar: a shared tooltip on hover and keyboard focus, a chevron that expands the step rows,
+  a `+N` disclosure for steps not drawn at this scale, an "n steps need dates" chip, a dashed
+  extension where a step runs past its parent's dates, and a Schedule table twin with the
+  same rows as text, which is the default at phone width.
 
 Integrity rules enforced at the service boundary: task titles cannot be blanked on
 update, task assignees must be active and authorized on the task's project, and

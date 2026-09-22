@@ -6,8 +6,25 @@ import re
 import tempfile
 import threading
 import unittest
+from importlib.resources import files
+from pathlib import Path
 
 from astra.web import AstraHandler, AstraServer
+
+STATIC = Path(str(files("astra").joinpath("static")))
+REPO = Path(__file__).resolve().parents[1]
+HEX = r"#[0-9A-Fa-f]{6}"
+
+
+def relative_luminance(colour):
+    channels = [int(colour.lstrip("#")[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def contrast_ratio(a, b):
+    la, lb = relative_luminance(a), relative_luminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 
 
 class AstraWebTests(unittest.TestCase):
@@ -704,6 +721,137 @@ class AstraWebTests(unittest.TestCase):
         _, step_detail = self.request("GET", f"/api/tasks/{step['task']['id']}", cookie=cookie)
         self.assertEqual(step_detail["task"]["parent_title"], "Parent")
         self.assertEqual(step_detail["task"]["parent_task_id"], parent_id)
+
+    def test_undated_parent_with_undated_steps_over_http(self):
+        # GF-16 / MS-4: the chip "n steps need dates" is built from children with neither date; an
+        # undated parent returns exactly that shape (nulls, never invented dates) for its steps.
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "UndatedSteps"}, cookie=cookie, csrf=csrf)
+        pid = project["project"]["id"]
+        _, parent = self.request("POST", "/api/tasks", {"project_id": pid, "title": "All-undated parent"}, cookie=cookie, csrf=csrf)
+        parent_id = parent["task"]["id"]
+        for title in ("Undated kid 1", "Undated kid 2"):
+            self.request("POST", "/api/tasks", {"project_id": pid, "title": title, "parent_task_id": parent_id}, cookie=cookie, csrf=csrf)
+        _, listing = self.request("GET", "/api/tasks", cookie=cookie)
+        kids = [t for t in listing["tasks"] if t["parent_task_id"] == parent_id]
+        self.assertEqual(len(kids), 2)
+        self.assertTrue(all(t["start_date"] is None and t["due_date"] is None for t in kids))
+        parent_row = next(t for t in listing["tasks"] if t["id"] == parent_id)
+        self.assertIsNone(parent_row["start_date"])
+        self.assertIsNone(parent_row["due_date"])
+        self.assertEqual(parent_row["due_state"], "undated")
+
+
+class AstraStaticAssetTests(unittest.TestCase):
+    """D73AQW adversarial-review follow-ups pinned on the shipped static files.
+
+    The Gantt is rendered client-side, so these tests read app.js / style.css / index.html
+    as text: the colour tokens are recomputed as WCAG contrast ratios and the structural
+    fixes (chip and +N placement, parent-sized track, focus return, short labels, wrap
+    texture, legend wording) are asserted on the source that produces them.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.js = (STATIC / "app.js").read_text(encoding="utf-8")
+        cls.css = (STATIC / "style.css").read_text(encoding="utf-8")
+        cls.html = (STATIC / "index.html").read_text(encoding="utf-8")
+        cls.readme = (REPO / "README.md").read_text(encoding="utf-8")
+        cls.contract = (REPO / "docs" / "design" / "gantt-steps-contract.md").read_text(encoding="utf-8")
+
+    def _tokens(self, suffix):
+        return dict(re.findall(rf"--step-(\d){suffix}:\s*({HEX})", self.css))
+
+    def test_step_edge_tokens_reach_3_to_1_on_tint_tracks_and_white(self):
+        # GF-3: the stripe and border are drawn from a per-hue edge token; every edge must separate
+        # a segment from its own tint, from every track tint and from white at >= 3:1 (WCAG 1.4.11).
+        hues, tints, edges = self._tokens(""), self._tokens("-tint"), self._tokens("-edge")
+        self.assertEqual(sorted(hues), list("1234567"))
+        self.assertEqual(sorted(tints), list("1234567"))
+        self.assertEqual(sorted(edges), list("1234567"))
+        track_rules = re.findall(rf"\.bar\.track[^{{]*\{{[^}}]*?background:\s*({HEX})", self.css)
+        self.assertGreaterEqual(len(track_rules), 8, "default, overdue, soon/today, scheduled, blocked, closed, critical, derived")
+        ink = re.search(rf"--ink:\s*({HEX})", self.css).group(1)
+        done_text = re.search(rf"\.step\.done \{{[^}}]*color:\s*({HEX})", self.css).group(1)
+        for i in "1234567":
+            self.assertGreaterEqual(contrast_ratio(edges[i], tints[i]), 3.0, f"edge {i} vs tint {i}")
+            for background in track_rules + ["#FFFFFF"]:
+                self.assertGreaterEqual(contrast_ratio(edges[i], background), 3.0, f"edge {i} vs {background}")
+            self.assertGreaterEqual(contrast_ratio(ink, tints[i]), 4.5, f"ink on tint {i}")
+            self.assertGreaterEqual(contrast_ratio(done_text, tints[i]), 4.5, f"done text on tint {i}")
+        # The segment and swatch draw border and stripe from --edge and no longer carry the white ring.
+        self.assertRegex(self.css, r"\.step \{[^}]*border: 1px solid var\(--edge, var\(--gray\)\)[^}]*box-shadow: inset 0 -3px 0 var\(--edge, var\(--gray\)\);")
+        self.assertRegex(self.css, r"\.sw \{[^}]*border: 1px solid var\(--edge, var\(--gray\)\)")
+        self.assertNotIn("inset 0 0 0 1px #fff", self.css)
+        for i in "1234567":
+            self.assertIn(f".step-c{i}, .sw.step-c{i} {{ --hue: var(--step-{i}); --tint: var(--step-{i}-tint); --edge: var(--step-{i}-edge); }}", self.css)
+
+    def test_undated_chip_and_more_button_never_cover_a_step(self):
+        # GF-1 / GF-16: the chip is built before the dated branch and rendered in the meta column
+        # (no timeline position), so an all-undated parent gets it too and no step sits under it.
+        self.assertLess(self.js.index('class="chip step-undated"'), self.js.index("if(!ext){bar="))
+        self.assertNotIn('class="chip step-undated" data-detail="${id}" data-x=', self.js)
+        self.assertIn("${derived}${undatedChip}${metaMore}${overrunText}", self.js)
+        self.assertRegex(self.css, r"\.chip \{ position: relative; display: inline-flex;")
+        # +N sits outside the track (right, left with .flip, or in the meta column), never pinned inside it.
+        self.assertRegex(self.css, r"\.step-more \{ position: absolute; left: 100%;")
+        self.assertNotRegex(self.css, r"\.step-more \{[^}]*right: 2px")
+        self.assertRegex(self.css, r"\.step-more\.flip \{ left: auto; right: 100%;")
+        self.assertIn('place=100-(left+width)>=need?"":(left>=need?" flip":" in-meta")', self.js)
+        self.assertIn('if(place===" in-meta")metaMore=`<br>${moreBtn}${moreList}`;', self.js)
+        # GF-7: the same 44px hit area as a step; decorative marker lines never intercept the pointer.
+        self.assertIn('.step-more::before { content: ""; position: absolute; left: 0; right: 0; top: -13px; bottom: -13px; }', self.css)
+        self.assertRegex(self.css, r"\.today-line \{[^}]*pointer-events: none")
+        self.assertRegex(self.css, r"\.proj-line \{[^}]*pointer-events: none")
+
+    def test_track_is_sized_from_the_parents_own_dates_and_names_overruns(self):
+        # GF-2: a dated parent's track comes from its own dates; steps outside them overhang onto a
+        # dashed neutral extension and are named in the parent's tooltip and meta column.
+        self.assertIn("const ext=ownDates?dateExtent(t,[]):dateExtent(t,kids);", self.js)
+        self.assertIn('class="track-ext before"', self.js)
+        self.assertIn('class="track-ext after" data-x="100"', self.js)
+        self.assertIn('overruns.push(`Step ${idx} ends ${d} day${d===1?"":"s"} after the parent`)', self.js)
+        self.assertIn('overruns.push(`Step ${idx} starts ${d} day${d===1?"":"s"} before the parent`)', self.js)
+        self.assertIn("tipAttrs(t,null,kids.length,overruns)", self.js)
+        self.assertIn('<span class="overrun-text">', self.js)
+        # Steps are no longer clamped into the track, so an overhang is drawn rather than clipped.
+        self.assertNotIn("x:Math.max(0,(pct(ks)-left)/width*100)", self.js)
+        self.assertNotIn("w:Math.min(100-x,wPct/width*100)", self.js)
+        self.assertRegex(self.css, r"\.track-ext \{[^}]*border: 1px dashed var\(--gray\)[^}]*pointer-events: none")
+
+    def test_focus_returns_to_a_visible_control(self):
+        # GF-6: Escape in a +N list, a dialog opened from a list link, and any re-render.
+        self.assertIn("const held=l.contains(document.activeElement)", self.js)
+        self.assertIn('if(b){b.setAttribute("aria-expanded","false");if(held)b.focus()}', self.js)
+        self.assertIn('const list=b.closest(".step-more-list");', self.js)
+        self.assertIn("const focusKey=focusKeyIn(el);", self.js)
+        self.assertIn("restoreFocus(el,focusKey);", self.js)
+        self.assertIn('n.focus({preventScroll:true})', self.js)
+
+    def test_step_labels_are_short_and_tooltip_follows_the_focused_element(self):
+        # GF-8: aria-label carries position and name only; the tooltip text is linked through
+        # aria-describedby while visible and cleared when that same element loses focus.
+        self.assertIn("`Step ${idx} of ${total}, ${t.title}`", self.js)
+        self.assertNotIn("Press Enter for details", self.js)
+        self.assertIn('gantt.addEventListener("focusin",e=>{if(e.target.matches("[data-tip]"))showTip(e.target)});', self.js)
+        self.assertIn('gantt.addEventListener("focusout",e=>{if(e.target.matches("[data-tip]")&&e.target===tipFor)hideTip()});', self.js)
+        self.assertIn('if(isMore(e.target))return;', self.js)
+
+    def test_wrap_texture_legend_and_docs_agree(self):
+        # GF-10: 8+ steps use a doubled stripe, on-hold keeps the hatching, so both can show at once.
+        self.assertIn(".step.wrap, .sw.wrap { box-shadow: inset 0 -3px 0 var(--edge), inset 0 -4px 0 var(--tint), inset 0 -6px 0 var(--edge); }", self.css)
+        self.assertNotRegex(self.css, r"\.step\.wrap[^}]*repeating-linear-gradient")
+        self.assertRegex(self.css, r"\.step\.hold \{[^}]*repeating-linear-gradient")
+        # list item, name-column kicker, Schedule table and detail-dialog subtasks all carry it
+        self.assertEqual(self.js.count('>STEP_HUES?" wrap":""}'), 4)
+        # DTJ-06: legend, contract and README describe the shipped behaviour.
+        self.assertIn("+N not drawn at this scale (too small or overlapping)", self.html)
+        self.assertNotIn("too small to draw", self.html)
+        self.assertIn("8+ repeats the colours with a doubled stripe", self.html)
+        self.assertIn("not drawn at this scale (too small or overlapping)", self.contract)
+        self.assertIn("--step-1-edge", self.contract)
+        for phrase in ("steps", "tooltip", "chevron", "Schedule table", "phone width"):
+            self.assertIn(phrase, self.readme)
 
 
 if __name__ == "__main__":

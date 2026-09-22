@@ -72,7 +72,7 @@ function stepOrder(children){return children.slice().sort((a,b)=>{const da=a.sta
 function stepHue(idx){return ((idx-1)%STEP_HUES)+1}
 function stepDays(t){const s=t.start_date||t.due_date,e=t.due_date||t.start_date;return Math.round((Date.parse(e)-Date.parse(s))/86400000)+1}
 function stateClass(t){return t.is_critical_path?"critical":(t.is_blocked?"blocked":t.due_state)}
-function tipLines(t,idx,total){
+function tipLines(t,idx,total,extra){
   const head=idx?`Step ${idx} of ${total} · ${t.title}`:t.title;
   const owner=`Owner: ${t.owner_name||"Unassigned"}`;
   const dated=t.start_date||t.due_date;
@@ -80,10 +80,12 @@ function tipLines(t,idx,total){
   const when=dated?`${fmtDay(t.start_date||t.due_date)} → ${fmtDay(t.due_date||t.start_date)} · ${n} day${n===1?"":"s"}`:"No dates yet";
   const st=[statusLabel(t.status),dueText(t),t.criticality||"Unrated"];
   if(t.is_critical_path)st.push("Critical path");if(t.is_blocked)st.push("Blocked");
-  return [head,owner,when,st.filter(Boolean).join(" · "),"Click for details & history"];
+  return [head,owner,when,st.filter(Boolean).join(" · "),...(extra||[]),"Click for details & history"];
 }
 // Registers the tooltip text for an element and returns its data-tip + aria-label attributes.
-function tipAttrs(t,idx,total){const lines=tipLines(t,idx,total);tipMeta.set(t.id,lines);return `data-tip="${escapeHtml(t.id)}" aria-label="${escapeHtml(lines.slice(0,-1).join(". ")+". Press Enter for details.")}"`}
+// GF-8: the label is short (position and name); the detail lives in the tooltip, which is
+// linked by aria-describedby only while it is visible, so nothing is read twice.
+function tipAttrs(t,idx,total,extra){const lines=tipLines(t,idx,total,extra);tipMeta.set(t.id,lines);const label=idx?`Step ${idx} of ${total}, ${t.title}`:(total?`${t.title}, ${total} step${total===1?"":"s"}`:t.title);return `data-tip="${escapeHtml(t.id)}" aria-label="${escapeHtml(label)}"`}
 function groupSteps(tasks){
   const visible=new Set(tasks.map(t=>t.id));
   // Step index comes from ALL children of a parent (state.tasks), so a step keeps its
@@ -108,8 +110,14 @@ function dateExtent(t,kids){
 // CSP is style-src 'self', so inline style attributes are dropped by the browser. Positions
 // travel as data-x / data-w percentages and are applied through the CSSOM after insertion.
 function applyGeometry(root){root.querySelectorAll("[data-x]").forEach(n=>{n.style.left=`${n.dataset.x}%`;if(n.dataset.w!=null)n.style.width=`${n.dataset.w}%`})}
+// GF-6: a re-render (resize, filter, view change) replaces the chart's DOM. If focus was inside it,
+// remember which control held it (kind + id attribute) and put focus back on its replacement.
+const FOCUS_ATTRS=["data-detail","data-more","data-expand"],FOCUS_KINDS=["step","track","chip","link","expand","step-more"];
+function focusKeyIn(root){const a=document.activeElement;if(!a||!root.contains(a))return null;const attr=FOCUS_ATTRS.find(x=>a.hasAttribute(x));if(!attr)return null;const kind=FOCUS_KINDS.find(k=>a.classList.contains(k));return `${kind?"."+kind:""}[${attr}="${CSS.escape(a.getAttribute(attr))}"]`}
+function restoreFocus(root,sel){if(!sel)return;const n=root.querySelector(sel);if(n&&!n.closest("[hidden]"))n.focus({preventScroll:true})}
 function renderGantt(tasks){
   const el=document.querySelector("#gantt"),tableEl=document.querySelector("#schedule-table");
+  const focusKey=focusKeyIn(el);
   tipMeta.clear();hideTip();
   const showTable=currentView()==="table";
   document.querySelector("#view-table").checked=showTable;
@@ -161,43 +169,65 @@ function renderGantt(tasks){
     const own=showOwner?`<i class="own" aria-hidden="true">${escapeHtml(initials(k.owner_name))}</i>`:"";
     return `<button type="button" class="${cls}" data-detail="${escapeHtml(k.id)}" data-idx="${m.idx}" tabindex="${g.solo?0:-1}" ${tipAttrs(k,m.idx,m.total)} data-x="${g.x}" data-w="${g.w}"><span class="step-label"><b class="idx">${m.idx}</b>${ttl}${own}</span></button>`;
   };
-  const stepListItem=k=>{const m=stepIndex.get(k.id);return `<li><button type="button" class="link" data-detail="${escapeHtml(k.id)}"><i class="sw step-c${stepHue(m.idx)}" aria-hidden="true">${m.idx}</i> Step ${m.idx} · ${escapeHtml(k.title)}</button> <span class="muted">${escapeHtml(k.owner_name||"Unassigned")} · ${escapeHtml(k.start_date||"—")} → ${escapeHtml(k.due_date||"—")} · ${escapeHtml(statusLabel(k.status))}</span></li>`};
+  const stepListItem=k=>{const m=stepIndex.get(k.id);return `<li><button type="button" class="link" data-detail="${escapeHtml(k.id)}"><i class="sw step-c${stepHue(m.idx)}${m.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${m.idx}</i> Step ${m.idx} · ${escapeHtml(k.title)}</button> <span class="muted">${escapeHtml(k.owner_name||"Unassigned")} · ${escapeHtml(k.start_date||"—")} → ${escapeHtml(k.due_date||"—")} · ${escapeHtml(statusLabel(k.status))}</span></li>`};
   const row=(t,depth)=>{
     const id=escapeHtml(t.id);
     const kids=childrenOf.get(t.id)||[];
     const meta=stepIndex.get(t.id);
     const isStep=depth>0&&!!meta;
     const expanded=expandedParents.has(t.id);
-    const ext=dateExtent(t,kids);
-    let bar,tall=false,derived="";
+    const ownDates=!!(t.start_date||t.due_date);
+    // GF-2: a dated parent's track is sized and tinted from its OWN dates. Steps that run past them
+    // overhang onto a dashed neutral extension and are named in the tooltip and the meta column.
+    // Only a parent without dates takes its extent from its steps (the dashed "derived" track).
+    const ext=ownDates?dateExtent(t,[]):dateExtent(t,kids);
+    const undatedKids=kids.filter(k=>!k.start_date&&!k.due_date),nUndated=undatedKids.length;
+    // GF-1/GF-16: the "n steps need dates" chip lives in the meta column, never on the timeline, so
+    // it can never cover a step and shows whether or not the parent itself has dates.
+    const undatedChip=nUndated?`<br><button type="button" class="chip step-undated" data-detail="${id}" aria-label="${nUndated} step${nUndated===1?"":"s"} of ${escapeHtml(t.title)} need${nUndated===1?"s":""} dates; open the task">${nUndated} step${nUndated===1?"":"s"} need${nUndated===1?"s":""} dates</button>`:"";
+    let bar,tall=false,derived="",overrunText="",metaMore="";
     if(!ext){bar=`<span class="bar undated">Date required</span>`}
     else{
       const left=Math.max(0,pct(ext.start)),width=Math.max(.8,(ext.end-ext.start+86400000)/span*100);
       // A parent with no dates of its own gets a dashed "derived" track (its extent comes
       // from its steps) rather than the static grey "Date required" chip styling.
-      const cls=kids.length&&!t.start_date&&!t.due_date?"derived":stateClass(t);
+      const cls=kids.length&&!ownDates?"derived":stateClass(t);
       if(kids.length){
-        const datedKids=kids.filter(k=>k.start_date||k.due_date),undatedKids=kids.filter(k=>!k.start_date&&!k.due_date);
+        const datedKids=kids.filter(k=>k.start_date||k.due_date);
         const barPx=width/100*tlw,maxLanes=barPx>=160?2:1;
-        const laneEnd=[],drawn=[],overflow=[];
+        const laneEnd=[],drawn=[],overflow=[],overruns=[];
+        let extStart=ext.start,extEnd=ext.end;
         for(const k of datedKids){
           const ks=Date.parse(k.start_date||k.due_date),ke=Date.parse(k.due_date||k.start_date);
+          if(ownDates){
+            const idx=stepIndex.get(k.id).idx;
+            if(ks<ext.start){const d=Math.round((ext.start-ks)/86400000);overruns.push(`Step ${idx} starts ${d} day${d===1?"":"s"} before the parent`);extStart=Math.min(extStart,ks)}
+            if(ke>ext.end){const d=Math.round((ke-ext.end)/86400000);overruns.push(`Step ${idx} ends ${d} day${d===1?"":"s"} after the parent`);extEnd=Math.max(extEnd,ke)}
+          }
           const wPct=(ke-ks+86400000)/span*100,px=wPct/100*tlw;
           if(px<8){overflow.push(k);continue}
           let lane=-1;for(let i=0;i<maxLanes;i++){if(laneEnd[i]==null||laneEnd[i]<ks){lane=i;break}}
           if(lane<0){overflow.push(k);continue}
           laneEnd[lane]=ke;
-          const x=Math.max(0,(pct(ks)-left)/width*100);
-          drawn.push({k,g:{lane,px,x,w:Math.min(100-x,wPct/width*100)}});
+          // Track-relative geometry; a step outside the parent's dates overhangs (x<0 or x+w>100).
+          drawn.push({k,g:{lane,px,x:(pct(ks)-left)/width*100,w:wPct/width*100}});
         }
         tall=laneEnd.length>1;
+        const extBefore=extStart<ext.start?`<i class="track-ext before" data-x="${(pct(extStart)-left)/width*100}" data-w="${(pct(ext.start)-pct(extStart))/width*100}"></i>`:"";
+        const extAfter=extEnd>ext.end?`<i class="track-ext after" data-x="100" data-w="${(pct(extEnd)-pct(ext.end))/width*100}"></i>`:"";
+        if(overruns.length)overrunText=overruns.map(o=>`<br><span class="overrun-text">${escapeHtml(o)}</span>`).join("");
         const segs=drawn.map(({k,g})=>stepButton(k,g)).join("");
-        const more=overflow.length?`<button type="button" class="step-more" data-more="${id}" aria-expanded="false" aria-controls="more-${id}" aria-label="${overflow.length} more step${overflow.length===1?"":"s"} not drawn at this scale (too small or overlapping); open the list">+${overflow.length}</button>`:"";
-        const moreList=overflow.length?`<div class="step-more-list" id="more-${id}" data-x="${Math.min(left,68)}" hidden><p class="muted">${overflow.length} more step${overflow.length===1?"":"s"} not drawn at this scale (too small or overlapping)</p><ul>${overflow.map(stepListItem).join("")}</ul></div>`:"";
-        const n=undatedKids.length;
-        const undatedChip=n?`<button type="button" class="chip step-undated" data-detail="${id}" data-x="${Math.min(left+width+.6,80)}" aria-label="${n} step${n===1?"":"s"} of ${escapeHtml(t.title)} need${n===1?"s":""} dates; open the task">${n} step${n===1?"":"s"} need${n===1?"s":""} dates</button>`:"";
-        if(!t.start_date&&!t.due_date)derived=`<br><span class="chip derived">Dates from steps</span>`;
-        bar=`<div class="bar track ${cls}${tall?" lanes-2":""}${expanded?" is-expanded":""}" role="group" tabindex="0" data-detail="${id}" ${tipAttrs(t,null,0)} data-x="${left}" data-w="${width}">${segs}${more}</div>${moreList}${undatedChip}`;
+        // GF-1/GF-7: +N sits just outside the track's right edge, or its left edge when the track ends
+        // near the timeline's end, or in the meta column when the track spans the whole timeline, so
+        // neither it nor its 44px hit area can ever cover a drawn step.
+        const need=40/tlw*100,place=100-(left+width)>=need?"":(left>=need?" flip":" in-meta");
+        const moreBtn=overflow.length?`<button type="button" class="step-more${place}" data-more="${id}" aria-expanded="false" aria-controls="more-${id}" aria-label="${overflow.length} more step${overflow.length===1?"":"s"} not drawn at this scale (too small or overlapping); open the list">+${overflow.length}</button>`:"";
+        const more=place===" in-meta"?"":moreBtn;
+        const moreList=overflow.length?`<div class="step-more-list" id="more-${id}" data-x="${place===" in-meta"?0:Math.min(left,68)}" hidden><p class="muted">${overflow.length} more step${overflow.length===1?"":"s"} not drawn at this scale (too small or overlapping)</p><ul>${overflow.map(stepListItem).join("")}</ul></div>`:"";
+        // In the meta column the list follows its button, so the disclosure stays adjacent in Tab order.
+        if(place===" in-meta")metaMore=`<br>${moreBtn}${moreList}`;
+        if(!ownDates)derived=`<br><span class="chip derived">Dates from steps</span>`;
+        bar=`<div class="bar track ${cls}${tall?" lanes-2":""}${expanded?" is-expanded":""}" role="group" tabindex="0" data-detail="${id}" ${tipAttrs(t,null,kids.length,overruns)} data-x="${left}" data-w="${width}">${extBefore}${extAfter}${segs}${more}</div>${place===" in-meta"?"":moreList}`;
       }
       else if(isStep){bar=stepButton(t,{lane:0,px:width/100*tlw,x:left,w:Math.min(100-left,width),solo:true})}
       else{bar=`<button type="button" class="bar plain ${cls}" data-detail="${id}" ${tipAttrs(t,null,0)} data-x="${left}" data-w="${width}"><span class="bar-label">${escapeHtml(t.title)}</span></button>`}
@@ -205,16 +235,17 @@ function renderGantt(tasks){
     const blocked=t.is_blocked?`<br><span class="blocked-text">Blocked by ${escapeHtml(t.blocked_by.map(item=>item.title).join(", "))}</span>`:"";
     const cp=t.is_critical_path?`<br><span class="cp-text">On critical path</span>`:"";
     const expandBtn=kids.length?`<button type="button" class="expand" data-expand="${id}" aria-expanded="${expanded}" aria-controls="steps-${id}" aria-label="${expanded?"Hide":"Show"} ${kids.length} step${kids.length===1?"":"s"} of ${escapeHtml(t.title)}">${expanded?"▾":"▸"}</button>`:"";
-    const swatch=isStep?`<i class="sw step-c${stepHue(meta.idx)}" aria-hidden="true">${meta.idx}</i> `:"";
+    const swatch=isStep?`<i class="sw step-c${stepHue(meta.idx)}${meta.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${meta.idx}</i> `:"";
     const nameTop=isStep?`<span class="step-kicker">${swatch}Step ${meta.idx} of ${meta.total}</span>`:escapeHtml(t.project_name);
     const name=`<div class="task-name${isStep?" is-step":""}"><div class="name-wrap">${expandBtn}<div>${nameTop}<br><small>${escapeHtml(t.title)}</small>${kids.length?`<br><small class="muted">${kids.length} step${kids.length===1?"":"s"}</small>`:""}<br><button type="button" class="link" data-detail="${id}">Details &amp; history</button></div></div></div>`;
-    const metaCol=`<div class="task-meta">${escapeHtml(t.owner_name||"Unassigned")}<br>${escapeHtml(t.due_date||"No due date")} · ${escapeHtml(t.criticality||"Unrated")}${derived}${blocked}${cp}<br><span class="next-action">Next: ${escapeHtml(t.next_action||"—")}</span></div>`;
+    const metaCol=`<div class="task-meta">${escapeHtml(t.owner_name||"Unassigned")}<br>${escapeHtml(t.due_date||"No due date")} · ${escapeHtml(t.criticality||"Unrated")}${derived}${undatedChip}${metaMore}${overrunText}${blocked}${cp}<br><span class="next-action">Next: ${escapeHtml(t.next_action||"—")}</span></div>`;
     const html=`<div class="gantt-row${isStep?" step-row":""}">${name}${metaCol}<div class="timeline${tall?" tall":""}">${markerLines}${todayLine}${bar}</div></div>`;
     if(!kids.length)return html;
     return html+`<div class="step-rows" id="steps-${id}" role="group" aria-label="Steps of ${escapeHtml(t.title)}"${expanded?"":" hidden"}>${kids.map(k=>row(k,depth+1)).join("")}</div>`;
   };
   el.innerHTML=header+top.map(t=>row(t,0)).join("");
   applyGeometry(el);
+  restoreFocus(el,focusKey);
 }
 function renderScheduleTable(groups,tableEl){
   const {top,childrenOf,stepIndex}=groups;
@@ -223,7 +254,7 @@ function renderScheduleTable(groups,tableEl){
   const walk=(t,parent)=>{
     const kids=childrenOf.get(t.id)||[];const m=stepIndex.get(t.id);const isStep=!!parent;
     const link=`<button type="button" class="link" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>`;
-    const stepNo=isStep?`<i class="sw step-c${stepHue(m.idx)}" aria-hidden="true">${m.idx}</i><span class="sr-only">Step ${m.idx}</span> of ${m.total}`:"—";
+    const stepNo=isStep?`<i class="sw step-c${stepHue(m.idx)}${m.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${m.idx}</i><span class="sr-only">Step ${m.idx}</span> of ${m.total}`:"—";
     rows.push(`<tr class="${isStep?"step-tr":"task-tr"}">${cell(t.project_name)}<td>${isStep?escapeHtml(parent.title):link}</td><td>${stepNo}</td><td>${isStep?link:"—"}</td>${cell(t.owner_name||"Unassigned")}${cell(t.start_date||"—")}${cell(t.due_date||"—")}${cell(statusLabel(t.status))}${cell(dueText(t)||t.due_state)}<td>${t.is_critical_path?"Yes":"No"}</td></tr>`);
     if(isStep)steps++;
     kids.forEach(k=>walk(k,t));
@@ -241,7 +272,8 @@ function placeTip(target){const r=target.getBoundingClientRect();const tw=tipEl.
 function showTip(target){const lines=tipMeta.get(target.dataset.tip);if(!lines)return;clearTimeout(tipTimer);tipTimer=null;if(tipFor&&tipFor!==target)tipFor.removeAttribute("aria-describedby");tipFor=target;tipEl.innerHTML=lines.map((l,i)=>`<span class="${i===0?"tip-head":(i===lines.length-1?"tip-hint":"")}">${escapeHtml(l)}</span>`).join("");tipEl.hidden=false;target.setAttribute("aria-describedby","step-tip");placeTip(target)}
 function hideTip(){clearTimeout(tipTimer);tipTimer=null;if(tipFor){tipFor.removeAttribute("aria-describedby");tipFor=null}if(tipEl)tipEl.hidden=true}
 function announce(msg){const live=document.querySelector("#gantt-live");if(!live)return;live.textContent="";setTimeout(()=>{live.textContent=msg},30)}
-function closeMoreLists(){document.querySelectorAll(".step-more-list:not([hidden])").forEach(l=>{l.hidden=true;const b=document.querySelector(`[aria-controls="${CSS.escape(l.id)}"]`);if(b)b.setAttribute("aria-expanded","false")})}
+// GF-6: when the list being closed holds focus (Escape on a link), focus returns to its +N button.
+function closeMoreLists(){document.querySelectorAll(".step-more-list:not([hidden])").forEach(l=>{const held=l.contains(document.activeElement);l.hidden=true;const b=document.querySelector(`[aria-controls="${CSS.escape(l.id)}"]`);if(b){b.setAttribute("aria-expanded","false");if(held)b.focus()}})}
 function toggleSteps(id){
   const btn=document.querySelector(`[data-expand="${CSS.escape(id)}"]`),rows=document.getElementById(`steps-${id}`);
   if(!btn||!rows)return;
@@ -257,11 +289,16 @@ function toggleSteps(id){
 function toggleMore(btn){const list=document.getElementById(btn.getAttribute("aria-controls"));if(!list)return;const open=list.hidden;closeMoreLists();if(open){list.hidden=false;btn.setAttribute("aria-expanded","true");hideTip()}}
 (function wireGantt(){
   const gantt=document.querySelector("#gantt");
-  gantt.addEventListener("mouseover",e=>{const t=e.target.closest("[data-tip]");if(!t||t===tipFor)return;clearTimeout(tipTimer);tipTimer=setTimeout(()=>showTip(t),150)});
-  gantt.addEventListener("mouseout",e=>{const t=e.target.closest("[data-tip]");if(!t)return;const to=e.relatedTarget;if(to&&(t.contains(to)||tipEl.contains(to)))return;clearTimeout(tipTimer);tipTimer=setTimeout(()=>{if(!tipEl.matches(":hover"))hideTip()},120)});
+  // The +N button and its list are DOM children of the track but not part of it: they never raise
+  // the track's tooltip (GF-8).
+  const isMore=n=>!!(n&&n.closest&&n.closest(".step-more,.step-more-list"));
+  gantt.addEventListener("mouseover",e=>{if(isMore(e.target))return;const t=e.target.closest("[data-tip]");if(!t||t===tipFor)return;clearTimeout(tipTimer);tipTimer=setTimeout(()=>showTip(t),150)});
+  gantt.addEventListener("mouseout",e=>{const t=e.target.closest("[data-tip]");if(!t)return;const to=e.relatedTarget;if(to&&((t.contains(to)&&!isMore(to))||tipEl.contains(to)))return;clearTimeout(tipTimer);tipTimer=setTimeout(()=>{if(!tipEl.matches(":hover"))hideTip()},120)});
   tipEl.addEventListener("mouseleave",()=>hideTip());
-  gantt.addEventListener("focusin",e=>{const t=e.target.closest("[data-tip]");if(t)showTip(t)});
-  gantt.addEventListener("focusout",e=>{const to=e.relatedTarget;if(!to||!to.closest||!to.closest("[data-tip]"))hideTip()});
+  // GF-8: only the focused element itself carries a tooltip (never an ancestor track when focus lands
+  // on +N), and losing focus clears the tooltip and aria-describedby of that same element.
+  gantt.addEventListener("focusin",e=>{if(e.target.matches("[data-tip]"))showTip(e.target)});
+  gantt.addEventListener("focusout",e=>{if(e.target.matches("[data-tip]")&&e.target===tipFor)hideTip()});
   // Roving focus inside a parent bar: the bar is the tab stop, arrows move between its steps.
   gantt.addEventListener("keydown",e=>{
     if(e.key==="Escape"){hideTip();closeMoreLists();return}
@@ -497,7 +534,14 @@ let detailTaskId=null;
 document.querySelector("#gantt").addEventListener("click",e=>{
   const ex=e.target.closest("[data-expand]");if(ex){toggleSteps(ex.dataset.expand);return}
   const more=e.target.closest("[data-more]");if(more){toggleMore(more);return}
-  const b=e.target.closest("[data-detail]");if(b){hideTip();closeMoreLists();openDetail(b.dataset.detail)}
+  const b=e.target.closest("[data-detail]");
+  if(b){
+    // GF-6: a link inside a +N list hands focus to its +N button first, so closing the dialog
+    // returns focus to a visible control instead of body.
+    const list=b.closest(".step-more-list");
+    if(list){const btn=document.querySelector(`[aria-controls="${CSS.escape(list.id)}"]`);if(btn)btn.focus()}
+    hideTip();closeMoreLists();openDetail(b.dataset.detail);
+  }
 });
 document.querySelector("#schedule-table").addEventListener("click",e=>{const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail)});
 
@@ -654,7 +698,7 @@ async function decideSchedule(id,action,btn){
 function buildSubtasks(task){
   const rollup=task.subtask_rollup||{total:0,completed:0};
   // D73AQW: same order, index and swatch as the Gantt segments, so dialog and bar agree.
-  const rows=stepOrder(task.subtasks||[]).map((s,i)=>{const n=i+1;return `<li><i class="sw step-c${stepHue(n)}" aria-hidden="true">${n}</i> <button type="button" class="link" data-detail="${escapeHtml(s.id)}">Step ${n} · ${escapeHtml(s.title)}</button> · ${escapeHtml(statusLabel(s.status))} · ${escapeHtml(s.owner_name||"Unassigned")} · ${escapeHtml(s.start_date||"—")} → ${escapeHtml(s.due_date||"—")}${s.criticality?` · ${escapeHtml(s.criticality)}`:""}</li>`}).join("")||"<li>No subtasks.</li>";
+  const rows=stepOrder(task.subtasks||[]).map((s,i)=>{const n=i+1;return `<li><i class="sw step-c${stepHue(n)}${n>STEP_HUES?" wrap":""}" aria-hidden="true">${n}</i> <button type="button" class="link" data-detail="${escapeHtml(s.id)}">Step ${n} · ${escapeHtml(s.title)}</button> · ${escapeHtml(statusLabel(s.status))} · ${escapeHtml(s.owner_name||"Unassigned")} · ${escapeHtml(s.start_date||"—")} → ${escapeHtml(s.due_date||"—")}${s.criticality?` · ${escapeHtml(s.criticality)}`:""}</li>`}).join("")||"<li>No subtasks.</li>";
   const candidates=state.tasks.filter(t=>t.project_id===task.project_id&&t.id!==task.id);
   const parentOptions=candidates.map(t=>`<option value="${escapeHtml(t.id)}"${t.id===task.parent_task_id?" selected":""}>${escapeHtml(t.title)}</option>`).join("");
   return `<div class="subtasks"><h3>Subtasks</h3>
