@@ -3,7 +3,10 @@
 Status: implemented for `C9KPH6` (2026-09-22). Requested by Aly Jafferani in
 `#astra-builder` on 2026-09-22 after sharing the Rupani Academy executive Gantt
 workbook; the two scope changes of the same day (Manager access, locked and
-Owner-configurable template, dd-mm-yyyy dates) are folded in.
+Owner-configurable template, dd-mm-yyyy dates) are folded in. The independent
+review of the same day (probes P1c-P21e) and Aly's 07:18 UTC request for a
+template that comes pre-filled with the project's tasks are addressed in the
+follow-up commit `fix(C9KPH6)`; the behaviour below is the corrected one.
 
 The service layer is the authorization boundary (`AstraService.import_preview`,
 `import_commit`, `import_template`, `import_targets`, `get_/set_import_template_config`,
@@ -80,6 +83,44 @@ edits and not a secret) is applied to every sheet. Column widths follow the refe
 design. Header hover comments from the openpyxl reference are not emitted (they need a
 VML part); the same text is in the input messages and the README dictionary.
 
+### Project-scoped download: the template pre-filled with the project's tasks
+
+`GET /api/import/template.xlsx?project_id=<id>` (and `.csv`) returns the current
+template with the **Tasks** sheet already listing that project's tasks, so a project
+manager who prefers Excel edits what Astra has instead of retyping it, and a re-upload
+updates the same tasks (Aly, 2026-09-22 07:18 UTC). The Import dialog's download links
+switch to "Download template (with this project's tasks)" as soon as a target project
+is selected.
+
+- Authorization: App Owner for any project, Manager for the projects they manage,
+  everyone else HTTP 403; an unknown project is 404. The blank template
+  (`project_id` absent or empty) stays available to every signed-in user.
+- Keys: a task that has no Import Key yet gets one at download time - `T-001`,
+  `T-002` ... continuing above the highest `T-nnn` already in the project and skipping
+  any key in use - stored in `tasks.import_key` with a `task_event`
+  `import_key_assigned` (no Owner notification), all inside one transaction. A second
+  download assigns nothing new. Hand-made tasks and imported tasks therefore share one
+  key space and the file's rows carry **literal** keys; the blank rows below keep the
+  pre-filled formula, offset so the first blank row yields the next free number
+  (`=IF(B8="","","T-"&TEXT(ROW()-1+3,"000"))` when six tasks occupy rows 2-7 and
+  `T-009` is the highest in use).
+- Rows: parents come before their steps, each level ordered by Start, Due, Title.
+  Every enabled column that maps to a task field is filled: Import Key, Title, Step of
+  (Key) / Parent Key (the parent's key), Owner Email, Start Date, Due Date, Status
+  (label), Criticality, % Complete, Next Action, Predecessors (keys), Collaborators /
+  Reviewers / Approvers (emails), Attachment Links, Milestone (Yes/No), Description
+  (the full stored description), Notes (the text of the description's "Notes:"
+  section) and custom columns from `tasks.import_extras`. Original Due Date stays blank
+  (a baseline is never overwritten) and Type repeats only a value the task already
+  carries in `import_extras`, so re-uploading the file unedited previews every row as
+  **unchanged** with no warnings; a single edited Title previews as one update (with
+  `W_TITLE_CHANGED`).
+- Project sheet: name, the first Manager's email (falling back to
+  `projects.manager_user_id`), timezone and, in the Full shape, description, working
+  days and planned dates. The People sheet (Full shape only) lists the project's active
+  members with their role.
+- The file name is `astra-import-<project-slug>.xlsx` / `.csv`.
+
 ### Presets: Simple (default) and Full
 
 Two presets live in `importer.PRESETS`; the Owner applies either from Template settings
@@ -92,7 +133,11 @@ preset; a preset only changes the `enabled` flags.
   Owner Email, Start Date, Due Date, Status, Criticality, Notes. The template's Import Key
   cells carry the formula `=IF(B2="","","T-"&TEXT(ROW()-1,"000"))`, so a key such as
   `T-001` appears as soon as a Title is typed and untouched rows stay blank; the user may
-  overwrite it. A row whose only cell is an Import Key is ignored by the importer. The
+  overwrite it. Because the formula follows the row number, both READMEs say: add new
+  rows at the bottom, do not insert or delete rows in the middle (a deleted row would
+  shift every key below it onto another task); the preview's `W_TITLE_CHANGED` warning
+  is the visible symptom when that happens anyway. A row whose only cell is an Import
+  Key is ignored by the importer. The
   workbook has six sheets: an eight-line README, a three-row Project sheet (Project Name
   required, Project Manager Email, Timezone dropdown defaulting to Asia/Karachi), Tasks,
   a two-row Example (a task and a step), hidden Lists and veryHidden `_astra`. No People
@@ -120,7 +165,12 @@ and People sheets.
   with the sheet's description (plus a "Sponsor / Executive Owner" line), timezone
   (validated, default Asia/Karachi), working days (`Every day` / `Mon-Fri` / `Mon-Sat` /
   `Sun-Thu`), planned start and finish, manager (email of an active user; also granted the
-  `manager` membership) and filing entity (existing active entity only). When a target is
+  `manager` membership) and filing entity (existing active entity only). Every active
+  user named in the rows (Owner Email, Collaborators, Reviewers, Approvers) is eligible
+  for the new project and is granted access when it is created — `manager` for the
+  Project sheet's manager email, `member` for everyone else, never downgrading — so the
+  assignments are kept instead of being dropped as "not eligible" (`I_ACCESS_GRANTED`
+  info per row; a deactivated user still gets `W_PERSON_NOT_ELIGIBLE`). When a target is
   chosen — always the case for a Manager — a Project Name that differs from the chosen
   project puts `E_PROJECT_MISMATCH` on every row. Plan As-of Date and Source Document are
   recorded in the import summary.
@@ -144,11 +194,11 @@ and People sheets.
 | Description | `tasks.description` | on update, replaces only when non-empty |
 | Owner Email (core) | `tasks.owner_user_id` | active user with access to the project |
 | Collaborators / Reviewers / Approvers | `task_reviewers` | `;`-separated emails; import only adds |
-| Start Date (core), Due Date (core) | `tasks.start_date` / `due_date` | real Excel date, `dd-mm-yyyy` or `yyyy-mm-dd` text; prose is an error |
+| Start Date (core), Due Date (core) | `tasks.start_date` / `due_date` | real Excel date, `dd-mm-yyyy` or `yyyy-mm-dd` text; a bare serial number follows the workbook's date system (1900 or 1904); prose is an error |
 | Duration (days) | derived | fills the missing one of Start/Due |
 | Original Due Date | `tasks.baseline_due_date` | Owner only; never overwrites an existing baseline |
-| Status (core) | `tasks.status` | labels or synonyms (Not Started, Done, Delayed/At Risk, Blocked ...) |
-| % Complete | `tasks.progress` | 0..100, `45%` and `0.45` accepted |
+| Status (core) | `tasks.status` | labels or synonyms (Not Started, Done, Delayed/At Risk, Blocked ...); on update, Submitted, Completed, On hold, Reopened and Changes requested are never set by import (`W_GOVERNED_STATUS`) |
+| % Complete | `tasks.progress` | 0..100, `45%` and `0.45` accepted; a %-formatted Excel cell is read as displayed (stored 1.0 shown as 100% -> 100) |
 | Criticality | `tasks.criticality` | Critical, High, Normal, Low or blank |
 | Predecessors | `task_dependencies` (finish-to-start) | `;`-separated Import Keys; `FS+2d` suffixes are recorded in Notes with `W_LAG_IGNORED` |
 | Milestone (off by default) | `tasks.is_milestone` | Yes/No; superseded by the `Type` list column; with one date, start = due |
@@ -175,11 +225,19 @@ by Managers.
 ## Upload rules
 
 - `.xlsx` (from the template) or `.csv`; `.xlsm`, `.xlsb`, `.xls` are refused. 5 MB,
-  2,000 rows, 40 columns, 4,000 characters per cell.
+  2,000 rows, 40 columns, 4,000 characters per cell. Inside the zip, at most 200 parts,
+  8 MB declared per part and 20 MB declared in total (judged on the central directory,
+  so a forged size is refused before anything is inflated); any of these is HTTP 413
+  (`ImportTooLarge`).
 - `.xlsx`: the `_astra` marker must equal the current configuration hash and the
   `Tasks` header row must equal the configured labels in order; mismatches are listed by
-  column letter. The `Project` and `People` sheets are read by name when present. Dates may be real Excel date cells (1900 and 1904 systems; serials
-  at or below 60 are refused as ambiguous) or `dd-mm-yyyy` / `yyyy-mm-dd` text.
+  column letter. Data in a column to the right of the last header is never imported and
+  is reported per row (`W_EXTRA_DATA`, "extra data ignored in column J"; a row with
+  nothing else on it gets a file-level warning). The `Project` and `People` sheets are
+  read by name when present. Dates may be real Excel date cells (1900 and 1904 systems;
+  serials at or below 60 are refused as ambiguous), bare serial numbers in the workbook's
+  own date system, or `dd-mm-yyyy` / `yyyy-mm-dd` text. Percent-formatted numeric cells
+  arrive as the displayed percentage (`xlsx_reader.Percent`).
 - `.csv`: UTF-8 (BOM stripped) with a cp1252 fallback warning; delimiter sniffed
   (`,` `;` tab); headers match the configured labels, or the built-in default
   headers and aliases (`Task Name`, `Assignee`, `Finish`, `Depends On`, ...) with a
@@ -193,13 +251,26 @@ by Managers.
 `X-Filename` (percent-encoded), `X-Project-Id` (blank = Owner creates or finds the
 project named in the file), `X-Options` (percent-encoded JSON: `valid_rows_only`,
 `default_reason`) and, for commit, `X-Sha256` of the previewed bytes (HTTP 409 when
-they differ). CSRF and the session cookie apply as for every other mutation.
+they differ). CSRF and the session cookie apply as for every other mutation. Only
+these two routes read the body as raw bytes; every other route keeps the 1 MB JSON
+ceiling whatever `Content-Type` the client declares.
 
 Preview writes nothing and returns per row: `action` (create / update / unchanged /
 error), `level` (ok / warning / error), findings with stable codes, the resolved
-values (dates as dd-mm-yyyy) and, for updates, `old → new` changes. Errors block
-their own row and any row whose parent or predecessor they are; commit is refused
-while errors exist unless `valid_rows_only` is set.
+values (dates as dd-mm-yyyy) and, for updates, `old → new` changes (including
+`parent_key`). Errors block their own row and any row whose parent or predecessor
+they are: the propagation runs after every row-level and dependency check and repeats
+until stable, so a parent that only fails in dependency wiring takes its steps and
+successors with it instead of importing them top-level (a three-row dependency cycle
+therefore errors all three rows). Import Keys are unique per project only: the same
+`T-001` may exist in every project. Parent and dependency cycles are checked on one
+graph per kind whose nodes are task ids for tasks already in the project and file
+keys for new rows, so a cycle that runs through an existing task absent from the file
+is found too (`E_PARENT_CYCLE`, `E_DEP_CYCLE`). Re-parenting an existing task under a
+row that is new in the same file is an update, applied after the new parent is
+created. A Title that differs from the stored one is `W_TITLE_CHANGED` (the symptom of
+shifted pre-filled keys). Commit is refused while errors exist unless
+`valid_rows_only` is set.
 
 Commit re-parses and re-validates the same bytes, then runs one `BEGIN IMMEDIATE`
 transaction: create the project if needed (Owner), insert or update tasks by
@@ -210,9 +281,12 @@ entities (union, never removal), record `task_created` / `task_updated` /
 events with the row's Reason, insert finish-to-start dependencies (cycle-checked in
 preview against existing and new edges), write one `import_committed` project event
 and one `imports` row (actor, filename, SHA-256, summary JSON, full CSV report).
-Any exception rolls everything back. Import never deletes a task, a link or a
-dependency, never overwrites a baseline and never moves a task into
-`submitted`, `completed`, `on_hold` or `reopened` on update (`W_GOVERNED_STATUS`).
+Any exception rolls everything back; when the unique `(project_id, import_key)` index
+fires because another writer took a key between preview and commit, the rollback is
+reported as HTTP 409 with a "run the preview again" message, not 500. Import never
+deletes a task, a link or a dependency, never overwrites a baseline and never moves a
+task into `submitted`, `completed`, `on_hold`, `reopened` or `changes_requested` on
+update (`W_GOVERNED_STATUS`; each needs the record its lifecycle action writes).
 
 `GET /api/imports` lists imports (Owner: all; Manager: their own and their managed
 projects). `GET /api/imports/<id>/report.csv` downloads the stored report
@@ -223,10 +297,16 @@ criticality, task_id, findings`, dates dd-mm-yyyy).
 
 An **Import** button appears beside **Templates** for the Owner and for anyone who
 manages at least one project (`GET /api/import/targets`). The dialog has three
-steps — Upload (template links, target project, drop zone or file picker, options),
+steps — Upload (template links, which become "Download template (with this project's
+tasks)" and carry `?project_id=` once a target project is selected; target project,
+drop zone or file picker, options),
 Review (summary chips that filter the table, the Project-sheet header line, a People
 panel listing who the Owner still has to add or grant, per-row badge and findings,
-`old → new` cells, Back / Import N rows), Confirm (counts, project, report link). The Owner also
+`old → new` cells, Back / Import N rows), Confirm (counts, project, report link). Every
+server-provided string the dialog puts into `innerHTML` — row values, findings, the
+Project-sheet header line including the manager email, People rows, file names,
+template labels — goes through `escapeHtml`; the preview JSON itself is returned
+verbatim (a test pins both). The Owner also
 gets **Template settings** inside the dialog: Simple / Full preset buttons,
 enable/disable, rename, reorder, add and remove custom columns, reset, save. Colouring is class-based with `data-level`
 attributes (CSP `style-src 'self'`), every level is also a word, the dialog closes

@@ -90,6 +90,45 @@ class XlsxReaderTests(unittest.TestCase):
         data = bytearray(buffer.getvalue())
         # Forge the declared uncompressed size in the central directory (offset 24 of the CD header).
         cd_start = data.rfind(b"PK\x01\x02")
-        data[cd_start + 24:cd_start + 28] = (60 * 1024 * 1024).to_bytes(4, "little")
-        with self.assertRaisesRegex(XlsxError, "50 MB"):
+        data[cd_start + 24:cd_start + 28] = (9 * 1024 * 1024).to_bytes(4, "little")
+        with self.assertRaisesRegex(XlsxError, "8 MB") as caught:
             read_workbook(bytes(data))
+        from astra.xlsx_reader import XlsxTooLarge
+        self.assertIsInstance(caught.exception, XlsxTooLarge)
+
+    def test_total_declared_size_is_capped(self):
+        import io
+        import zipfile
+        from import_fixtures import forge_declared_size
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for index in range(1, 4):
+                archive.writestr(f"xl/worksheets/sheet{index}.xml", "<worksheet/>")
+            archive.writestr("xl/workbook.xml", "<workbook/>")
+        data = buffer.getvalue()
+        for index in range(1, 4):   # 3 x 7 MB: each part under the 8 MB cap, 21 MB together
+            data = forge_declared_size(data, f"xl/worksheets/sheet{index}.xml", 7 * 1024 * 1024)
+        with self.assertRaisesRegex(XlsxError, "20 MB in total"):
+            read_workbook(data)
+
+    def test_percent_formatted_cells_return_the_displayed_percentage(self):
+        from astra.xlsx_reader import Percent
+        from import_fixtures import DECL as decl, STYLES
+        styles = STYLES.replace('<numFmts count="1"><numFmt numFmtId="164" formatCode="dd-mm-yyyy"/></numFmts>',
+                                '<numFmts count="2"><numFmt numFmtId="164" formatCode="dd-mm-yyyy"/>'
+                                '<numFmt numFmtId="165" formatCode="0.0&quot;%&quot;"/><numFmt numFmtId="166" formatCode="0.0%"/></numFmts>')
+        styles = styles.replace('<cellXfs count="3">', '<cellXfs count="5">').replace(
+            '</cellXfs>', '<xf numFmtId="165" applyNumberFormat="1"/><xf numFmtId="166" applyNumberFormat="1"/></cellXfs>')
+        xml = (f'{decl}<worksheet {NS}><sheetData><row r="1">'
+               '<c r="A1" s="2"><v>1</v></c><c r="B1" s="2"><v>0.45</v></c><c r="C1"><v>0.45</v></c>'
+               '<c r="D1" s="3"><v>0.45</v></c><c r="E1" s="4"><v>0.125</v></c></row></sheetData></worksheet>')
+        sheet = read_workbook(workbook_bytes([("Tasks", xml)], styles=styles)).sheet("Tasks")
+        a, b, c, d, e = (sheet.cell(1, column) for column in range(1, 6))
+        self.assertIsInstance(a, Percent)
+        self.assertEqual((a, b), (100, 45))
+        self.assertEqual(c, 0.45)                       # unformatted: left alone
+        self.assertNotIsInstance(c, Percent)
+        self.assertEqual(d, 0.45)                       # "%" only inside a quoted literal is not a percent format
+        self.assertNotIsInstance(d, Percent)
+        self.assertEqual(e, 12.5)                       # custom 0.0% format
+        self.assertIsInstance(e, Percent)

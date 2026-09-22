@@ -900,8 +900,8 @@ function renderImportUpload(){
   const selected=document.querySelector("#project-filter").value;
   document.querySelector("#import-body").innerHTML=`
     <h3>Upload a filled template</h3>
-    <p class="muted">Download the template, fill its <strong>Project</strong>, <strong>People</strong> and <strong>Tasks</strong> sheets (dates as dd-mm-yyyy; the Example sheet shows three worked rows), then upload it here. Nothing is written until you confirm in step 3. Re-importing a file updates tasks by Import Key; it never deletes.</p>
-    <div class="import-links"><a href="/api/import/template.xlsx" download>Download template (.xlsx)</a><a href="/api/import/template.csv" download>Download template (.csv)</a>${settings}</div>
+    <p class="muted">Choose the target project, download the template and fill its <strong>Project</strong> and <strong>Tasks</strong> sheets (dates as dd-mm-yyyy; the Example sheet shows worked rows), then upload it here. With a project chosen the download already lists that project's tasks with their Import Keys, so a re-upload updates them instead of duplicating; add new rows at the bottom. Nothing is written until you confirm in step 3. An import never deletes.</p>
+    <div class="import-links"><a href="/api/import/template.xlsx" id="import-template-xlsx" download>Download template (.xlsx)</a><a href="/api/import/template.csv" id="import-template-csv" download>Download template (.csv)</a>${settings}</div>
     <label>Target project<select id="import-project">${createOption}${options}</select></label>
     <div id="import-drop" class="dropzone" tabindex="0" role="button" aria-describedby="import-file-name"><strong>Drop your .xlsx or .csv here</strong><span>or press Enter / click to choose a file</span><input type="file" id="import-file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="visually-hidden" tabindex="-1"></div>
     <div id="import-file-name" class="muted">${importState.file?escapeHtml(`Selected: ${importState.file.name} (${Math.ceil(importState.file.size/1024)} KB)`):"No file selected."}</div>
@@ -914,6 +914,13 @@ function renderImportUpload(){
   const select=document.querySelector("#import-project");
   if(selected&&[...select.options].some(o=>o.value===selected))select.value=selected;
   else if(!targets.can_create_project&&select.options.length)select.selectedIndex=0;
+  // With a project chosen the template comes pre-filled with that project's tasks (GET ...?project_id=).
+  const updateTemplateLinks=()=>{
+    const pid=select.value,suffix=pid?`?project_id=${encodeURIComponent(pid)}`:"";
+    const label=pid?"Download template (with this project's tasks)":"Download template";
+    for(const [id,ext] of [["import-template-xlsx","xlsx"],["import-template-csv","csv"]]){const a=document.querySelector(`#${id}`);a.href=`/api/import/template.${ext}${suffix}`;a.textContent=`${label} (.${ext})`}
+  };
+  select.addEventListener("change",updateTemplateLinks);updateTemplateLinks();
   const drop=document.querySelector("#import-drop"),input=document.querySelector("#import-file");
   const pick=file=>{if(!file)return;importState.file=file;document.querySelector("#import-file-name").textContent=`Selected: ${file.name} (${Math.ceil(file.size/1024)} KB)`;document.querySelector("#import-preview-btn").disabled=false;importError("")};
   drop.addEventListener("click",()=>input.click());
@@ -951,7 +958,8 @@ function renderImportReview(){
   const project=s.project||{};
   const projectLine=project.create?`<strong>${escapeHtml(project.name||"")}</strong> (a new project will be created)`:`<strong>${escapeHtml(project.name||"")}</strong>`;
   const header=p.project_header||{};
-  const headerBits=[header.manager_email?`manager ${header.manager_email}`:"",header.timezone?escapeHtml(header.timezone):"",header.start_date?`planned ${escapeHtml(fmtDmy(header.start_date))} → ${escapeHtml(fmtDmy(header.target_date)||"—")}`:"",header.as_of_date?`plan as of ${escapeHtml(fmtDmy(header.as_of_date))}`:""].filter(Boolean).join(" · ");
+  // Every Project-sheet value is user input from the workbook: escape each one (review probe P15c).
+  const headerBits=[header.manager_email?`manager ${escapeHtml(header.manager_email)}`:"",header.timezone?escapeHtml(header.timezone):"",header.start_date?`planned ${escapeHtml(fmtDmy(header.start_date))} → ${escapeHtml(fmtDmy(header.target_date)||"—")}`:"",header.as_of_date?`plan as of ${escapeHtml(fmtDmy(header.as_of_date))}`:""].filter(Boolean).join(" · ");
   const projectSheet=header.name?`<div>Project sheet: <strong>${escapeHtml(header.name)}</strong>${headerBits?` · ${headerBits}`:""}</div>`:"";
   const peopleRows=(p.people||[]).map(x=>`<li data-status="${escapeHtml(x.status)}"><span class="badge" data-level="${x.status==="ok"?"ok":"warning"}">${escapeHtml(x.status==="ok"?"ready":x.status.replace("_"," "))}</span> ${escapeHtml(x.email||x.name)}${x.name&&x.email?` · ${escapeHtml(x.name)}`:""}${x.role?` · ${escapeHtml(x.role)}`:""}${x.message?`<br><small>${escapeHtml(x.message)}</small>`:""}</li>`).join("");
   const people=peopleRows?`<details class="import-people"${(p.people||[]).some(x=>x.status!=="ok")?" open":""}><summary>People sheet: ${p.people.length} listed, ${p.people.filter(x=>x.status!=="ok").length} for the App Owner to add or grant</summary><ul class="findings">${peopleRows}</ul></details>`:"";

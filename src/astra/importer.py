@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from xml.sax.saxutils import escape
 
-from .xlsx_reader import CellError, XlsxError, column_letter, read_workbook
+from .xlsx_reader import CellError, Percent, XlsxError, XlsxTooLarge, column_letter, read_workbook
 
 TEMPLATE_SHEET = "Tasks"
 README_SHEET = "README"
@@ -256,6 +256,14 @@ CUSTOM_PROMPTS = {
 }
 
 _STATUS_BY_LABEL = {label.casefold(): code for label, code in STATUS_LABELS}
+STATUS_LABEL_BY_CODE = {code: label for label, code in STATUS_LABELS}
+NOTES_MARKER = "Notes:\n"
+
+
+def notes_section(description: str) -> str:
+    """The text the importer filed under "Notes:" in a task description, or ''."""
+    index = (description or "").find(NOTES_MARKER)
+    return description[index + len(NOTES_MARKER):].strip() if index >= 0 else ""
 STATUS_SYNONYMS = {
     **_STATUS_BY_LABEL,
     **{code.replace("_", " "): code for _, code in STATUS_LABELS},
@@ -278,6 +286,9 @@ FALSE_WORDS = {"no", "n", "false", "0"}
 # duplicated so this module has no import cycle with service.py.
 GOVERNED = {"submitted", "completed", "on_hold", "reopened"}
 PROTECTED = {"changes_requested", "completed", "on_hold", "cancelled", "abandoned", "reopened"}
+# Statuses an import never sets on an existing task, Owner included: each needs the
+# record its lifecycle action writes (a submission, a checkpoint, a hold note).
+NO_IMPORT_ON_UPDATE = GOVERNED | {"changes_requested"}
 MANAGER_ORDINARY = {"draft", "assigned", "in_progress", "delayed"}
 NO_RECORD_ON_CREATE = {"submitted", "changes_requested", "completed", "on_hold", "reopened"}
 CLOSED = {"completed", "cancelled", "abandoned"}
@@ -288,7 +299,12 @@ class ImportFileError(ValueError):
 
 
 class ImportConflict(ValueError):
-    """The bytes sent to commit differ from the previewed bytes."""
+    """The bytes sent to commit differ from the previewed bytes, or another writer
+    took an Import Key while the commit ran (HTTP 409)."""
+
+
+class ImportTooLarge(ImportFileError):
+    """The upload, or what the workbook would inflate to, is above the limits (HTTP 413)."""
 
 
 # --------------------------------------------------------------------------- helpers
@@ -819,7 +835,7 @@ def _styles_xml() -> str:
 class _TemplateWorkbook:
     """Builds the seven-sheet template for one configuration."""
 
-    def __init__(self, config: TemplateConfig, *, tasks=None, project=None, people=None):
+    def __init__(self, config: TemplateConfig, *, tasks=None, project=None, people=None, key_offset: int = 0):
         self.config = config
         self.columns = config.active
         self.extended = config.is_extended()
@@ -829,6 +845,9 @@ class _TemplateWorkbook:
         self.tasks = tasks or []
         self.project = project or {}
         self.people = people or []
+        # Pre-filled key formula: T-(ROW()-1+key_offset). A project-scoped download sets the
+        # offset so the blank rows below the existing tasks continue above the highest T-nnn in use.
+        self.key_offset = int(key_offset or 0)
         self.letter = {column.key: column_letter(index) for index, column in enumerate(self.columns, start=1)}
         self.last_col = column_letter(len(self.columns))
         self.last_row = TEMPLATE_DATA_ROWS + 1
@@ -900,7 +919,8 @@ class _TemplateWorkbook:
                 if not cell and column.key == "import_key" and not example:
                     # Pre-filled key: appears as T-001, T-002 ... once the Title is typed; the user may overwrite it.
                     title_col = self.letter["title"]
-                    cell = _formula(ref, f'IF({title_col}{number}="","","T-"&TEXT(ROW()-1,"000"))', text_style)
+                    base = f"ROW()-1{self.key_offset:+d}" if self.key_offset else "ROW()-1"
+                    cell = _formula(ref, f'IF({title_col}{number}="","","T-"&TEXT({base},"000"))', text_style)
                 cells.append(cell or f'<c r="{ref}" s="{text_style}"/>')
             long = any(len(str(value or "")) > 60 for value in row.values())
             height = ' ht="48" customHeight="1"' if row and (example or long) else ""
@@ -1161,7 +1181,7 @@ class _TemplateWorkbook:
         line("Rules that make the upload seamless", XF_LABEL)
         status_list = ", ".join(label for label, _ in STATUS_LABELS)
         for text in (
-            "Import Key is the row's permanent id (RA-001, WEB-12, M-3). Keep it forever: re-importing the same key updates the task; a new key creates a new task. Parent Key and Predecessors refer to it.",
+            "Import Key is the row's permanent id (RA-001, WEB-12, M-3). Keep it forever: re-importing the same key updates the task; a new key creates a new task. Parent Key and Predecessors refer to it. Add new rows at the bottom; do not insert or delete rows in the middle - pre-filled keys follow the row number and a shifted key updates the wrong task.",
             "Dates are real dates only. Cells display dd-mm-yyyy. If your Excel reads dates month-first, type yyyy-mm-dd (2026-09-07) and it will still display 07-09-2026. Never type TBD, Immediate, Ongoing or 'Sept 7-10' into a date cell - the cell will refuse it; write that wording in Notes and leave the date blank.",
             "One accountable owner per row, by work email. Helpers go in Collaborators, separated by ; (semicolon). A group such as 'Academic Team' cannot own a task - name a person and mention the group in Notes.",
             f"Status: {status_list}. Blank = Draft (Assigned once an owner is given). Delayed, On hold, Cancelled, Abandoned and Reopened need a Reason. Completed, Submitted, On hold and Reopened are taken on the FIRST import only; afterwards those transitions happen in Astra, where their records are kept.",
@@ -1222,7 +1242,7 @@ class _TemplateWorkbook:
             ("Astra import - how to fill this workbook", XF_TITLE, 30),
             (f"Template {self.family} | column set {self.config.hash()} | dates show as dd-mm-yyyy", XF_SUBTLE, 22),
             ("1. Project sheet: type the project name (required); add the manager's email and timezone if you know them.", XF_WRAP_LOCKED, 34),
-            ("2. Tasks sheet: one row per task or action item. Only the Title is required; the Import Key fills itself (T-001, T-002 ...). Leave it alone unless you have your own ids.", XF_WRAP_LOCKED, 34),
+            ("2. Tasks sheet: one row per task or action item. Only the Title is required; the Import Key fills itself (T-001, T-002 ...). Leave it alone unless you have your own ids. Add new rows at the bottom; do not insert or delete rows in the middle - the pre-filled keys follow the row number, and a shifted key would update the wrong task.", XF_WRAP_LOCKED, 48),
             ("3. Dates: real dates only, shown dd-mm-yyyy. If your Excel reads dates month-first, type 2026-09-07 and it will show 07-09-2026. Never type TBD or 'Sept 7-10' in a date cell - write it in Notes and leave the date blank.", XF_WRAP_LOCKED, 34),
             ("4. Owner: one work email per row, of a person who already has access in Astra. Status and Criticality are dropdowns; blank Status = Draft, blank Criticality = Unrated.", XF_WRAP_LOCKED, 34),
             ("5. Steps: to make a row a step of another task, put that task's Import Key in 'Step of (Key)'.", XF_WRAP_LOCKED, 34),
@@ -1320,22 +1340,59 @@ class _TemplateWorkbook:
         return buffer.getvalue()
 
 
-def build_template_xlsx(config: TemplateConfig | None = None, *, tasks=None, project=None, people=None) -> bytes:
+def build_template_xlsx(config: TemplateConfig | None = None, *, tasks=None, project=None, people=None,
+                        key_offset: int = 0) -> bytes:
     """Return the locked Astra template workbook for this configuration (zipfile, no dependencies).
 
     ``tasks`` (dicts keyed by column key), ``project`` (dict keyed by PROJECT_FIELD_KEYS
     values) and ``people`` (tuples Email, Full Name, Role, Notes) pre-fill the sheets;
-    the blank template passes none of them.
+    the blank template passes none of them. ``key_offset`` shifts the pre-filled key
+    formula of the blank rows (see ``next_key_offset``).
     """
-    return _TemplateWorkbook(config or TemplateConfig.default(), tasks=tasks, project=project, people=people).build()
+    return _TemplateWorkbook(config or TemplateConfig.default(), tasks=tasks, project=project, people=people,
+                             key_offset=key_offset).build()
 
 
-def build_template_csv(config: TemplateConfig | None = None) -> str:
+def build_template_csv(config: TemplateConfig | None = None, *, tasks=None) -> str:
     config = config or TemplateConfig.default()
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(config.labels())
+    for row in tasks or []:
+        writer.writerow([normalize_text(row.get(column.key)) for column in config.active])
     return buffer.getvalue()
+
+
+SEQUENCE_KEY = re.compile(r"^T-(\d{3,})$")
+
+
+def next_sequence_number(keys) -> int:
+    """The number after the highest pre-filled-style key (T-001, T-002 ...) among ``keys``."""
+    highest = 0
+    for key in keys:
+        match = SEQUENCE_KEY.match(str(key or ""))
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return highest + 1
+
+
+def assign_sequence_keys(keys_in_use, count: int) -> list[str]:
+    """``count`` fresh T-nnn keys continuing above the highest in use and skipping any taken."""
+    used = set(keys_in_use)
+    number = next_sequence_number(used)
+    out = []
+    while len(out) < count:
+        key = f"T-{number:03d}"
+        if key not in used:
+            used.add(key)
+            out.append(key)
+        number += 1
+    return out
+
+
+def next_key_offset(keys_in_use, prefilled_rows: int) -> int:
+    """Formula offset so the first blank row (row prefilled_rows + 2) yields the next free T-nnn."""
+    return next_sequence_number(keys_in_use) - (prefilled_rows + 1)
 
 
 # --------------------------------------------------------------------------- upload parsing
@@ -1345,6 +1402,7 @@ class ParsedRow:
     number: int
     cells: dict[str, object]                               # column key -> raw cell value
     aliased: dict[str, str] = field(default_factory=dict)  # column key -> header text matched by alias
+    extra: list[str] = field(default_factory=list)         # letters of unheaded columns that carried data
 
 
 @dataclass
@@ -1356,6 +1414,7 @@ class ParsedUpload:
     sheet_name: str = ""
     project_header: dict = field(default_factory=dict)     # Project sheet: key -> value (dates as ISO)
     people: list = field(default_factory=list)             # People sheet rows: {row, email, name, role, notes}
+    date1904: bool = False                                 # the workbook's date system, for bare serial cells
 
 
 def detect_format(filename: str, data: bytes) -> str:
@@ -1373,7 +1432,7 @@ def detect_format(filename: str, data: bytes) -> str:
 
 def parse_upload(filename: str, data: bytes, config: TemplateConfig) -> ParsedUpload:
     if len(data) > MAX_FILE_BYTES:
-        raise ImportFileError("The file is larger than 5 MB. Split it or remove unused sheets and try again.")
+        raise ImportTooLarge("The file is larger than 5 MB. Split it or remove unused sheets and try again.")
     if not data:
         raise ImportFileError("The uploaded file is empty.")
     fmt = detect_format(filename, data)
@@ -1389,6 +1448,8 @@ def _template_hint() -> str:
 def _parse_xlsx(data: bytes, config: TemplateConfig) -> ParsedUpload:
     try:
         workbook = read_workbook(data)
+    except XlsxTooLarge as exc:
+        raise ImportTooLarge(str(exc)) from exc
     except XlsxError as exc:
         raise ImportFileError(str(exc)) from exc
     marker = workbook.sheet(MARKER_SHEET)
@@ -1407,7 +1468,7 @@ def _parse_xlsx(data: bytes, config: TemplateConfig) -> ParsedUpload:
     if sheet is None or not sheet.rows:
         raise ImportFileError(f"The workbook has no '{TEMPLATE_SHEET}' sheet with data. " + _template_hint())
     file_warnings: list[str] = []
-    project_header = _read_project_sheet(workbook.sheet(PROJECT_SHEET), file_warnings)
+    project_header = _read_project_sheet(workbook.sheet(PROJECT_SHEET), file_warnings, workbook.date1904)
     people = _read_people_sheet(workbook.sheet(PEOPLE_SHEET))
     header_row_number = min(sheet.rows)
     labels = config.labels()
@@ -1434,7 +1495,7 @@ def _parse_xlsx(data: bytes, config: TemplateConfig) -> ParsedUpload:
             "The header row does not match the Astra template: " + "; ".join(mismatches) + ". " + _template_hint()
         )
     rows = []
-    for number, values in sheet.iter_rows(len(labels)):
+    for number, values in sheet.iter_rows(width):
         if number == header_row_number:
             continue
         cells = {}
@@ -1444,16 +1505,23 @@ def _parse_xlsx(data: bytes, config: TemplateConfig) -> ParsedUpload:
             if value is None or value == "":
                 continue
             cells[column.key] = value
+        # Data to the right of the last template column has no header and is never
+        # imported; say so per row instead of dropping it silently (review probe P2d).
+        extra = [column_letter(index) for index, value in enumerate(values, start=1)
+                 if index > len(labels) and value not in (None, "") and normalize_text(value) != ""]
         if not cells or set(cells) == {"import_key"}:
+            if extra:
+                file_warnings.append(f"Row {number}: extra data ignored in column {', '.join(extra)} "
+                                     "(no template header above it and no task data on the row).")
             continue  # blank row, or only the template's pre-filled key
-        rows.append(ParsedRow(number=number, cells=cells))
+        rows.append(ParsedRow(number=number, cells=cells, extra=extra))
     if len(rows) > MAX_ROWS:
         raise ImportFileError(f"The sheet has more than {MAX_ROWS} data rows. Split the file and import in parts.")
     return ParsedUpload(format="xlsx", rows=rows, unknown_columns=[], file_warnings=file_warnings, sheet_name=sheet.name,
-                        project_header=project_header, people=people)
+                        project_header=project_header, people=people, date1904=workbook.date1904)
 
 
-def _read_project_sheet(sheet, file_warnings: list[str]) -> dict:
+def _read_project_sheet(sheet, file_warnings: list[str], date1904: bool = False) -> dict:
     """Label / Value rows of the Project sheet -> {key: value}; dates become ISO text."""
     if sheet is None:
         return {}
@@ -1469,7 +1537,7 @@ def _read_project_sheet(sheet, file_warnings: list[str]) -> dict:
         if raw is None or raw == "":
             continue
         if key in date_keys:
-            parsed, error = parse_date_cell(raw, allow_serial=True)
+            parsed, error = parse_date_cell(raw, allow_serial=True, date1904=date1904)
             if error:
                 file_warnings.append(f"Project sheet, {label}: {error} The value was ignored.")
                 continue
@@ -1559,8 +1627,12 @@ def _parse_csv(data: bytes, config: TemplateConfig) -> ParsedUpload:
 
 # --------------------------------------------------------------------------- cell coercion
 
-def parse_date_cell(value, *, allow_serial: bool):
-    """Return (date|None, error_message|None). Prose is never guessed."""
+def parse_date_cell(value, *, allow_serial: bool, date1904: bool = False):
+    """Return (date|None, error_message|None). Prose is never guessed.
+
+    A bare number is an Excel serial in the workbook's own date system (``date1904``
+    follows the workbook's ``workbookPr``), exactly like a date-styled cell.
+    """
     if value is None or value == "":
         return None, None
     if isinstance(value, CellError):
@@ -1572,9 +1644,14 @@ def parse_date_cell(value, *, allow_serial: bool):
     elif isinstance(value, (int, float)):
         if not allow_serial:
             return None, f"'{value}' is not a date. Use dd-mm-yyyy."
-        if float(value) <= 60:
-            return None, f"Excel date serial {value} is before 01-03-1900 and cannot be interpreted safely."
-        parsed = date.fromordinal(EXCEL_EPOCH.toordinal() + int(value))
+        if date1904:
+            if float(value) < 0:
+                return None, f"Excel date serial {value} is negative."
+            parsed = date.fromordinal(date(1904, 1, 1).toordinal() + int(value))
+        else:
+            if float(value) <= 60:
+                return None, f"Excel date serial {value} is before 01-03-1900 and cannot be interpreted safely."
+            parsed = date.fromordinal(EXCEL_EPOCH.toordinal() + int(value))
     else:
         text = normalize_text(value)
         match = DMY_DATE.match(text)
@@ -1623,19 +1700,24 @@ def parse_number(value):
     if isinstance(value, bool):
         return None, f"'{value}' is not a number."
     if isinstance(value, (int, float)):
-        return value, None
-    text = normalize_text(value).replace(",", "")
-    try:
-        number = float(text)
-    except ValueError:
-        return None, f"'{text}' is not a number."
+        # A percent-formatted cell arrives as the displayed percentage (xlsx_reader.Percent).
+        number = float(value)
+    else:
+        text = normalize_text(value).replace(",", "")
+        try:
+            number = float(text)
+        except ValueError:
+            return None, f"'{text}' is not a number."
     return (int(number) if number.is_integer() else number), None
 
 
 def parse_progress(value):
     if value is None or value == "":
         return None, None
-    if isinstance(value, float) and 0 < value < 1:
+    if isinstance(value, Percent):
+        # The reader already scaled a %-formatted cell to what Excel displays: 100% -> 100.
+        value = float(value)
+    elif isinstance(value, float) and 0 < value < 1:
         value = round(value * 100)
     elif isinstance(value, float) and value == 1.0:
         value = 100
@@ -1766,6 +1848,11 @@ class ImportEngine:
         self.file_format = ""
         self.project_header: dict = {}
         self.people: list[dict] = []
+        self.date1904 = False
+        # Owner creating a project from the file: active users named in the rows get
+        # project access when the project is created (user id -> role), so the Owner
+        # Emails are not dropped as "not eligible" for a project that does not exist yet.
+        self.grants: dict[str, str] = {}
         self._load_context()
 
     # ---- context ---------------------------------------------------------
@@ -1815,7 +1902,25 @@ class ImportEngine:
             return False
         if user.get("global_role") in ("owner", "chairman"):
             return True
+        if self.project_id is None and self.is_owner:
+            # The Owner is creating the project from this file: every active user named
+            # in it is granted access when the project is created (see self.grants).
+            return True
         return user["id"] in self.members
+
+    def _grant_role_for(self, user: dict) -> str:
+        manager_email = normalize_text(self.project_header.get("manager_email", "")).casefold()
+        return "manager" if manager_email and user["email"].casefold() == manager_email else "member"
+
+    def _note_grant(self, user: dict, result: RowResult, column: str) -> None:
+        """Record that an active user named in a new-project import gets access at commit."""
+        if self.project_id is not None or not self.is_owner or user.get("global_role") in ("owner", "chairman"):
+            return
+        role = self._grant_role_for(user)
+        if user["id"] not in self.grants or role == "manager":
+            self.grants[user["id"]] = role
+        result.add("info", "I_ACCESS_GRANTED",
+                   f"{user['email']} will be given {role} access to the new project.", column)
 
     def _resolve_person(self, text: str, result: RowResult, column: str):
         """Return a user dict or None, adding findings. Email first, then a unique display name."""
@@ -1836,9 +1941,10 @@ class ImportEngine:
             result.add("warning", "W_PERSON_BY_NAME", f"'{text}' was matched by name to {user['email']}.", column)
         if not self._eligible(user):
             where = "the new project" if not self.project_id else "this project"
-            result.add("warning", "W_PERSON_NOT_ELIGIBLE",
-                       f"{user['email']} is inactive or has no access to {where}; grant access, then re-import.", column)
+            what = "is deactivated and cannot be granted access" if not user.get("active") else f"has no access to {where}; grant access, then re-import"
+            result.add("warning", "W_PERSON_NOT_ELIGIBLE", f"{user['email']} {what}.", column)
             return None
+        self._note_grant(user, result, column)
         return user
 
     def _default_reason(self, row: RowResult) -> str:
@@ -1850,12 +1956,14 @@ class ImportEngine:
         self.file_warnings = list(parsed.file_warnings)
         self.file_format = parsed.format
         self.project_header = dict(parsed.project_header)
+        self.date1904 = parsed.date1904
         self.people = self._check_people(parsed.people)
         self.rows = [self._validate_row(row) for row in parsed.rows]
         self._check_duplicate_keys()
         self._check_project_column()
         self._wire_parents()
         self._wire_dependencies()
+        self._propagate_invalid()
         for result in self.rows:
             self._finish_row(result)
         return self.preview()
@@ -1886,17 +1994,14 @@ class ImportEngine:
         elif key.upper().startswith(EXAMPLE_KEY_PREFIXES):
             result.add("error", "E_EXAMPLE_ROW", "This is an example row (Import Key starts with EX-). Give it a real key.",
                        "Import Key")
+        # Import Keys are unique per project only (idx_tasks_import_key); the Simple
+        # template pre-fills T-001, T-002 ... for every project, so a key used in
+        # another project is not a finding.
         existing = self.existing_by_key.get(key) if key else None
-        if key and not existing:
-            other = self.db.execute(
-                "SELECT p.name FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.import_key=? AND t.project_id<>? LIMIT 1",
-                (key, self.project_id or ""),
-            ).fetchone()
-            if other:
-                result.add("error", "E_KEY_OTHER_PROJECT",
-                           f"Import Key '{key}' already belongs to a task in project '{other['name']}'. "
-                           "Cross-project moves are manual Owner actions.", "Import Key")
         result.existing = existing
+        if row.extra:
+            result.add("warning", "W_EXTRA_DATA",
+                       f"Extra data ignored in column {', '.join(row.extra)} (no template header above it).")
         result.action = "update" if existing else "create"
         is_manager_import = not self.is_owner
 
@@ -1907,6 +2012,7 @@ class ImportEngine:
             result.add("error", "E_TITLE_TOO_LONG", f"Title has {len(title)} characters; the limit is {MAX_TITLE_CHARS}.", "Title")
 
         allow_serial = self.file_format == "xlsx"
+        date1904 = self.date1904
         extras = {}
         for column in self.config.active:
             if not column.custom:
@@ -1917,7 +2023,7 @@ class ImportEngine:
                     result.add("error", "E_REQUIRED", f"'{column.label}' is required.", column.label)
                 continue
             if column.kind == "date":
-                parsed, error = parse_date_cell(raw, allow_serial=allow_serial)
+                parsed, error = parse_date_cell(raw, allow_serial=allow_serial, date1904=date1904)
                 value = parsed.isoformat() if parsed else None
             elif column.kind == "number":
                 value, error = parse_number(raw)
@@ -1951,7 +2057,7 @@ class ImportEngine:
 
         dates = {}
         for date_key, label in (("start_date", "Start Date"), ("due_date", "Due Date"), ("baseline_due_date", "Original Due Date")):
-            parsed, error = parse_date_cell(cells.get(date_key), allow_serial=allow_serial)
+            parsed, error = parse_date_cell(cells.get(date_key), allow_serial=allow_serial, date1904=date1904)
             if error:
                 result.add("error", "E_DATE_INVALID", error, label)
             dates[date_key] = parsed
@@ -2090,72 +2196,93 @@ class ImportEngine:
     def _row_index(self) -> dict[str, RowResult]:
         return {result.key: result for result in self.rows if result.key}
 
+    # Both graphs (parents, dependencies) are built over one node id per task: the
+    # task id for a task that already exists in the project (whether or not its key
+    # is in the file) and the Import Key for a task the file creates. Existing tasks
+    # that are absent from the file therefore sit in the same graph as the rows, so
+    # a cycle that runs through them is found (review probes P6a, P6c).
+    def _node(self, key: str):
+        task = self.existing_by_key.get(key)
+        return task["id"] if task else key
+
     def _wire_parents(self) -> None:
         by_key = self._row_index()
+        row_of_node = {self._node(key): row for key, row in by_key.items()}
 
         def parent_node(node):
-            """node is an import key (file row) or a task id (DB-only task)."""
-            if node in by_key:
-                row = by_key[node]
+            row = row_of_node.get(node)
+            if row is not None:
                 parent_key = row.plan.get("parent_key")
                 if parent_key:
-                    return parent_key
+                    return self._node(parent_key)
                 if row.existing:
-                    parent_id = row.existing.get("parent_task_id")
-                    return self._node_for_task(parent_id) if parent_id else None
+                    return row.existing.get("parent_task_id") or None
                 return None
             task = self.existing_by_id.get(node)
-            parent_id = task.get("parent_task_id") if task else None
-            return self._node_for_task(parent_id) if parent_id else None
+            return (task.get("parent_task_id") or None) if task else None
 
+        for result in self.rows:
+            parent_key = result.plan.get("parent_key")
+            if not parent_key or result.level == "error":
+                continue
+            if parent_key == result.key:
+                result.add("error", "E_PARENT_SELF", "A task cannot be its own parent.", "Parent Key")
+            elif parent_key in by_key and by_key[parent_key].level == "error":
+                result.add("error", "E_PARENT_INVALID", f"Parent '{parent_key}' has errors and will not import.",
+                           "Parent Key")
+            elif parent_key not in by_key and parent_key not in self.existing_by_key:
+                result.add("error", "E_PARENT_UNKNOWN",
+                           f"Parent Key '{parent_key}' is neither in this file nor an existing task of the project.",
+                           "Parent Key")
+            else:
+                own = self._node(result.key)
+                node, seen = self._node(parent_key), set()
+                while node and node not in seen:
+                    if node == own:
+                        result.add("error", "E_PARENT_CYCLE", f"Parent '{parent_key}' would create a subtask cycle.",
+                                   "Parent Key")
+                        break
+                    seen.add(node)
+                    node = parent_node(node)
+                else:
+                    if len(seen) > 2:
+                        result.add("warning", "W_PARENT_DEPTH",
+                                   "Steps nested more than two levels deep render as one level in the Gantt.",
+                                   "Parent Key")
+
+    def _propagate_invalid(self) -> None:
+        """A row whose parent or predecessor (in this file) has errors is an error too.
+
+        Runs after every row-level and dependency check, and repeats until stable, so
+        a parent that only fails in dependency wiring still takes its steps with it
+        (review probe P5b) instead of importing them top-level.
+        """
+        by_key = self._row_index()
         changed = True
         while changed:
             changed = False
-            invalid = {result.key for result in self.rows if result.key and result.level == "error"}
             for result in self.rows:
-                parent_key = result.plan.get("parent_key")
-                if not parent_key or result.level == "error" or result.plan.get("parent_checked"):
+                if result.level == "error":
                     continue
-                if parent_key == result.key:
-                    result.add("error", "E_PARENT_SELF", "A task cannot be its own parent.", "Parent Key")
-                elif parent_key in invalid:
+                parent_key = result.plan.get("parent_key")
+                if parent_key and parent_key != result.key and parent_key in by_key and by_key[parent_key].level == "error":
                     result.add("error", "E_PARENT_INVALID", f"Parent '{parent_key}' has errors and will not import.",
                                "Parent Key")
-                elif parent_key not in by_key and parent_key not in self.existing_by_key:
-                    result.add("error", "E_PARENT_UNKNOWN",
-                               f"Parent Key '{parent_key}' is neither in this file nor an existing task of the project.",
-                               "Parent Key")
-                else:
-                    node, seen = parent_key, set()
-                    while node and node not in seen:
-                        if node == result.key:
-                            result.add("error", "E_PARENT_CYCLE", f"Parent '{parent_key}' would create a subtask cycle.",
-                                       "Parent Key")
-                            break
-                        seen.add(node)
-                        node = parent_node(node)
-                    else:
-                        depth = len(seen)
-                        if depth > 2:
-                            result.add("warning", "W_PARENT_DEPTH",
-                                       "Steps nested more than two levels deep render as one level in the Gantt.",
-                                       "Parent Key")
-                        result.plan["parent_checked"] = True
-                if result.level == "error":
                     changed = True
-
-    def _node_for_task(self, task_id: str | None):
-        task = self.existing_by_id.get(task_id) if task_id else None
-        if task and task.get("import_key") and task["import_key"] in {r.key for r in self.rows}:
-            return task["import_key"]
-        return task_id
+                    continue
+                for key in result.plan.get("predecessors", []):
+                    if key in by_key and by_key[key].level == "error":
+                        result.add("error", "E_PRED_INVALID", f"Predecessor '{key}' has errors and will not import.",
+                                   "Predecessors")
+                        changed = True
+                        break
 
     def _wire_dependencies(self) -> None:
         by_key = self._row_index()
         known = set(by_key) | set(self.existing_by_key)
         graph: dict[str, set] = {}
         for pred_id, succ_id in self.existing_edges:
-            graph.setdefault(self._node_for_task(pred_id), set()).add(self._node_for_task(succ_id))
+            graph.setdefault(pred_id, set()).add(succ_id)
 
         def reaches(start, target) -> bool:
             stack, seen = [start], set()
@@ -2194,12 +2321,12 @@ class ImportEngine:
                     continue
                 if result.level == "error":
                     continue
-                if reaches(result.key, key):
+                if reaches(self._node(result.key), self._node(key)):
                     result.add("error", "E_DEP_CYCLE", f"Depending on '{key}' would create a cycle.", "Predecessors")
                     continue
                 if key not in edges:
                     edges.append(key)
-                    graph.setdefault(key, set()).add(result.key)
+                    graph.setdefault(self._node(key), set()).add(self._node(result.key))
             result.plan["predecessors"] = edges
 
     def _finish_row(self, result: RowResult) -> None:
@@ -2247,6 +2374,10 @@ class ImportEngine:
                     changes[label or name] = {"from": old_value, "to": new_value}
 
             change("title", plan["title"] or None)
+            if "title" in fields:
+                result.add("warning", "W_TITLE_CHANGED",
+                           f"Title changes from '{existing.get('title')}' to '{plan['title']}'. If you inserted or deleted "
+                           "rows, the pre-filled keys below that point have shifted; check the Import Key column.", "Title")
             if plan["description"]:
                 change("description", plan["description"])
             if owner_id and owner_id != existing.get("owner_user_id"):
@@ -2265,7 +2396,7 @@ class ImportEngine:
                     if existing["status"] in ("draft", "assigned"):
                         target = existing["status"]
                 if target != existing["status"]:
-                    if self.is_owner and target in GOVERNED:
+                    if self.is_owner and target in NO_IMPORT_ON_UPDATE:
                         result.add("warning", "W_GOVERNED_STATUS",
                                    f"Status '{target}' needs its lifecycle action in Astra; the status was left as "
                                    f"'{existing['status']}'.", "Status")
@@ -2327,7 +2458,11 @@ class ImportEngine:
         if parent_key and result.level != "error":
             current_parent = existing.get("parent_task_id") if existing else None
             target_parent_id = self.existing_by_key.get(parent_key, {}).get("id")
-            plan["parent_change"] = not existing or target_parent_id != current_parent
+            # A parent that is new in this file has no id yet: that is a change too, applied
+            # after pass 1 has created it (review probe P6d).
+            plan["parent_change"] = (not existing or target_parent_id is None or target_parent_id != current_parent)
+            if existing and plan["parent_change"]:
+                result.changes["parent_key"] = {"from": self._key_of_task(current_parent), "to": parent_key}
         if existing and result.level != "error":
             touched = bool(plan["fields"] or plan["new_people"] or plan["new_attachments"] or plan["new_predecessors"]
                            or plan["parent_change"] or plan["baseline_due"] or plan["entities"])
@@ -2349,6 +2484,12 @@ class ImportEngine:
     def _owner_name(self, task: dict) -> str:
         row = self.db.execute("SELECT display_name FROM users WHERE id=?", (task.get("owner_user_id"),)).fetchone()
         return row["display_name"] if row else ""
+
+    def _key_of_task(self, task_id: str | None) -> str:
+        task = self.existing_by_id.get(task_id) if task_id else None
+        if not task:
+            return ""
+        return task.get("import_key") or task.get("title") or task_id
 
     @staticmethod
     def _display(name: str, value):

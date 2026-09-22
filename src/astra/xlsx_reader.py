@@ -35,17 +35,35 @@ NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 NS_PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 
 MAX_ZIP_MEMBERS = 200
-MAX_MEMBER_BYTES = 50 * 1024 * 1024
+# Declared (uncompressed) sizes: one part and the whole package. A 5 MB upload can
+# inflate to hundreds of MB of XML otherwise (review probe P1c), so both are capped.
+MAX_MEMBER_BYTES = 8 * 1024 * 1024
+MAX_TOTAL_BYTES = 20 * 1024 * 1024
 
 # Built-in number formats that render as dates (ECMA-376 18.8.30). Ids 27-36 and
 # 50-58 are the East-Asian locale date formats.
 BUILTIN_DATE_FORMATS = set(range(14, 23)) | set(range(27, 37)) | {45, 46, 47} | set(range(50, 59))
+# Built-in percent formats: 9 = "0%", 10 = "0.00%".
+BUILTIN_PERCENT_FORMATS = {9, 10}
 
 _CELL_REF = re.compile(r"^([A-Z]+)(\d+)$")
 
 
 class XlsxError(ValueError):
     """The bytes are not a workbook this reader can use."""
+
+
+class XlsxTooLarge(XlsxError):
+    """The workbook declares more content than the reader will inflate."""
+
+
+class Percent(float):
+    """A numeric cell whose number format is a percentage.
+
+    The value is what Excel displays: a stored 1.0 formatted ``0%`` is ``Percent(100.0)``,
+    a stored 0.45 is ``Percent(45.0)``. It is still a float, so generic code keeps
+    working; ``importer.parse_progress`` uses the type to skip its 0..1 heuristic.
+    """
 
 
 @dataclass(frozen=True)
@@ -183,9 +201,19 @@ def read_workbook(data: bytes) -> Workbook:
         members = archive.infolist()
         if len(members) > MAX_ZIP_MEMBERS:
             raise XlsxError("Workbook refused: it contains too many parts.")
+        total = 0
         for member in members:
             if member.file_size > MAX_MEMBER_BYTES:
-                raise XlsxError("Workbook refused: a part declares more than 50 MB.")
+                raise XlsxTooLarge(
+                    f"Workbook refused: a part declares more than {MAX_MEMBER_BYTES // (1024 * 1024)} MB. "
+                    "Remove unused sheets or split the file."
+                )
+            total += max(0, member.file_size)
+        if total > MAX_TOTAL_BYTES:
+            raise XlsxTooLarge(
+                f"Workbook refused: its parts declare more than {MAX_TOTAL_BYTES // (1024 * 1024)} MB in total. "
+                "Remove unused sheets or split the file."
+            )
         names = set(archive.namelist())
         if "xl/workbook.xml" not in names:
             raise XlsxError("This is not an .xlsx workbook (xl/workbook.xml is missing).")
@@ -218,7 +246,7 @@ def _read(archive: zipfile.ZipFile, names: set[str]) -> Workbook:
                 defined_names[item.get("name")] = (item.text or "").strip()
 
     shared_strings = _shared_strings(parse, rels, names)
-    date_styles = _date_styles(parse, names)
+    date_styles, percent_styles = _number_styles(parse, names)
 
     sheets: list[Sheet] = []
     sheets_element = workbook_xml.find(_tag("sheets"))
@@ -236,7 +264,7 @@ def _read(archive: zipfile.ZipFile, names: set[str]) -> Workbook:
             index=index,
             hidden=sheet_element.get("state", "visible") in ("hidden", "veryHidden"),
         )
-        _read_sheet(parse(target), sheet, shared_strings, date_styles, date1904)
+        _read_sheet(parse(target), sheet, shared_strings, date_styles, percent_styles, date1904)
         sheets.append(sheet)
     return Workbook(sheets=sheets, date1904=date1904, defined_names=defined_names)
 
@@ -253,12 +281,18 @@ def _shared_strings(parse, rels, names) -> list[str]:
     return [_text_of(item) for item in parse(target) if item.tag == _tag("si")]
 
 
-def _date_styles(parse, names) -> set[int]:
-    """Indices into cellXfs whose number format renders a date."""
+def _format_is_percent(code: str) -> bool:
+    stripped = re.sub(r'"[^"]*"', "", code)          # literal text
+    stripped = re.sub(r"\\.", "", stripped)          # escaped characters
+    return "%" in stripped
+
+
+def _number_styles(parse, names) -> tuple[set[int], set[int]]:
+    """(indices into cellXfs that render a date, indices that render a percentage)."""
     if "xl/styles.xml" not in names:
-        return set()
+        return set(), set()
     styles = parse("xl/styles.xml")
-    custom_dates = set()
+    custom_dates, custom_percents = set(), set()
     num_fmts = styles.find(_tag("numFmts"))
     if num_fmts is not None:
         for fmt in num_fmts:
@@ -266,23 +300,34 @@ def _date_styles(parse, names) -> set[int]:
                 fmt_id = int(fmt.get("numFmtId", "-1"))
             except ValueError:
                 continue
-            if _format_is_date(fmt.get("formatCode", "")):
+            code = fmt.get("formatCode", "")
+            if _format_is_date(code):
                 custom_dates.add(fmt_id)
-    result = set()
+            elif _format_is_percent(code):
+                custom_percents.add(fmt_id)
+    dates, percents = set(), set()
     cell_xfs = styles.find(_tag("cellXfs"))
     if cell_xfs is None:
-        return result
+        return dates, percents
     for index, xf in enumerate(cell_xfs):
         try:
             fmt_id = int(xf.get("numFmtId", "0"))
         except ValueError:
             continue
         if fmt_id in BUILTIN_DATE_FORMATS or fmt_id in custom_dates:
-            result.add(index)
-    return result
+            dates.add(index)
+        elif fmt_id in BUILTIN_PERCENT_FORMATS or fmt_id in custom_percents:
+            percents.add(index)
+    return dates, percents
 
 
-def _read_sheet(root, sheet: Sheet, shared_strings: list[str], date_styles: set[int], date1904: bool) -> None:
+def _date_styles(parse, names) -> set[int]:
+    """Indices into cellXfs whose number format renders a date (kept for callers of the old name)."""
+    return _number_styles(parse, names)[0]
+
+
+def _read_sheet(root, sheet: Sheet, shared_strings: list[str], date_styles: set[int], percent_styles: set[int],
+                date1904: bool) -> None:
     sheet_data = root.find(_tag("sheetData"))
     if sheet_data is None:
         return
@@ -306,14 +351,14 @@ def _read_sheet(root, sheet: Sheet, shared_strings: list[str], date_styles: set[
             else:
                 col_number = next_col + 1
             next_col = col_number
-            value = _cell_value(cell, shared_strings, date_styles, date1904)
+            value = _cell_value(cell, shared_strings, date_styles, percent_styles, date1904)
             if value is not None:
                 cells[col_number] = value
         if cells:
             sheet.rows[row_number] = cells
 
 
-def _cell_value(cell, shared_strings: list[str], date_styles: set[int], date1904: bool):
+def _cell_value(cell, shared_strings: list[str], date_styles: set[int], percent_styles: set[int], date1904: bool):
     cell_type = cell.get("t", "n")
     value_element = cell.find(_tag("v"))
     raw = value_element.text if value_element is not None else None
@@ -345,6 +390,8 @@ def _cell_value(cell, shared_strings: list[str], date_styles: set[int], date1904
         style = 0
     if style in date_styles:
         return serial_to_date(number, date1904)
+    if style in percent_styles:
+        return Percent(round(number * 100, 6))   # what Excel shows: 1.0 -> 100, 0.45 -> 45
     if number.is_integer() and abs(number) < 1e15:
         return int(number)
     return number

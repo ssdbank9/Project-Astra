@@ -16,9 +16,21 @@ NS = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r=
 DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
 
 
+class Styled:
+    """A numeric cell written with an explicit cellXfs index (e.g. PERCENT_STYLE)."""
+
+    def __init__(self, value, style):
+        self.value, self.style = value, style
+
+
+PERCENT_STYLE = 2   # cellXfs index 2 in STYLES below: built-in numFmtId 9 = "0%"
+
+
 def _cell(ref, value, *, date_style=1):
     if value is None or value == "":
         return ""
+    if isinstance(value, Styled):
+        return f'<c r="{ref}" s="{value.style}"><v>{value.value}</v></c>'
     if isinstance(value, bool):
         return f'<c r="{ref}" t="b"><v>{1 if value else 0}</v></c>'
     if isinstance(value, date):
@@ -44,7 +56,7 @@ STYLES = (
     '<numFmts count="1"><numFmt numFmtId="164" formatCode="dd-mm-yyyy"/></numFmts>'
     '<fonts count="1"><font><sz val="11"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
     '<borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0"/></cellStyleXfs>'
-    '<cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="164" applyNumberFormat="1"/><xf numFmtId="0"/></cellXfs>'
+    '<cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="164" applyNumberFormat="1"/><xf numFmtId="9" applyNumberFormat="1"/></cellXfs>'
     '</styleSheet>'
 )
 
@@ -98,6 +110,27 @@ def workbook_bytes(sheets, *, date1904=False, shared_strings=None, absolute_targ
         for i, (_, xml) in enumerate(sheets, start=1):
             archive.writestr(f"xl/worksheets/sheet{i}.xml", xml)
     return buffer.getvalue()
+
+
+def forge_declared_size(data: bytes, name: str, size: int) -> bytes:
+    """Return the zip with member ``name``'s uncompressed size in the central directory set to ``size``.
+
+    The reader trusts the central directory for its inflation caps, so this is how a
+    hostile workbook would lie about its size (offset 24 of the CD header is the
+    uncompressed size; the file name follows the 46-byte fixed part).
+    """
+    out = bytearray(data)
+    wanted = name.encode("utf-8")
+    start = 0
+    while True:
+        index = out.find(b"PK\x01\x02", start)
+        if index < 0:
+            raise AssertionError(f"{name} not found in the central directory")
+        name_length = int.from_bytes(out[index + 28:index + 30], "little")
+        if bytes(out[index + 46:index + 46 + name_length]) == wanted:
+            out[index + 24:index + 28] = size.to_bytes(4, "little")
+            return bytes(out)
+        start = index + 4
 
 
 def filled_template(rows, config=None, *, marker=None, headers=None, project=None, people=None):

@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from .auth import new_token, token_digest, verify_password
 from .db import connect, database_path
-from .importer import ImportConflict
+from .importer import ImportConflict, ImportTooLarge
 from .service import AstraService, Forbidden, now_text
 
 
@@ -123,7 +123,8 @@ class AstraHandler(BaseHTTPRequestHandler):
                 return self._json({"results": self.service.search(user, term)})
             if path in ("/api/import/template.xlsx", "/api/import/template.csv"):
                 user, _ = self._require_user()
-                payload, filename, content_type = self.service.import_template(user, path.rsplit(".", 1)[1])
+                project = parse_qs(urlparse(self.path).query).get("project_id", [""])[0].strip() or None
+                payload, filename, content_type = self.service.import_template(user, path.rsplit(".", 1)[1], project)
                 return self._download(payload, filename, content_type)
             if path == "/api/import/targets":
                 user, _ = self._require_user()
@@ -173,7 +174,7 @@ class AstraHandler(BaseHTTPRequestHandler):
         self._service = AstraService(self.db)
         try:
             path = urlparse(self.path).path
-            payload = self._body()
+            payload = self._body(path)
             if path == "/api/login":
                 return self._login(payload)
             user, csrf = self._require_user()
@@ -381,7 +382,7 @@ class AstraHandler(BaseHTTPRequestHandler):
         self._service = AstraService(self.db)
         try:
             path = urlparse(self.path).path
-            payload = self._body()
+            payload = self._body(path)
             user, csrf = self._require_user()
             if self.headers.get("X-CSRF-Token") != csrf:
                 raise Forbidden("Invalid request token.")
@@ -398,7 +399,7 @@ class AstraHandler(BaseHTTPRequestHandler):
         self._service = AstraService(self.db)
         try:
             path = urlparse(self.path).path
-            payload = self._body()
+            payload = self._body(path)
             user, csrf = self._require_user()
             if self.headers.get("X-CSRF-Token") != csrf:
                 raise Forbidden("Invalid request token.")
@@ -502,10 +503,14 @@ class AstraHandler(BaseHTTPRequestHandler):
         cookie = SimpleCookie(self.headers.get("Cookie", ""))
         return cookie[name].value if name in cookie else None
 
-    def _body(self) -> dict:
+    # Routes that take the request body as raw file bytes; every other route is JSON
+    # with the 1 MB ceiling whatever Content-Type the client declares.
+    RAW_BODY_ROUTES = frozenset({"/api/import/preview", "/api/import/commit"})
+
+    def _body(self, path: str) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().casefold()
-        if content_type and content_type != "application/json":
+        if path in self.RAW_BODY_ROUTES:
             # Raw upload (import): bytes are handed to the service untouched.
             if length > IMPORT_MAX_BYTES:
                 raise PayloadTooLarge("The file is larger than 5 MB.")
@@ -615,7 +620,7 @@ class AstraHandler(BaseHTTPRequestHandler):
             return self._json({"error": str(exc)}, HTTPStatus.FORBIDDEN)
         if isinstance(exc, ImportConflict):
             return self._json({"error": str(exc)}, HTTPStatus.CONFLICT)
-        if isinstance(exc, PayloadTooLarge):
+        if isinstance(exc, (PayloadTooLarge, ImportTooLarge)):
             return self._json({"error": str(exc)}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
         if isinstance(exc, KeyError):
             return self._json({"error": str(exc).strip("'")}, HTTPStatus.NOT_FOUND)

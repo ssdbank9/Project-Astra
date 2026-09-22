@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
@@ -2140,7 +2141,8 @@ class AstraService:
             task["is_blocked"] = bool(task["blocked_by"])
         return tasks
 
-    def _event(self, task_id: str, actor_id: str, kind: str, before: dict | None, after: dict | None, reason: str | None) -> None:
+    def _event(self, task_id: str, actor_id: str, kind: str, before: dict | None, after: dict | None, reason: str | None,
+               *, notify: bool = True) -> None:
         event_id = new_id()
         self.db.execute(
             "INSERT INTO task_events VALUES(?,?,?,?,?,?,?,?)",
@@ -2148,7 +2150,8 @@ class AstraService:
              json.dumps(before, default=str, sort_keys=True) if before else None,
              json.dumps(after, default=str, sort_keys=True) if after else None),
         )
-        self._notify_owner(event_id, task_id, actor_id, kind)
+        if notify:
+            self._notify_owner(event_id, task_id, actor_id, kind)
 
     def _notify_owner(self, event_id: str, task_id: str, actor_id: str, kind: str) -> None:
         # Durable record for the app owner of every task change made by someone else.
@@ -2299,18 +2302,153 @@ class AstraService:
             )
         return self.get_import_template_config(actor)
 
-    def import_template(self, actor: dict, fmt: str) -> tuple[bytes, str, str]:
-        """The template a signed-in user downloads; built from the current configuration."""
+    def import_template(self, actor: dict, fmt: str, project_id: str | None = None) -> tuple[bytes, str, str]:
+        """The template a signed-in user downloads; built from the current configuration.
+
+        With ``project_id`` the Tasks sheet comes pre-filled with that project's tasks
+        (App Owner: any project; Manager: the projects they manage; others 403). Tasks
+        that have no Import Key get one assigned and stored first (T-001 ... continuing
+        above the highest in use, ``import_key_assigned`` event), so a later upload of
+        the file updates the same tasks instead of creating duplicates.
+        """
         if not actor.get("active"):
             raise Forbidden("Sign in required.")
+        if fmt not in ("csv", "xlsx"):
+            raise ValueError("Unknown template format.")
         config = self._import_config()
+        tasks = project = people = None
+        key_offset = 0
+        stem = "astra-import-template"
+        if project_id:
+            project_row = self._template_project(actor, project_id)
+            tasks, project, people, key_offset = self._template_prefill(actor, project_row, config)
+            stem = "astra-import-" + (re.sub(r"[^A-Za-z0-9]+", "-", project_row["name"]).strip("-").lower()[:40] or "project")
         if fmt == "csv":
-            return (importer.build_template_csv(config).encode("utf-8-sig"), "astra-import-template.csv",
+            return (importer.build_template_csv(config, tasks=tasks).encode("utf-8-sig"), stem + ".csv",
                     "text/csv; charset=utf-8")
-        if fmt == "xlsx":
-            return (importer.build_template_xlsx(config), "astra-import-template.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        raise ValueError("Unknown template format.")
+        payload = importer.build_template_xlsx(config, tasks=tasks, project=project, people=people, key_offset=key_offset)
+        return payload, stem + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    def _template_project(self, actor: dict, project_id: str) -> dict:
+        project = row_dict(self.db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
+        if not project:
+            raise KeyError("Project not found.")
+        if actor["global_role"] != "owner" and not self._is_project_manager(actor, project_id):
+            raise Forbidden("Only the App Owner or a Manager of the project may download its filled template.")
+        return project
+
+    def _template_prefill(self, actor: dict, project: dict, config: importer.TemplateConfig):
+        """(task rows, Project-sheet values, People rows, key formula offset) for a project-scoped template.
+
+        Assigns and stores Import Keys for tasks that lack one, in one transaction. Row
+        values are chosen so that re-uploading the file unedited previews every task as
+        unchanged: the Description column carries the full stored description, Notes the
+        text of its "Notes:" section, Original Due Date stays blank (a baseline is never
+        overwritten), Type only repeats a value the task already carries in import_extras.
+        """
+        project_id = project["id"]
+        with transaction(self.db):
+            tasks = [dict(row) for row in self.db.execute(
+                "SELECT * FROM tasks WHERE project_id=? ORDER BY created_at, rowid", (project_id,))]
+            missing = [task for task in tasks if not task.get("import_key")]
+            if missing:
+                fresh = importer.assign_sequence_keys([t["import_key"] for t in tasks if t.get("import_key")], len(missing))
+                for task, key in zip(missing, fresh):
+                    self.db.execute("UPDATE tasks SET import_key=? WHERE id=?", (key, task["id"]))
+                    self._event(task["id"], actor["id"], "import_key_assigned", {"import_key": None}, {"import_key": key},
+                                "Assigned when the project's import template was downloaded", notify=False)
+                    task["import_key"] = key
+            users = {row["id"]: dict(row) for row in self.db.execute("SELECT id, email, display_name, active FROM users")}
+            reviewers: dict[str, dict[str, list]] = {}
+            for row in self.db.execute(
+                """SELECT r.task_id, r.role, u.email FROM task_reviewers r JOIN users u ON u.id=r.user_id
+                   JOIN tasks t ON t.id=r.task_id WHERE t.project_id=? ORDER BY r.created_at""", (project_id,)):
+                reviewers.setdefault(row["task_id"], {}).setdefault(row["role"], []).append(row["email"])
+            predecessors: dict[str, list] = {}
+            key_of = {task["id"]: task["import_key"] for task in tasks}
+            for row in self.db.execute(
+                """SELECT d.predecessor_task_id p, d.successor_task_id s FROM task_dependencies d
+                   JOIN tasks t ON t.id=d.successor_task_id WHERE t.project_id=?""", (project_id,)):
+                if row["p"] in key_of:
+                    predecessors.setdefault(row["s"], []).append(key_of[row["p"]])
+            attachments: dict[str, list] = {}
+            for row in self.db.execute(
+                "SELECT a.task_id, a.path FROM task_attachments a JOIN tasks t ON t.id=a.task_id WHERE t.project_id=? ORDER BY a.added_at",
+                (project_id,)):
+                attachments.setdefault(row["task_id"], []).append(row["path"])
+            members = [dict(row) for row in self.db.execute(
+                """SELECT m.user_id, m.role, u.email, u.display_name FROM memberships m JOIN users u ON u.id=m.user_id
+                   WHERE m.project_id=? AND u.active=1 ORDER BY m.created_at, u.email""", (project_id,))]
+
+        def as_date(iso):
+            try:
+                return date.fromisoformat(iso[:10]) if iso else None
+            except ValueError:
+                return None
+
+        def row_for(task: dict) -> dict:
+            row = {
+                "import_key": task["import_key"], "title": task["title"],
+                "parent_key": key_of.get(task.get("parent_task_id") or "", ""),
+                "owner_email": users.get(task.get("owner_user_id") or "", {}).get("email", ""),
+                "start_date": as_date(task.get("start_date")), "due_date": as_date(task.get("due_date")),
+                "status": importer.STATUS_LABEL_BY_CODE.get(task["status"], ""),
+                "criticality": (task.get("criticality") or "").capitalize(),
+                "progress": task.get("progress"), "next_action": task.get("next_action_note") or "",
+                "description": task.get("description") or "", "notes": importer.notes_section(task.get("description") or ""),
+                "milestone": "Yes" if task.get("is_milestone") else "No",
+                "collaborators": "; ".join(reviewers.get(task["id"], {}).get("collaborator", [])),
+                "reviewers": "; ".join(reviewers.get(task["id"], {}).get("reviewer", [])),
+                "approvers": "; ".join(reviewers.get(task["id"], {}).get("approver", [])),
+                "predecessors": "; ".join(predecessors.get(task["id"], [])),
+                "attachment_links": "; ".join(attachments.get(task["id"], [])),
+            }
+            if task.get("import_extras"):
+                try:
+                    extras = json.loads(task["import_extras"])
+                except ValueError:
+                    extras = {}
+                for key, value in extras.items():
+                    column = config.by_key.get(key)
+                    if column is None:
+                        continue
+                    row[key] = as_date(value) if column.kind == "date" and isinstance(value, str) else value
+            return row
+
+        # Parents before their steps, each level ordered by start, due, title.
+        children: dict[str, list] = {}
+        for task in tasks:
+            children.setdefault(task.get("parent_task_id") if task.get("parent_task_id") in key_of else None, []).append(task)
+
+        def order(items):
+            return sorted(items, key=lambda t: (t.get("start_date") or "9999", t.get("due_date") or "9999", t["title"].casefold()))
+
+        rows, stack = [], list(reversed(order(children.get(None, []))))
+        seen = set()
+        while stack:
+            task = stack.pop()
+            if task["id"] in seen:
+                continue
+            seen.add(task["id"])
+            rows.append(row_for(task))
+            stack.extend(reversed(order(children.get(task["id"], []))))
+        for task in tasks:  # any task whose parent chain is broken still gets a row
+            if task["id"] not in seen:
+                rows.append(row_for(task))
+        manager = next((m for m in members if m["role"] == "manager"), None)
+        if manager is None and project.get("manager_user_id") in users:
+            manager = users[project["manager_user_id"]]
+        working_days = {code: label for label, code in importer.WORKING_DAY_LABELS.items()}
+        header = {
+            "name": project["name"], "manager_email": manager["email"] if manager else "",
+            "timezone": project.get("timezone") or "Asia/Karachi", "description": project.get("description") or "",
+            "working_days": working_days.get(project.get("working_days") or "", ""),
+            "start_date": as_date(project.get("start_date")), "target_date": as_date(project.get("target_date")),
+        }
+        people = ([(m["email"], m["display_name"], m["role"].capitalize(), "") for m in members]
+                  if config.is_extended() else None)
+        key_offset = importer.next_key_offset(key_of.values(), len(rows))
+        return rows, header, people, key_offset
 
     def import_targets(self, actor: dict) -> dict:
         """Projects the actor may import into, and whether they may create one from a file."""
@@ -2434,44 +2572,62 @@ class AstraService:
         if not any(row["action"] != "error" for row in preview["rows"]):
             raise ValueError("Nothing to import: every row has errors.")
         import_id = new_id()
-        with transaction(self.db):
-            if engine.project is None:
-                project_id = self._create_project_from_header(actor, engine.new_project_name, engine.project_header)
-                engine.project = {"id": project_id, "name": engine.new_project_name}
-                engine.project_id = project_id
-            else:
-                project_id = engine.project["id"]
-            summary = engine.apply(self, project_id, import_id, valid_rows_only=options["valid_rows_only"])
-            summary["project"] = {"id": project_id, "name": engine.project["name"], "create": engine.new_project_name is not None}
-            summary["filename"] = os.path.basename(filename or "upload")
-            summary["sha256"] = digest
-            header = engine.project_header
-            if header.get("as_of_date") or header.get("source_document"):
-                summary["plan_as_of"] = header.get("as_of_date")
-                summary["source_document"] = header.get("source_document")
-            self._project_event(
-                project_id, actor["id"], "import_committed",
-                {"import_id": import_id, "filename": summary["filename"], "sha256": digest,
-                 "counts": {k: summary[k] for k in ("rows", "create", "update", "unchanged", "skipped_errors", "dependencies")}},
-                None,
-            )
-            self.db.execute(
-                "INSERT INTO imports(id,project_id,actor_user_id,filename,sha256,created_at,summary_json,report_csv)"
-                " VALUES(?,?,?,?,?,?,?,?)",
-                (import_id, project_id, actor["id"], summary["filename"], digest, now_text(),
-                 json.dumps(summary, default=str, sort_keys=True), engine.report_csv()),
-            )
-            owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
-            if owner and owner["id"] != actor["id"]:
-                self.db.execute(
-                    "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at)"
-                    " VALUES(?,?,?,?,?,?,?)",
-                    (new_id(), owner["id"], import_id, None, "import_committed",
-                     f"import committed: {summary['filename']} into {engine.project['name']}"
-                     f" ({summary['create']} created, {summary['update']} updated)", now_text()),
-                )
+        try:
+            with transaction(self.db):
+                summary = self._import_apply(actor, engine, filename, digest, import_id, options)
+        except sqlite3.IntegrityError as exc:
+            # Another writer took one of these Import Keys between preview and commit; the
+            # transaction is rolled back, and the client gets a 409 with a retry hint.
+            if "import_key" in str(exc):
+                raise importer.ImportConflict(
+                    "Another import or edit took one of these Import Keys while this import ran; nothing was written. "
+                    "Run the preview again and retry."
+                ) from exc
+            raise
         summary["import_id"] = import_id
         summary["report_url"] = f"/api/imports/{import_id}/report.csv"
+        return summary
+
+    def _import_apply(self, actor: dict, engine, filename: str, digest: str, import_id: str, options: dict) -> dict:
+        """The body of the import transaction (see import_commit)."""
+        if engine.project is None:
+            project_id = self._create_project_from_header(actor, engine.new_project_name, engine.project_header)
+            engine.project = {"id": project_id, "name": engine.new_project_name}
+            engine.project_id = project_id
+            for user_id, role in engine.grants.items():  # users named in the rows get access (manager stays manager)
+                self.db.execute("INSERT OR IGNORE INTO memberships VALUES(?,?,?,?,?)",
+                                (project_id, user_id, role, now_text(), actor["id"]))
+        else:
+            project_id = engine.project["id"]
+        summary = engine.apply(self, project_id, import_id, valid_rows_only=options["valid_rows_only"])
+        summary["project"] = {"id": project_id, "name": engine.project["name"], "create": engine.new_project_name is not None}
+        summary["filename"] = os.path.basename(filename or "upload")
+        summary["sha256"] = digest
+        header = engine.project_header
+        if header.get("as_of_date") or header.get("source_document"):
+            summary["plan_as_of"] = header.get("as_of_date")
+            summary["source_document"] = header.get("source_document")
+        self._project_event(
+            project_id, actor["id"], "import_committed",
+            {"import_id": import_id, "filename": summary["filename"], "sha256": digest,
+             "counts": {k: summary[k] for k in ("rows", "create", "update", "unchanged", "skipped_errors", "dependencies")}},
+            None,
+        )
+        self.db.execute(
+            "INSERT INTO imports(id,project_id,actor_user_id,filename,sha256,created_at,summary_json,report_csv)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (import_id, project_id, actor["id"], summary["filename"], digest, now_text(),
+             json.dumps(summary, default=str, sort_keys=True), engine.report_csv()),
+        )
+        owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
+        if owner and owner["id"] != actor["id"]:
+            self.db.execute(
+                "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (new_id(), owner["id"], import_id, None, "import_committed",
+                 f"import committed: {summary['filename']} into {engine.project['name']}"
+                 f" ({summary['create']} created, {summary['update']} updated)", now_text()),
+            )
         return summary
 
     def _create_project_from_header(self, actor: dict, name: str, header: dict) -> str:
