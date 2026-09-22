@@ -335,7 +335,7 @@ def normalize_text(value) -> str:
         return str(int(value)) if value.is_integer() else repr(value)
     if isinstance(value, CellError):
         return value.message
-    return unicodedata.normalize("NFC", str(value)).strip()
+    return clean_text(unicodedata.normalize("NFC", str(value))).strip()
 
 
 def collapse(text: str) -> str:
@@ -382,14 +382,26 @@ def slug_key(label: str) -> str:
     return CUSTOM_PREFIX + (slug or "column")[:40]
 
 
+# Characters XML 1.0 forbids even when escaped: C0 controls other than tab, LF and CR, lone
+# surrogates and U+FFFE/U+FFFF. escape() leaves them in place, so one such byte in a task title
+# made the Owner's pre-filled workbook unreadable (regression review SECURITY-3).
+ILLEGAL_TEXT = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
+
+
+def clean_text(text) -> str:
+    """Drop the characters no workbook or CSV cell may carry; every string written to a file
+    or read from an upload passes through here (normalize_text, _xml, _xml_text, the CSV writers)."""
+    return ILLEGAL_TEXT.sub("", str(text))
+
+
 def _xml(text: str) -> str:
     """Escape for attribute values (quotes included)."""
-    return escape(str(text), {'"': "&quot;"})
+    return escape(clean_text(text), {'"': "&quot;"})
 
 
 def _xml_text(text: str) -> str:
     """Escape for element text, where quotes may stay literal."""
-    return escape(str(text))
+    return escape(clean_text(text))
 
 
 def _protection_hash(password: str, salt: bytes, spin: int) -> str:
@@ -2702,12 +2714,12 @@ class ImportEngine:
         writer.writerow(REPORT_COLUMNS)
         for result in self.rows:
             values = result.values
-            writer.writerow([
+            writer.writerow([clean_text(cell) for cell in (
                 result.number, result.key, result.action, result.level, values.get("title", ""), values.get("owner", ""),
                 values.get("start_date", ""), values.get("due_date", ""), values.get("status", ""),
                 values.get("criticality", ""), result.plan.get("task_id") or (result.existing["id"] if result.existing else ""),
                 " | ".join(f"{f.level.upper()} {f.code}: {f.message}" for f in result.findings),
-            ])
+            )])
         return buffer.getvalue()
 
     # ---- commit ----------------------------------------------------------

@@ -1289,6 +1289,48 @@ class ImportServiceTests(unittest.TestCase):
         self.assertIn("E_PRED_INVALID", self.codes(by_key["RD-002"]))
         self.assertEqual(by_key["RD-001"]["level"], "error")
 
+    def test_control_characters_in_task_text_round_trip_through_the_template_and_report(self):
+        # Regression review SECURITY-3 (2026-09-22): a Manager's title with U+0001 (or a vertical
+        # tab pasted from Word) reached _xml_text unfiltered; escape() keeps such characters, XML
+        # 1.0 forbids them, so the Owner's pre-filled template.xlsx could not be opened by Excel,
+        # by Astra's own reader or by re-upload until someone found the task.
+        title = "bell\x07 tail\x1fend"   # U+001F inside the text: str.strip() would take a trailing one
+        task = self.service.create_task(self.jamal, {"project_id": self.project["id"], "title": title,
+                                                     "description": "vertical\x0btab\x00null"})
+        self.assertEqual(task["title"], title)   # main only strips titles; that validation is unchanged
+        labels = list(self.service._import_config().labels())
+        payload, _, _ = self.service.import_template(self.owner, "xlsx", self.project["id"])
+        workbook = read_workbook(payload)         # was XlsxError: xl/worksheets/sheet3.xml is not well-formed XML
+        tasks = workbook.sheet("Tasks")
+        self.assertEqual(tasks.cell(2, labels.index("Title") + 1), "bell tailend")
+        self.assertEqual(tasks.cell(2, labels.index("Description") + 1), "verticaltabnull")
+        illegal = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
+        csv_payload, _, _ = self.service.import_template(self.owner, "csv", self.project["id"])
+        csv_text = csv_payload.decode("utf-8-sig")
+        self.assertIn("bell tailend", csv_text)
+        self.assertIsNone(illegal.search(csv_text))
+        # the download re-uploads (the file is well-formed); the cleaned title reads as an edit
+        preview = self.service.import_preview(self.owner, self.project["id"], "back.xlsx", payload)
+        self.assertEqual([r["level"] for r in preview["rows"]], ["warning"])
+        self.assertEqual(preview["rows"][0]["values"]["title"], "bell tailend")
+        # an import never stores such characters and the report CSV never carries them (a CSV
+        # upload: a workbook cannot hold a raw control byte, Excel writes it as _x0001_)
+        import csv as csv_module
+        import io as io_module
+        buffer = io_module.StringIO()
+        csv_module.writer(buffer).writerows([labels, [
+            {"Import Key": "CC-001", "Title": "ctrl\x01char", "Notes": "note\x1fend"}.get(label, "") for label in labels]])
+        data = buffer.getvalue().encode("utf-8")
+        preview = self.service.import_preview(self.jamal, self.project["id"], "ctrl.csv", data)
+        self.assertEqual(preview["rows"][0]["values"]["title"], "ctrlchar")
+        result = self.service.import_commit(self.jamal, self.project["id"], "ctrl.csv", data, None, preview["sha256"])
+        self.assertEqual(self.task_by_key("CC-001")["title"], "ctrlchar")
+        report = self.service.import_report(self.owner, result["import_id"])
+        self.assertIn("ctrlchar", report["csv"])
+        self.assertIsNone(illegal.search(report["csv"].replace("\r", "")))
+        # the surrogate and noncharacter cases, straight through the writer
+        self.assertEqual(importer.clean_text("a\ud800b\ufffec\uffffd\te\nf"), "abcd\te\nf")
+
 
 class PredecessorSyntaxTests(unittest.TestCase):
     """parse_predecessor is a hand-written linear split (regression review SECURITY-1); these
