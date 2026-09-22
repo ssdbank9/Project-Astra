@@ -718,12 +718,23 @@ class AstraCoreTests(unittest.TestCase):
                 self.service.submit_task(manager, task["id"], "v1")
             elif status == "on_hold":
                 self.service.set_on_hold(self.owner, task["id"], "hold", "2026-12-01")
+            elif status == "reopened":
+                submission = self.service.submit_task(manager, task["id"], "done")
+                self.service.accept_submission(self.owner, submission["id"], "ok")
+                self.service.reopen_task(self.owner, task["id"], "second look", "2027-01-15")
+            elif status == "changes_requested":
+                submission = self.service.submit_task(manager, task["id"], "v1")
+                self.service.request_changes(self.owner, submission["id"], "not yet")
             else:
                 self.service.update_task(self.owner, task["id"], {"status": status, "reason": "x"})
             return self.service.get_task(self.owner, task["id"])
 
+        # Regression review TESTS-1 (2026-09-22): reopened and changes_requested are locked sources
+        # too (authorization matrix row 24); until they were listed here a change in either
+        # direction passed the suite.
         for source, target in (("completed", "in_progress"), ("cancelled", "assigned"), ("on_hold", "in_progress"),
-                               ("submitted", "in_progress"), ("abandoned", "in_progress")):
+                               ("submitted", "in_progress"), ("abandoned", "in_progress"),
+                               ("reopened", "in_progress"), ("changes_requested", "in_progress")):
             with self.subTest(source=source, actor="manager"):
                 task = make(source)
                 outcome = self.service.update_task(manager, task["id"], {"status": target, "reason": "back to work"})
