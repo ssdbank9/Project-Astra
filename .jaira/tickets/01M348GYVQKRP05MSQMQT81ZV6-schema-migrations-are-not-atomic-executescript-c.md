@@ -21,7 +21,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-22T09:53:02Z
-updated-at: 2026-09-22T09:56:15Z
+updated-at: 2026-09-22T12:33:09Z
 updated-by: Claude
 ---
 
@@ -33,6 +33,7 @@ updated-by: Claude
 - [ ] Test: a step whose statement fails leaves sqlite_master and user_version exactly as before the step
 - [ ] Test: two connections migrating the same file concurrently end with the migration applied once and no error
 - [ ] The existing populated v11-to-current migration test still passes; full suite green (.venv/bin/python tests/run.py); git diff --check clean
+- [ ] Migration steps 1-12 in src/astra/db.py follow the _migrate_v13() pattern from e76eb52: statements run with execute() from a list inside one transaction(), guarded so a half-applied database from the old executescript code completes on the next start, user_version set last in the same transaction; no executescript() call remains in migrate()
 
 ## Options
 
@@ -44,4 +45,4 @@ updated-by: Claude
 <Steps, in order — filled in by the pre-process step, or by you.>
 
 ## Progress
-
+- **2026-09-22 12:33 · Claude** — 2026-09-22 independent regression pass (fix worker, MIGRATION-1): the v13 step is already fixed on claude/excel-import in e76eb52 with _migrate_v13() in src/astra/db.py: PRAGMA table_info guard before each ALTER, IF NOT EXISTS on each CREATE, every statement run with execute() inside one BEGIN IMMEDIATE via transaction(), and PRAGMA user_version = 13 as the last statement of that same transaction. Use it as the pattern for this ticket. Steps 1-12 (db.py lines 54-377 on e76eb52, same on main cd59438e) still call connection.executescript(), which commits the surrounding BEGIN IMMEDIATE before it runs. Probe evidence: killing main mid-v12 step (after CREATE TABLE owner_action_requests, before CREATE INDEX idx_owner_action_requests_status) leaves user_version 11 with owner_action_requests present; the next connect() dies with 'table owner_action_requests already exists'. The same probe against e76eb52's v13 step rolled back cleanly and the next start completed the step.
