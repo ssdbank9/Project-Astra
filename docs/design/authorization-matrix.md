@@ -1,7 +1,9 @@
 # Astra authorization matrix
 
 Status: implemented baseline for `HS3JRY` (2026-09-20); reconciled against the
-service, HTTP routes, tests, `README.md` and `CONTEXT.md` on 2026-09-21.
+service, HTTP routes, tests, `README.md` and `CONTEXT.md` on 2026-09-21; import rows
+and the source-status protection added for `C9KPH6` on 2026-09-22 (adversarial
+review AS-1, AS-2, DTJ-03).
 
 The service layer is the authorization boundary. HTTP and browser controls must
 call the same `AstraService` methods; hiding a control is not an authorization
@@ -18,6 +20,8 @@ decision.
 | Publish templates, administer access, or configure calendars | Yes | No | No | No |
 | Import tasks from Excel/CSV into an existing project (`import_preview` / `import_commit`) | Yes | Managed projects only; Owner-only row actions (Original Due Date, Entity, Attachment Links, protected statuses) are skipped with a per-row warning | Blocked, audited and Owner notified | Blocked, audited and Owner notified |
 | Create a project from an import file, or change the import template configuration | Yes | No (may read the configuration) | No | No |
+| Download the import template (blank, or pre-filled with a project's tasks) or read the template configuration (`import_template`, `get_import_template_config`) | Yes | Yes; the pre-filled download for managed projects only | No (403) | No (403) |
+| Move a task *out of* completed, cancelled, abandoned, submitted, on hold, changes requested or reopened (`update_task` with such a source status, or an import row that changes the status) | Completed, cancelled, abandoned: only through `reopen_task` (reason and revised due date, `task_reopened`); submitted: only through the submission decision; on hold, changes requested, reopened: `update_task` with a reason (no dedicated release action exists). An import row never changes it (`W_GOVERNED_STATUS`) | Creates a pending Owner request `update_task_status` whose payload names `from_status` (HTTP 202); live state unchanged. An import row keeps the stored status (`W_PROTECTED_STATUS`) | Blocked | Blocked |
 
 `Chairman` is retained as an organization-wide read role for compatibility. It
 no longer grants implicit mutation power through `can_manage_project`. A person

@@ -20,11 +20,13 @@ in `src/astra/xlsx_reader.py`. Both use the standard library only.
 | --- | --- | --- | --- |
 | App Owner | Any open project | Yes (from the `Project` column) | Yes |
 | Project Manager | Projects where they hold the `manager` membership | No | No (may read the configuration) |
-| Member / Viewer, Chairman without a project role | Blocked: `protected_action_blocked` project event and Owner notification, HTTP 403 | No | No |
+| Member / Viewer, Chairman without a project role | Blocked: `protected_action_blocked` project event and Owner notification, HTTP 403. An attempt with no target project (a Chairman or non-manager uploading without choosing a project) is notified to the Owner but not audited against a project, since there is none. The audit rows are written after the request's own transaction has rolled back, so they survive | No | No |
 
 A Manager's import may only do what that Manager could do by hand. Owner-only
 actions in a row are skipped with a warning, never silently applied:
-`W_PROTECTED_STATUS` (a status that needs an Owner decision or a lifecycle record),
+`W_PROTECTED_STATUS` (a status that needs an Owner decision or a lifecycle record - as the
+target of the change, and equally as the status the task would be moved *out of*: a
+Manager's row cannot take a completed, on-hold, cancelled or submitted task back into work),
 `W_BASELINE_SKIPPED` (Original Due Date), `W_ATTACHMENTS_SKIPPED`, `W_ENTITY_SKIPPED`.
 
 ## Before a Manager imports: users and access
@@ -53,15 +55,15 @@ per-task change notifications.
 
 `GET /api/import/template.xlsx` (and `.csv`) is generated at request time from the
 current configuration with `zipfile`; nothing is stored on disk. The workbook has
-six sheets in the Simple preset and seven in the Full preset (designed in
-`workbook-spec.md` and `build_simple.py`, 2026-09-22, and reproduced by the stdlib
-builder in `importer._TemplateWorkbook`):
+six sheets in the Simple preset and seven in the Full preset, built by the stdlib
+builder in `importer._TemplateWorkbook` (it reproduces the openpyxl reference design of
+2026-09-22, which lives in the session scratchpad and not in this repository):
 
 | Sheet | Read by the importer | Protection | Purpose |
 | --- | --- | --- | --- |
 | `README` | no | fully locked | Simple: eight short steps. Full: five steps, twelve rules, header-colour legend, a column dictionary generated from the same metadata as the sheet, and the list of columns the Owner can switch on |
 | `Project` | **yes** (project header) | labels and guidance locked, Value column unlocked | Simple: Project Name (required), Project Manager Email, Timezone. Full: also Description, Filing Entity, Sponsor / Executive Owner Email, Working Days, Planned Start / Finish, Plan As-of Date, Source Document, Prepared By |
-| `Tasks` | **yes** | header and structure locked; `A2:R2001` unlocked; rows may be inserted, deleted and filtered; columns may not | header row 1 = configured labels, frozen at `C2`, autofilter, 2,000 data rows with validation |
+| `Tasks` | **yes** | header and structure locked; `A2:<last configured column>2001` unlocked (`A2:R2001` in Full, `A2:I2001` in Simple); rows may be inserted, deleted and filtered; columns may not | header row 1 = configured labels, frozen at `C2`, autofilter, 2,000 data rows with validation |
 | `Example` | never | fully locked, grey tab, italic text | Simple: `EX-001` a task and `EX-001.1` its step. Full: three worked rows (`EX-001` a High task, `EX-001.1` a Delayed action-item step with Original Due Date, `EX-002` a Critical milestone waiting on `EX-001`) |
 | `People` | **yes** (cross-check only) | header locked, `A2:D201` unlocked, column E computed | Full preset (or any column beyond the Simple set) only: Email, Full Name, Role on project, Notes, "Used in Tasks" (`COUNTIF` over Owner Email and Collaborators) |
 | `Lists` | no | hidden, locked | named ranges `Lists_Status`, `Lists_Criticality`, `Lists_Type`, `Lists_YesNo`, `Lists_ProjectRole`, `Lists_Timezone`, `Lists_WorkingDays`, `Lists_Entity` and `Lists_<key>` for each custom list column |
@@ -94,7 +96,9 @@ is selected.
 
 - Authorization: App Owner for any project, Manager for the projects they manage,
   everyone else HTTP 403; an unknown project is 404. The blank template
-  (`project_id` absent or empty) stays available to every signed-in user.
+  (`project_id` absent or empty) is served to the App Owner and to anyone who manages
+  at least one project - the same people who may read the template configuration
+  (authorization matrix) - and is 403 for everyone else.
 - Keys: a task that has no Import Key yet gets one at download time - `T-001`,
   `T-002` ... continuing above the highest `T-nnn` already in the project and skipping
   any key in use - stored in `tasks.import_key` with a `task_event`
@@ -162,9 +166,9 @@ and People sheets.
 
 - The `Project` sheet is the project header. When the Owner imports without choosing a
   target, its Project Name finds an existing project (case-insensitive) or creates one
-  with the sheet's description (plus a "Sponsor / Executive Owner" line), timezone
-  (validated, default Asia/Karachi), working days (`Every day` / `Mon-Fri` / `Mon-Sat` /
-  `Sun-Thu`), planned start and finish, manager (email of an active user; also granted the
+  with the sheet's description (plus a "Sponsor / Executive Owner" line), timezone,
+  working days (`Every day` / `Mon-Fri` / `Mon-Sat` / `Sun-Thu`), planned start and
+  finish, manager (email of an active user; also granted the
   `manager` membership) and filing entity (existing active entity only). Every active
   user named in the rows (Owner Email, Collaborators, Reviewers, Approvers) is eligible
   for the new project and is granted access when it is created — `manager` for the
@@ -173,7 +177,14 @@ and People sheets.
   info per row; a deactivated user still gets `W_PERSON_NOT_ELIGIBLE`). When a target is
   chosen — always the case for a Manager — a Project Name that differs from the chosen
   project puts `E_PROJECT_MISMATCH` on every row. Plan As-of Date and Source Document are
-  recorded in the import summary.
+  recorded in the import summary. Typed values are validated, not trusted: a Timezone that
+  is not a known zone (case-insensitive against the template's list, then `ZoneInfo`) falls
+  back to `Asia/Karachi` and a Working Days value outside the four labels to `Every day`,
+  each with a file warning naming the substitution, and the preview's `project_header`
+  carries the **resolved** values that a created project would get. A Planned Finish Date
+  before the Planned Start Date is `E_PROJECT_DATES` on every row when the file would create
+  the project (the same order `set_project_schedule` enforces) and a file warning when the
+  target already exists, because the sheet's dates are never applied to an existing project.
 - The `People` sheet is cross-checked in preview: each row is `ready`, `unknown_user`,
   `inactive`, `no_access` or `group` (a name without an email) with a message naming the
   People row, so the App Owner knows exactly which accounts to add or grant before the
@@ -186,18 +197,18 @@ and People sheets.
 
 | Column | Astra field | Rule |
 | --- | --- | --- |
-| Import Key (core) | `tasks.import_key`, unique per project | `[A-Za-z0-9][A-Za-z0-9._-]{0,39}`; drives create-or-update |
+| Import Key (core) | `tasks.import_key`, unique per project | `[A-Za-z0-9][A-Za-z0-9._-]{0,39}`; drives create-or-update. Canonicalised to upper case on lookup and storage (`t-001` and `T-001` are one key, matching the template's case-insensitive `COUNTIF` rule); Parent Key and Predecessors are matched the same way. Keys already stored are compared case-insensitively; new rows are stored upper-case |
 | Project | target project when none is chosen | Owner only; one project per file; created when it does not exist |
 | Entity | `project_entities` | Owner only; names of active entities; never created |
 | Parent Key | `tasks.parent_task_id` | Import Key in the file or an existing task; cycles rejected |
-| Title (core) | `tasks.title` | required, up to 200 characters |
+| Title (core) | `tasks.title` | required on every row, up to 200 characters. The exception to the empty-cell rule: a blank Title on an existing key is `E_TITLE_MISSING`, not "leave as is" |
 | Description | `tasks.description` | on update, replaces only when non-empty |
 | Owner Email (core) | `tasks.owner_user_id` | active user with access to the project |
 | Collaborators / Reviewers / Approvers | `task_reviewers` | `;`-separated emails; import only adds |
 | Start Date (core), Due Date (core) | `tasks.start_date` / `due_date` | real Excel date, `dd-mm-yyyy` or `yyyy-mm-dd` text; a bare serial number follows the workbook's date system (1900 or 1904); prose is an error |
 | Duration (days) | derived | fills the missing one of Start/Due |
 | Original Due Date | `tasks.baseline_due_date` | Owner only; never overwrites an existing baseline |
-| Status (core) | `tasks.status` | labels or synonyms (Not Started, Done, Delayed/At Risk, Blocked ...); on update, Submitted, Completed, On hold, Reopened and Changes requested are never set by import (`W_GOVERNED_STATUS`) |
+| Status (core) | `tasks.status` | labels or synonyms (Not Started, Done, Delayed/At Risk, Blocked ...); on update, Submitted, Completed, On hold, Reopened and Changes requested are never set by import (`W_GOVERNED_STATUS`), and a task is never moved *out of* Submitted, Completed, On hold, Reopened, Changes requested, Cancelled or Abandoned either (`W_GOVERNED_STATUS` for the Owner, `W_PROTECTED_STATUS` for a Manager; the stored status stays and the change is made in Astra through its lifecycle action) |
 | % Complete | `tasks.progress` | 0..100, `45%` and `0.45` accepted; a %-formatted Excel cell is read as displayed (stored 1.0 shown as 100% -> 100) |
 | Criticality | `tasks.criticality` | Critical, High, Normal, Low or blank |
 | Predecessors | `task_dependencies` (finish-to-start) | `;`-separated Import Keys; `FS+2d` suffixes are recorded in Notes with `W_LAG_IGNORED` |
@@ -214,7 +225,10 @@ with `enabled`, `label` and position, plus custom columns (`label`, `type` in
 `text | number | date | list`, `values` for lists, `required`). Core columns —
 Import Key, Title, Start Date, Due Date, Status, Owner Email — cannot be disabled or
 renamed. Validation: unique labels, known built-in keys, non-empty list values, at
-most 40 enabled columns. Saving increments `version` and changes the hash, so a
+most 40 enabled columns, and a client-supplied custom `key` must match
+`x_[a-z0-9_]{1,40}` (it names a defined range in the workbook; keys derived from the
+label always fit). A custom Number cell must be a finite number within ±1e15
+(`E_CUSTOM_INVALID` otherwise: nan / inf are not JSON). Saving increments `version` and changes the hash, so a
 template downloaded earlier is rejected on upload with "The import template has
 changed since this file was downloaded". `{"reset": true}` restores the default.
 Custom column values are stored in `tasks.import_extras` (JSON keyed by the column
@@ -235,14 +249,21 @@ by Managers.
   is reported per row (`W_EXTRA_DATA`, "extra data ignored in column J"; a row with
   nothing else on it gets a file-level warning). The `Project` and `People` sheets are
   read by name when present. Dates may be real Excel date cells (1900 and 1904 systems;
-  serials at or below 60 are refused as ambiguous), bare serial numbers in the workbook's
-  own date system, or `dd-mm-yyyy` / `yyyy-mm-dd` text. Percent-formatted numeric cells
-  arrive as the displayed percentage (`xlsx_reader.Percent`).
-- `.csv`: UTF-8 (BOM stripped) with a cp1252 fallback warning; delimiter sniffed
-  (`,` `;` tab); headers match the configured labels, or the built-in default
+  serials at or below 60 are refused as ambiguous, serials beyond 31-12-9999 - such as
+  `20260904` typed as digits - and nan / inf are `E_DATE_INVALID` naming the column, never
+  a server error), bare serial numbers in the workbook's own date system, or `dd-mm-yyyy` /
+  `yyyy-mm-dd` text. Percent-formatted numeric cells arrive as the displayed percentage
+  (`xlsx_reader.Percent`). An Excel error value (`#N/A`, `#REF!`, `#VALUE!` ...) in any
+  column is `E_CELL_ERROR` naming the column; it is never imported as text.
+- `.csv`: UTF-8 (BOM stripped) with a cp1252 fallback warning; a UTF-16 file (Excel's
+  "Unicode Text") is refused with a hint to save as CSV UTF-8; CR, LF and CRLF line
+  endings are all read, a malformed file is a 400 with the parser's reason, and a cell
+  longer than 4,000 characters is `E_CELL_TOO_LONG` on its row rather than a parser error;
+  delimiter sniffed (`,` `;` tab); headers match the configured labels, or the built-in default
   headers and aliases (`Task Name`, `Assignee`, `Finish`, `Depends On`, ...) with a
   per-row `W_HEADER_ALIAS` warning; unknown columns are listed and ignored.
-- An empty cell means "leave as is" on update, never "clear".
+- An empty cell means "leave as is" on update, never "clear" - except Title, which is
+  required on every row (`E_TITLE_MISSING`).
 
 ## Preview and commit
 
@@ -250,8 +271,14 @@ by Managers.
 (`Content-Type` other than JSON, own 5 MB limit, HTTP 413 above it) with headers
 `X-Filename` (percent-encoded), `X-Project-Id` (blank = Owner creates or finds the
 project named in the file), `X-Options` (percent-encoded JSON: `valid_rows_only`,
-`default_reason`) and, for commit, `X-Sha256` of the previewed bytes (HTTP 409 when
-they differ). CSRF and the session cookie apply as for every other mutation. Only
+`default_reason`) and, for commit, `X-Sha256` of the previewed bytes and
+`X-Plan-Fingerprint`, the preview's `plan_fingerprint` (HTTP 409 when either differs).
+The fingerprint is the SHA-256 of the sorted (Import Key, action, existing task id)
+triples the file produces against the project at that moment, so a plan that changed
+underneath the same bytes - a hand-made task took the row's key through the pre-filled
+download, a task was edited meanwhile - is refused instead of silently turning a create
+into an update. The dialog always sends both headers; an API client that omits them
+skips the check. CSRF and the session cookie apply as for every other mutation. Only
 these two routes read the body as raw bytes; every other route keeps the 1 MB JSON
 ceiling whatever `Content-Type` the client declares.
 
@@ -272,11 +299,15 @@ created. A Title that differs from the stored one is `W_TITLE_CHANGED` (the symp
 shifted pre-filled keys). Commit is refused while errors exist unless
 `valid_rows_only` is set.
 
-Commit re-parses and re-validates the same bytes, then runs one `BEGIN IMMEDIATE`
-transaction: create the project if needed (Owner), insert or update tasks by
+Commit opens one `BEGIN IMMEDIATE` transaction and, inside it, re-parses and
+re-validates the same bytes - so the parent and dependency cycle checks and the snapshot
+of existing tasks see exactly the state the writes apply to, with no window for another
+writer - then: create the project if needed (Owner), insert or update tasks by
 `(project_id, import_key)`, wire parents, apply the explicit baseline (Owner, only
 when none exists) and `_ensure_baseline`, add reviewers, attachment links and
-entities (union, never removal), record `task_created` / `task_updated` /
+entities (union, never removal), record `task_created` / `task_updated` (a row that only
+added people, links, predecessors or a parent still bumps `updated_at` and `revision`,
+and the additions appear as `import_additions` in the event's after snapshot) /
 `criticality_changed` / `parent_changed` / `attachment_added` / `dependency_added`
 events with the row's Reason, insert finish-to-start dependencies (cycle-checked in
 preview against existing and new edges), write one `import_committed` project event
