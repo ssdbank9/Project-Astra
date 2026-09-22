@@ -1272,6 +1272,72 @@ class ImportServiceTests(unittest.TestCase):
         self.assertEqual(importer.next_key_offset(["T-001", "T-002"], 2), 0)      # row 4 -> T-003
         self.assertEqual(importer.next_key_offset(["RA-001"], 1), -1)            # row 3 -> T-001
 
+    def test_hostile_predecessor_cell_is_rejected_without_stalling_the_preview(self):
+        # Regression review SECURITY-1 (2026-09-22): the former PRED_SUFFIX regex backtracked
+        # cubically on 'a' + blanks + 'x', so a Manager's 1,200-character cell froze the whole
+        # single-process server for ten seconds and a 4,000-character one for minutes.
+        import time
+        hostile = "a" + " " * 4998 + "x"
+        rows = [{"import_key": "RD-001", "title": "redos", "predecessors": hostile},
+                {"import_key": "RD-002", "title": "many", "predecessors": ";".join(["b" + " " * 300 + "y"] * 12)}]
+        started = time.perf_counter()
+        _, preview = self.preview(self.jamal, rows)
+        elapsed = time.perf_counter() - started
+        self.assertLess(elapsed, 5.0, f"preview took {elapsed:.1f}s")
+        by_key = {r["import_key"]: r for r in preview["rows"]}
+        self.assertIn("E_PRED_INVALID", self.codes(by_key["RD-001"]))
+        self.assertIn("E_PRED_INVALID", self.codes(by_key["RD-002"]))
+        self.assertEqual(by_key["RD-001"]["level"], "error")
+
+
+class PredecessorSyntaxTests(unittest.TestCase):
+    """parse_predecessor is a hand-written linear split (regression review SECURITY-1); these
+    pin the syntax the former regex accepted so the rewrite changes nothing a template says."""
+
+    KNOWN = {"RA-001", "T-1", "FS", "ABFS"}
+
+    def test_a_5000_character_hostile_item_parses_in_under_50_ms(self):
+        import time
+        for item in ("a" + " " * 4998 + "x", "a" + " " * 4998 + "+1d", "RA-001" + " " * 4990 + "FS", " 1" * 2500 + "d"):
+            started = time.perf_counter()
+            result = importer.parse_predecessor(item, self.KNOWN)
+            elapsed = time.perf_counter() - started
+            self.assertLess(elapsed, 0.05, f"{len(item)} characters took {elapsed:.3f}s")
+            self.assertIsNotNone(result[3], item[:20])
+        # a long but plausible item under the ceiling still parses linearly
+        started = time.perf_counter()
+        self.assertEqual(importer.parse_predecessor("RA-001" + " " * 150 + "SS" + " " * 20 + "+ 2 days", self.KNOWN),
+                         ("RA-001", "SS", "+2days", None))
+        self.assertLess(time.perf_counter() - started, 0.05)
+
+    def test_accepted_syntax_is_unchanged(self):
+        # Expected values were recorded from the regex implementation (69f36a2) before the rewrite.
+        cases = {
+            "RA-001": ("RA-001", "FS", ""), "ra-001": ("RA-001", "FS", ""), "RA-001FS": ("RA-001", "FS", ""),
+            "RA-001 FS": ("RA-001", "FS", ""), "RA-001SS+2d": ("RA-001", "SS", "+2d"), "RA-001 SS +2d": ("RA-001", "SS", "+2d"),
+            "RA-001 ss -3 days": ("RA-001", "SS", "-3days"), "RA-001+2d": ("RA-001", "FS", "+2d"),
+            "RA-001 +2 day": ("RA-001", "FS", "+2day"), "RA-001-2d": ("RA-001", "FS", "-2d"), "A-1-2d": ("A-1", "FS", "-2d"),
+            "A-3D-3d": ("A-3D", "FS", "-3d"), "AB-3d": ("AB", "FS", "-3d"), "SSFS": ("SS", "FS", ""), "FSS": ("F", "SS", ""),
+            "FFS": ("F", "FS", ""), "FS": ("FS", "FS", ""), "FS+2d": ("FS", "FS", "+2d"), "SSFS+2d": ("SS", "FS", "+2d"),
+            "ABFS": ("ABFS", "FS", ""), "ABFS+1d": ("AB", "FS", "+1d"), "TASKSS": ("TASK", "SS", ""),
+            "RA-001\tFS\t+2d": ("RA-001", "FS", "+2d"), "RA-001 FS+2days": ("RA-001", "FS", "+2days"), "T-1": ("T-1", "FS", ""),
+            "t-1ff": ("T-1", "FF", ""), "RA-001 fs": ("RA-001", "FS", ""), "RA-001 Fs +0d": ("RA-001", "FS", "+0d"),
+            "x" * 40 + " FS": ("X" * 40, "FS", ""), "RA_001.2-3": ("RA_001.2-3", "FS", ""),
+            "RA-001 FS  +  12   DAYS": ("RA-001", "FS", "+12DAYS"), "9": ("9", "FS", ""), "9SF": ("9", "SF", ""),
+            "  RA-001 SS  ": ("RA-001", "SS", ""),
+        }
+        for item, expected in cases.items():
+            with self.subTest(item=item):
+                self.assertEqual(importer.parse_predecessor(item, self.KNOWN), expected + (None,))
+        invalid = ["RA 001 FS", "RA-001 FSX", "RA-001 FS 2d", "RA-001 FS +2", "RA-001 FS +2 da", "+2d", "-2d", "A+1d+2d", "",
+                   "RA-001 XX", "x" * 41, ".RA", "RA-001 FSFS", "RA-001 FS FS", "A +2dd", "a" * 201]
+        for item in invalid:
+            with self.subTest(item=item):
+                key, dep_type, lag, error = importer.parse_predecessor(item, self.KNOWN)
+                self.assertEqual((key, dep_type, lag), (None, None, None))
+                self.assertIn("is not a valid Import Key", error)
+        self.assertNotIn("a" * 100, importer.parse_predecessor("a" * 201, self.KNOWN)[3])  # error text stays short
+
 
 class ImportHttpTests(unittest.TestCase):
     def setUp(self):

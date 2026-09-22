@@ -65,7 +65,11 @@ DISPLAY_DATE_FORMAT = "dd-mm-yyyy"
 KEY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$")
 ISO_DATE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T].*)?$")
 DMY_DATE = re.compile(r"^(\d{1,2})-(\d{1,2})-(\d{4})$")
-PRED_SUFFIX = re.compile(r"^(?P<key>.+?)\s*(?P<type>FS|SS|FF|SF)?\s*(?P<lag>[+-]\s*\d+\s*d(?:ays?)?)?$", re.IGNORECASE)
+DEPENDENCY_TYPES = ("FS", "SS", "FF", "SF")
+# A predecessor item is "KEY [type] [lag]": a 40-character key plus blanks, a two-letter type and a
+# lag such as "+ 12 days". Anything longer cannot be valid and is refused before parsing, so a
+# hostile cell costs one length check (regression review SECURITY-1).
+MAX_PRED_ITEM_CHARS = 200
 LIST_SEPARATOR = ";"
 CUSTOM_PREFIX = "x_"
 CUSTOM_KEY_PATTERN = re.compile(r"^x_[a-z0-9_]{1,40}$")   # a client-supplied custom key; slug_key() output fits it
@@ -1834,17 +1838,60 @@ def resolve_criticality(value):
     return None, f"Unknown criticality '{text}'. Use Critical, High, Normal, Low or leave blank."
 
 
+def _split_predecessor(text: str) -> tuple[str, str, str]:
+    """Split "KEY [type] [lag]" into (key, type, lag), each "" when absent, scanning once from
+    the right: an optional lag ``[+-] blanks digits blanks d|day|days`` at the very end, then
+    blanks, then an optional two-letter type (FS, SS, FF, SF, any case), then blanks. The key
+    is whatever is left; it is never empty, matching the former regex, whose lazy key group
+    took the shortest key that left a parsable suffix. That regex
+    (``^(?P<key>.+?)\\s*(TYPE)?\\s*(LAG)?$``) backtracked cubically on a run of blanks, so
+    one crafted cell stalled the single-process server (regression review SECURITY-1);
+    this scan is linear in the item length and accepts exactly the same syntax.
+    """
+    end = len(text)
+    lag = ""
+    unit_start = None
+    for unit in ("DAYS", "DAY", "D"):
+        if end >= len(unit) and text[end - len(unit):end].upper() == unit:
+            unit_start = end - len(unit)
+            break
+    if unit_start is not None:
+        i = unit_start
+        while i > 0 and text[i - 1].isspace():
+            i -= 1
+        digits_end = i
+        while i > 0 and text[i - 1].isdecimal():
+            i -= 1
+        if i < digits_end:
+            while i > 0 and text[i - 1].isspace():
+                i -= 1
+            if i > 1 and text[i - 1] in "+-":   # i > 1: a key of at least one character stays
+                i -= 1
+                lag = text[i:end].replace(" ", "")
+                end = i
+    while end > 0 and text[end - 1].isspace():
+        end -= 1
+    dep_type = ""
+    if end > 2 and text[end - 2:end].upper() in DEPENDENCY_TYPES:
+        dep_type = text[end - 2:end].upper()
+        end -= 2
+        while end > 0 and text[end - 1].isspace():
+            end -= 1
+    return text[:end], dep_type, lag
+
+
 def parse_predecessor(item: str, known_keys: set[str]):
     """Return (key, dependency_type, lag_text, error). A suffix (FS+2d) is only
     split off when the bare text is not itself a known key."""
     text = item.strip()
+    if len(text) > MAX_PRED_ITEM_CHARS:
+        shown = text[:MAX_KEY_CHARS] + "..."
+        return None, None, None, f"'{shown}' is not a valid Import Key."
     if text.upper() in known_keys:   # Import Keys are canonical upper case
         return text.upper(), "FS", "", None
-    match = PRED_SUFFIX.match(text)
-    if match and (match.group("type") or match.group("lag")):
-        key = match.group("key").strip()
-        if KEY_PATTERN.match(key):
-            return key.upper(), (match.group("type") or "FS").upper(), (match.group("lag") or "").replace(" ", ""), None
+    key, dep_type, lag = _split_predecessor(text)
+    if (dep_type or lag) and KEY_PATTERN.match(key):
+        return key.upper(), dep_type or "FS", lag, None
     if KEY_PATTERN.match(text):
         return text.upper(), "FS", "", None
     return None, None, None, f"'{text}' is not a valid Import Key."
