@@ -52,9 +52,15 @@
       </section>
       <section class="panel">
         <div class="panel-title"><h2>Portfolio Gantt</h2><span id="as-of"></span></div>
-        <div class="legend"><i class="overdue"></i>Overdue <i class="soon"></i>Due in 7 days <i class="scheduled"></i>Scheduled <i class="blocked"></i>Blocked <i class="undated"></i>Undated <i class="critical"></i>Critical path <i class="proj-start-key"></i>Project start <i class="proj-target-key"></i>Project target</div>
+        <div class="view-controls">
+          <div class="legend"><i class="overdue"></i>Overdue <i class="soon"></i>Due in 7 days <i class="scheduled"></i>Scheduled <i class="blocked"></i>Blocked <i class="undated"></i>Undated <i class="critical"></i>Critical path <i class="proj-start-key"></i>Project start <i class="proj-target-key"></i>Project target</div>
+          <label class="inline view-toggle"><input type="checkbox" id="view-table"> Schedule table</label>
+        </div>
         <div id="bands" class="bands"></div>
         <div id="gantt"></div>
+        <div id="schedule-table" hidden></div>
+        <div class="legend step-legend" id="step-legend" hidden><span class="legend-cap">Steps inside a task bar (colour = step number):</span> <i class="sw step-c1" aria-hidden="true">1</i>Step 1 <i class="sw step-c2" aria-hidden="true">2</i>Step 2 <i class="sw step-c3" aria-hidden="true">3</i>Step 3 <i class="sw step-c4" aria-hidden="true">4</i>Step 4 <i class="sw step-c5" aria-hidden="true">5</i>Step 5 <i class="sw step-c6" aria-hidden="true">6</i>Step 6 <i class="sw step-c7" aria-hidden="true">7</i>Step 7 <span class="legend-cap">· 8+ repeats the colours with a doubled stripe · ✓ completed · × cancelled · ∥ on hold (hatched) · +N not drawn at this scale (too small or overlapping) · dashed track end = step runs past the parent's dates · dashed chip = steps need dates</span></div>
+        <div id="gantt-live" class="sr-only" aria-live="polite"></div>
       </section>
     </main>
   </div>
@@ -67,6 +73,7 @@
   <dialog id="portfolio-dialog"><div id="portfolio-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
   <dialog id="templates-dialog"><div id="templates-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
   <dialog id="final-results-dialog"><div id="final-results-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
+  <div id="step-tip" role="tooltip" hidden></div>
   <script src="/static/app.js"></script>
 </body>
 </html>
