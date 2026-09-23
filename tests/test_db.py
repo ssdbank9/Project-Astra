@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from astra import db
+from astra.service import AstraService
 
 
 DENY_IMPORTS_TABLE = "imports"
@@ -238,6 +239,132 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
         self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
         connection.close()
+
+    # 03G8EH: schema 14 makes (task_id, version) unique on task_submissions.
+    def at_v13(self):
+        """A complete v13 database: v14's CREATE UNIQUE INDEX is refused, so the v14
+        step rolls back and leaves user_version at 13."""
+        connection = self.raw()
+        connection.set_authorizer(deny_create_index(db.V14_SUBMISSION_VERSION_INDEX))
+        with self.assertRaises(sqlite3.DatabaseError):
+            db.migrate(connection)
+        connection.set_authorizer(None)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 13)
+        return connection
+
+    def submitted_task(self, connection):
+        """One real task with one version-1 submission, written by the service."""
+        service = AstraService(connection)
+        owner = service.create_initial_owner("owner@example.org", "Owner", "correct horse battery")
+        project = service.create_project(owner, "Migration")
+        task = service.create_task(owner, {"project_id": project["id"], "title": "Deliverable"})
+        service.submit_task(owner, task["id"], "first")
+        return task["id"]
+
+    def duplicate_submission(self, connection, task_id):
+        """The row a pre-03G8EH concurrent submit left: same task, same version."""
+        connection.execute(
+            "INSERT INTO task_submissions(id,task_id,version,submitted_by,submitted_at,note,status)"
+            " SELECT 'duplicate-row', task_id, version, submitted_by, submitted_at, 'second', 'submitted'"
+            " FROM task_submissions WHERE task_id=?",
+            (task_id,),
+        )
+
+    def submission_rows(self, connection):
+        return [
+            tuple(row) for row in connection.execute(
+                "SELECT id,task_id,version,note FROM task_submissions ORDER BY id"
+            ).fetchall()
+        ]
+
+    def unique_submission_index(self, connection):
+        rows = connection.execute("PRAGMA index_list(task_submissions)").fetchall()
+        return {row["name"]: row["unique"] for row in rows}.get(db.V14_SUBMISSION_VERSION_INDEX)
+
+    def test_fresh_v14_database_refuses_a_second_submission_at_one_version(self):
+        connection = db.connect(self.path)
+        try:
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 14)
+            self.assertEqual(self.unique_submission_index(connection), 1)
+            task_id = self.submitted_task(connection)
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "UNIQUE"):
+                self.duplicate_submission(connection, task_id)
+        finally:
+            connection.close()
+
+    def test_v13_database_with_submissions_upgrades_to_v14_and_matches_fresh_schema(self):
+        connection = self.at_v13()
+        try:
+            task_id = self.submitted_task(connection)
+            before = self.submission_rows(connection)
+            self.assertIsNone(self.unique_submission_index(connection))
+
+            db.migrate(connection)
+
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 14)
+            self.assertEqual(self.unique_submission_index(connection), 1)
+            self.assertEqual(self.submission_rows(connection), before)
+            self.assertEqual([row[1] for row in before], [task_id])
+            fresh = db.connect(Path(self.temp.name) / "fresh.sqlite3")
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
+    def test_v13_duplicate_submission_versions_refuse_the_upgrade_without_touching_data(self):
+        connection = self.at_v13()
+        try:
+            task_id = self.submitted_task(connection)
+            self.duplicate_submission(connection, task_id)
+            before = self.submission_rows(connection)
+            self.assertEqual(len(before), 2)
+
+            with self.assertRaisesRegex(db.SchemaMigrationRefused, rf"schema 14.*task {task_id} version 1 \(2 rows\)"):
+                db.migrate(connection)
+
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 13)
+            self.assertEqual(self.submission_rows(connection), before, "no submission may be deleted")
+            self.assertIsNone(self.unique_submission_index(connection))
+            self.assertFalse(connection.in_transaction)
+        finally:
+            connection.close()
+        with self.assertRaises(db.SchemaMigrationRefused):   # connect() refuses the same way
+            db.connect(self.path)
+
+        repaired = self.raw()   # once the Owner resolves the pair, the next start upgrades
+        try:
+            repaired.execute("DELETE FROM task_submissions WHERE id='duplicate-row'")
+        finally:
+            repaired.close()
+        reopened = db.connect(self.path)
+        try:
+            self.assertEqual(reopened.execute("PRAGMA user_version").fetchone()[0], 14)
+            self.assertEqual(self.unique_submission_index(reopened), 1)
+        finally:
+            reopened.close()
+
+    def test_failure_creating_the_v14_index_rolls_back_to_v13_and_retries(self):
+        connection = self.at_v13()
+        try:
+            self.submitted_task(connection)
+            before = self.submission_rows(connection)
+            connection.set_authorizer(deny_create_index(db.V14_SUBMISSION_VERSION_INDEX))
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 13)
+            self.assertIsNone(self.unique_submission_index(connection))
+            self.assertFalse(connection.in_transaction)
+
+            db.migrate(connection)
+
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 14)
+            self.assertEqual(self.unique_submission_index(connection), 1)
+            self.assertEqual(self.submission_rows(connection), before)
+        finally:
+            connection.close()
 
 
 if __name__ == "__main__":

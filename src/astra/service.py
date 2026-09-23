@@ -31,6 +31,7 @@ PROTECTED_STATUSES = {"changes_requested", "completed", "on_hold", "cancelled", 
 # (adversarial review AS-1, 2026-09-22).
 LOCKED_SOURCE_STATUSES = GOVERNED_STATUSES | PROTECTED_STATUSES | {"cancelled", "abandoned"}
 REOPEN_ONLY_STATUSES = {"completed", "cancelled", "abandoned"}
+UNSUBMITTABLE_STATUSES = frozenset({"submitted", "completed", "cancelled", "abandoned"})
 REVIEWER_ROLES = {"reviewer", "approver", "collaborator"}
 # SRFCZD: the request payload fields that carry an Owner-action request's intent. A
 # direct Owner action resolves only the pending requests whose values for these fields
@@ -1433,23 +1434,39 @@ class AstraService:
         if not (self.can_manage_project(actor, task["project_id"])
                 or actor["id"] == task.get("owner_user_id") or collaborator):
             raise Forbidden("You are not authorized to submit this task.")
-        if task["status"] in {"submitted", "completed", "cancelled", "abandoned"}:
+        if task["status"] in UNSUBMITTABLE_STATUSES:
             raise ValueError(f"A {task['status']} task cannot be submitted; reopen it first if needed.")
-        version = self.db.execute(
-            "SELECT COALESCE(MAX(version),0) m FROM task_submissions WHERE task_id=?", (task_id,)
-        ).fetchone()["m"] + 1
+        expected_revision = task["revision"]
         submission_id = new_id()
         timestamp = now_text()
         note = str(note).strip()
         with transaction(self.db):
+            # Re-read under the write lock (03G8EH). The permission and status checks
+            # above ran before BEGIN IMMEDIATE, so a concurrent submit, an Owner cancel
+            # or acceptance, or a reassignment may have landed since; only a task still
+            # at the revision those checks saw may be submitted.
+            current = self.db.execute(
+                "SELECT status, revision FROM tasks WHERE id=?", (task_id,)
+            ).fetchone()
+            if current is None or current["revision"] != expected_revision:
+                raise Conflict("Submission conflict: the task changed before it could be submitted; reload it and try again.")
+            if current["status"] in UNSUBMITTABLE_STATUSES:
+                raise Conflict(f"Submission conflict: the task is now {current['status']}.")
+            version = self.db.execute(
+                "SELECT COALESCE(MAX(version),0) m FROM task_submissions WHERE task_id=?", (task_id,)
+            ).fetchone()["m"] + 1
+            cursor = self.db.execute(
+                "UPDATE tasks SET status='submitted', updated_at=?, revision=revision+1"
+                " WHERE id=? AND revision=?"
+                " AND status NOT IN ('submitted','completed','cancelled','abandoned')",
+                (timestamp, task_id, expected_revision),
+            )
+            if cursor.rowcount != 1:
+                raise Conflict("Submission conflict: the task changed before it could be submitted; reload it and try again.")
             self.db.execute(
                 "INSERT INTO task_submissions(id,task_id,version,submitted_by,submitted_at,note,status)"
                 " VALUES(?,?,?,?,?,?,'submitted')",
                 (submission_id, task_id, version, actor["id"], timestamp, note),
-            )
-            self.db.execute(
-                "UPDATE tasks SET status='submitted', updated_at=?, revision=revision+1 WHERE id=?",
-                (timestamp, task_id),
             )
             self._event(task_id, actor["id"], "task_submitted", None,
                         {"submission_id": submission_id, "version": version, "note": note}, None)

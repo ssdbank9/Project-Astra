@@ -932,6 +932,118 @@ class AstraStateIntegrityTests(unittest.TestCase):
         self.assertEqual(self.service.list_task_final_results(self.owner, task["id"]), [])
         self.assertEqual(self._task_event_count(task["id"], "final_result_unmarked"), 1)
 
+    # 03G8EH: submit_task used to check status and allocate MAX(version)+1 before
+    # BEGIN IMMEDIATE and then UPDATE the task with no status or revision predicate.
+    def _submission_rows(self, task_id):
+        return [
+            tuple(row) for row in self.db.execute(
+                "SELECT version,status,note FROM task_submissions WHERE task_id=? ORDER BY version,submitted_at",
+                (task_id,),
+            ).fetchall()
+        ]
+
+    def _submit_fixture(self, name):
+        project, manager = self._intent_fixture(name)
+        task = self.service.create_task(
+            self.owner, {"project_id": project["id"], "title": "Deliverable", "owner_user_id": manager["id"]}
+        )
+        return manager, task
+
+    def test_concurrent_submissions_have_one_winner_one_row_and_one_event(self):
+        manager, task = self._submit_fixture("Submit race")
+
+        def submit(note):
+            return lambda service: service.submit_task(self._as(manager)(service), task["id"], note)
+
+        winner = self._one_winner(self._race(submit("first click"), submit("second click")))
+
+        self.assertEqual(self._submission_rows(task["id"]), [(1, "submitted", winner["note"])])
+        self.assertEqual(self._task_event_count(task["id"], "task_submitted"), 1)
+        current = self.service.get_task(self.owner, task["id"])
+        self.assertEqual((current["status"], current["revision"]), ("submitted", task["revision"] + 1))
+
+    def _interleave_before_submit_write(self, action):
+        """Run ``action`` on another connection once submit_task has passed its
+        pre-checks, immediately before its first transaction starts."""
+        other = connect(self.db_path)
+        self.addCleanup(other.close)
+        interleaved = []
+
+        @contextmanager
+        def other_writer_first(connection):
+            if connection is self.db and not interleaved:
+                interleaved.append(True)
+                action(AstraService(other))
+            with database_transaction(connection):
+                yield
+
+        return other_writer_first, interleaved
+
+    def test_submit_refuses_when_the_owner_cancels_before_its_write(self):
+        manager, task = self._submit_fixture("Cancelled mid-submit")
+
+        def cancel(service):
+            service.update_task(self.owner, task["id"], {
+                "status": "cancelled", "reason": "Owner cancelled", "expected_revision": task["revision"],
+            })
+
+        hook, interleaved = self._interleave_before_submit_write(cancel)
+        with patch.object(service_module, "transaction", hook):
+            with self.assertRaises(service_module.Conflict):
+                self.service.submit_task(manager, task["id"], "late submit")
+
+        current = self.service.get_task(self.owner, task["id"])
+        self.assertEqual(interleaved, [True])
+        self.assertEqual((current["status"], current["revision"]), ("cancelled", task["revision"] + 1))
+        self.assertEqual(self._submission_rows(task["id"]), [])
+        self.assertEqual(self._task_event_count(task["id"], "task_submitted"), 0)
+
+    def test_submit_refuses_when_the_task_is_submitted_and_accepted_before_its_write(self):
+        manager, task = self._submit_fixture("Accepted mid-submit")
+
+        def submit_and_accept(service):
+            submission = service.submit_task(service.get_user(manager["id"]), task["id"], "first")
+            service.accept_submission(self.owner, submission["id"], "accepted")
+
+        hook, interleaved = self._interleave_before_submit_write(submit_and_accept)
+        with patch.object(service_module, "transaction", hook):
+            with self.assertRaises(service_module.Conflict):
+                self.service.submit_task(manager, task["id"], "late submit")
+
+        current = self.service.get_task(self.owner, task["id"])
+        self.assertEqual(interleaved, [True])
+        self.assertEqual(current["status"], "completed")
+        self.assertEqual(self._submission_rows(task["id"]), [(1, "accepted", "first")])
+        self.assertEqual(self._task_event_count(task["id"], "task_submitted"), 1)
+
+    def test_submit_refuses_when_the_task_is_reassigned_away_before_its_write(self):
+        project = self.service.create_project(self.owner, "Reassigned mid-submit")
+        member = self.service.create_user(self.owner, "member@example.org", "Member", "member password safe")
+        self.service.grant_project_access(self.owner, project["id"], member["id"], "member")
+        task = self.service.create_task(
+            self.owner, {"project_id": project["id"], "title": "Deliverable", "owner_user_id": member["id"]}
+        )
+
+        def reassign(service):
+            # No status change: only the revision records that the submitter's
+            # permission check is now stale.
+            service.update_task(self.owner, task["id"], {
+                "owner_user_id": self.owner["id"], "expected_revision": task["revision"],
+            })
+
+        hook, interleaved = self._interleave_before_submit_write(reassign)
+        with patch.object(service_module, "transaction", hook):
+            with self.assertRaises(service_module.Conflict):
+                self.service.submit_task(member, task["id"], "no longer mine")
+
+        current = self.service.get_task(self.owner, task["id"])
+        self.assertEqual(interleaved, [True])
+        self.assertEqual((current["owner_user_id"], current["status"]), (self.owner["id"], task["status"]))
+        self.assertEqual(self._submission_rows(task["id"]), [])
+        self.assertEqual(self._task_event_count(task["id"], "task_submitted"), 0)
+        with self.assertRaises(service_module.Forbidden):   # a fresh attempt is refused outright
+            self.service.submit_task(member, task["id"], "retry")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,12 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
+
+
+class SchemaMigrationRefused(RuntimeError):
+    """A migration found existing data it cannot convert safely. The step was rolled
+    back untouched; the message says what to fix before starting Astra again."""
 
 
 def app_home() -> Path:
@@ -398,6 +403,8 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 12")
     if version < 13:
         _migrate_v13(connection)
+    if version < 14:
+        _migrate_v14(connection)
 
 
 # Columns the v13 step adds to tasks, in order (name, definition).
@@ -455,3 +462,43 @@ def _migrate_v13(connection: sqlite3.Connection) -> None:
         for statement in V13_STATEMENTS:
             connection.execute(statement)
         connection.execute("PRAGMA user_version = 13")
+
+
+V14_SUBMISSION_VERSION_INDEX = "idx_submissions_task_version"
+
+V14_DUPLICATE_SUBMISSION_VERSIONS = """
+    SELECT task_id, version, COUNT(*) AS copies FROM task_submissions
+    GROUP BY task_id, version HAVING COUNT(*) > 1 ORDER BY task_id, version
+"""
+
+
+def _migrate_v14(connection: sqlite3.Connection) -> None:
+    """v13 -> v14: one submission per (task_id, version) (ticket 03G8EH).
+
+    Before 03G8EH, two concurrent ``submit_task`` calls could both read the same
+    ``MAX(version)`` and insert two rows at one version. The service now allocates the
+    version under ``BEGIN IMMEDIATE``; this unique index makes the database refuse a
+    duplicate too. A database that already holds duplicates is refused rather than
+    repaired: which of two pending submissions is the real one is an Owner decision, so
+    nothing is deleted or renumbered here. The step rolls back, user_version stays 13,
+    and the error lists the affected pairs.
+    """
+    with transaction(connection):
+        duplicates = connection.execute(V14_DUPLICATE_SUBMISSION_VERSIONS).fetchall()
+        if duplicates:
+            listed = "; ".join(
+                f"task {row[0]} version {row[1]} ({row[2]} rows)" for row in duplicates[:10]
+            )
+            more = f"; and {len(duplicates) - 10} more" if len(duplicates) > 10 else ""
+            raise SchemaMigrationRefused(
+                "Astra cannot upgrade this database to schema 14: task_submissions holds "
+                f"{len(duplicates)} duplicate (task_id, version) pair(s): {listed}{more}. "
+                "They come from the concurrent-submission defect fixed in 03G8EH. Nothing was "
+                "changed. Back up the database, keep one row per pair (or renumber the extra "
+                "rows to unused versions), then start Astra again."
+            )
+        connection.execute(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS {V14_SUBMISSION_VERSION_INDEX}"
+            " ON task_submissions(task_id, version)"
+        )
+        connection.execute("PRAGMA user_version = 14")

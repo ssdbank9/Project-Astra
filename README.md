@@ -62,7 +62,13 @@ dedicated reopen action records a revised timeline; task titles cannot be blanke
 assignees must be active and authorized on the task's project; and operations against a
 non-existent project return a controlled 404 rather than a 500. Submission acceptance is
 transactionally single-winner, and retrying an identical protected request or final-result
-mark does not create duplicate queue rows or audit events.
+mark does not create duplicate queue rows or audit events. Submitting work is also
+single-winner: the version is allocated under the write lock, and a submit whose task
+was changed in the meantime (a second submit, an Owner cancel or acceptance, a
+reassignment) returns HTTP 409 instead of overwriting it. Schema 14 makes
+`(task_id, version)` unique on `task_submissions`; a database that already holds
+duplicate submission versions refuses that upgrade, lists the pairs, and changes nothing
+until they are resolved.
 
 Database migrations are applied one SQL statement at a time inside a single
 `BEGIN IMMEDIATE` transaction per schema version. The schema changes and that step's
