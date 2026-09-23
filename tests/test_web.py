@@ -1260,7 +1260,9 @@ globalThis.__run=async(sc)=>{
   if(sc.requests){state.user={global_role:"owner"};state.loads=1;renderInbox([],sc.requests)}
   else{detailTaskId=sc.task.id;renderDetail(sc.task,[])}
   const pick=sc.click||sc.submitAt;
-  const target=pick?document.querySelectorAll("["+pick[0]+"]").find(n=>Object.values(n.dataset).includes(pick[1]))
+  // 5GK6SB: match the named attribute only, so data-remove-pred="t1" never matches data-remove-succ="t1".
+  const key=pick&&pick[0].replace(/^data-/,"").replace(/-([a-z])/g,(_,c)=>c.toUpperCase());
+  const target=pick?document.querySelectorAll("["+pick[0]+"]").find(n=>n.dataset[key]===pick[1])
     :document.querySelector(sc.submit||sc.button);
   if(sc.closeDetail){ // Close on a task opened from the inbox; loadsSince says whether anything was saved meanwhile
     const inbox=document.querySelector("#inbox-dialog");inbox.open=true;state.loads+=sc.closeDetail.loadsSince;calls.length=0;
@@ -1404,9 +1406,42 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
                 self.assertIn('aria-disabled="true" aria-describedby="status-locked-hint"', html)
                 self.assertNotIn(' disabled aria-describedby', html)  # aria-disabled keeps it focusable, so the hint is read
                 self.assertIn('id="status-locked-hint"', html)
-                self.assertIn("Accept or Request changes", html)
                 self.assertIn('name="title"', html)  # the other fields still save on a submitted task
                 self.assertIn('data-life="accept"', html)
+
+    def test_submitted_hint_names_the_buttons_this_viewer_has(self):
+        # 5GK6SB: a Manager's buttons ask the Owner; the hint must not send them looking for "Accept".
+        expected = {"owner": ("Use Accept &amp; complete or Request changes under Lifecycle.",
+                              ">Accept &amp; complete</button>", ">Request changes</button>"),
+                    "manager": ("Use Request Owner acceptance or Request Owner to return changes under Lifecycle.",
+                                ">Request Owner acceptance</button>", ">Request Owner to return changes</button>")}
+        for who, (hint, *buttons) in expected.items():
+            with self.subTest(who=who):
+                html = self.html[f"{who}-submitted"]
+                start = html.index('id="status-locked-hint"')
+                self.assertIn(hint, html[start:html.index("</p>", start)])
+                for button in buttons:
+                    self.assertIn(button, html)
+        html = self.html["manager-submitted"]
+        start = html.index('id="status-locked-hint"')
+        self.assertNotIn("Use Accept or Request changes", html[start:html.index("</p>", start)])
+
+    def test_submitted_hint_sits_under_the_status_field(self):
+        # 5GK6SB: the hint follows the Status select and comes before the next field in the grid.
+        for who in ("owner", "manager"):
+            with self.subTest(who=who):
+                html = self.html[f"{who}-submitted"]
+                edit = html[html.index('id="detail-edit"'):]
+                grid = edit[edit.index('<div class="grid">'):]
+                select_end = grid.index("</select>", grid.index('name="status"'))
+                self.assertLess(select_end, grid.index('id="status-locked-hint"'))
+                self.assertLess(grid.index('id="status-locked-hint"'), grid.index('name="start_date"'))
+
+    def test_closed_statuses_are_listed_once(self):
+        # 5GK6SB: buildLifecycle reuses CLOSED_STATUSES rather than a second copy that could drift.
+        src = (REPO / "src" / "astra" / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertEqual(src.count('["completed","cancelled","abandoned"]'), 1)
+        self.assertIn("const closed=CLOSED_STATUSES.includes(task.status)", src[src.index("function buildLifecycle"):])
 
     def test_open_task_is_unchanged(self):
         html = self.html["owner-in_progress"]
@@ -1433,6 +1468,8 @@ class AstraDetailDialogWiringTests(unittest.TestCase):
             "unlink-successor-closed-refused": {"task": owner_done, "click": ["data-remove-pred", "t1"],
                                                 "fail": "A reason is required."},
             "unlink-predecessor-open": {"task": owner_open, "click": ["data-remove-pred", "t0"], "reason": "wrong link"},
+            # 5GK6SB: on an open t1 the incoming Remove carries data-remove-succ="t1"; the click must not land there.
+            "unlink-successor-open": {"task": owner_open, "click": ["data-remove-pred", "t1"], "reason": "not needed"},
             "add-predecessor-open-empty": {"task": owner_open, "button": "#add-dep-button"},
             "reject-proposal-closed-refused": {"task": owner_done, "click": ["data-reject-sched", "sp1"],
                                                "fail": "A reason is required."},
@@ -1506,6 +1543,9 @@ class AstraDetailDialogWiringTests(unittest.TestCase):
     def test_dependency_controls_on_an_open_task_still_work(self):
         run = self._ran("unlink-predecessor-open")
         self.assertEqual(run["calls"][0]["body"]["predecessor_task_id"], "t0")
+        run = self._ran("unlink-successor-open")
+        self.assertEqual(run["calls"][0]["body"], {"predecessor_task_id": "t1", "successor_task_id": "t2",
+                                                   "reason": "not needed"})
         run = self._ran("add-predecessor-open-empty")
         self.assertEqual(run["calls"], [])
         self.assertIn("Choose a predecessor task.", run["messages"].values())

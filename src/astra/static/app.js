@@ -19,7 +19,7 @@ function render(){
     (!crit||(crit==="unrated"?!t.criticality:t.criticality===crit))&&
     (!band||matchesBand(t,band))&&
     (!owner||(t.owner_name||"").toLowerCase().includes(owner))&&
-    (!openOnly||!["completed","cancelled","abandoned"].includes(t.status)));
+    (!openOnly||!CLOSED_STATUSES.includes(t.status)));
   document.querySelector("#project-count").textContent=state.projects.length;
   document.querySelector("#task-count").textContent=tasks.length;
   document.querySelector("#overdue-count").textContent=tasks.filter(t=>t.due_state==="overdue").length;
@@ -651,8 +651,12 @@ function renderDetail(task,events){
       <div class="actions"><button>Confirm criticality</button></div><div class="error" id="crit-error"></div></form></div>`;
   const closedNote=closed?`<div class="state-note" role="note"><p><strong>${escapeHtml(statusLabel(task.status))}.</strong> Reopen this task to change it.${perms.can_manage_files?" Attachments and final results can still be added.":""}</p>
     ${canReopen?`<button type="button" class="link" data-goto-reopen>${perms.can_decide_protected?"Reopen task…":"Request reopening…"}</button>`:`<p>Ask the App Owner to reopen it.</p>`}</div>`:"";
-  const statusHint=submitted?`<p class="field-hint" id="status-locked-hint">Status is locked while this work is in review. ${perms.can_decide_protected||perms.can_request_protected?"Use Accept or Request changes under Lifecycle.":"The App Owner will Accept or Request changes."}</p>`:"";
-  const statusField=`<label>Status<select name="status"${submitted?' aria-disabled="true" aria-describedby="status-locked-hint"':""}>${opts}</select></label>`;
+  // 5GK6SB: name the decision buttons this viewer actually has under Lifecycle.
+  const decide=decisionLabels(perms.can_decide_protected);
+  const statusHint=submitted?`<p class="field-hint" id="status-locked-hint">Status is locked while this work is in review. ${perms.can_decide_protected||perms.can_request_protected?escapeHtml(`Use ${decide.accept} or ${decide.changes} under Lifecycle.`):"The App Owner will Accept or Request changes."}</p>`:"";
+  // The hint shares the Status grid cell, so it sits under the field it explains (not inside the label, which would add it to the select's name).
+  const statusField=submitted?`<div><label>Status<select name="status" aria-disabled="true" aria-describedby="status-locked-hint">${opts}</select></label>${statusHint}</div>`
+    :`<label>Status<select name="status">${opts}</select></label>`;
   const backToWork=BACK_TO_WORK.map(s=>`<option value="${s}">${escapeHtml(statusLabel(s))}</option>`).join("");
   const statusRequest=closed&&perms.can_edit_ordinary&&!perms.can_decide_protected?`<form id="detail-edit">
       <p class="field-hint">Or, instead of reopening, ask to move it straight back into work.</p>
@@ -675,7 +679,6 @@ function renderDetail(task,events){
         <label>Due date<input name="due_date" type="date" value="${escapeHtml(task.due_date||"")}"></label>
         <label>Progress<input name="progress" type="number" min="0" max="100" value="${task.progress==null?"":task.progress}"></label>
       </div>
-      ${statusHint}
       <label>Description<textarea name="description">${escapeHtml(task.description||"")}</textarea></label>
       <label>Reason (required for status or schedule changes)<input name="reason"></label>
       <div class="actions"><button value="save">Save changes</button></div>
@@ -804,8 +807,15 @@ async function submitCriticality(e){
   catch(x){err.textContent=x.message}
 }
 
+// 5GK6SB: one source for the submission-decision button labels, shared with the locked-Status hint.
+function decisionLabels(canDecide){
+  return canDecide?{accept:"Accept & complete",changes:"Request changes"}
+    :{accept:"Request Owner acceptance",changes:"Request Owner to return changes"};
+}
+
 function buildLifecycle(task,extra=""){
   const canDecide=task.permissions?.can_decide_protected,canRequest=task.permissions?.can_request_protected;
+  const decide=decisionLabels(canDecide);
   const frBySub={};(task.final_results||[]).forEach(f=>{if(f.submission_id)frBySub[f.submission_id]=f.id});
   const subs=(task.submissions||[]).map(s=>{
     const decided=s.status==="accepted"?` · accepted by ${escapeHtml(s.decided_by_name||"")}`:s.status==="changes_requested"?` · changes requested`:"";
@@ -820,21 +830,21 @@ function buildLifecycle(task,extra=""){
     return `<li>v${s.version} · <strong>${escapeHtml(s.status)}</strong> · by ${escapeHtml(s.submitted_by_name||"")}${decided}${note}${decisionNote}${frCtl}</li>`;
   }).join("")||"<li>No submissions yet.</li>";
   const pending=(task.submissions||[]).find(s=>s.status==="submitted");
-  const terminal=["completed","cancelled","abandoned"].includes(task.status);
+  const closed=CLOSED_STATUSES.includes(task.status);
   let actions="";
-  if(!terminal&&task.status!=="submitted"){
+  if(!closed&&task.status!=="submitted"){
     actions+=`<form data-life="submit"><label>Submit work (note)<input name="note"></label><div class="actions"><button>Submit for acceptance</button></div></form>`;
   }
   if(task.status==="submitted"&&pending){
     if(canDecide||canRequest){
-      actions+=`<form data-life="accept" data-sid="${escapeHtml(pending.id)}"><label>Acceptance note<input name="decision_note"></label><div class="actions"><button>${canDecide?"Accept &amp; complete":"Request Owner acceptance"}</button></div></form>`;
-      actions+=`<form data-life="changes" data-sid="${escapeHtml(pending.id)}"><label>Reason for changes<input name="reason" required></label><div class="actions"><button>${canDecide?"Request changes":"Request Owner to return changes"}</button></div></form>`;
+      actions+=`<form data-life="accept" data-sid="${escapeHtml(pending.id)}"><label>Acceptance note<input name="decision_note"></label><div class="actions"><button>${escapeHtml(decide.accept)}</button></div></form>`;
+      actions+=`<form data-life="changes" data-sid="${escapeHtml(pending.id)}"><label>Reason for changes<input name="reason" required></label><div class="actions"><button>${escapeHtml(decide.changes)}</button></div></form>`;
     }else actions+=`<p class="blocked-text">Only the App Owner can decide this submission.</p>`;
   }
-  if(terminal&&(canDecide||canRequest)){
+  if(closed&&(canDecide||canRequest)){
     actions+=`<form data-life="reopen" id="reopen-form"><label>Reason to reopen<input name="reason" required></label><label>Revised due date<input name="new_due_date" type="date" required></label><div class="actions"><button>${canDecide?"Reopen":"Request Owner reopening"}</button></div></form>`;
   }
-  if(!terminal&&task.status!=="on_hold"&&(canDecide||canRequest)){
+  if(!closed&&task.status!=="on_hold"&&(canDecide||canRequest)){
     actions+=`<form data-life="hold"><label>On-hold reason<input name="reason" required></label><label>Follow-up checkpoint<input name="checkpoint_date" type="date" required></label><label>Responsible owner<select name="owner_user_id"><option value="">Unassigned</option></select></label><div class="actions"><button>${canDecide?"Put on hold":"Request Owner hold"}</button></div></form>`;
   }
   return `<div class="lifecycle"><h3>Lifecycle</h3>
