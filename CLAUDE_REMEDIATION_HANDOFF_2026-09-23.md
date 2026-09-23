@@ -12,6 +12,7 @@ conflicts with an older handoff, this document is newer.
 - GitHub repository: `https://github.com/ssdbank9/Project-Astra`
 - Branch to review: `codex/migration-safety-remediation`
 - Remote branch URL: `https://github.com/ssdbank9/Project-Astra/tree/codex/migration-safety-remediation`
+- Whitespace-filtered review URL: `https://github.com/ssdbank9/Project-Astra/compare/claude/excel-import...codex/migration-safety-remediation?w=1`
 - Branch point: `5adec82` from `origin/claude/excel-import`
 - Remote review range: `origin/claude/excel-import...origin/codex/migration-safety-remediation`
 - Application status: local development only; not deployed or approved for real users
@@ -54,7 +55,7 @@ jaira show A836XC --for-lane review --json
 .\.venv\Scripts\python.exe -m unittest -v tests.test_db
 node --check src\astra\static\app.js
 git diff --check origin/claude/excel-import...HEAD
-git diff --stat origin/claude/excel-import...HEAD
+git diff -w --stat origin/claude/excel-import...HEAD
 ```
 
 On Linux/macOS, replace the Python executable with `.venv/bin/python` and use
@@ -79,6 +80,15 @@ browser session because Windows Git Credential Manager returned
 grouped web-upload commits rather than the original local implementation commit
 IDs. The final source, tests, documentation, handoff, and two Jaira ticket files
 were all published to the named branch.
+
+Publication hygiene note: the authenticated GitHub web uploader serialized touched
+text files with CRLF line endings. The ordinary compare therefore includes
+line-ending-only churn and materially inflates its raw addition/deletion totals.
+Claude should review with the whitespace-filtered URL above or `git diff -w`. Before
+merge, normalize the touched text-file blobs back to LF with an authenticated Git
+client, then confirm the ordinary compare matches the whitespace-filtered semantic
+scope. This is a publication artifact; it was not present in the locally tested
+commit tree.
 
 Use the remote branch comparison above. Do not require the local-only commit IDs
 to resolve in a fresh clone. They remain useful provenance on Aly's remediation
