@@ -635,9 +635,22 @@ class AstraService:
                 )
         return task
 
+    # 9MK29X: update_task is a fixed sequence of named steps. The order is load-bearing
+    # (for example the SRFCZD R6 refusal must run before any request is filed, and the
+    # closed-task check before the reason rules), so each helper runs its checks in the
+    # original order and update_task calls them in that order.
     def update_task(self, actor: dict, task_id: str, payload: dict,
         *, owner_decision: OwnerDecision | None = None,
     ) -> dict:
+        before, expected_revision = self._authorize_task_update(actor, task_id, payload)
+        fields = self._validate_task_update(before, payload)
+        request = self._route_protected_status_update(actor, before, fields)
+        if request is not None:
+            return request
+        return self._write_task_update(actor, task_id, before, fields, expected_revision, owner_decision)
+
+    def _authorize_task_update(self, actor: dict, task_id: str, payload: dict) -> tuple[dict, int]:
+        """Load the task, require task-management access and an up-to-date expected_revision."""
         before = self.get_task(actor, task_id)
         if not self.can_manage_project(actor, before["project_id"]):
             raise Forbidden("Task-management access denied.")
@@ -648,6 +661,11 @@ class AstraService:
             raise Conflict(
                 f"Task revision conflict: expected {expected_revision}, current revision is {before['revision']}."
             )
+        return before, expected_revision
+
+    def _validate_task_update(self, before: dict, payload: dict) -> dict:
+        """Merge the payload over the task, apply the lifecycle policy and field rules, and
+        return the normalised values the write and the request routing need."""
         merged = {**before, **payload}
         status = merged["status"]
         criticality = merged.get("criticality") or None
@@ -662,8 +680,8 @@ class AstraService:
             raise ValueError(f"Use the dedicated {status.replace('_', ' ')} action for this transition.")
         # T8WHJR: with the status unchanged, a closed task has nothing an update may write, so
         # the call is refused even when no field differs (a reason-only save must not bump the
-        # revision or add a task_updated event). The revision predicate below keeps a task
-        # closed after this check out of the write.
+        # revision or add a task_updated event). The revision predicate in _write_task_update
+        # keeps a task closed after this check out of the write.
         if before["status"] in REOPEN_ONLY_STATUSES and not status_changed:
             raise ValueError(
                 f"A {before['status']} task is immutable; reopen the task first with the dedicated reopen task action."
@@ -686,7 +704,28 @@ class AstraService:
             owner_user_id = self._validate_assignee(before["project_id"], payload.get("owner_user_id") or None)
         else:
             owner_user_id = before.get("owner_user_id")
-        if status_changed and before["status"] in LOCKED_SOURCE_STATUSES:
+        return {
+            "status": status,
+            "status_changed": status_changed,
+            "criticality": criticality,
+            "reason": reason,
+            "start_date": start_date,
+            "due_date": due_date,
+            "title": title,
+            "description": merged.get("description", ""),
+            "owner_user_id": owner_user_id,
+            "progress": merged.get("progress"),
+        }
+
+    def _route_protected_status_update(self, actor: dict, before: dict, fields: dict) -> dict | None:
+        """Refuse a status change no update may make, or file it as a Manager request.
+
+        Returns the filed request (update_task returns it unchanged), or None when the
+        update may be written directly."""
+        if not fields["status_changed"]:
+            return None
+        status, reason = fields["status"], fields["reason"]
+        if before["status"] in LOCKED_SOURCE_STATUSES:
             # The source status is protected too: a Manager may only request the change and
             # the Owner leaves completed / cancelled / abandoned through reopen_task (reason
             # and revised due date) and submitted through the submission decision. There is
@@ -716,7 +755,7 @@ class AstraService:
                 )
             if before["status"] in REOPEN_ONLY_STATUSES:
                 raise ValueError(reopen_refusal)
-        if status_changed and actor["global_role"] != "owner" and status in PROTECTED_STATUSES:
+        if actor["global_role"] != "owner" and status in PROTECTED_STATUSES:
             return self._request_protected_action(
                 actor,
                 before,
@@ -724,30 +763,39 @@ class AstraService:
                 {"status": status, "reason": reason, "expected_revision": before["revision"]},
                 reason or "",
             )
+        return None
+
+    def _write_task_update(
+        self, actor: dict, task_id: str, before: dict, fields: dict, expected_revision: int,
+        owner_decision: OwnerDecision | None,
+    ) -> dict:
+        """The single write transaction: every guard that must see committed state runs
+        inside it, under the write lock, not before it."""
         with transaction(self.db):
             # An approval re-checks, under the write lock, that its request is still pending.
             self._assert_active_request_revision(before, owner_decision)
             cursor = self.db.execute(
                 """UPDATE tasks SET title=?,description=?,owner_user_id=?,status=?,criticality=?,start_date=?,due_date=?,
                    progress=?,updated_at=?,revision=revision+1 WHERE id=? AND revision=?""",
-                (title, str(merged.get("description", "")).strip(), owner_user_id,
-                 status, criticality, start_date, due_date, self._progress(merged.get("progress")), now_text(), task_id,
+                (fields["title"], str(fields["description"]).strip(), fields["owner_user_id"],
+                 fields["status"], fields["criticality"], fields["start_date"], fields["due_date"],
+                 self._progress(fields["progress"]), now_text(), task_id,
                  expected_revision),
             )
             if cursor.rowcount != 1:
                 raise Conflict("Task revision conflict: the task changed before this update could be saved.")
             self._ensure_baseline(task_id)
             after = self.get_task(actor, task_id)
-            self._event(task_id, actor["id"], "task_updated", before, after, reason)
-            if status_changed:
+            self._event(task_id, actor["id"], "task_updated", before, after, fields["reason"])
+            if fields["status_changed"]:
                 self._resolve_pending_requests(
                     actor,
                     "update_task_status",
                     project_id=before["project_id"],
-                    intent={"status": status, "from_status": before["status"]},
+                    intent={"status": fields["status"], "from_status": before["status"]},
                     task_id=task_id,
                     expected_revision=expected_revision,
-                    decision_reason=reason or "",
+                    decision_reason=fields["reason"] or "",
                     owner_decision=owner_decision,
                 )
         return after
