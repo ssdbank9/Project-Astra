@@ -125,6 +125,42 @@ class MigrationTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_failed_commit_rolls_back_and_leaves_the_connection_reusable(self):
+        """MIG-7: a COMMIT that fails must not leave the connection in a transaction.
+
+        A deferred foreign key is only checked at COMMIT, so violating one inside the
+        block makes ``connection.commit()`` itself raise. Before the fix the open
+        transaction (and its write lock) survived, and the next ``transaction()`` on
+        the same connection failed with "cannot start a transaction within a
+        transaction".
+        """
+        connection = self.raw()
+        try:
+            connection.execute("CREATE TABLE commit_parent(id INTEGER PRIMARY KEY)")
+            connection.execute(
+                "CREATE TABLE commit_child(id INTEGER PRIMARY KEY, parent_id INTEGER "
+                "REFERENCES commit_parent(id) DEFERRABLE INITIALLY DEFERRED)"
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                with db.transaction(connection):
+                    connection.execute(
+                        "INSERT INTO commit_child(id, parent_id) VALUES (1, 404)"
+                    )
+            self.assertFalse(connection.in_transaction)
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM commit_child").fetchone()[0], 0
+            )
+
+            with db.transaction(connection):
+                connection.execute("INSERT INTO commit_parent(id) VALUES (404)")
+                connection.execute("INSERT INTO commit_child(id, parent_id) VALUES (1, 404)")
+            self.assertFalse(connection.in_transaction)
+            self.assertEqual(
+                connection.execute("SELECT parent_id FROM commit_child").fetchone()[0], 404
+            )
+        finally:
+            connection.close()
+
     def test_failure_midway_through_initial_schema_rolls_back_every_object_and_retries(self):
         connection = self.raw()
         try:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
@@ -46,8 +46,15 @@ def transaction(connection: sqlite3.Connection):
     except Exception:
         connection.rollback()
         raise
-    else:
+    # COMMIT itself can fail (a deferred foreign key, SQLITE_BUSY, disk full). Without
+    # a rollback the connection would stay inside the transaction, holding the write
+    # lock, and the next BEGIN on it would fail. The COMMIT error is the one raised.
+    try:
         connection.commit()
+    except Exception:
+        with suppress(sqlite3.Error):
+            connection.rollback()
+        raise
 
 
 def _execute_statements(connection: sqlite3.Connection, script: str) -> None:

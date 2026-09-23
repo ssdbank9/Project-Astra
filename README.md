@@ -93,7 +93,9 @@ Database migrations are applied one SQL statement at a time inside a single
 `BEGIN IMMEDIATE` transaction per schema version. The schema changes and that step's
 `PRAGMA user_version` update therefore commit together or roll back together; a failed
 or interrupted step can be retried without retaining only its earlier tables, indexes,
-or columns. Regression tests exercise fresh creation, legacy upgrades, injected DDL
+or columns. The same holds when `COMMIT` itself fails (for example a deferred foreign
+key or `SQLITE_BUSY`): `db.transaction()` rolls back and re-raises the commit error, so
+the connection is never left inside an open transaction. Regression tests exercise fresh creation, legacy upgrades, injected DDL
 failures, retry, and equivalence between upgraded and freshly created schemas.
 
 Sign-in protection: repeated failed logins for an email are throttled (5 failures in
