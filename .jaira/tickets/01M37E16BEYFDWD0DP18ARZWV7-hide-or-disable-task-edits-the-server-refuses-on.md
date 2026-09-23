@@ -1,7 +1,7 @@
 ---
 id: 01M37E16BEYFDWD0DP18ARZWV7
 title: Hide or disable task edits the server refuses on closed and submitted tasks
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -21,13 +21,17 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:27:00Z
-updated-at: 2026-09-23T16:16:19Z
+updated-at: 2026-09-23T16:27:34Z
 updated-by: Claude
 claimed-by: vm-28497
 claimed-at: 2026-09-23T15:40:31Z
-outcome-what: "Task dialog now gates edits by status: closed tasks show one 'Reopen this task to change it' note with a jump to the reopen form (offered on completed, cancelled and abandoned), drop the criticality, parent, schedule propose/approve, reviewer add/remove, add-predecessor and incoming-dependency-remove controls, keep attachments, final-result marking, proposal rejection and successor unlinking; a Manager gets a status-request form limited to draft/assigned/in_progress/delayed; a submitted task's Status select is disabled with an aria-describedby hint pointing to Accept or Request changes."
-outcome-why: "Users filled forms the server refuses (SRFCZD R5/R6, T8WHJR) and only then saw a 400; the dialog now shows only what the server accepts and names the governed path. Server checks unchanged."
-outcome-resolves: "ARZWV7: renderDetail offered cancelled/abandoned/changes_requested and edit forms on closed and submitted tasks"
+outcome-what: "Independent review approved ARZWV7 with five low findings; review fields recorded"
+outcome-why: "Every DoD item holds; nothing medium or higher; server authority unchanged"
+outcome-resolves: "ARZWV7 review lane"
+review-summary: "Independent review approves ARZWV7. Diff touches only src/astra/static/app.js, style.css, README.md, tests/test_web.py and the ticket; service.py and web.py unchanged, so no authorization was weakened and server refusals still return a controlled 400. Closed tasks (completed, cancelled, abandoned) show one 'Reopen this task to change it' note linking to the reopen form, which is now offered on all three; forms the server refuses are removed (edit, criticality, parent, schedule propose/approve, reviewer add/remove, add predecessor, incoming-dependency remove); attachments, final-result marking, proposal rejection and successor unlinking stay. Managers get a status-request form limited to draft/assigned/in_progress/delayed. Submitted tasks lock Status with an aria-describedby hint and save omits status. Dependency errors share one error line, so Remove on Blocks works on a closed task."
+review-gaps: "1. Manager on a submitted task sees hint 'Use Accept or Request changes' but the buttons read 'Request Owner acceptance' / 'Request Owner to return changes' (app.js:607 vs 784-785). 2. #status-locked-hint renders after the whole Status/Start/Due/Progress grid, not under Status (visual only; aria-describedby links it). 3. Client mirrors server lists (BACK_TO_WORK vs MANAGER_ORDINARY_STATUSES, CLOSED_STATUSES and buildLifecycle 'terminal' literal vs REOPEN_ONLY_STATUSES); drift would surface the server 400 again; buildLifecycle could reuse CLOSED_STATUSES. 4. WIRING_DRIVER test selector matches any data-* value, so ['data-remove-pred','t1'] also matches data-remove-succ; passes on new code but should match the named attribute. 5. Manager status-request select shows readable labels while the ordinary Edit status select still shows raw values. 6. No live human browser acceptance yet; only the reviewer's scripted Chromium run on synthetic data."
+review-verdict: Approve — independent reviewer
+review-check: "13 new tests against base app.js: 19 failures, 3 errors (regression confirmed). 8 mutations M1-M8 in a scratch copy: all caught. node --check src/astra/static/app.js: clean. git diff --check: clean. tests/run.py on scratch copy of HEAD d879391: Ran 282 tests OK. Chromium Playwright on 127.0.0.1:8791 with synthetic fixture: closed-task note and Reopen link, focus to reason field, reopen of cancelled task restores Edit, Manager status request shows 'Owner request created; accepted live state is unchanged.', submitted hint renders, no page errors."
 ---
 
 # Hide or disable task edits the server refuses on closed and submitted tasks
