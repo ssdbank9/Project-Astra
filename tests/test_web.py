@@ -1166,6 +1166,76 @@ def _detail_task(status, permissions):
     }
 
 
+# ARZWV7 round 2: a stricter stub that runs the dialog's real click/submit wiring. An id selector
+# resolves only if that id is in index.html or in the markup renderDetail just wrote, so a handler
+# that reaches for a missing element fails here the way it fails in a browser.
+WIRING_DRIVER = r"""
+const fs=require("fs");
+const src=fs.readFileSync(process.argv[2],"utf8");
+const indexIds=new Set([...fs.readFileSync(process.argv[3],"utf8").matchAll(/id="([^"]+)"/g)].map(m=>m[1]));
+const scenarios=JSON.parse(fs.readFileSync(0,"utf8"));
+const store={};let dyn={},nodes={};
+const camel=s=>s.replace(/-([a-z])/g,(_,c)=>c.toUpperCase());
+function el(init){
+  const t={innerHTML:"",textContent:"",value:"",style:{},dataset:{},options:[],open:false,hidden:false,_l:{},...(init||{})};
+  t.addEventListener=(k,f)=>{(t._l[k]=t._l[k]||[]).push(f)};
+  t.classList={add(){},remove(){},toggle(){},contains(){return false}};
+  t.querySelector=s=>document.querySelector(s);t.querySelectorAll=s=>document.querySelectorAll(s);
+  return new Proxy(t,{get(o,k){if(k===Symbol.toPrimitive)return()=>"";if(k in o)return o[k];return function(){return el()}},
+    set(o,k,v){o[k]=v;if(k==="innerHTML"&&o.isBody){dyn={};nodes={}}return true}});
+}
+function bodyHtml(){return store["#detail-body"]?store["#detail-body"].innerHTML:""}
+globalThis.bodyHtml=bodyHtml;
+globalThis.document={
+  querySelector(s){
+    const m=/^#([\w-]+)$/.exec(s);
+    if(!m)return el();
+    if(s==="#detail-body")return store[s]||(store[s]=el({isBody:true}));
+    if(indexIds.has(m[1]))return store[s]||(store[s]=el());
+    if(bodyHtml().includes(`id="${m[1]}"`))return dyn[m[1]]||(dyn[m[1]]=el());
+    return null;
+  },
+  querySelectorAll(s){
+    const m=/\[([\w-]+)\]$/.exec(s.split(",").pop().trim());if(!m)return[];
+    const attr=m[1];if(nodes[attr])return nodes[attr];
+    const found=[];
+    for(const tag of bodyHtml().matchAll(new RegExp(`<\\w+[^>]*\\b${attr}="[^"]*"[^>]*>`,"g"))){
+      const dataset={};for(const a of tag[0].matchAll(/data-([\w-]+)="([^"]*)"/g))dataset[camel(a[1])]=a[2];
+      found.push(el({dataset,parentElement:{querySelector:()=>({value:globalThis.__reason||""})}}));
+    }
+    return nodes[attr]=found;
+  },
+  getElementById(s){return document.querySelector("#"+s)},createElement(){return el()},addEventListener(){},body:el(),documentElement:el()};
+globalThis.window=globalThis;globalThis.addEventListener=()=>{};
+globalThis.localStorage={getItem(){return null},setItem(){}};
+globalThis.fetch=()=>new Promise(()=>{});
+globalThis.Option=function(t,v){return{text:t,value:v}};
+globalThis.FormData=function(form){return form.__entries||[]};
+globalThis.location={hash:"",search:""};globalThis.history={replaceState(){}};
+const harness=`;globalThis.__run=async(sc)=>{
+  const calls=[];
+  api=async(path,opts)=>{calls.push({path,method:opts&&opts.method,body:opts&&opts.body?JSON.parse(opts.body):null});if(sc.fail)throw new Error(sc.fail);return {}};
+  load=async()=>{};openDetail=async()=>{calls.push({reload:true})};
+  detailTaskId=sc.task.id;globalThis.__reason=sc.reason||"";
+  renderDetail(sc.task,[]);
+  const target=sc.click?document.querySelectorAll("["+sc.click[0]+"]").find(n=>Object.values(n.dataset).includes(sc.click[1]))
+    :document.querySelector(sc.submit||sc.button);
+  if(!target)return {missing:true};
+  await new Promise(r=>setTimeout(r,0));calls.length=0;
+  if(sc.entries)target.__entries=sc.entries;
+  const handlers=target._l[sc.submit?"submit":"click"]||[];
+  let threw=null;
+  try{await Promise.all(handlers.map(f=>f({target,preventDefault(){}})))}catch(e){threw=String(e)}
+  const messages={};
+  for(const m of bodyHtml().matchAll(/id="([\\w-]*error)"/g)){const n=document.querySelector("#"+m[1]);if(n&&n.textContent)messages[m[1]]=n.textContent}
+  return {calls,threw,handlers:handlers.length,messages};
+};`;
+(0,eval)(src+harness);
+(async()=>{const out={};for(const [name,sc] of Object.entries(scenarios))out[name]=await globalThis.__run(sc);
+  process.stdout.write(JSON.stringify(out))})().catch(e=>{console.error(e);process.exit(1)});
+"""
+
+
 class _StatusSelect(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -1174,7 +1244,8 @@ class _StatusSelect(HTMLParser):
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
         if tag == "select" and a.get("name") == "status":
-            self.in_select, self.found, self.disabled = True, True, "disabled" in a
+            self.in_select, self.found = True, True
+            self.disabled = "disabled" in a or a.get("aria-disabled") == "true"
         elif tag == "option" and self.in_select:
             self.options.append(a.get("value"))
             self._pending = a.get("value") is None
@@ -1234,6 +1305,8 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
                     self.assertIn("Current: <strong>high</strong>", html)
                     self.assertIn('data-life="reopen"', html)
                     self.assertIn('data-goto-reopen', html)
+                    self.assertIn('id="dep-error"', html)  # the kept Remove (Blocks) has somewhere to report
+                    self.assertNotIn("Go to ", html)
 
     def test_closed_task_keeps_attachments_and_final_result_marking_for_the_owner(self):
         for status in ("completed", "cancelled", "abandoned"):
@@ -1245,6 +1318,18 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
                 self.assertIn('>Reopen</button>', html)
         self.assertIn('data-mark-fr-sub="s1"', self.html["owner-completed"])
         self.assertIn("Request Owner reopening", self.html["manager-cancelled"])
+        self.assertIn(">Reopen task…</button>", self.html["owner-completed"])
+        self.assertIn(">Request reopening…</button>", self.html["manager-completed"])
+
+    def test_manager_status_request_sits_under_reopen_as_the_alternative(self):
+        for status in ("completed", "cancelled", "abandoned"):
+            with self.subTest(status=status):
+                html = self.html[f"manager-{status}"]
+                lifecycle = html[html.index('<div class="lifecycle">'):html.index('<div class="reviewers">')]
+                self.assertLess(lifecycle.index('id="reopen-form"'), lifecycle.index('id="detail-edit"'))
+                self.assertIn("Or, instead of reopening, ask to move it straight back into work.", lifecycle)
+                self.assertIn(">Request status change</button>", lifecycle)
+                self.assertEqual(html.count('id="detail-edit"'), 1)
 
     def test_owner_on_a_closed_task_gets_no_status_select(self):
         for status in ("completed", "cancelled", "abandoned"):
@@ -1269,7 +1354,8 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
                 self.assertTrue(select.found)
                 self.assertTrue(select.disabled)
                 self.assertEqual(select.options, ["submitted"])
-                self.assertIn('aria-describedby="status-locked-hint"', html)
+                self.assertIn('aria-disabled="true" aria-describedby="status-locked-hint"', html)
+                self.assertNotIn(' disabled aria-describedby', html)  # aria-disabled keeps it focusable, so the hint is read
                 self.assertIn('id="status-locked-hint"', html)
                 self.assertIn("Accept or Request changes", html)
                 self.assertIn('name="title"', html)  # the other fields still save on a submitted task
@@ -1285,6 +1371,80 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
         for form in ('id="crit-form"', 'id="parent-form"', 'id="sched-form"', 'id="add-reviewer-button"',
                      'id="add-dep-select"', 'id="detail-edit"'):
             self.assertIn(form, html)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")
+class AstraDetailDialogWiringTests(unittest.TestCase):
+    """ARZWV7: the controls a closed or submitted task keeps still work when clicked."""
+
+    @classmethod
+    def setUpClass(cls):
+        owner_done, manager_done = _detail_task("completed", OWNER_PERMS), _detail_task("completed", MANAGER_PERMS)
+        owner_open, owner_submitted = _detail_task("in_progress", OWNER_PERMS), _detail_task("submitted", OWNER_PERMS)
+        scenarios = {
+            "unlink-successor-closed": {"task": owner_done, "click": ["data-remove-pred", "t1"], "reason": "not needed"},
+            "unlink-successor-closed-refused": {"task": owner_done, "click": ["data-remove-pred", "t1"],
+                                                "fail": "A reason is required."},
+            "unlink-predecessor-open": {"task": owner_open, "click": ["data-remove-pred", "t0"], "reason": "wrong link"},
+            "add-predecessor-open-empty": {"task": owner_open, "button": "#add-dep-button"},
+            "reject-proposal-closed-refused": {"task": owner_done, "click": ["data-reject-sched", "sp1"],
+                                               "fail": "A reason is required."},
+            "save-submitted": {"task": owner_submitted, "submit": "#detail-edit",
+                               "entries": [["expected_revision", "3"], ["title", "Renamed"], ["status", "submitted"],
+                                           ["reason", ""]]},
+            "manager-request-closed": {"task": manager_done, "submit": "#detail-edit",
+                                       "entries": [["expected_revision", "3"], ["status", "in_progress"],
+                                                   ["reason", "more work found"]]},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            driver = Path(tmp) / "wiring.js"
+            driver.write_text(WIRING_DRIVER, encoding="utf-8")
+            static = REPO / "src" / "astra" / "static"
+            result = subprocess.run(["node", str(driver), str(static / "app.js"), str(static / "index.html")],
+                                    input=json.dumps(scenarios), capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise AssertionError(result.stderr)
+        cls.out = json.loads(result.stdout)
+
+    def _ran(self, name):
+        run = self.out[name]
+        self.assertFalse(run.get("missing"), f"{name}: control not rendered")
+        self.assertGreater(run["handlers"], 0, f"{name}: control not wired")
+        self.assertIsNone(run["threw"], f"{name}: {run['threw']}")
+        return run
+
+    def test_unlinking_a_successor_on_a_closed_task_sends_the_request(self):
+        run = self._ran("unlink-successor-closed")
+        self.assertEqual(run["calls"][0], {"path": "/api/task-dependencies", "method": "DELETE",
+                                           "body": {"predecessor_task_id": "t1", "successor_task_id": "t2",
+                                                    "reason": "not needed"}})
+        self.assertIn({"reload": True}, run["calls"])
+
+    def test_a_refused_unlink_on_a_closed_task_shows_the_reason(self):
+        run = self._ran("unlink-successor-closed-refused")
+        self.assertIn("A reason is required.", run["messages"].values())
+
+    def test_dependency_controls_on_an_open_task_still_work(self):
+        run = self._ran("unlink-predecessor-open")
+        self.assertEqual(run["calls"][0]["body"]["predecessor_task_id"], "t0")
+        run = self._ran("add-predecessor-open-empty")
+        self.assertEqual(run["calls"], [])
+        self.assertIn("Choose a predecessor task.", run["messages"].values())
+
+    def test_a_refused_proposal_rejection_on_a_closed_task_shows_the_reason(self):
+        run = self._ran("reject-proposal-closed-refused")
+        self.assertEqual(run["calls"][0]["path"], "/api/schedule-proposals/sp1/reject")
+        self.assertIn("A reason is required.", run["messages"].values())
+
+    def test_saving_a_submitted_task_leaves_the_locked_status_out(self):
+        run = self._ran("save-submitted")
+        body = run["calls"][0]["body"]
+        self.assertEqual(body["title"], "Renamed")
+        self.assertNotIn("status", body)
+
+    def test_manager_status_request_on_a_closed_task_sends_the_status(self):
+        run = self._ran("manager-request-closed")
+        self.assertEqual(run["calls"][0]["body"]["status"], "in_progress")
 
 
 if __name__ == "__main__":

@@ -594,7 +594,6 @@ function renderDetail(task,events){
   const candidates=state.tasks.filter(t=>t.project_id===task.project_id&&t.id!==task.id);
   const addOptions=candidates.map(t=>`<option value="${escapeHtml(t.id)}">${escapeHtml(t.title)}</option>`).join("");
   const timeline=events.slice().reverse().map(renderEvent).join("")||"<li>No history.</li>";
-  const lifecycle=buildLifecycle(task);
   const reviewers=buildReviewers(task,closed);
   const attachments=buildAttachments(task);
   const subtasks=buildSubtasks(task,closed);
@@ -605,21 +604,21 @@ function renderDetail(task,events){
       <label>Reason (evidence for this level)<input name="reason" required></label>
       <div class="actions"><button>Confirm criticality</button></div><div class="error" id="crit-error"></div></form></div>`;
   const closedNote=closed?`<div class="state-note" role="note"><p><strong>${escapeHtml(statusLabel(task.status))}.</strong> Reopen this task to change it.${perms.can_manage_files?" Attachments and final results can still be added.":""}</p>
-    ${canReopen?`<button type="button" class="link" data-goto-reopen>${perms.can_decide_protected?"Go to Reopen":"Go to Request reopening"}</button>`:`<p>Ask the App Owner to reopen it.</p>`}</div>`:"";
+    ${canReopen?`<button type="button" class="link" data-goto-reopen>${perms.can_decide_protected?"Reopen task…":"Request reopening…"}</button>`:`<p>Ask the App Owner to reopen it.</p>`}</div>`:"";
   const statusHint=submitted?`<p class="field-hint" id="status-locked-hint">Status is locked while this work is in review. ${perms.can_decide_protected||perms.can_request_protected?"Use Accept or Request changes under Lifecycle.":"The App Owner will Accept or Request changes."}</p>`:"";
-  const statusField=`<label>Status<select name="status"${submitted?' disabled aria-describedby="status-locked-hint"':""}>${opts}</select></label>`;
+  const statusField=`<label>Status<select name="status"${submitted?' aria-disabled="true" aria-describedby="status-locked-hint"':""}>${opts}</select></label>`;
   const backToWork=BACK_TO_WORK.map(s=>`<option value="${s}">${escapeHtml(statusLabel(s))}</option>`).join("");
-  const editForm=closed?(perms.can_edit_ordinary&&!perms.can_decide_protected?`<form id="detail-edit">
-      <h3>Request a status change</h3>
-      <p class="field-hint">Only a move back into work can be requested. The App Owner decides.</p>
+  const statusRequest=closed&&perms.can_edit_ordinary&&!perms.can_decide_protected?`<form id="detail-edit">
+      <p class="field-hint">Or, instead of reopening, ask to move it straight back into work.</p>
       <input name="expected_revision" type="hidden" value="${task.revision}">
       <div class="grid">
         <label>Status<select name="status" required><option value="">Choose a status…</option>${backToWork}</select></label>
         <label>Reason<input name="reason" required></label>
       </div>
-      <div class="actions"><button>Request Owner change</button></div>
+      <div class="actions"><button>Request status change</button></div>
       <div class="error" id="detail-edit-error"></div>
-    </form>`:""):`<form id="detail-edit">
+    </form>`:"";
+  const editForm=closed?"":`<form id="detail-edit">
       <h3>Edit</h3>
       <input name="expected_revision" type="hidden" value="${task.revision}">
       <label>Title<input name="title" value="${escapeHtml(task.title)}" required></label>
@@ -636,10 +635,10 @@ function renderDetail(task,events){
       <div class="actions"><button value="save">Save changes</button></div>
       <div class="error" id="detail-edit-error"></div>
     </form>`;
+  const lifecycle=buildLifecycle(task,statusRequest);
   const addDep=closed?"":`<div class="add-dep">
         <select id="add-dep-select" aria-label="Predecessor task"><option value="">Add a predecessor…</option>${addOptions}</select>
         <button type="button" id="add-dep-button">Add predecessor</button>
-        <div class="error" id="add-dep-error"></div>
       </div>`;
   // D73AQW: a step opened from the Gantt can return to its parent task.
   const parentLink=task.parent_task_id?`<p class="parent-link"><button type="button" class="link" data-detail="${escapeHtml(task.parent_task_id)}">◂ Parent: ${escapeHtml(task.parent_title||"parent task")}</button></p>`:"";
@@ -662,9 +661,10 @@ function renderDetail(task,events){
       <h3>Dependencies</h3>
       <ul>${deps}</ul>
       ${addDep}
+      <div class="error" id="dep-error" role="alert"></div>
     </div>
     <div class="history"><h3>History</h3><ul>${timeline}</ul></div>`;
-  document.querySelector("#detail-edit")?.addEventListener("submit",submitDetailEdit);
+  document.querySelector("#detail-edit")?.addEventListener("submit",e=>submitDetailEdit(e,{statusLocked:submitted}));
   document.querySelector("#add-dep-button")?.addEventListener("click",addDependency);
   document.querySelector("#detail-body [data-goto-reopen]")?.addEventListener("click",()=>{const f=document.querySelector("#reopen-form");if(!f)return;f.scrollIntoView({behavior:"smooth",block:"center"});f.querySelector("input")?.focus({preventScroll:true})});
   document.querySelector("#detail-body").querySelectorAll("[data-remove-pred]").forEach(b=>b.addEventListener("click",removeDependency));
@@ -758,7 +758,7 @@ async function submitCriticality(e){
   catch(x){err.textContent=x.message}
 }
 
-function buildLifecycle(task){
+function buildLifecycle(task,extra=""){
   const canDecide=task.permissions?.can_decide_protected,canRequest=task.permissions?.can_request_protected;
   const frBySub={};(task.final_results||[]).forEach(f=>{if(f.submission_id)frBySub[f.submission_id]=f.id});
   const subs=(task.submissions||[]).map(s=>{
@@ -794,7 +794,7 @@ function buildLifecycle(task){
   return `<div class="lifecycle"><h3>Lifecycle</h3>
     <p>Status: <strong>${escapeHtml(task.status)}</strong></p>
     <ul class="submissions">${subs}</ul>${actions}
-    <div class="error" id="lifecycle-error"></div></div>`;
+    <div class="error" id="lifecycle-error"></div>${extra}</div>`;
 }
 
 function buildReviewers(task,closed){
@@ -912,10 +912,11 @@ function renderEvent(ev){
 
 function safeParse(text){try{return text?JSON.parse(text):{}}catch{return{}}}
 
-async function submitDetailEdit(e){
+async function submitDetailEdit(e,{statusLocked=false}={}){
   e.preventDefault();
   const form=e.target,error=document.querySelector("#detail-edit-error");error.textContent="";
   const body=Object.fromEntries(new FormData(form));
+  if(statusLocked)delete body.status; // shown for context only; Accept or Request changes moves it
   body.expected_revision=Number(body.expected_revision);
   try{
     const outcome=await api(`/api/tasks/${detailTaskId}`,{method:"POST",body:JSON.stringify(body)});
@@ -925,7 +926,7 @@ async function submitDetailEdit(e){
 }
 
 async function addDependency(){
-  const select=document.querySelector("#add-dep-select"),error=document.querySelector("#add-dep-error");error.textContent="";
+  const select=document.querySelector("#add-dep-select"),error=document.querySelector("#dep-error");error.textContent="";
   const predecessor=select.value;
   if(!predecessor){error.textContent="Choose a predecessor task.";return}
   try{
@@ -935,7 +936,7 @@ async function addDependency(){
 }
 
 async function removeDependency(e){
-  const button=e.target,error=document.querySelector("#add-dep-error");error.textContent="";
+  const button=e.target,error=document.querySelector("#dep-error");error.textContent="";
   const reason=button.parentElement.querySelector(".dep-reason").value;
   try{
     await api("/api/task-dependencies",{method:"DELETE",body:JSON.stringify({predecessor_task_id:button.dataset.removePred,successor_task_id:button.dataset.removeSucc,reason})});
