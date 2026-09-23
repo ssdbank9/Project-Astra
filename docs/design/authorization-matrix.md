@@ -4,7 +4,8 @@ Status: implemented baseline for `HS3JRY` (2026-09-20); reconciled against the
 service, HTTP routes, tests, `README.md` and `CONTEXT.md` on 2026-09-21; import rows
 and the source-status protection added for `C9KPH6` on 2026-09-22 (adversarial
 review AS-1, AS-2, DTJ-03); person resolution in import files scoped to the actor's
-view of the directory the same day (regression review SECURITY-4).
+view of the directory the same day (regression review SECURITY-4); concurrency and
+Owner-request decisions hardened under `SRFCZD` on 2026-09-22.
 
 The service layer is the authorization boundary. HTTP and browser controls must
 call the same `AstraService` methods; hiding a control is not an authorization
@@ -32,12 +33,16 @@ then comes from that project role, not from the Chairman label.
 
 ## Protected action outcome
 
-A permitted Manager or designated approver attempt creates an append-only
+A permitted Manager or designated approver attempt creates one idempotent pending
 `owner_action_requests` row, task/project audit event, and Owner notification.
 The HTTP endpoint returns `202 Accepted` with a `request` object. The original
 task, submission, schedule proposal, checkpoint, or project remains unchanged.
 The Owner can list pending requests through `GET /api/owner-action-requests`, and
-the browser Inbox shows them under **Needs action**.
+the browser Inbox shows them under **Needs action**. The Owner approves, rejects,
+or cancels with `POST /api/owner-action-requests/{id}/decision`; stale task
+revisions return HTTP 409 and leave the request pending. A successful approval and
+the governed action commit together, while a direct equivalent Owner action
+reconciles the matching pending request in the same transaction.
 
 An unauthorized Viewer/member or read-only Chairman attempt is rejected, audited,
 and notified to the Owner when it targets a visible record. A blocked attachment
@@ -60,16 +65,12 @@ codebase. There is therefore no alternate write seam today. Future implementatio
 must enter through the service authorization/request seam and carry the real actor,
 expected revision, and audit attribution.
 
-## Deferred: request decision controls
+## Task update concurrency
 
-Reviewed scope decision for `HS3JRY`: generic approve/reject execution of an
-`owner_action_requests` row is intentionally not implemented in this ticket. The
-Owner Inbox lists pending requests under **Needs action** for visibility only; the
-Owner acts directly on the underlying task or project screen, where the same
-Owner-only service methods apply. A request row therefore stays `pending` until a
-later ticket executes or closes it. Request execution, rejection and their audit
-attribution belong to roadmap Gate 3 (`CLAUDE_CODE_HANDOFF_2026-09-21.md`,
-section 11). This is not an accidental omission.
+`update_task` requires the caller's integer `expected_revision`. The service checks
+it before validation and again in the conditional SQL update inside `BEGIN IMMEDIATE`.
+Concurrent or replayed stale writes raise `Conflict` (HTTP 409), roll back, and emit
+no task event. The browser includes the revision loaded with the detail form.
 
 ## Out of scope: production dashboard overflow
 
