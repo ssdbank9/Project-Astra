@@ -14,3 +14,6 @@ The remaining medium findings are Jaira tickets in todo: EBSJ4J (AS-3), N4KQBB
 (XI3-06); DTJ-04 is covered by WT5TCK on PR #3. Intended merge order: PR #3,
 PR #2, PR #4. The report itself is left as written; `ASTRA_HANDOFF_2026-09-22.md`
 at the repository root carries the current state.
+An independent regression pass (report
+https://claude.ai/artifact/XVS7iGTN3VNgychQJNt7cD) followed on 2026-09-23; see
+"Status as of 2026-09-23" at the top of `ASTRA_HANDOFF_2026-09-22.md`.

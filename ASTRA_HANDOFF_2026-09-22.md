@@ -1,5 +1,95 @@
 # Astra handoff for another assistant — 2026-09-22
 
+## Status as of 2026-09-23 16:45 PKT (11:45 UTC) — handoff to the new thread
+
+Written at Aly's request so that a different Claude session, working from
+Aly's new Slack thread, can continue from Git alone. Everything below was
+verified against `git ls-remote origin` at the time of writing; refresh it with
+`git fetch origin` before acting.
+
+### 1. Branch heads
+
+| Branch | Head | State |
+| --- | --- | --- |
+| `main` | cd59438e | Clean baseline; PR #1 (HS3JRY) merged |
+| `claude/hs3jry-followup-tickets` | 331f988 | PR #3, draft; tickets WT5TCK / 0RSY5C |
+| `claude/gantt-steps` | dc7aa0f | PR #2, draft; Gantt step segments (D73AQW); 126 tests |
+| `claude/excel-import` | 5adec82 | PR #4, draft; Excel/CSV import (C9KPH6); includes PR #2 merged in at 69f36a2; 207 tests; regression-pass fixes 7e533af, e76eb52, c295bb7, 84f5c24, d295d78, 5adec82 |
+| `claude/review-report-2026-09-22` | this branch | Review report, this handoff, follow-up tickets; no PR |
+| `codex/migration-safety-remediation` | f54520b | Built on 5adec82; owned by the Claude session in Aly's new Slack thread since 2026-09-23 11:16 UTC; no PR |
+
+### 2. Merge order and review requirement
+
+Aly set the merge order: PR #3, then PR #2, then PR #4, then the Codex branch.
+All three PRs are still GitHub drafts; Aly marks them ready and merges herself.
+Aly requires a detailed adversarial review before a PR is marked ready. PR #2
+and PR #4 have had one (`docs/reviews/2026-09-22-adversarial-review.md`) plus
+an independent regression pass:
+
+- regression-pass report: https://claude.ai/artifact/XVS7iGTN3VNgychQJNt7cD
+- adversarial-review report: https://claude.ai/artifact/YVvCcB1bs3bAVD9SmU26P1
+
+### 3. Codex branch status (`codex/migration-safety-remediation`)
+
+- Line endings fixed at f54520b: a pure CRLF to LF conversion, `git diff -w`
+  is empty.
+- Still open: `update_task` in `src/astra/service.py` (lines about 601 to 603
+  at f54520b) raises `ValueError` when it is called without an integer
+  `expected_revision`. PR #4's own test files fail 14 tests against that
+  `service.py`, so existing callers need the revision number to be optional
+  (or PR #4's callers must be updated) before the branch merges after PR #4.
+- The branch's own suite: 220/220.
+- Tickets SRFCZD and A836XC live on that branch.
+
+### 4. Follow-up tickets committed on this branch
+
+All in `todo`; none on `main` yet.
+
+- EBSJ4J: login throttle keyed by email lets anyone lock out the Owner
+- N4KQBB: unbounded login attempts
+- T81ZV6: non-atomic legacy migrations (DoD item 5 overlaps A836XC on the
+  Codex branch)
+- GDPJD1: portfolio wrap and contrast
+- VTEM1V: template download caps at 2000 tasks
+- JE5W89: regional CSV dates
+- 0RX7NM: export CSV formula injection in `web.py` `_csv` /
+  `_csv_final_results` (the import side is already fixed in d295d78)
+- DBZ2WM: xlsx_reader `_xHHHH_` / `_x005F_` escapes
+
+### 5. Hosting decision recorded 2026-09-23
+
+Aly stated the app will be hosted on Oracle Cloud as well (Oracle Always Free
+VM, DuckDNS, Caddy per `CODEX_HANDOFF_2026-09-20.md`). Nothing has been
+provisioned or deployed. No infrastructure, credential or exposure steps are
+authorised without Aly's explicit instruction, and Aly performs account and
+credential steps personally.
+
+### 6. Open product question for Aly
+
+Whether an Owner may leave `on_hold` / `changes_requested` / `reopened` via an
+ordinary task edit with a recorded reason (the current behaviour; see
+`LOCKED_SOURCE_STATUSES` vs `MANAGER_ORDINARY_STATUSES` in
+`src/astra/service.py`), or whether a distinct release action should be
+required. Managers already cannot.
+
+### 7. Where the rest lives
+
+- The Slack channel memory for #astra-builder holds decisions and preferences
+  and is shared by every Claude session in the channel.
+- The Jaira board in `.jaira/` is CLI only: never edit tickets by hand, never
+  `jaira init`, never `--force`; agents may move tickets into `human` or
+  `signoff` but never out.
+- This session's Slack thread (ts 1790003172.924309) has the full history.
+
+### 8. Standing rules from Aly (unchanged)
+
+No destructive git. No committing databases, credentials, `.env` files,
+virtual environments, caches, browser fixtures or user workbooks. No deploying,
+exposing a server, creating real users, ingesting private sources, configuring
+Oracle, DuckDNS or Caddy, using external AI, sending notifications or
+publishing private files without explicit approval. Agents open drafts; Aly
+merges.
+
 Prepared for Aly Jafferani, App Owner, and for an AI assistant (Aly's "Astra"
 GPT in ChatGPT) that has no memory of the work so far and will read only this
 repository. Written on 2026-09-22 at about 09:30 UTC, while fixes from the
