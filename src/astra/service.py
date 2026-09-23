@@ -692,6 +692,8 @@ class AstraService:
                 reason or "",
             )
         with transaction(self.db):
+            # An approval re-checks, under the write lock, that its request is still pending.
+            self._assert_active_request_revision(before)
             cursor = self.db.execute(
                 """UPDATE tasks SET title=?,description=?,owner_user_id=?,status=?,criticality=?,start_date=?,due_date=?,
                    progress=?,updated_at=?,revision=revision+1 WHERE id=? AND revision=?""",
@@ -2193,7 +2195,9 @@ class AstraService:
             )
             raise Forbidden("Owner access required for final-result publication.")
         with transaction(self.db):
-            self.db.execute("DELETE FROM final_results WHERE id=?", (result_id,))
+            cursor = self.db.execute("DELETE FROM final_results WHERE id=?", (result_id,))
+            if cursor.rowcount != 1:
+                raise KeyError("Final result not found.")
             self._event(row["task_id"], actor["id"], "final_result_unmarked", {"title": row["title"]}, None, None)
 
     def _get_final_result_for_source(self, task_id: str, source_type: str, source_id: str) -> dict:

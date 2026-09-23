@@ -144,6 +144,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
         self.assertTrue(all(not thread.is_alive() for thread in threads))
         self.assertEqual([result[0] for result in outcomes].count("accepted"), 1, outcomes)
         self.assertEqual([result[0] for result in outcomes].count("error"), 1, outcomes)
+        self.assertEqual([result[1] for result in outcomes if result[0] == "error"], ["Conflict"], outcomes)
         accepted_events = [
             event for event in self.service.task_events(self.owner, task["id"])
             if event["event_type"] == "submission_accepted"
@@ -286,7 +287,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
         )
         accepted_submission = self.service.submit_task(manager, accepted_task["id"], "ready")
         requested = self.service.accept_submission(manager, accepted_submission["id"], "recommend")
-        self.service.decide_owner_action_request(self.owner, requested["request"]["id"], "approved")
+        self._approve_and_assert_resolved(requested["request"], task_id=accepted_task["id"])
         self.assertEqual(self.service.get_task(self.owner, accepted_task["id"])["status"], "completed")
 
         changes_task = self.service.create_task(
@@ -294,7 +295,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
         )
         changes_submission = self.service.submit_task(manager, changes_task["id"], "draft")
         requested = self.service.request_changes(manager, changes_submission["id"], "revise")
-        self.service.decide_owner_action_request(self.owner, requested["request"]["id"], "approved")
+        self._approve_and_assert_resolved(requested["request"], task_id=changes_task["id"])
         self.assertEqual(self.service.get_task(self.owner, changes_task["id"])["status"], "changes_requested")
 
         reopen_task = self.service.create_task(
@@ -303,7 +304,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
         reopen_submission = self.service.submit_task(manager, reopen_task["id"], "done")
         self.service.accept_submission(self.owner, reopen_submission["id"], "accepted")
         requested = self.service.reopen_task(manager, reopen_task["id"], "new scope", "2027-03-01")
-        self.service.decide_owner_action_request(self.owner, requested["request"]["id"], "approved")
+        self._approve_and_assert_resolved(requested["request"], task_id=reopen_task["id"])
         self.assertEqual(self.service.get_task(self.owner, reopen_task["id"])["status"], "reopened")
 
         hold_task = self.service.create_task(
@@ -312,7 +313,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
         requested = self.service.set_on_hold(
             manager, hold_task["id"], "vendor", "2027-04-01", manager["id"]
         )
-        self.service.decide_owner_action_request(self.owner, requested["request"]["id"], "approved")
+        self._approve_and_assert_resolved(requested["request"], task_id=hold_task["id"])
         self.assertEqual(self.service.get_task(self.owner, hold_task["id"])["status"], "on_hold")
 
         schedule_task = self.service.create_task(
@@ -326,14 +327,14 @@ class AstraStateIntegrityTests(unittest.TestCase):
         )
         proposal = self.service.propose_schedule(manager, schedule_task["id"], None, "2027-02-01", "later")
         requested = self.service.approve_schedule_proposal(manager, proposal["id"], "recommend")
-        self.service.decide_owner_action_request(self.owner, requested["request"]["id"], "approved")
+        self._approve_and_assert_resolved(requested["request"], task_id=schedule_task["id"])
         self.assertEqual(self.service.get_task(self.owner, schedule_task["id"])["due_date"], "2027-02-01")
 
         rejected_proposal = self.service.propose_schedule(
             manager, schedule_task["id"], None, "2027-03-01", "too late"
         )
         requested = self.service.reject_schedule_proposal(manager, rejected_proposal["id"], "not suitable")
-        self.service.decide_owner_action_request(self.owner, requested["request"]["id"], "approved")
+        self._approve_and_assert_resolved(requested["request"], task_id=schedule_task["id"])
         self.assertEqual(
             self.service.get_schedule_proposal(self.owner, rejected_proposal["id"])["status"], "rejected"
         )
@@ -341,8 +342,13 @@ class AstraStateIntegrityTests(unittest.TestCase):
         close_project = self.service.create_project(self.owner, "Close dispatch")
         self.service.grant_project_access(self.owner, close_project["id"], manager["id"], "manager")
         requested = self.service.close_project(manager, close_project["id"], "finished")
-        self.service.decide_owner_action_request(self.owner, requested["request"]["id"], "approved")
+        self._approve_and_assert_resolved(requested["request"], project_id=close_project["id"])
         self.assertEqual(self.service.get_project(self.owner, close_project["id"])["status"], "closed")
+
+    def _approve_and_assert_resolved(self, request, task_id=None, project_id=None):
+        decided = self.service.decide_owner_action_request(self.owner, request["id"], "approved")
+        self.assertEqual(decided["request"]["status"], "approved")
+        self._assert_resolved(request, task_id=task_id, project_id=project_id)
 
     # SRFCZD R2: approving a request records the Owner's decision note as the
     # request's decision reason and on protected_action_approved; the governed
@@ -714,6 +720,217 @@ class AstraStateIntegrityTests(unittest.TestCase):
         self.assertEqual(self.service.get_project(self.owner, project["id"])["status"], "active")
         self.assertEqual(self._request_status(request["id"]), "rejected")
         self.assertNotIn("project_closed", self._project_event_types(project["id"]))
+
+
+    # SRFCZD R4: two-connection races. Each call runs on its own connection; both pass
+    # their pre-checks, then meet at a barrier inside service.transaction, so only the
+    # guards inside the transaction can keep the second writer out.
+    def _race(self, *calls):
+        barrier = threading.Barrier(len(calls))
+        local = threading.local()
+        outcomes = [None] * len(calls)
+
+        @contextmanager
+        def synchronized_transaction(connection):
+            if not getattr(local, "waited", False):
+                local.waited = True
+                barrier.wait(timeout=5)
+            with database_transaction(connection):
+                yield
+
+        def run(index, call):
+            connection = connect(self.db_path)
+            try:
+                try:
+                    outcomes[index] = ("ok", call(AstraService(connection)))
+                except Exception as exc:
+                    outcomes[index] = ("error", exc)
+            finally:
+                connection.close()
+
+        with patch.object(service_module, "transaction", synchronized_transaction):
+            threads = [threading.Thread(target=run, args=(index, call)) for index, call in enumerate(calls)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=15)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        return outcomes
+
+    def _one_winner(self, outcomes, loser_type=service_module.Conflict):
+        winners = [value for kind, value in outcomes if kind == "ok"]
+        losers = [value for kind, value in outcomes if kind == "error"]
+        self.assertEqual(len(winners), 1, outcomes)
+        self.assertEqual(len(losers), 1, outcomes)
+        self.assertIs(type(losers[0]), loser_type, outcomes)
+        return winners[0]
+
+    def _task_event_count(self, task_id, event_type):
+        return sum(1 for event in self.service.task_events(self.owner, task_id) if event["event_type"] == event_type)
+
+    def _as(self, user):
+        return lambda service: service.get_user(user["id"])
+
+    def test_concurrent_task_updates_at_one_revision_have_one_winner_and_one_event(self):
+        project = self.service.create_project(self.owner, "Update race")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Original"})
+        owner = self._as(self.owner)
+
+        def update(title):
+            return lambda service: service.update_task(
+                owner(service), task["id"], {"title": title, "expected_revision": task["revision"]}
+            )
+
+        winner = self._one_winner(self._race(update("First writer"), update("Second writer")))
+
+        current = self.service.get_task(self.owner, task["id"])
+        self.assertEqual(current["revision"], task["revision"] + 1)
+        self.assertEqual(current["title"], winner["title"])
+        self.assertEqual(self._task_event_count(task["id"], "task_updated"), 1)
+
+    def test_task_update_refuses_when_task_is_cancelled_before_its_write(self):
+        project = self.service.create_project(self.owner, "Cancelled mid-update")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Original"})
+        other = connect(self.db_path)
+        self.addCleanup(other.close)
+        interleaved = []
+
+        @contextmanager
+        def cancel_first(connection):
+            if connection is self.db and not interleaved:
+                interleaved.append(True)
+                AstraService(other).update_task(self.owner, task["id"], {
+                    "status": "cancelled", "reason": "Owner cancelled", "expected_revision": task["revision"],
+                })
+            with database_transaction(connection):
+                yield
+
+        with patch.object(service_module, "transaction", cancel_first):
+            with self.assertRaises(service_module.Conflict):
+                self.service.update_task(
+                    self.owner, task["id"], {"title": "Late edit", "progress": 50, "expected_revision": task["revision"]}
+                )
+
+        current = self.service.get_task(self.owner, task["id"])
+        self.assertEqual(interleaved, [True])
+        self.assertEqual((current["status"], current["title"]), ("cancelled", "Original"))
+        self.assertEqual(current["revision"], task["revision"] + 1)
+        self.assertEqual(self._task_event_count(task["id"], "task_updated"), 1)
+
+    def test_concurrent_equivalent_manager_requests_create_one_pending_request_and_event(self):
+        project, manager = self._intent_fixture("Request race")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Governed"})
+        payload = {"status": "cancelled", "reason": "Manager recommendation", "expected_revision": task["revision"]}
+        request = lambda service: service.update_task(self._as(manager)(service), task["id"], dict(payload))
+
+        outcomes = self._race(request, request)
+
+        self.assertEqual([kind for kind, _ in outcomes], ["ok", "ok"], outcomes)
+        self.assertEqual(len({value["request"]["id"] for _, value in outcomes}), 1)
+        self.assertEqual(len(self.service.list_owner_action_requests(self.owner)), 1)
+        self.assertEqual(self._task_event_count(task["id"], "protected_action_requested"), 1)
+
+    def test_concurrent_equivalent_close_requests_create_one_pending_request_and_event(self):
+        project, manager = self._intent_fixture("Close request race")
+        self.service.create_task(self.owner, {"project_id": project["id"], "title": "Residual"})
+        request = lambda service: service.close_project(self._as(manager)(service), project["id"], "Residual remains")
+
+        outcomes = self._race(request, request)
+
+        self.assertEqual([kind for kind, _ in outcomes], ["ok", "ok"], outcomes)
+        self.assertEqual(len({value["request"]["id"] for _, value in outcomes}), 1)
+        self.assertEqual(len(self.service.list_owner_action_requests(self.owner)), 1)
+        self.assertEqual(self._project_event_types(project["id"]).count("protected_action_requested"), 1)
+
+    def test_non_owner_cannot_approve_or_reject_a_request(self):
+        project, manager = self._intent_fixture("Non-owner decisions")
+        viewer = self.service.create_user(self.owner, "viewer@example.org", "Viewer", "viewer password safe")
+        self.service.grant_project_access(self.owner, project["id"], viewer["id"], "viewer")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Governed"})
+        request = self.service.update_task(manager, task["id"], {
+            "status": "cancelled", "reason": "Manager recommendation", "expected_revision": task["revision"],
+        })["request"]
+
+        for label, actor in (("manager", manager), ("viewer", viewer)):
+            for decision in ("approved", "rejected"):
+                with self.subTest(actor=label, decision=decision):
+                    with self.assertRaises(service_module.Forbidden):
+                        self.service.decide_owner_action_request(actor, request["id"], decision, "not mine")
+                    self.assertEqual(self._request_status(request["id"]), "pending")
+        self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], "draft")
+
+    def test_stale_hold_approval_is_refused_and_request_stays_pending(self):
+        project, manager = self._intent_fixture("Stale hold")
+        task = self.service.create_task(
+            self.owner, {"project_id": project["id"], "title": "Hold", "owner_user_id": manager["id"]}
+        )
+        request = self.service.set_on_hold(manager, task["id"], "vendor", "2027-04-01", manager["id"])["request"]
+        edited = self.service.update_task(
+            self.owner, task["id"], {"title": "Unrelated edit", "expected_revision": task["revision"]}
+        )
+
+        with self.assertRaises(service_module.Conflict):
+            self.service.decide_owner_action_request(self.owner, request["id"], "approved", "ok")
+
+        current = self.service.get_task(self.owner, task["id"])
+        self.assertEqual((current["status"], current["revision"]), ("draft", edited["revision"]))
+        self._assert_untouched(request, task_id=task["id"])
+        self.assertEqual(self._task_event_count(task["id"], "task_on_hold"), 0)
+
+    def test_concurrent_rejections_have_one_winner_and_one_event(self):
+        project, manager = self._intent_fixture("Reject race")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Governed"})
+        request = self.service.update_task(manager, task["id"], {
+            "status": "cancelled", "reason": "Manager recommendation", "expected_revision": task["revision"],
+        })["request"]
+
+        def reject(note):
+            return lambda service: service.decide_owner_action_request(
+                self._as(self.owner)(service), request["id"], "rejected", note
+            )
+
+        winner = self._one_winner(self._race(reject("first no"), reject("second no")))
+
+        decided = self.service.list_owner_action_requests(self.owner, status="rejected")
+        self.assertEqual([row["decision_reason"] for row in decided], [winner["request"]["decision_reason"]])
+        self.assertEqual(self._task_event_count(task["id"], "protected_action_rejected"), 1)
+
+    def test_status_approval_racing_a_reject_is_refused_without_changing_the_task(self):
+        project, manager = self._intent_fixture("Status approve race")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Governed"})
+        request = self.service.update_task(manager, task["id"], {
+            "status": "cancelled", "reason": "Manager recommendation", "expected_revision": task["revision"],
+        })["request"]
+        other = connect(self.db_path)
+        self.addCleanup(other.close)
+        original = self.service._execute_owner_action_request
+
+        def reject_first(*args, **kwargs):
+            AstraService(other).decide_owner_action_request(self.owner, request["id"], "rejected", "no")
+            return original(*args, **kwargs)
+
+        with patch.object(self.service, "_execute_owner_action_request", side_effect=reject_first):
+            with self.assertRaises(service_module.Conflict):
+                self.service.decide_owner_action_request(self.owner, request["id"], "approved", "ok")
+
+        current = self.service.get_task(self.owner, task["id"])
+        self.assertEqual((current["status"], current["revision"]), ("draft", task["revision"]))
+        self.assertEqual(self._request_status(request["id"]), "rejected")
+        self.assertEqual(self._task_event_count(task["id"], "task_updated"), 0)
+        self.assertEqual(self._approved_event_count(request["id"], task_id=task["id"]), 0)
+
+    def test_concurrent_unmark_final_result_emits_one_event(self):
+        project = self.service.create_project(self.owner, "Unmark race")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Final"})
+        submission = self.service.submit_task(self.owner, task["id"], "done")
+        self.service.accept_submission(self.owner, submission["id"], "accepted")
+        result = self.service.mark_final_result(self.owner, task["id"], "submission", submission["id"])
+        unmark = lambda service: service.unmark_final_result(self._as(self.owner)(service), result["id"])
+
+        self._one_winner(self._race(unmark, unmark), loser_type=KeyError)
+
+        self.assertEqual(self.service.list_task_final_results(self.owner, task["id"]), [])
+        self.assertEqual(self._task_event_count(task["id"], "final_result_unmarked"), 1)
 
 
 if __name__ == "__main__":

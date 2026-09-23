@@ -449,6 +449,48 @@ class AstraWebTests(unittest.TestCase):
         _, detail = self.request("GET", f"/api/tasks/{task['id']}", cookie=owner_cookie)
         self.assertEqual(detail["task"]["status"], "cancelled")
 
+    def test_non_owner_decision_on_a_request_returns_403_and_leaves_it_pending(self):
+        owner_cookie, owner_csrf = self._owner_session()
+        _, project = self.request(
+            "POST", "/api/projects", {"name": "HTTP non-owner decisions"}, cookie=owner_cookie, csrf=owner_csrf
+        )
+        project_id = project["project"]["id"]
+        for email, name, role in (
+            ("forbidden-manager@example.org", "Forbidden Manager", "manager"),
+            ("forbidden-viewer@example.org", "Forbidden Viewer", "viewer"),
+        ):
+            _, user = self.request("POST", "/api/users", {
+                "email": email, "display_name": name, "password": f"{role} password safe", "role": "member",
+            }, cookie=owner_cookie, csrf=owner_csrf)
+            self.request("POST", "/api/project-access", {
+                "project_id": project_id, "user_id": user["user"]["id"], "role": role,
+            }, cookie=owner_cookie, csrf=owner_csrf)
+        manager_cookie, manager_csrf = self._login_as("forbidden-manager@example.org", "manager password safe")
+        viewer_cookie, viewer_csrf = self._login_as("forbidden-viewer@example.org", "viewer password safe")
+        _, created = self.request(
+            "POST", "/api/tasks", {"project_id": project_id, "title": "Governed"}, cookie=owner_cookie, csrf=owner_csrf
+        )
+        task = created["task"]
+        response, requested = self.request("POST", f"/api/tasks/{task['id']}", {
+            "status": "cancelled", "reason": "Manager recommends cancellation", "expected_revision": task["revision"],
+        }, cookie=manager_cookie, csrf=manager_csrf)
+        self.assertEqual(response.status, 202)
+        request_id = requested["request"]["id"]
+
+        for label, cookie, csrf in (("manager", manager_cookie, manager_csrf), ("viewer", viewer_cookie, viewer_csrf)):
+            for decision in ("approved", "rejected"):
+                with self.subTest(actor=label, decision=decision):
+                    response, _ = self.request(
+                        "POST", f"/api/owner-action-requests/{request_id}/decision",
+                        {"decision": decision, "reason": "not mine"}, cookie=cookie, csrf=csrf,
+                    )
+                    self.assertEqual(response.status, 403)
+
+        _, queue = self.request("GET", "/api/owner-action-requests", cookie=owner_cookie)
+        self.assertEqual([(r["id"], r["status"]) for r in queue["requests"]], [(request_id, "pending")])
+        _, detail = self.request("GET", f"/api/tasks/{task['id']}", cookie=owner_cookie)
+        self.assertEqual(detail["task"]["status"], "draft")
+
     def test_stylesheet_declares_each_bare_class_once_and_the_import_dialog_uses_namespaced_classes(self):
         # Merged-state review MS-1..MS-6: the Gantt steps (D73AQW) and the import dialog (C9KPH6)
         # both declared bare .step, .chip and .muted, so whichever rule came last repainted the
