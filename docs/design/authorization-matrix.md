@@ -40,7 +40,9 @@ task, submission, schedule proposal, checkpoint, or project remains unchanged.
 The Owner can list pending requests through `GET /api/owner-action-requests`, and
 the browser Inbox shows them under **Needs action**. The Owner approves, rejects,
 or cancels with `POST /api/owner-action-requests/{id}/decision`; stale task
-revisions return HTTP 409 and leave the request pending. A successful approval and
+revisions return HTTP 409 and leave the request pending, as does approving a project
+closure whose open tasks or their statuses no longer match the request's recorded
+residual set. A successful approval and
 the governed action commit together, while a direct equivalent Owner action
 reconciles the matching pending request in the same transaction. A direct Owner
 action resolves only pending requests with the same intent (for example the same

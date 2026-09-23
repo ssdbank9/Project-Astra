@@ -632,5 +632,89 @@ class AstraStateIntegrityTests(unittest.TestCase):
                     self._assert_untouched(request, project_id=project["id"])
 
 
+    # SRFCZD R3: approving a Manager's close request re-checks, inside the close
+    # transaction, that the open work is still the residual set the request recorded.
+    # A changed set refuses with 409 and leaves the project open and the request pending.
+    def _close_request_fixture(self, name):
+        project, manager = self._intent_fixture(name)
+        self.service.create_task(self.owner, {"project_id": project["id"], "title": "Residual A"})
+        request = self.service.close_project(manager, project["id"], "A remains")["request"]
+        self.assertTrue(json.loads(request["payload_json"])["exceptional"])
+        return project, manager, request
+
+    def _project_event_types(self, project_id):
+        return [event["event_type"] for event in self.service.project_events(self.owner, project_id)]
+
+    def test_close_approval_refuses_when_open_work_changed_since_request(self):
+        project, _, request = self._close_request_fixture("Close changed")
+        self.service.create_task(self.owner, {"project_id": project["id"], "title": "Residual B"})
+        _, manager = self._intent_fixture("Close changed plain")
+        plain = self.service.create_project(self.owner, "Close changed from none")
+        self.service.grant_project_access(self.owner, plain["id"], manager["id"], "manager")
+        plain_request = self.service.close_project(manager, plain["id"], "finished")["request"]
+        self.assertFalse(json.loads(plain_request["payload_json"])["exceptional"])
+        self.service.create_task(self.owner, {"project_id": plain["id"], "title": "Late work"})
+        status_project, _, status_request = self._close_request_fixture("Close status changed")
+        residual = self.service.list_tasks(self.owner, status_project["id"])[0]
+        self.service.update_task(
+            self.owner, residual["id"], {"status": "in_progress", "reason": "Started", "expected_revision": residual["revision"]}
+        )
+
+        for label, target, pending in (
+            ("task added", project, request),
+            ("non-exceptional request now has work", plain, plain_request),
+            ("residual status changed", status_project, status_request),
+        ):
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(
+                    service_module.Conflict, "open work changed since this close was requested"
+                ):
+                    self.service.decide_owner_action_request(self.owner, pending["id"], "approved", "ok")
+                self.assertEqual(self.service.get_project(self.owner, target["id"])["status"], "active")
+                self._assert_untouched(pending, project_id=target["id"])
+                self.assertNotIn("project_closed", self._project_event_types(target["id"]))
+
+    def test_close_approval_succeeds_when_open_work_is_unchanged(self):
+        project, _, request = self._close_request_fixture("Close unchanged")
+
+        decided = self.service.decide_owner_action_request(self.owner, request["id"], "approved", "ok")
+
+        self.assertEqual(decided["request"]["status"], "approved")
+        closed = self.service.get_project(self.owner, project["id"])
+        self.assertEqual(closed["status"], "closed")
+        self.assertEqual(closed["closure_is_exceptional"], 1)
+        self._assert_resolved(request, project_id=project["id"])
+
+    def test_direct_owner_close_with_changed_work_behaves_as_before(self):
+        project, _, request = self._close_request_fixture("Close direct")
+        self.service.create_task(self.owner, {"project_id": project["id"], "title": "Residual B"})
+
+        closed = self.service.close_project(self.owner, project["id"], "A and B remain", exceptional=True)
+
+        self.assertEqual(closed["status"], "closed")
+        self._assert_untouched(request, project_id=project["id"])
+        self.assertIn("project_closed", self._project_event_types(project["id"]))
+
+    def test_close_approval_racing_a_reject_rolls_back_without_closing(self):
+        project, _, request = self._close_request_fixture("Close race")
+        original = self.service._execute_owner_action_request
+
+        def reject_first(*args, **kwargs):
+            with database_transaction(self.db):
+                self.db.execute(
+                    "UPDATE owner_action_requests SET status='rejected', decision_reason='no' WHERE id=?",
+                    (request["id"],),
+                )
+            return original(*args, **kwargs)
+
+        with patch.object(self.service, "_execute_owner_action_request", side_effect=reject_first):
+            with self.assertRaisesRegex(service_module.Conflict, "pending request changed"):
+                self.service.decide_owner_action_request(self.owner, request["id"], "approved", "ok")
+
+        self.assertEqual(self.service.get_project(self.owner, project["id"])["status"], "active")
+        self.assertEqual(self._request_status(request["id"]), "rejected")
+        self.assertNotIn("project_closed", self._project_event_types(project["id"]))
+
+
 if __name__ == "__main__":
     unittest.main()

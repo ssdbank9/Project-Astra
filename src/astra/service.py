@@ -2285,7 +2285,8 @@ class AstraService:
                 {"note": note, "exceptional": bool(outstanding), "residual_work": outstanding},
                 note,
             )
-        if outstanding:
+        # An approval is re-checked against its request inside the transaction below.
+        if outstanding and not getattr(self, "_active_owner_request_id", None):
             if not exceptional:
                 raise ValueError("This project has outstanding work; an exceptional owner closure is required.")
             if not note:
@@ -2300,6 +2301,27 @@ class AstraService:
                 " AND status NOT IN ('completed','cancelled','abandoned') ORDER BY title COLLATE NOCASE",
                 (project_id,),
             ).fetchall()]
+            request_id = getattr(self, "_active_owner_request_id", None)
+            if request_id:
+                row = self.db.execute(
+                    "SELECT project_id,action,payload_json FROM owner_action_requests WHERE id=? AND status='pending'",
+                    (request_id,),
+                ).fetchone()
+                if not row or row["project_id"] != project_id or row["action"] != "close_project":
+                    raise Conflict("Owner-action request conflict: the pending request changed.")
+                requested = json.loads(row["payload_json"])
+                requested_work = {item["id"]: item.get("status") for item in requested.get("residual_work") or []}
+                current_work = {item["id"]: item["status"] for item in outstanding}
+                if (
+                    bool(requested.get("exceptional")) != bool(outstanding)
+                    or requested_work.keys() != current_work.keys()
+                    or any(status is not None and status != current_work[task_id]
+                           for task_id, status in requested_work.items())
+                ):
+                    raise Conflict(
+                        "Project closure conflict: the project's open work changed since this close was "
+                        "requested; review and decide again."
+                    )
             if outstanding and not exceptional:
                 raise Conflict("Project closure conflict: outstanding work now requires exceptional closure.")
             if outstanding and not note:
