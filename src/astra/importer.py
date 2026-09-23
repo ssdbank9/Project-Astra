@@ -2698,6 +2698,18 @@ class ImportEngine:
         if existing and result.level != "error":
             touched = bool(plan["fields"] or plan["new_people"] or plan["new_attachments"] or plan["new_predecessors"]
                            or plan["parent_change"] or plan["baseline_due"] or plan["entities"])
+            if touched and existing["status"] in CLOSED:
+                # T8WHJR: a completed, cancelled or abandoned task is a fixed record; only the
+                # governed reopen in Astra changes it, so nothing in this row is applied. The
+                # commit re-validates inside its write transaction, so a task closed after the
+                # preview is caught there too (the plan fingerprint then differs: HTTP 409).
+                result.add("warning", "W_CLOSED_TASK",
+                           f"This task is {existing['status']}, a fixed record, so none of this row's changes were "
+                           "applied. Reopen the task in Astra first (reason and revised due date), then import again.")
+                plan.update(fields={}, new_people=[], new_attachments=[], new_predecessors=[], parent_change=False,
+                            baseline_due=None, entities=[], criticality_change=None, closed_skip=True)
+                result.changes = {}
+                touched = False
             result.action = "update" if touched else "unchanged"
         if result.level == "error":
             result.action = "error"
@@ -2712,6 +2724,19 @@ class ImportEngine:
             "milestone": bool(plan.get("milestone") if plan.get("milestone") is not None else (existing or {}).get("is_milestone")),
             "next_action": plan["next_action"], "extras": plan["extras"],
         }
+        if plan.get("closed_skip"):  # show what is stored, not the row that was not applied
+            result.values.update(
+                title=existing.get("title") or "", start_date=display_date(existing.get("start_date")),
+                due_date=display_date(existing.get("due_date")), criticality=existing.get("criticality") or "Unrated",
+                owner=self._owner_name(existing) if existing.get("owner_user_id") else "",
+                parent_key=self._key_of_task(existing.get("parent_task_id")),
+                predecessors=sorted(self._key_of_task(pred) for pred, succ in self.existing_edges if succ == existing["id"]),
+                milestone=bool(existing.get("is_milestone")), next_action=existing.get("next_action_note") or "",
+            )
+            try:
+                result.values["extras"] = json.loads(existing["import_extras"]) if existing.get("import_extras") else {}
+            except ValueError:
+                result.values["extras"] = {}
 
     def _owner_name(self, task: dict) -> str:
         row = self.db.execute("SELECT display_name FROM users WHERE id=?", (task.get("owner_user_id"),)).fetchone()

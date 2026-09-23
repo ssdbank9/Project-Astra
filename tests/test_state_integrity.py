@@ -1326,5 +1326,185 @@ class AstraStateIntegrityTests(unittest.TestCase):
         self.service.reopen_task(self.owner, task["id"], "Owner reopens", "2027-08-01")
         self._assert_resolved(request, task_id=task["id"])
 
+    # T8WHJR: a completed, cancelled or abandoned task is a fixed record. Only the
+    # governed reopen (reason and revised due date) changes it; evidence (attachment
+    # links, final results) may still be added after closure.
+    def _closed_fixture(self, name):
+        project, manager = self._intent_fixture(name)
+        neighbour = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Open neighbour"})
+        closed = []
+        for status in ("completed", "cancelled", "abandoned"):
+            task = self.service.create_task(
+                self.owner, {"project_id": project["id"], "title": f"Closed {status}", "owner_user_id": manager["id"]}
+            )
+            self.service.add_task_dependency(self.owner, neighbour["id"], task["id"])
+            proposal = self.service.propose_schedule(self.owner, task["id"], "2027-01-04", "2027-01-08", "planned move")
+            if status == "completed":
+                submission = self.service.submit_task(manager, task["id"], "done")
+                self.service.accept_submission(self.owner, submission["id"], "accepted")
+            else:
+                current = self.service.get_task(self.owner, task["id"])
+                self.service.update_task(self.owner, task["id"], {
+                    "status": status, "reason": "closing", "expected_revision": current["revision"],
+                })
+            closed.append((self.service.get_task(self.owner, task["id"]), proposal))
+        return project, manager, neighbour, closed
+
+    def _snapshot(self, task_id):
+        task = self.service.get_task(self.owner, task_id)
+        dependencies = sorted(
+            (row["predecessor_task_id"], row["successor_task_id"])
+            for row in self.service.get_task_dependencies(self.owner, task_id)
+        )
+        proposals = sorted(
+            (row["id"], row["status"]) for row in self.service.list_schedule_proposals(self.owner, task_id)
+        )
+        return task, dependencies, proposals, len(self.service.task_events(self.owner, task_id))
+
+    def test_closed_task_refuses_structural_and_schedule_writes_until_reopened(self):
+        project, manager, neighbour, closed = self._closed_fixture("Closed writes")
+        parent = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Would-be parent"})
+        requests_before = len(self.service.list_owner_action_requests(self.owner, status=None))
+        for task, proposal in closed:
+            for actor in (self.owner, manager):
+                role = actor["global_role"] if actor is self.owner else "manager"
+                writes = {
+                    "set_parent": lambda: self.service.set_parent(actor, task["id"], parent["id"]),
+                    "confirm_criticality": lambda: self.service.confirm_criticality(
+                        actor, task["id"], "critical", "late evidence"),
+                    "propose_schedule": lambda: self.service.propose_schedule(
+                        actor, task["id"], "2027-02-01", "2027-02-05", "late move"),
+                    "approve_schedule_proposal": lambda: self.service.approve_schedule_proposal(
+                        actor, proposal["id"], "approve late"),
+                    "add_task_dependency": lambda: self.service.add_task_dependency(
+                        actor, parent["id"], task["id"]),
+                    "remove_task_dependency": lambda: self.service.remove_task_dependency(
+                        actor, neighbour["id"], task["id"], "late unlink"),
+                }
+                for name, write in writes.items():
+                    with self.subTest(status=task["status"], role=role, write=name):
+                        before = self._snapshot(task["id"])
+                        with self.assertRaisesRegex(ValueError, "reopen the task first") as refused:
+                            write()
+                        self.assertIs(type(refused.exception), ValueError)  # 400 from the pre-check, not 409
+                        self.assertEqual(self._snapshot(task["id"]), before)
+        self.assertEqual(len(self.service.list_owner_action_requests(self.owner, status=None)), requests_before)
+
+    def test_closed_task_writes_work_again_after_the_governed_reopen(self):
+        project, manager, neighbour, closed = self._closed_fixture("Closed reopen")
+        task, _ = closed[0]
+        self.service.reopen_task(self.owner, task["id"], "more work", "2027-03-01")
+        self.assertEqual(self.service.set_parent(self.owner, task["id"], neighbour["id"])["parent_task_id"],
+                         neighbour["id"])
+        self.assertEqual(self.service.confirm_criticality(self.owner, task["id"], "high", "evidence")["criticality"],
+                         "high")
+        self.service.remove_task_dependency(self.owner, neighbour["id"], task["id"], "unlink")
+
+    def test_closed_task_may_be_a_predecessor_and_still_takes_evidence(self):
+        project, manager, neighbour, closed = self._closed_fixture("Closed evidence")
+        task, _ = closed[0]  # completed
+        successor = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Open successor"})
+        for actor in (self.owner, manager):
+            with self.subTest(role="owner" if actor is self.owner else "manager"):
+                added = self.service.add_task_dependency(actor, task["id"], successor["id"])
+                self.assertTrue(added["created"])
+                self.service.remove_task_dependency(actor, task["id"], successor["id"], "test unlink")
+        revision = self.service.get_task(self.owner, task["id"])["revision"]
+        attachment = self.service.add_task_attachment(self.owner, task["id"], "/data/signed-after-close.pdf")
+        submission_id = self.db.execute(
+            "SELECT id FROM task_submissions WHERE task_id=?", (task["id"],)).fetchone()["id"]
+        result = self.service.mark_final_result(self.owner, task["id"], "submission", submission_id)
+        self.service.unmark_final_result(self.owner, result["id"])
+        self.service.remove_task_attachment(self.owner, task["id"], attachment["id"])
+        current = self.service.get_task(self.owner, task["id"])
+        self.assertEqual((current["status"], current["revision"]), ("completed", revision))
+
+    def test_update_task_on_a_closed_task_with_no_change_writes_nothing(self):
+        project, manager, neighbour, closed = self._closed_fixture("Closed no-op")
+        for task, _ in closed:
+            payloads = (
+                {"reason": "just a note"},
+                {"title": task["title"], "reason": "same title"},
+                {},
+            )
+            for payload in payloads:
+                with self.subTest(status=task["status"], payload=sorted(payload)):
+                    before = self._snapshot(task["id"])
+                    with self.assertRaisesRegex(ValueError, "reopen the task first"):
+                        self.service.update_task(
+                            self.owner, task["id"], {**payload, "expected_revision": task["revision"]}
+                        )
+                    self.assertEqual(self._snapshot(task["id"]), before)
+
+    def _cancel_between_precheck_and_write(self, task):
+        other = connect(self.db_path)
+        self.addCleanup(other.close)
+        interleaved = []
+
+        @contextmanager
+        def cancel_first(connection):
+            if connection is self.db and not interleaved:
+                interleaved.append(True)
+                current = AstraService(other).get_task(self.owner, task["id"])
+                AstraService(other).update_task(self.owner, task["id"], {
+                    "status": "cancelled", "reason": "Owner cancelled", "expected_revision": current["revision"],
+                })
+            with database_transaction(connection):
+                yield
+
+        return interleaved, cancel_first
+
+    def test_writes_refuse_when_the_task_is_cancelled_before_their_write(self):
+        project = self.service.create_project(self.owner, "Cancelled mid-write")
+        parent = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Parent"})
+        neighbour = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Neighbour"})
+        writes = {
+            "set_parent": lambda task: self.service.set_parent(self.owner, task["id"], parent["id"]),
+            "confirm_criticality": lambda task: self.service.confirm_criticality(
+                self.owner, task["id"], "critical", "evidence"),
+            "propose_schedule": lambda task: self.service.propose_schedule(
+                self.owner, task["id"], "2027-02-01", "2027-02-05", "move"),
+            "add_task_dependency": lambda task: self.service.add_task_dependency(
+                self.owner, parent["id"], task["id"]),
+            "remove_task_dependency": lambda task: self.service.remove_task_dependency(
+                self.owner, neighbour["id"], task["id"], "unlink"),
+        }
+        for name, write in writes.items():
+            with self.subTest(write=name):
+                task = self.service.create_task(self.owner, {"project_id": project["id"], "title": f"Racing {name}"})
+                self.service.add_task_dependency(self.owner, neighbour["id"], task["id"])
+                interleaved, cancel_first = self._cancel_between_precheck_and_write(task)
+                with patch.object(service_module, "transaction", cancel_first):
+                    with self.assertRaises(service_module.Conflict):
+                        write(task)
+                self.assertEqual(interleaved, [True])
+                current = self.service.get_task(self.owner, task["id"])
+                self.assertEqual(current["status"], "cancelled")
+                self.assertIsNone(current["parent_task_id"])
+                self.assertIsNone(current["criticality"])
+                self.assertEqual(
+                    sorted(r["predecessor_task_id"] for r in self.service.get_task_dependencies(self.owner, task["id"])),
+                    [neighbour["id"]],
+                )
+                self.assertEqual(self.service.list_schedule_proposals(self.owner, task["id"]), [])
+                self.assertEqual(
+                    [e["event_type"] for e in self.service.task_events(self.owner, task["id"])],
+                    ["task_created", "dependency_added", "task_updated"],
+                )
+
+    def test_schedule_approval_refuses_when_the_task_is_cancelled_before_its_write(self):
+        project = self.service.create_project(self.owner, "Cancelled mid-approval")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Racing approval"})
+        proposal = self.service.propose_schedule(self.owner, task["id"], "2027-02-01", "2027-02-05", "move")
+        interleaved, cancel_first = self._cancel_between_precheck_and_write(task)
+        with patch.object(service_module, "transaction", cancel_first):
+            with self.assertRaises(service_module.Conflict):
+                self.service.approve_schedule_proposal(self.owner, proposal["id"], "approve")
+        self.assertEqual(interleaved, [True])
+        current = self.service.get_task(self.owner, task["id"])
+        self.assertEqual((current["status"], current["start_date"], current["due_date"]), ("cancelled", None, None))
+        self.assertEqual(self.service.get_schedule_proposal(self.owner, proposal["id"])["status"], "pending")
+        self.assertEqual(self._task_event_count(task["id"], "schedule_revised"), 0)
+
 if __name__ == "__main__":
     unittest.main()

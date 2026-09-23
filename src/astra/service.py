@@ -636,15 +636,13 @@ class AstraService:
         # could never approve a generic request into these statuses.
         if status_changed and status in GOVERNED_STATUSES:
             raise ValueError(f"Use the dedicated {status.replace('_', ' ')} action for this transition.")
-        ordinary_fields = (
-            "title", "description", "owner_user_id", "criticality",
-            "start_date", "due_date", "progress",
-        )
-        if before["status"] in REOPEN_ONLY_STATUSES and not status_changed and any(
-            key in payload and before.get(key) != merged.get(key) for key in ordinary_fields
-        ):
+        # T8WHJR: with the status unchanged, a closed task has nothing an update may write, so
+        # the call is refused even when no field differs (a reason-only save must not bump the
+        # revision or add a task_updated event). The revision predicate below keeps a task
+        # closed after this check out of the write.
+        if before["status"] in REOPEN_ONLY_STATUSES and not status_changed:
             raise ValueError(
-                f"A {before['status']} task is immutable; use the dedicated reopen task action before editing it."
+                f"A {before['status']} task is immutable; reopen the task first with the dedicated reopen task action."
             )
         if criticality != (before.get("criticality") or None):
             raise ValueError("Use the confirm criticality action to change criticality.")
@@ -721,6 +719,21 @@ class AstraService:
                     decision_reason=reason or "",
                 )
         return after
+
+    # T8WHJR (Aly Jafferani, 2026-09-23): a completed, cancelled or abandoned task is a fixed
+    # record. reopen_task (reason and revised due date) is the only write that changes it;
+    # attachment links and final results may still be added, since evidence often arrives
+    # after closure, and a closed task may still become the predecessor of an open task.
+    @staticmethod
+    def _refuse_closed(task: dict) -> None:
+        if task["status"] in REOPEN_ONLY_STATUSES:
+            raise ValueError(f"A {task['status']} task is a fixed record; reopen the task first.")
+
+    def _refuse_closed_in_transaction(self, task_id: str) -> None:
+        """Re-read the status under the write lock: a task closed after the pre-check is a 409."""
+        row = self.db.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if row and row["status"] in REOPEN_ONLY_STATUSES:
+            raise Conflict(f"The task was {row['status']} before this change could be saved; reopen the task first.")
 
     def get_task(self, actor: dict, task_id: str) -> dict:
         task = row_dict(self.db.execute(
@@ -1751,6 +1764,7 @@ class AstraService:
         task = self.get_task(actor, task_id)
         if not self.can_manage_project(actor, task["project_id"]):
             raise Forbidden("Task-management access denied.")
+        self._refuse_closed(task)
         parent_task_id = parent_task_id or None
         if parent_task_id:
             if parent_task_id == task_id:
@@ -1764,6 +1778,7 @@ class AstraService:
         timestamp = now_text()
         before = {"parent_task_id": task.get("parent_task_id")}
         with transaction(self.db):
+            self._refuse_closed_in_transaction(task_id)
             self.db.execute(
                 "UPDATE tasks SET parent_task_id=?, updated_at=?, revision=revision+1 WHERE id=?",
                 (parent_task_id, timestamp, task_id),
@@ -1775,6 +1790,7 @@ class AstraService:
         task = self.get_task(actor, task_id)
         if not self.can_manage_project(actor, task["project_id"]):
             raise Forbidden("Task-management access denied.")
+        self._refuse_closed(task)
         criticality = criticality or None
         if criticality not in CRITICALITIES:
             raise ValueError("Invalid criticality.")
@@ -1786,6 +1802,7 @@ class AstraService:
             raise ValueError("Criticality is already set to that level.")
         timestamp = now_text()
         with transaction(self.db):
+            self._refuse_closed_in_transaction(task_id)
             self.db.execute(
                 "UPDATE tasks SET criticality=?, updated_at=?, revision=revision+1 WHERE id=?",
                 (criticality, timestamp, task_id),
@@ -2459,6 +2476,7 @@ class AstraService:
         task = self.get_task(actor, task_id)
         if not self.can_manage_project(actor, task["project_id"]):
             raise Forbidden("Task-management access denied.")
+        self._refuse_closed(task)
         reason = str(reason).strip()
         if not reason:
             raise ValueError("A reason is required to propose a schedule change.")
@@ -2467,6 +2485,7 @@ class AstraService:
             raise ValueError("Due date cannot be earlier than start date.")
         proposal_id, timestamp = new_id(), now_text()
         with transaction(self.db):
+            self._refuse_closed_in_transaction(task_id)
             self.db.execute(
                 "INSERT INTO task_schedule_proposals(id,task_id,start_date,due_date,reason,proposed_by,proposed_at,status)"
                 " VALUES(?,?,?,?,?,?,?,'pending')",
@@ -2484,6 +2503,7 @@ class AstraService:
         task = self.get_task(actor, proposal["task_id"])
         if proposal["status"] != "pending":
             raise ValueError("Only a pending schedule proposal can be approved.")
+        self._refuse_closed(task)
         if actor["global_role"] != "owner":
             return self._request_protected_action(
                 actor,
@@ -2501,6 +2521,7 @@ class AstraService:
             task = self.get_task(actor, proposal["task_id"])
             if task["revision"] != expected_task_revision:
                 raise Conflict("Task revision conflict: the task changed before schedule approval began.")
+            self._refuse_closed_in_transaction(task["id"])
             self._assert_active_request_revision(task)
             if proposal["status"] != "pending":
                 raise Conflict("Schedule decision conflict: this proposal is no longer pending.")
@@ -2586,6 +2607,8 @@ class AstraService:
             raise ValueError("A task cannot depend on itself.")
         if dependency_type != "finish_to_start":
             raise ValueError("Only finish-to-start dependencies are currently supported.")
+        # Only the successor changes; a closed task may still be added as a predecessor.
+        self._refuse_closed(successor)
         value = {
             "predecessor_task_id": predecessor_task_id,
             "successor_task_id": successor_task_id,
@@ -2593,6 +2616,7 @@ class AstraService:
             "created": True,
         }
         with transaction(self.db):
+            self._refuse_closed_in_transaction(successor_task_id)
             existing = self.db.execute(
                 """SELECT 1 FROM task_dependencies
                    WHERE predecessor_task_id=? AND successor_task_id=?""",
@@ -2625,6 +2649,7 @@ class AstraService:
         successor = self.get_task(actor, successor_task_id)
         if not self.can_manage_project(actor, successor["project_id"]):
             raise Forbidden("Task-management access denied.")
+        self._refuse_closed(successor)
         reason = str(reason).strip()
         if not reason:
             raise ValueError("A reason is required to remove a dependency.")
@@ -2641,6 +2666,7 @@ class AstraService:
             "dependency_type": existing["dependency_type"],
         }
         with transaction(self.db):
+            self._refuse_closed_in_transaction(successor_task_id)
             self.db.execute(
                 """DELETE FROM task_dependencies
                    WHERE predecessor_task_id=? AND successor_task_id=?""",

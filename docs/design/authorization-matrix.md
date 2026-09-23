@@ -5,7 +5,8 @@ service, HTTP routes, tests, `README.md` and `CONTEXT.md` on 2026-09-21; import 
 and the source-status protection added for `C9KPH6` on 2026-09-22 (adversarial
 review AS-1, AS-2, DTJ-03); person resolution in import files scoped to the actor's
 view of the directory the same day (regression review SECURITY-4); concurrency and
-Owner-request decisions hardened under `SRFCZD` on 2026-09-22.
+Owner-request decisions hardened under `SRFCZD` on 2026-09-22; closed tasks made fixed
+records outside reopen under `T8WHJR` on 2026-09-23.
 
 The service layer is the authorization boundary. HTTP and browser controls must
 call the same `AstraService` methods; hiding a control is not an authorization
@@ -25,6 +26,7 @@ decision.
 | Download the import template (blank, or pre-filled with a project's tasks) or read the template configuration (`import_template`, `get_import_template_config`) | Yes | Yes; the pre-filled download for managed projects only | No (403) | No (403) |
 | Resolve the people an import file names (Owner Email, Collaborators, Reviewers, Approvers, People sheet) | Against every account, with the precise reason for a miss (`W_UNRESOLVED_PERSON` / `W_PERSON_NOT_ELIGIBLE`; People statuses `unknown_user`, `inactive`, `no_access`) | Against the `list_assignable_users` set only (active members of the target project, App Owner, chairman); every miss is the one neutral `W_PERSON_NOT_ELIGIBLE` text and People status `no_access`, so a preview cannot enumerate accounts | No import | No import |
 | Move a task *out of* completed, cancelled, abandoned, submitted, on hold, changes requested or reopened (`update_task` with such a source status, or an import row that changes the status) | Completed, cancelled, abandoned: only through `reopen_task` (reason and revised due date, `task_reopened`); submitted: only through the submission decision; on hold, changes requested, reopened: `update_task` with a reason (no dedicated release action exists). An import row never changes it (`W_GOVERNED_STATUS`) | Creates a pending Owner request `update_task_status` whose payload names `from_status` (HTTP 202); live state unchanged. Leaving submitted, or a target of on hold, completed or reopened, is refused with HTTP 400 and no request, as for the Owner (use the dedicated action). An import row keeps the stored status (`W_PROTECTED_STATUS`) | Blocked | Blocked |
+| Change a completed, cancelled or abandoned task in any other way: `update_task` with the status unchanged (even a reason-only save), `set_parent` on it, `confirm_criticality`, `propose_schedule`, `approve_schedule_proposal`, `add_task_dependency` / `remove_task_dependency` with it as the successor, or an import row for it | Refused with HTTP 400 "reopen the task first" until `reopen_task`; a task closed while the write is in flight is refused with 409; an import row is skipped whole (`W_CLOSED_TASK`). Attachment links, final-result mark/unmark and adding it as the predecessor of an open task stay allowed | Refused the same way; no Owner request is created. An import row is skipped whole (`W_CLOSED_TASK`) | Blocked | Blocked |
 
 `Chairman` is retained as an organization-wide read role for compatibility. It
 no longer grants implicit mutation power through `can_manage_project`. A person

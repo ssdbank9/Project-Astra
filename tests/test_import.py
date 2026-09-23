@@ -427,6 +427,83 @@ class ImportServiceTests(unittest.TestCase):
                 self.assertEqual((result["update"], result["unchanged"]), (0, 3))
                 self.assertEqual(stored(), ["completed", "on_hold", "cancelled"])
 
+    def test_import_row_for_a_closed_task_is_skipped_for_either_role(self):
+        # T8WHJR: a completed, cancelled or abandoned task is a fixed record; only the governed
+        # reopen changes it. The status was already locked (AS-2) but title, dates, progress,
+        # criticality, parent, predecessors, people and attachment links still applied.
+        config = self.enable_all_columns()
+        seed = [{"import_key": "O-1", "title": "Open parent", "status": "In progress"},
+                {"import_key": "O-2", "title": "Open predecessor", "status": "In progress"},
+                {"import_key": "P-1", "title": "Done", "status": "Completed", "start_date": "2026-09-01",
+                 "due_date": "2026-09-05", "progress": 100},
+                {"import_key": "P-2", "title": "Dropped", "status": "Cancelled"},
+                {"import_key": "P-3", "title": "Gone", "status": "Abandoned"}]
+        self.service.import_commit(self.owner, self.project["id"], "seed.xlsx", filled_template(seed, config), {}, None)
+        closed_keys = ("P-1", "P-2", "P-3")
+        self.assertEqual([self.task_by_key(k)["status"] for k in closed_keys], ["completed", "cancelled", "abandoned"])
+
+        def snapshot():
+            state = {}
+            for key in closed_keys:
+                task = self.task_by_key(key)
+                state[key] = (
+                    self.service.get_task(self.owner, task["id"]),
+                    self.service.list_task_reviewers(self.owner, task["id"]),
+                    [a["path"] for a in self.service.list_task_attachments(self.owner, task["id"])],
+                    [d for d in self.service.get_task_dependencies(self.owner, task["id"]) if d["direction"] == "incoming"],
+                    len(self.service.task_events(self.owner, task["id"])),
+                )
+            return state
+
+        # An unedited re-upload of closed rows is quiet: nothing would change.
+        preview = self.service.import_preview(self.owner, self.project["id"], "same.xlsx", filled_template(seed, config))
+        for row in preview["rows"]:
+            self.assertNotIn("W_CLOSED_TASK", self.codes(row))
+        before = snapshot()
+        edit = [dict(row) for row in seed[:2]] + [
+            dict(row, title=f"{row['title']} edited", start_date="2027-01-04", due_date="2027-01-08", progress=40,
+                 criticality="Critical", parent_key="O-1", predecessors="O-2", collaborators="jamal@example.org",
+                 reviewers="waseem@example.org", attachment_links="\\\\server\\late.pdf", description="late words",
+                 next_action="late action", milestone="Yes")
+            for row in seed[2:]
+        ] + [{"import_key": "N-1", "title": "New after closed", "predecessors": "P-1"}]
+        for actor in (self.owner, self.waseem):
+            with self.subTest(actor=actor["email"]):
+                data = filled_template(edit, config)
+                preview = self.service.import_preview(actor, self.project["id"], "edit.xlsx", data)
+                by_key = {row["import_key"]: row for row in preview["rows"]}
+                for key in closed_keys:
+                    row = by_key[key]
+                    self.assertIn("W_CLOSED_TASK", self.codes(row))
+                    self.assertEqual(row["action"], "unchanged")
+                    self.assertEqual(row["changes"], {})
+                    message = next(f["message"] for f in row["findings"] if f["code"] == "W_CLOSED_TASK")
+                    self.assertIn("reopen the task", message.lower())
+                result = self.service.import_commit(actor, self.project["id"], "edit.xlsx", data, {}, None)
+                self.assertEqual(result["update"], 0, result)
+                self.assertEqual(snapshot(), before)
+        # A closed task may still be the predecessor of an open task created by the file.
+        new_task = self.task_by_key("N-1")
+        self.assertEqual([d["predecessor_task_id"] for d in self.service.get_task_dependencies(self.owner, new_task["id"])],
+                         [self.task_by_key("P-1")["id"]])
+
+    def test_import_commit_refuses_when_the_task_closed_after_the_preview(self):
+        # T8WHJR: the commit re-validates inside its write transaction; a task cancelled between
+        # preview and commit turns the row from "update" into a skipped row, so the plan differs.
+        seed = [{"import_key": "C-1", "title": "Open", "status": "In progress"}]
+        self.commit(self.owner, seed)
+        data = filled_template([dict(seed[0], title="Edited", progress=30)])
+        preview = self.service.import_preview(self.owner, self.project["id"], "late.xlsx", data)
+        self.assertEqual(preview["rows"][0]["action"], "update")
+        task = self.task_by_key("C-1")
+        self.service.update_task(self.owner, task["id"], {
+            "status": "cancelled", "reason": "Owner cancelled", "expected_revision": task["revision"]})
+        cancelled = self.service.get_task(self.owner, task["id"])
+        with self.assertRaises(importer.ImportConflict):
+            self.service.import_commit(self.owner, self.project["id"], "late.xlsx", data, {}, preview["sha256"],
+                                       preview["plan_fingerprint"])
+        self.assertEqual(self.service.get_task(self.owner, task["id"]), cancelled)
+
     def test_non_finite_or_huge_numbers_in_a_custom_number_column_are_errors(self):
         # DI-4 / XI3-02: nan / inf reached import_extras and the JSON bodies as NaN / Infinity.
         config = self.service.get_import_template_config(self.owner)

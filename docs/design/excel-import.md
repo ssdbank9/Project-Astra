@@ -28,6 +28,8 @@ actions in a row are skipped with a warning, never silently applied:
 target of the change, and equally as the status the task would be moved *out of*: a
 Manager's row cannot take a completed, on-hold, cancelled or submitted task back into work),
 `W_BASELINE_SKIPPED` (Original Due Date), `W_ATTACHMENTS_SKIPPED`, `W_ENTITY_SKIPPED`.
+For the Owner and a Manager alike, a row for a completed, cancelled or abandoned task is
+skipped whole with `W_CLOSED_TASK` (see "Closed tasks").
 
 ## Before a Manager imports: users and access
 
@@ -219,7 +221,7 @@ and People sheets.
 | Start Date (core), Due Date (core) | `tasks.start_date` / `due_date` | real Excel date, `dd-mm-yyyy` or `yyyy-mm-dd` text; a bare serial number follows the workbook's date system (1900 or 1904); prose is an error |
 | Duration (days) | derived | fills the missing one of Start/Due |
 | Original Due Date | `tasks.baseline_due_date` | Owner only; never overwrites an existing baseline |
-| Status (core) | `tasks.status` | labels or synonyms (Not Started, Done, Delayed/At Risk, Blocked ...); on update, Submitted, Completed, On hold, Reopened and Changes requested are never set by import (`W_GOVERNED_STATUS`), and a task is never moved *out of* Submitted, Completed, On hold, Reopened, Changes requested, Cancelled or Abandoned either (`W_GOVERNED_STATUS` for the Owner, `W_PROTECTED_STATUS` for a Manager; the stored status stays and the change is made in Astra through its lifecycle action) |
+| Status (core) | `tasks.status` | labels or synonyms (Not Started, Done, Delayed/At Risk, Blocked ...); on update, Submitted, Completed, On hold, Reopened and Changes requested are never set by import (`W_GOVERNED_STATUS`), and a task is never moved *out of* Submitted, Completed, On hold, Reopened, Changes requested, Cancelled or Abandoned either (`W_GOVERNED_STATUS` for the Owner, `W_PROTECTED_STATUS` for a Manager; the stored status stays and the change is made in Astra through its lifecycle action). A row for an existing **Completed, Cancelled or Abandoned** task changes nothing at all, see "Closed tasks" below |
 | % Complete | `tasks.progress` | 0..100, `45%` and `0.45` accepted; a %-formatted Excel cell is read as displayed (stored 1.0 shown as 100% -> 100) |
 | Criticality | `tasks.criticality` | Critical, High, Normal, Low or blank |
 | Predecessors | `task_dependencies` (finish-to-start) | `;`-separated Import Keys; `FS+2d` suffixes are recorded in Notes with `W_LAG_IGNORED` |
@@ -228,6 +230,22 @@ and People sheets.
 | Reason (if delayed or changed) | `task_events.reason` | default `Excel import <file> row <n>` |
 | Notes | `tasks.description` "Notes:" section | also receives anything that could not be stored exactly |
 | Attachment Links | `task_attachments` | Owner only; links, never bytes |
+
+### Closed tasks (`W_CLOSED_TASK`)
+
+A completed, cancelled or abandoned task is a fixed record: only the governed reopen in
+Astra (reason and revised due date) changes it (App Owner decision, 2026-09-23, ticket
+T8WHJR). A row whose Import Key names such a task is therefore skipped as a whole, for the
+Owner and for a Manager alike: no title, description, owner, dates, progress, criticality,
+milestone, next action, custom value, parent, predecessor, person or attachment link from
+the row is applied. When the row would have changed anything it carries the warning
+`W_CLOSED_TASK` ("This task is completed, a fixed record, so none of this row's changes were
+applied. Reopen the task in Astra first ..."), its action is `unchanged` and the preview
+shows the stored values; an unedited row for a closed task stays quiet. Other rows may still
+name a closed task as their predecessor or parent, since that changes only the open task.
+The commit re-validates inside its write transaction, so a task closed between preview and
+commit is caught there: the plan fingerprint then differs and the commit is refused with
+HTTP 409.
 
 ### Owner configuration (`import_template_config`)
 
@@ -326,9 +344,10 @@ and one `imports` row (actor, filename, SHA-256, summary JSON, full CSV report).
 Any exception rolls everything back; when the unique `(project_id, import_key)` index
 fires because another writer took a key between preview and commit, the rollback is
 reported as HTTP 409 with a "run the preview again" message, not 500. Import never
-deletes a task, a link or a dependency, never overwrites a baseline and never moves a
+deletes a task, a link or a dependency, never overwrites a baseline, never moves a
 task into `submitted`, `completed`, `on_hold`, `reopened` or `changes_requested` on
-update (`W_GOVERNED_STATUS`; each needs the record its lifecycle action writes).
+update (`W_GOVERNED_STATUS`; each needs the record its lifecycle action writes) and never
+writes to a completed, cancelled or abandoned task (`W_CLOSED_TASK`).
 
 `GET /api/imports` lists imports (Owner: all; Manager: their own and their managed
 projects). `GET /api/imports/<id>/report.csv` downloads the stored report
