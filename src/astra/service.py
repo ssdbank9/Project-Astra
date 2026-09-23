@@ -671,6 +671,16 @@ class AstraService:
             # refused for a Manager as well (SEM-2): only the submission decision does it.
             if before["status"] == "submitted":
                 raise ValueError("A submitted task leaves review through the dedicated accept or request changes action.")
+            # SRFCZD R6 (R5-1): from a terminal status only a move back into ordinary work
+            # may become a Manager request, which reopen then reconciles (handoff 7.1). Any
+            # other target (cancelled, abandoned, changes_requested) could never be approved
+            # or resolved, so it is refused for a Manager too, with the Owner's message.
+            reopen_refusal = (
+                f"A {before['status']} task is not edited back into work; use the dedicated reopen task action "
+                "(reason and revised due date) so the reopening is recorded."
+            )
+            if before["status"] in REOPEN_ONLY_STATUSES and status not in REOPEN_EQUIVALENT_STATUSES:
+                raise ValueError(reopen_refusal)
             if actor["global_role"] != "owner":
                 return self._request_protected_action(
                     actor,
@@ -681,10 +691,7 @@ class AstraService:
                     reason or "",
                 )
             if before["status"] in REOPEN_ONLY_STATUSES:
-                raise ValueError(
-                    f"A {before['status']} task is not edited back into work; use the dedicated reopen task action "
-                    "(reason and revised due date) so the reopening is recorded."
-                )
+                raise ValueError(reopen_refusal)
         if status_changed and actor["global_role"] != "owner" and status in PROTECTED_STATUSES:
             return self._request_protected_action(
                 actor,

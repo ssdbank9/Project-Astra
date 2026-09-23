@@ -236,6 +236,42 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(queue["requests"][0]["requested_by_name"], "HTTP Manager")
 
+    # SRFCZD R6 (R5-1): a Manager's generic edit from a terminal status to another
+    # terminal status is a 400 with the Owner's message, never an unapprovable request.
+    def test_manager_terminal_to_terminal_update_is_400_without_a_request(self):
+        owner_cookie, owner_csrf = self._owner_session()
+        _, project = self.request(
+            "POST", "/api/projects", {"name": "Terminal HTTP"}, cookie=owner_cookie, csrf=owner_csrf
+        )
+        project_id = project["project"]["id"]
+        _, manager = self.request("POST", "/api/users", {
+            "email": "terminal-manager@example.org", "display_name": "Terminal Manager",
+            "password": "manager password safe", "role": "member",
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        self.request("POST", "/api/project-access", {
+            "project_id": project_id, "user_id": manager["user"]["id"], "role": "manager",
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        manager_cookie, manager_csrf = self._login_as("terminal-manager@example.org", "manager password safe")
+        _, task = self.request("POST", "/api/tasks", {
+            "project_id": project_id, "title": "Cancelled work",
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        task_id = task["task"]["id"]
+        response, cancelled = self.request("POST", f"/api/tasks/{task_id}", {
+            "status": "cancelled", "reason": "Owner cancels", "expected_revision": task["task"]["revision"],
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        self.assertEqual(response.status, 200)
+
+        response, error = self.request("POST", f"/api/tasks/{task_id}", {
+            "status": "abandoned", "reason": "Manager asks",
+            "expected_revision": cancelled["task"]["revision"],
+        }, cookie=manager_cookie, csrf=manager_csrf)
+
+        self.assertEqual(response.status, 400)
+        self.assertIn("A cancelled task is not edited back into work", error["error"])
+        response, queue = self.request("GET", "/api/owner-action-requests", cookie=owner_cookie)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(queue["requests"], [])
+
     def _login_as(self, email, password):
         response, login = self.request("POST", "/api/login", {"email": email, "password": password})
         self.assertEqual(response.status, 200)

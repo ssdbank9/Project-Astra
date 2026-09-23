@@ -555,23 +555,36 @@ class AstraStateIntegrityTests(unittest.TestCase):
                 )
                 self._assert_untouched(request, task_id=task["id"])
 
-    def test_direct_reopen_leaves_terminal_cancel_or_abandon_request_pending(self):
+    # SRFCZD R6 (R5-1): a terminal task's generic edit into another terminal or governed
+    # status is refused for a Manager before any request exists (no Owner approval or
+    # direct action could ever resolve it), so reopen only ever meets back-to-work
+    # requests. It resolves the matching ones and leaves every other request pending.
+    def test_direct_reopen_resolves_only_matching_requests(self):
         project, manager = self._intent_fixture("Intent reopen")
         for requested in ("cancelled", "abandoned"):
             with self.subTest(requested=requested):
                 task = self._completed_task(project, manager, f"Reopen {requested}")
-                request = self.service.update_task(
-                    manager, task["id"],
-                    {"status": requested, "reason": "Manager wants it closed out",
-                     "expected_revision": task["revision"]},
-                )["request"]
-                self.service.reopen_task(self.owner, task["id"], "Owner reopens instead", "2027-08-01")
-                self._assert_untouched(request, task_id=task["id"])
+                with self.assertRaisesRegex(ValueError, "not edited back into work"):
+                    self.service.update_task(
+                        manager, task["id"],
+                        {"status": requested, "reason": "Manager wants it closed out",
+                         "expected_revision": task["revision"]},
+                    )
+                self.assertEqual(
+                    [r for r in self.service.list_owner_action_requests(self.owner, status=None)
+                     if r["task_id"] == task["id"]],
+                    [],
+                )
 
         task = self._completed_task(project, manager, "Reopen matching")
+        sibling = self._completed_task(project, manager, "Reopen sibling")
         back_to_work = self.service.update_task(
             manager, task["id"],
             {"status": "in_progress", "reason": "More work", "expected_revision": task["revision"]},
+        )["request"]
+        sibling_back_to_work = self.service.update_task(
+            manager, sibling["id"],
+            {"status": "in_progress", "reason": "More work", "expected_revision": sibling["revision"]},
         )["request"]
         same_date = self.service.reopen_task(manager, task["id"], "More work", "2027-08-01")["request"]
         other_date = self.service.reopen_task(manager, task["id"], "Much later", "2030-12-31")["request"]
@@ -579,6 +592,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
         self._assert_resolved(back_to_work, task_id=task["id"])
         self._assert_resolved(same_date, task_id=task["id"])
         self._assert_untouched(other_date, task_id=task["id"])
+        self._assert_untouched(sibling_back_to_work, task_id=sibling["id"])
 
     def test_direct_schedule_decision_resolves_only_the_same_proposal(self):
         project, manager = self._intent_fixture("Intent schedule")
@@ -1177,8 +1191,8 @@ class AstraStateIntegrityTests(unittest.TestCase):
 
 
     # SRFCZD R5 (RT-1): every governed action re-checks its Owner request inside its own
-    # transaction. A reject that lands after the approval's pre-checks refuses the
-    # approval with 409 and leaves the task, its record and the rejection as they were.
+    # transaction. A reject that lands at the lock, after the approval's pre-checks, refuses
+    # the approval with 409 and leaves the task, its record and the rejection as they were.
     def test_each_action_approval_racing_a_reject_is_refused_without_changing_the_task(self):
         project, manager = self._intent_fixture("Guard race")
 
@@ -1234,22 +1248,30 @@ class AstraStateIntegrityTests(unittest.TestCase):
         )
         other = connect(self.db_path)
         self.addCleanup(other.close)
-        original = self.service._execute_owner_action_request
         for action, make in cases:
             with self.subTest(action=action):
                 task_id, request, record_status = make(f"Race {action}")
                 self.assertEqual(request["action"], action)
                 before = self.service.get_task(self.owner, task_id)
                 record_before = record_status()
+                interleaved = []
 
-                def reject_first(*args, **kwargs):
-                    AstraService(other).decide_owner_action_request(self.owner, request["id"], "rejected", "no")
-                    return original(*args, **kwargs)
+                # SRFCZD R6 (R5-2): the reject lands at the lock, after every pre-check the
+                # action runs before `with transaction` and before its BEGIN IMMEDIATE, so
+                # only a guard inside the transaction can refuse the approval.
+                @contextmanager
+                def reject_at_the_lock(connection):
+                    if connection is self.db and not interleaved:
+                        interleaved.append(True)
+                        AstraService(other).decide_owner_action_request(self.owner, request["id"], "rejected", "no")
+                    with database_transaction(connection):
+                        yield
 
-                with patch.object(self.service, "_execute_owner_action_request", side_effect=reject_first):
+                with patch.object(service_module, "transaction", reject_at_the_lock):
                     with self.assertRaisesRegex(service_module.Conflict, "pending request changed"):
                         self.service.decide_owner_action_request(self.owner, request["id"], "approved", "ok")
 
+                self.assertEqual(interleaved, [True])
                 current = self.service.get_task(self.owner, task_id)
                 fields = ("status", "revision", "due_date")
                 self.assertEqual([current[f] for f in fields], [before[f] for f in fields])
@@ -1556,6 +1578,60 @@ class AstraStateIntegrityTests(unittest.TestCase):
                     self.assertEqual(self._task_event_count(task["id"], "protected_action_requested"), 0)
                     self.assertEqual(len(self.service.list_owner_action_requests(self.owner, status=None)),
                                      requests_before)
+
+    # SRFCZD R6 (R5-1): from completed, cancelled or abandoned, a Manager's generic edit to
+    # any status that is not ordinary work (cancelled, abandoned, changes_requested) is
+    # refused with the Owner's message and creates no request: the Owner could never
+    # approve it (400) and reopen reconciles only back-to-work requests. Terminal back to
+    # ordinary work still becomes a request (handoff 7.1), for every terminal source.
+    def test_manager_generic_update_refuses_terminal_to_non_work_targets(self):
+        project, manager = self._intent_fixture("Terminal generic")
+
+        def make(source, title):
+            if source == "completed":
+                return self._completed_task(project, manager, title)
+            task = self.service.create_task(
+                self.owner, {"project_id": project["id"], "title": title, "owner_user_id": manager["id"]}
+            )
+            return self.service.update_task(
+                self.owner, task["id"],
+                {"status": source, "reason": "Owner closes it", "expected_revision": task["revision"]},
+            )
+
+        for source in ("completed", "cancelled", "abandoned"):
+            owner_message = (
+                f"A {source} task is not edited back into work; use the dedicated reopen task action "
+                "(reason and revised due date) so the reopening is recorded."
+            )
+            for target in ("cancelled", "abandoned", "changes_requested"):
+                if target == source:
+                    continue
+                with self.subTest(source=source, target=target):
+                    task = make(source, f"{source} to {target}")
+                    self.assertEqual(task["status"], source)
+                    events_before = len(self.service.task_events(self.owner, task["id"]))
+                    for actor in (manager, self.owner):
+                        with self.assertRaises(ValueError) as caught:
+                            self.service.update_task(
+                                actor, task["id"],
+                                {"status": target, "reason": "Asks", "expected_revision": task["revision"]},
+                            )
+                        self.assertEqual(str(caught.exception), owner_message)
+                    current = self.service.get_task(self.owner, task["id"])
+                    self.assertEqual((current["status"], current["revision"]), (source, task["revision"]))
+                    self.assertEqual(len(self.service.task_events(self.owner, task["id"])), events_before)
+                    self.assertEqual(self.service.list_owner_action_requests(self.owner, status=None), [])
+
+        for source in ("completed", "cancelled", "abandoned"):
+            with self.subTest(source=source, target="in_progress"):
+                task = make(source, f"{source} back to work")
+                request = self.service.update_task(
+                    manager, task["id"],
+                    {"status": "in_progress", "reason": "More work", "expected_revision": task["revision"]},
+                )["request"]
+                self.assertEqual(json.loads(request["payload_json"])["from_status"], source)
+                self.service.reopen_task(self.owner, task["id"], "Owner reopens", "2027-08-01")
+                self._assert_resolved(request, task_id=task["id"])
 
 if __name__ == "__main__":
     unittest.main()
