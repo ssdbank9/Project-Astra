@@ -1,7 +1,7 @@
 ---
 id: 01M37E291XMP18KQPDXV0D9Q3X
 title: "Owner inbox: show the requested status and reason, and reload the task after a 409"
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -19,13 +19,17 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:27:36Z
-updated-at: 2026-09-23T17:14:14Z
+updated-at: 2026-09-23T17:24:20Z
 updated-by: Claude
 claimed-by: vm-19186
 claimed-at: 2026-09-23T16:39:03Z
-outcome-what: "Inbox requests show target/from status, reason and an Open task link; a 409 from task edit, lifecycle actions or an inbox decision reloads the task/inbox and says it changed since it was opened; inbox errors inline"
-outcome-why: "Owner approved requests blind and users kept editing stale revisions after a 409"
-outcome-resolves: "DoD 1: requestDetail in renderInbox; DoD 2: api() err.status + reloadTaskAfterConflict + decideOwnerRequest 409 branch; DoD 3: 6 node-driven tests, 290 tests OK, node --check clean"
+outcome-what: "Independent review approved 0D9Q3X"
+outcome-why: "Diff meets the definition of done; all findings low"
+outcome-resolves: "review fields set; awaiting human signoff"
+review-summary: "The Owner inbox now shows each request as '<Action> · <task or project>' with the requested status change using readable labels (e.g. 'Change status from Cancelled to In progress'), the requester's reason (escaped, or a muted 'No reason given.'), who asked and when, and an Open task link for task requests. api() now attaches the HTTP status to the error it throws. On a 409 from the Edit form or a lifecycle form (submit, accept, request changes, reopen, hold) the page reloads the task list and the task, says 'This task changed since you opened it, so nothing was saved' plus what happens next, shows the server's reason in smaller grey text, and moves focus to that message. On a 409 from an inbox decision it reloads the inbox and says the request can no longer be approved (reject or cancel it) or was already decided elsewhere. Inbox errors appear inline with role=alert instead of alert() pop-ups. A 400 keeps what the user typed. Only src/astra/static/app.js, style.css, README.md and tests/test_web.py changed; no server, database or permission code changed, so the server remains the authority."
+review-gaps: "All low severity. (1) The escaping of the server's reason inside the conflict note (showConflict, <small class=conflict-detail>) is not covered by a test; removing escapeHtml there survives the AstraDetailDialogWiringTests. (2) Focus falls to <body> after Open task -> save -> Close, because the close listener re-renders the inbox and destroys the Open task button. (3) A close-project conflict shows two instructions: 'reject or cancel' on the first line and the server's 'review and decide again' under it. (4) Only Edit, lifecycle forms and inbox decisions reload on a 409; the criticality, schedule-proposal, parent, dependency and reviewer forms still show the raw 409 and keep the stale form, which is narrower than the goal's 'anywhere in the task dialog' (DoD is scoped to edit, submit, decision) - follow-up ticket recommended. (5) README says every inbox request shows an Open task link; project-level requests (Close project) have none. (6) Two pending requests with the same action and task cannot be told apart in the stale-request message, and the failed row is not marked. (7) No live human browser acceptance yet: browser checks were Playwright runs on synthetic data by the builder and the reviewer."
+review-verdict: Approve — independent reviewer
+review-check: "1. cd /workspace/project-astra && git checkout codex/migration-safety-remediation && git pull --ff-only  2. .venv/bin/python tests/run.py  -> ends with OK (all tests pass)  3. cd tests && PYTHONPATH=../src ../.venv/bin/python -m unittest -v test_web  -> OK, including the 0D9Q3X AstraDetailDialogWiringTests  4. Start Astra bound to 127.0.0.1 with a throwaway database, sign in as a Manager and request a status change on a task with a reason  5. Sign in as the Owner and open the inbox: the row reads bold '<Action> · <task title>', then 'Change status from X to Y', the reason in italics, and 'Requested by ... · Open task'  6. In a second browser tab change that task so the request is stale, then Approve in the first tab: the inbox reloads and says the request can no longer be approved and to reject or cancel it, with the server reason in small grey text, and keyboard focus is on that message  7. Open a task's Edit form in two tabs, save in one, then save in the other: 'This task changed since you opened it, so nothing was saved' appears at the top, the form shows the latest version, and nothing you typed was saved  8. Submit the Edit form with an invalid value (400): your typed values stay and the server message shows"
 ---
 
 # Owner inbox: show the requested status and reason, and reload the task after a 409
