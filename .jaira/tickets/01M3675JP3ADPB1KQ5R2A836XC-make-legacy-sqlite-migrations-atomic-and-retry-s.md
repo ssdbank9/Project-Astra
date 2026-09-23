@@ -16,14 +16,18 @@ follows: 01M3549XTPENM6MSYCG2SRFCZD
 commits:
   - 3fd31ec0094798b867aadfa5e94a5de9fb9b7906
 created-at: 2026-09-23T04:07:50Z
-updated-at: 2026-09-23T04:33:25Z
-updated-by: Aly Jafferani
+updated-at: 2026-09-23T12:08:05Z
+updated-by: Claude
 claimed-by: X1CarbonPC-33252
 claimed-at: 2026-09-23T04:17:12Z
 outcome-what: "Replaced every v1-v12 sqlite3.executescript migration call with complete-statement execution through connection.execute inside the existing per-version BEGIN IMMEDIATE transaction; documented the contract and added rollback, retry, parser, legacy-upgrade, and schema-equivalence regressions."
 outcome-why: "executescript committed the surrounding transaction before running, so a DDL failure could leave partial tables, columns, or indexes while user_version remained stale and future starts failed."
 outcome-resolves: "Injected failures in v1, v5, and v12 now leave the prior schema and user_version intact, retries reach v13, legacy and fresh SQLite catalogs match, focused migration tests pass 8/8, and the complete suite passes 220/220 with syntax and diff checks clean."
 executed-by: Codex
+review-summary: "Shipped: every v1-v12 migration now runs through _execute_statements, which splits the script only at complete SQLite statements and runs each with connection.execute inside that version's BEGIN IMMEDIATE, so the DDL and PRAGMA user_version commit or roll back together. Tests add rollback-and-retry cases for v1, v5 and v12, a v4 upgrade compared with a fresh v13 catalog, and a quoted-semicolon and incomplete-SQL parser check."
+review-gaps: "1) The committed fault tests cover only v1, v5 and v12: putting executescript back in any of v2, v3, v4, v6-v11, or moving the v3 or v8 user_version bump outside its transaction, leaves tests.test_db green. The runtime behaviour was independently verified for every version (148 injected faults plus 26 hard-kill cases, all rolled back and retried to a catalog identical to fresh). 2) Pre-existing, not introduced here: migrate() reads user_version once outside the lock, so a second process migrating the same old database at the same moment fails with 'table ... already exists' (the database still ends at a correct v13). 3) Databases already half-applied by the old executescript code at v1-v12 stay stuck; only v13 is idempotent. 4) Four tests leave SQLite handles open when an assertion fails (a Windows cleanup error would hide the real failure). 5) The 'legacy v4' database is synthesised by the current code, not historical code; independent upgrades from real historical v11 and v12 databases matched fresh. 6) The ticket says 7/7 migration tests in one place and 8/8 elsewhere; 8 is correct."
+review-verdict: "Definition of done met at runtime; no defect introduced. Test proof is narrower than the claim (3 of 12 legacy versions). Recommend signoff with follow-up tickets for per-version fault tests and re-reading user_version inside each step. Independent review by Claude, 2026-09-23."
+review-check: "1. cd to the repo and run: .venv/bin/python -m unittest -v tests.test_db ; expect 8 tests and OK. 2. Run: .venv/bin/python tests/run.py ; expect 'Ran 220 tests' and OK. 3. Run: grep -n executescript src/astra/db.py ; expect only comment or docstring lines, no code call. 4. There is no UI path; migrations run when the app opens its database."
 ---
 
 # Make legacy SQLite migrations atomic and retry-safe
@@ -53,3 +57,4 @@ executed-by: Codex
 
 ## Progress
 - **2026-09-23 04:32 · Aly Jafferani** — The first red v1 regression proved six tables persisted with user_version 0. Its initial failing assertion left the SQLite handle open and produced a secondary Windows cleanup error; the test now closes in finally so failures remain unambiguous. Jaira ticket creation also initially failed to record its coordination outbox under the sandbox, although the local ticket file was created; narrow permission to the project-specific .jaira state directory restored normal board writes.
+- **2026-09-23 12:08 · Claude** — Review 2026-09-23 (Claude): runtime atomicity verified for all 13 versions with injected faults and hard kills; committed tests cover v1, v5, v12 only. Move to signoff waits on Aly allowing reassignment (not_owner gate). Follow-ups to file: per-version parameterised fault test; re-read user_version inside each step's BEGIN IMMEDIATE (concurrent migrators). T81ZV6 on claude/review-report-2026-09-22 overlaps this ticket's scope.
