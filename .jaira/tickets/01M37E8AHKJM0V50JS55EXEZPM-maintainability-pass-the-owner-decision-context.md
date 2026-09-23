@@ -1,7 +1,7 @@
 ---
 id: 01M37E8AHKJM0V50JS55EXEZPM
 title: "Maintainability: pass the Owner decision context explicitly instead of _active_owner_request_id"
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -20,13 +20,17 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:30:54Z
-updated-at: 2026-09-23T17:21:12Z
+updated-at: 2026-09-23T17:35:59Z
 updated-by: Claude
 claimed-by: vm-32730
 claimed-at: 2026-09-23T17:11:29Z
-outcome-what: "Replaced AstraService._active_owner_request_id/_active_owner_decision_reason with a frozen OwnerDecision passed as keyword-only owner_decision through the 8 governed actions into _assert_active_request_revision, _resolve_pending_requests and close_project; added two re-entrancy regression tests"
-outcome-why: "Hidden mutable instance state let a nested or shared-instance call inherit or clear another approval's context"
+outcome-what: "Independent review approved the explicit OwnerDecision refactor with three low findings recorded as gaps"
+outcome-why: "Diff meets all three DoD items; full suite green at 289; 8 of 9 mutations caught"
 outcome-resolves: EXEZPM
+review-summary: "The AstraService instance flags _active_owner_request_id and _active_owner_decision_reason are removed. A frozen OwnerDecision(request_id, reason) dataclass (src/astra/service.py:96) is built in _execute_owner_action_request and passed as keyword-only owner_decision to the 8 governed actions (update_task, accept_submission, request_changes, reopen_task, set_on_hold, approve_schedule_proposal, reject_schedule_proposal, close_project), then into _assert_active_request_revision, _resolve_pending_requests and close_project's approval branch. decide_owner_action_request no longer sets or resets instance state. Two new tests (tests/test_state_integrity.py) run a nested call inside an approval: a nested direct Owner edit no longer inherits the outer approval (old code: Conflict 'the pending request changed'), and a nested approval no longer clears the outer context (old code recorded 'Manager reason A' instead of 'OWNER NOTE A'). Both confirmed failing on the old service.py and passing now. Full suite 289 tests OK."
+review-gaps: "1. Low, coverage: mutation M5 survived. reopen_task's second _resolve_pending_requests call, which approves update_task_status twins of the reopen (src/astra/service.py:1723-1732), still passes test_state_integrity and test_core when owner_decision is replaced with None. The code is correct today, but no test covers it. Follow-up: approve a reopen_task request while a same-revision update_task_status reopen twin is pending, then assert the twin's decision_reason and approved_request_id. 2. Low: owner_decision is now a public keyword on the 8 governed actions; any in-process caller can pass OwnerDecision(request_id=X) and resolve request X as approved without decide_owner_action_request. HTTP cannot reach it (web.py forwards no kwargs). Roughly the same trust level as the old private attribute; worth a docstring note that only _execute_owner_action_request may pass it. 3. Low, stale doc: CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md:261 and :576-581 (remaining-risk item 2) still describe _active_owner_request_id as current; needs a one-line update at merge. 4. Info: test_failed_approval_clears_the_active_request_for_the_next_action (tests/test_state_integrity.py:1338-1340) now asserts the attributes are absent instead of None/empty; stricter, required by DoD item 1, not a weakening."
+review-verdict: Approve — independent reviewer
+review-check: "1. cd /workspace/project-astra && grep -rn _active_owner src/ — expect no output. 2. cd tests && PYTHONPATH=../src .venv/bin/python -m unittest -v test_state_integrity (use /workspace/project-astra/.venv/bin/python) — expect 'Ran 48 tests ... OK', including test_nested_direct_owner_action_does_not_inherit_the_outer_approval and test_nested_approval_does_not_replace_or_clear_the_outer_approval. 3. To see the old bug: copy the tree to a scratch dir, replace src/astra/service.py there with the parent commit's version (git show c143dbf^:src/astra/service.py), rerun those two tests — one errors with 'the pending request changed', the other fails with 'Manager reason A' != 'OWNER NOTE A'. 4. Full suite: /workspace/project-astra/.venv/bin/python tests/run.py from the repo root — expect all tests OK (289 at review time)."
 ---
 
 # Maintainability: pass the Owner decision context explicitly instead of _active_owner_request_id
