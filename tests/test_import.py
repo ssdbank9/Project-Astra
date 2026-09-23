@@ -432,41 +432,55 @@ class ImportServiceTests(unittest.TestCase):
         # reopen changes it. The status was already locked (AS-2) but title, dates, progress,
         # criticality, parent, predecessors, people and attachment links still applied.
         config = self.enable_all_columns()
-        seed = [{"import_key": "O-1", "title": "Open parent", "status": "In progress"},
+        filed = self.service.create_entity(self.owner, "Filed Co")
+        self.service.create_entity(self.owner, "Unfiled Co")
+        seed = [{"import_key": "O-1", "title": "Open parent", "status": "In progress", "entity": "Filed Co"},
                 {"import_key": "O-2", "title": "Open predecessor", "status": "In progress"},
                 {"import_key": "P-1", "title": "Done", "status": "Completed", "start_date": "2026-09-01",
-                 "due_date": "2026-09-05", "progress": 100},
-                {"import_key": "P-2", "title": "Dropped", "status": "Cancelled"},
+                 "due_date": "2026-09-05", "progress": 100, "entity": "Filed Co", "x_risk_dependency": "Seed risk",
+                 "next_action": "Seed action"},
+                {"import_key": "P-2", "title": "Dropped", "status": "Cancelled", "start_date": "2026-09-02",
+                 "due_date": "2026-09-06"},
                 {"import_key": "P-3", "title": "Gone", "status": "Abandoned"}]
         self.service.import_commit(self.owner, self.project["id"], "seed.xlsx", filled_template(seed, config), {}, None)
         closed_keys = ("P-1", "P-2", "P-3")
         self.assertEqual([self.task_by_key(k)["status"] for k in closed_keys], ["completed", "cancelled", "abandoned"])
+        # A legacy closed task without a baseline: a skipped row must not backfill one (review IMP-3).
+        self.db.execute("UPDATE tasks SET baseline_start_date=NULL, baseline_due_date=NULL WHERE import_key='P-1'")
+        self.db.commit()
 
         def snapshot():
             state = {}
             for key in closed_keys:
                 task = self.task_by_key(key)
                 state[key] = (
-                    self.service.get_task(self.owner, task["id"]),
+                    dict(self.db.execute("SELECT * FROM tasks WHERE id=?", (task["id"],)).fetchone()),
                     self.service.list_task_reviewers(self.owner, task["id"]),
                     [a["path"] for a in self.service.list_task_attachments(self.owner, task["id"])],
                     [d for d in self.service.get_task_dependencies(self.owner, task["id"]) if d["direction"] == "incoming"],
                     len(self.service.task_events(self.owner, task["id"])),
                 )
+            state["project_entities"] = [e["id"] for e in self.service.list_project_entities(self.owner, self.project["id"])]
             return state
 
-        # An unedited re-upload of closed rows is quiet: nothing would change.
+        self.assertEqual(snapshot()["project_entities"], [filed["id"]])
+        # An unedited re-upload is quiet: nothing would change, an already filed entity included (IMP-4).
         preview = self.service.import_preview(self.owner, self.project["id"], "same.xlsx", filled_template(seed, config))
         for row in preview["rows"]:
             self.assertNotIn("W_CLOSED_TASK", self.codes(row))
+            self.assertEqual(row["action"], "unchanged", row)
         before = snapshot()
+        stored = {key: self.service.get_task(self.owner, self.task_by_key(key)["id"]) for key in closed_keys}
         edit = [dict(row) for row in seed[:2]] + [
             dict(row, title=f"{row['title']} edited", start_date="2027-01-04", due_date="2027-01-08", progress=40,
-                 criticality="Critical", parent_key="O-1", predecessors="O-2", collaborators="jamal@example.org",
-                 reviewers="waseem@example.org", attachment_links="\\\\server\\late.pdf", description="late words",
-                 next_action="late action", milestone="Yes")
+                 criticality="Critical", parent_key="O-1", predecessors="O-2 FS+2d", owner_email="Jamal",
+                 collaborators="jamal@example.org", reviewers="waseem@example.org",
+                 attachment_links="\\\\server\\late.pdf", description="late words", next_action="late action",
+                 milestone="Yes", entity="Unfiled Co", baseline_due_date="2026-08-30", x_risk_dependency="late risk",
+                 notes="late note")
             for row in seed[2:]
         ] + [{"import_key": "N-1", "title": "New after closed", "predecessors": "P-1"}]
+        contradictory = {"W_TITLE_CHANGED", "W_LAG_IGNORED", "W_PARENT_DEPTH", "W_PERSON_BY_NAME", "I_BASELINE_KEPT"}
         for actor in (self.owner, self.waseem):
             with self.subTest(actor=actor["email"]):
                 data = filled_template(edit, config)
@@ -475,17 +489,69 @@ class ImportServiceTests(unittest.TestCase):
                 for key in closed_keys:
                     row = by_key[key]
                     self.assertIn("W_CLOSED_TASK", self.codes(row))
+                    self.assertFalse(contradictory & set(self.codes(row)), self.codes(row))
                     self.assertEqual(row["action"], "unchanged")
                     self.assertEqual(row["changes"], {})
                     message = next(f["message"] for f in row["findings"] if f["code"] == "W_CLOSED_TASK")
                     self.assertIn("reopen the task", message.lower())
+                    # The preview shows the stored task, not the row that was not applied (IMP-6).
+                    task = stored[key]
+                    values = row["values"]
+                    self.assertEqual(values["title"], task["title"])
+                    self.assertEqual(values["due_date"], importer.display_date(task["due_date"]))
+                    self.assertEqual(values["next_action"], task.get("next_action_note") or "")
+                    self.assertEqual(values["extras"], json.loads(task["import_extras"]) if task["import_extras"] else {})
+                    self.assertEqual(values["parent_key"], "")
+                    self.assertEqual(values["predecessors"], [])
                 result = self.service.import_commit(actor, self.project["id"], "edit.xlsx", data, {}, None)
                 self.assertEqual(result["update"], 0, result)
                 self.assertEqual(snapshot(), before)
+                report = self.service.import_report(self.owner, result["import_id"])["csv"].splitlines()
+                header = report[0].split(",")
+                for line in report[1:]:
+                    cells = dict(zip(header, next(iter(__import__("csv").reader([line])))))
+                    if cells["import_key"] in stored:
+                        self.assertEqual(cells["title"], stored[cells["import_key"]]["title"])
         # A closed task may still be the predecessor of an open task created by the file.
         new_task = self.task_by_key("N-1")
         self.assertEqual([d["predecessor_task_id"] for d in self.service.get_task_dependencies(self.owner, new_task["id"])],
                          [self.task_by_key("P-1")["id"]])
+
+    def test_closed_row_neither_forms_false_cycles_nor_poisons_other_rows(self):
+        # Review IMP-1 / IMP-2: the closed row's unapplied parent and predecessors fed the cycle
+        # checks, and its own cell error made it an error row that took the open rows with it.
+        seed = [{"import_key": "P-1", "title": "Done", "status": "Completed"},
+                {"import_key": "O-1", "title": "Open step", "status": "In progress", "parent_key": "P-1"},
+                {"import_key": "O-2", "title": "Open successor", "status": "In progress", "predecessors": "P-1"}]
+        self.commit(self.owner, seed)
+        closed = self.task_by_key("P-1")
+        stored = dict(self.db.execute("SELECT * FROM tasks WHERE id=?", (closed["id"],)).fetchone())
+        new_row = {"import_key": "N-1", "title": "New step", "parent_key": "P-1", "predecessors": "P-1"}
+        variants = {
+            "cycles": [dict(seed[0], parent_key="O-1", predecessors="O-2"), seed[1], seed[2], new_row],
+            "cell error": [dict(seed[0], due_date="not a date"), seed[1], seed[2], new_row],
+        }
+        for variant, rows in variants.items():
+            for actor in (self.owner, self.waseem):
+                with self.subTest(variant=variant, actor=actor["email"]):
+                    _, preview = self.preview(actor, rows)
+                    by_key = {row["import_key"]: row for row in preview["rows"]}
+                    self.assertEqual(preview["summary"]["errors"], 0, [(r["import_key"], self.codes(r)) for r in preview["rows"]])
+                    closed_row = by_key["P-1"]
+                    self.assertIn("W_CLOSED_TASK", self.codes(closed_row))
+                    self.assertEqual(closed_row["level"], "warning")
+                    if variant == "cell error":
+                        date_finding = next(f for f in closed_row["findings"] if f["code"] == "E_DATE_INVALID")
+                        self.assertEqual(date_finding["level"], "info")
+                    self.assertEqual(by_key["N-1"]["action"], "create")
+        edit = variants["cycles"]
+        result = self.commit(self.owner, edit)
+        self.assertEqual(result["create"], 1)
+        new_task = self.task_by_key("N-1")
+        self.assertEqual(new_task["parent_task_id"], closed["id"])
+        self.assertEqual([d["predecessor_task_id"] for d in self.service.get_task_dependencies(self.owner, new_task["id"])
+                          if d["direction"] == "incoming"], [closed["id"]])
+        self.assertEqual(dict(self.db.execute("SELECT * FROM tasks WHERE id=?", (closed["id"],)).fetchone()), stored)
 
     def test_import_commit_refuses_when_the_task_closed_after_the_preview(self):
         # T8WHJR: the commit re-validates inside its write transaction; a task cancelled between

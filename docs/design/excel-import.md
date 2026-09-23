@@ -236,13 +236,31 @@ and People sheets.
 A completed, cancelled or abandoned task is a fixed record: only the governed reopen in
 Astra (reason and revised due date) changes it (App Owner decision, 2026-09-23, ticket
 T8WHJR). A row whose Import Key names such a task is therefore skipped as a whole, for the
-Owner and for a Manager alike: no title, description, owner, dates, progress, criticality,
-milestone, next action, custom value, parent, predecessor, person or attachment link from
-the row is applied. When the row would have changed anything it carries the warning
-`W_CLOSED_TASK` ("This task is completed, a fixed record, so none of this row's changes were
-applied. Reopen the task in Astra first ..."), its action is `unchanged` and the preview
-shows the stored values; an unedited row for a closed task stays quiet. Other rows may still
-name a closed task as their predecessor or parent, since that changes only the open task.
+Owner and for a Manager alike: no title, description, notes, owner, dates, Original Due
+Date, progress, criticality, milestone, next action, custom value, entity, parent,
+predecessor, person or attachment link from the row is applied, and nothing is written to
+the task (not even `updated_at`, a revision or a backfilled baseline).
+
+- The row is settled before any cross-row check. It keeps the stored parent and adds no
+  dependency edges, so its unapplied Parent Key and Predecessors cannot form a cycle
+  (`E_PARENT_CYCLE`, `E_DEP_CYCLE`) with other rows. Its own cell errors (a bad date, an
+  unknown status ...) are shown as `info` with "Not applied: the task is closed", so the
+  row never becomes an error row and never spreads `E_PARENT_INVALID` / `E_PRED_INVALID` to
+  rows that reference the task. (A duplicate Import Key or a project mismatch stays an
+  error: the file itself is ambiguous.)
+- When the row would have changed anything (a field, a person, a link, an entity not yet
+  filed on the project, a new parent or predecessor, or a cell that could not be read) it
+  carries the warning `W_CLOSED_TASK` ("This task is completed, a fixed record, so none of
+  this row's changes were applied. Reopen the task in Astra first ..."). Its action is
+  `unchanged`, the preview and the stored report show the task's stored values, and the
+  findings that describe a change the row does not make (`W_TITLE_CHANGED`,
+  `W_LAG_IGNORED`, `W_PARENT_DEPTH`, `W_PERSON_BY_NAME`, `I_BASELINE_KEPT`) are dropped. An
+  unedited row for a closed task stays quiet; an entity that is already filed on the
+  project is not a change, for any row.
+- Other rows may still name a closed task as their predecessor or parent, and an open row
+  may move out from under a closed parent: that changes only the open task, as it does in
+  Astra itself (`add_task_dependency`, `set_parent`).
+
 The commit re-validates inside its write transaction, so a task closed between preview and
 commit is caught there: the plan fingerprint then differs and the commit is refused with
 HTTP 409.
@@ -347,7 +365,9 @@ reported as HTTP 409 with a "run the preview again" message, not 500. Import nev
 deletes a task, a link or a dependency, never overwrites a baseline, never moves a
 task into `submitted`, `completed`, `on_hold`, `reopened` or `changes_requested` on
 update (`W_GOVERNED_STATUS`; each needs the record its lifecycle action writes) and never
-writes to a completed, cancelled or abandoned task (`W_CLOSED_TASK`).
+writes to a completed, cancelled or abandoned task (`W_CLOSED_TASK`). A row whose action is
+`unchanged` writes nothing at all: it is left out of the parent, baseline, people,
+attachment and entity pass.
 
 `GET /api/imports` lists imports (Owner: all; Manager: their own and their managed
 projects). `GET /api/imports/<id>/report.csv` downloads the stored report

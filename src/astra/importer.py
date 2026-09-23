@@ -310,6 +310,8 @@ CLOSED = {"completed", "cancelled", "abandoned"}
 # record the lifecycle action writes (reopen, acceptance, hold release), so the stored status
 # is kept - W_GOVERNED_STATUS for the Owner, W_PROTECTED_STATUS for a Manager.
 LOCKED_SOURCE = GOVERNED | PROTECTED | CLOSED
+# Findings that describe a change a skipped closed-task row does not make (T8WHJR review IMP-5).
+CLOSED_SKIP_DROPPED = {"W_TITLE_CHANGED", "W_LAG_IGNORED", "W_PARENT_DEPTH", "W_PERSON_BY_NAME", "I_BASELINE_KEPT"}
 
 
 class ImportFileError(ValueError):
@@ -2034,6 +2036,7 @@ class ImportEngine:
         self.existing_edges: set[tuple] = set()
         self.existing_attachments: dict[str, set] = {}
         self.existing_reviewers: set[tuple] = set()
+        self.filed_entities: set[str] = set()
         if self.project_id:
             self.members = {
                 row["user_id"] for row in self.db.execute(
@@ -2062,6 +2065,10 @@ class ImportEngine:
                 (self.project_id,),
             ):
                 self.existing_reviewers.add((row["task_id"], row["user_id"], row["role"]))
+            self.filed_entities = {
+                row["entity_id"] for row in self.db.execute(
+                    "SELECT entity_id FROM project_entities WHERE project_id=?", (self.project_id,))
+            }
         self.entities = {collapse(row["name"]): dict(row) for row in self.db.execute("SELECT id,name,active FROM entities")}
 
     def _eligible(self, user: dict) -> bool:
@@ -2141,6 +2148,8 @@ class ImportEngine:
         self.date1904 = parsed.date1904
         self.people = self._check_people(parsed.people)
         self.rows = [self._validate_row(row) for row in parsed.rows]
+        for result in self.rows:
+            self._settle_closed(result)
         self._check_duplicate_keys()
         self._check_project_column()
         self._check_project_header()
@@ -2321,7 +2330,7 @@ class ImportEngine:
                     if not entity or not entity["active"]:
                         result.add("error", "E_ENTITY_UNKNOWN",
                                    f"'{item}' is not an active entity; entities are never created by import.", "Entity")
-                    else:
+                    elif entity["id"] not in self.filed_entities:  # already filed: no change (IMP-4)
                         entity_ids.append(entity["id"])
 
         pred_items = split_list(cells.get("predecessors"))
@@ -2337,6 +2346,35 @@ class ImportEngine:
             "pred_items": pred_items, "project_text": text.get("project", ""), "extra_notes": [],
         }
         return result
+
+    def _settle_closed(self, result: RowResult) -> None:
+        """T8WHJR: a row for a completed, cancelled or abandoned task applies nothing, so it is
+        settled before any cross-row check (review IMP-1, IMP-2). Its own cell errors become
+        info (the cell is not applied, so it cannot fail the file), and it keeps the stored
+        parent and adds no dependency edges, so its unapplied parent and predecessors can
+        neither form a false cycle nor spread errors to other rows. Whether the row would
+        have changed anything is remembered for the W_CLOSED_TASK decision in _finish_row."""
+        existing = result.existing
+        if not existing or existing["status"] not in CLOSED:
+            return
+        plan = result.plan
+        downgraded = False
+        for finding in result.findings:
+            if finding.level == "error":
+                finding.level = "info"
+                finding.message += " Not applied: the task is closed."
+                downgraded = True
+        known = {row.key for row in self.rows if row.key} | set(self.existing_by_key)
+        parent_key = plan.get("parent_key")
+        parent_differs = bool(parent_key) and (
+            self.existing_by_key.get(parent_key, {}).get("id") != existing.get("parent_task_id"))
+        new_edge = False
+        for item in plan.get("pred_items", []):
+            key = parse_predecessor(item, known)[0]
+            if (self.existing_by_key.get(key or "", {}).get("id"), existing["id"]) not in self.existing_edges:
+                new_edge = True
+        plan.update(closed=True, closed_would_change=downgraded or parent_differs or new_edge,
+                    parent_key="", pred_items=[])
 
     def _check_duplicate_keys(self) -> None:
         counts: dict[str, int] = {}
@@ -2698,7 +2736,9 @@ class ImportEngine:
         if existing and result.level != "error":
             touched = bool(plan["fields"] or plan["new_people"] or plan["new_attachments"] or plan["new_predecessors"]
                            or plan["parent_change"] or plan["baseline_due"] or plan["entities"])
-            if touched and existing["status"] in CLOSED:
+            if plan.get("closed"):
+                result.findings = [f for f in result.findings if f.code not in CLOSED_SKIP_DROPPED]
+            if plan.get("closed") and (touched or plan.get("closed_would_change")):
                 # T8WHJR: a completed, cancelled or abandoned task is a fixed record; only the
                 # governed reopen in Astra changes it, so nothing in this row is applied. The
                 # commit re-validates inside its write transaction, so a task closed after the
@@ -2856,7 +2896,7 @@ class ImportEngine:
                 updated.append(result)
         for result in rows:  # pass 2: hierarchy, baseline, people, attachments, entities
             task_id = id_of.get(result.key)
-            if not task_id:
+            if not task_id or result.action == "unchanged":  # an unchanged row writes nothing (IMP-3)
                 continue
             plan = result.plan
             if plan.get("parent_change"):

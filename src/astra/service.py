@@ -1104,6 +1104,11 @@ class AstraService:
             "decision_reason": None,
         }
         with transaction(self.db):
+            # Review SVC-2: the request is only as good as the state it was based on; a task
+            # changed (for example closed) after the caller's checks is a 409, not a queued 202.
+            current = self.db.execute("SELECT revision FROM tasks WHERE id=?", (task["id"],)).fetchone()
+            if not current or current["revision"] != request_payload["expected_revision"]:
+                raise Conflict("Task revision conflict: the task changed before this request could be filed.")
             existing = self.db.execute(
                 """SELECT * FROM owner_action_requests
                    WHERE project_id=? AND task_id=? AND action=? AND payload_json=? AND reason=?
@@ -1815,23 +1820,29 @@ class AstraService:
         task = self.get_task(actor, task_id)
         if not self.can_manage_project(actor, task["project_id"]):
             raise Forbidden("Task-management access denied.")
+        self._refuse_closed(task)  # review SVC-1: people are not evidence
         if role not in REVIEWER_ROLES:
             raise ValueError("Invalid reviewer role.")
         if not user_id:
             raise ValueError("A user is required.")
         self._validate_assignee(task["project_id"], user_id)
-        self.db.execute(
-            "INSERT OR IGNORE INTO task_reviewers VALUES(?,?,?,?,?)",
-            (task_id, user_id, role, now_text(), actor["id"]),
-        )
+        with transaction(self.db):
+            self._refuse_closed_in_transaction(task_id)
+            self.db.execute(
+                "INSERT OR IGNORE INTO task_reviewers VALUES(?,?,?,?,?)",
+                (task_id, user_id, role, now_text(), actor["id"]),
+            )
 
     def remove_task_reviewer(self, actor: dict, task_id: str, user_id: str, role: str) -> None:
         task = self.get_task(actor, task_id)
         if not self.can_manage_project(actor, task["project_id"]):
             raise Forbidden("Task-management access denied.")
-        self.db.execute(
-            "DELETE FROM task_reviewers WHERE task_id=? AND user_id=? AND role=?", (task_id, user_id, role)
-        )
+        self._refuse_closed(task)
+        with transaction(self.db):
+            self._refuse_closed_in_transaction(task_id)
+            self.db.execute(
+                "DELETE FROM task_reviewers WHERE task_id=? AND user_id=? AND role=?", (task_id, user_id, role)
+            )
 
     def list_task_reviewers(self, actor: dict, task_id: str) -> list[dict]:
         self.get_task(actor, task_id)
@@ -2521,6 +2532,8 @@ class AstraService:
             task = self.get_task(actor, proposal["task_id"])
             if task["revision"] != expected_task_revision:
                 raise Conflict("Task revision conflict: the task changed before schedule approval began.")
+            # Defence in depth: every closing write bumps the revision, so the check above
+            # already refuses a task closed after the pre-check (review SVC-4).
             self._refuse_closed_in_transaction(task["id"])
             self._assert_active_request_revision(task)
             if proposal["status"] != "pending":

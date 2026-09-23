@@ -60,11 +60,13 @@ task's current `expected_revision` and stale writes return HTTP 409 without chan
 or audit history; completed, cancelled, and abandoned tasks are fixed records until the
 dedicated reopen action records a reason and a revised timeline: field edits (including a
 reason-only save), re-parenting the task, confirming its criticality, proposing or approving
-a schedule change for it, and adding or removing its predecessors return HTTP 400 ("reopen
-the task first"), a task that closes while such a write is in flight is refused with 409,
+a schedule change for it, adding or removing its predecessors, and adding or removing its
+collaborators, reviewers or approvers return HTTP 400 ("reopen the task first"), a task that
+closes while such a write (or a Manager's request for one) is in flight is refused with 409,
 and an import row for a closed task is skipped with `W_CLOSED_TASK`. Attachment links and
 final-result marking stay available on closed tasks, and a closed task may still be added
-as a predecessor of an open one; task titles cannot be blanked; task
+as a predecessor of an open one, or have an open task moved under or out of it as a
+subtask, since the closed task's own row does not change; task titles cannot be blanked; task
 assignees must be active and authorized on the task's project; and operations against a
 non-existent project return a controlled 404 rather than a 500. Submission acceptance is
 transactionally single-winner, and retrying an identical protected request or final-result
