@@ -79,6 +79,13 @@ def _execute_statements(connection: sqlite3.Connection, script: str) -> None:
 
 
 def migrate(connection: sqlite3.Connection) -> None:
+    """Bring the database up to SCHEMA_VERSION by running MIGRATION_STEPS in order.
+
+    Each pending step runs in its own BEGIN IMMEDIATE transaction together with the
+    ``PRAGMA user_version`` bump to that step's version, and both commit or roll back
+    together. Steps only apply statements; this loop is the only place that opens a
+    migration transaction or writes user_version (ticket 39DNZT).
+    """
     version = connection.execute("PRAGMA user_version").fetchone()[0]
     if version > SCHEMA_VERSION:
         raise RuntimeError("Database was created by a newer Astra version.")
@@ -86,10 +93,17 @@ def migrate(connection: sqlite3.Connection) -> None:
         # Before any step commits: a database that v14 would refuse is refused now, at
         # the version it started at, so the refusal really changes nothing.
         _refuse_duplicate_submission_versions(connection)
-    if version < 1:
-        with transaction(connection):
-            _execute_statements(connection,
-                """
+    for step_version, step in MIGRATION_STEPS:
+        if version < step_version:
+            with transaction(connection):
+                step(connection)
+                connection.execute(f"PRAGMA user_version = {step_version}")
+
+
+def _migrate_v1(connection: sqlite3.Connection) -> None:
+    # SQL text is kept byte-for-byte: SQLite stores it in sqlite_master.
+    _execute_statements(connection,
+        """
                 CREATE TABLE users (
                     id TEXT PRIMARY KEY,
                     email TEXT NOT NULL UNIQUE,
@@ -178,12 +192,12 @@ def migrate(connection: sqlite3.Connection) -> None:
                 CREATE INDEX idx_tasks_due ON tasks(due_date);
                 CREATE INDEX idx_events_task ON task_events(task_id, occurred_at);
                 """
-            )
-            connection.execute("PRAGMA user_version = 1")
-    if version < 2:
-        with transaction(connection):
-            _execute_statements(connection,
-                """
+    )
+
+
+def _migrate_v2(connection: sqlite3.Connection) -> None:
+    _execute_statements(connection,
+        """
                 CREATE TABLE login_attempts (
                     id TEXT PRIMARY KEY,
                     email TEXT NOT NULL,
@@ -193,12 +207,12 @@ def migrate(connection: sqlite3.Connection) -> None:
                 );
                 CREATE INDEX idx_login_attempts_email ON login_attempts(email, attempted_at);
                 """
-            )
-            connection.execute("PRAGMA user_version = 2")
-    if version < 3:
-        with transaction(connection):
-            _execute_statements(connection,
-                """
+    )
+
+
+def _migrate_v3(connection: sqlite3.Connection) -> None:
+    _execute_statements(connection,
+        """
                 CREATE TABLE task_submissions (
                     id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -250,12 +264,12 @@ def migrate(connection: sqlite3.Connection) -> None:
                 CREATE INDEX idx_checkpoints_task ON task_checkpoints(task_id);
                 CREATE INDEX idx_project_events ON project_events(project_id, occurred_at);
                 """
-            )
-            connection.execute("PRAGMA user_version = 3")
-    if version < 4:
-        with transaction(connection):
-            _execute_statements(connection,
-                """
+    )
+
+
+def _migrate_v4(connection: sqlite3.Connection) -> None:
+    _execute_statements(connection,
+        """
                 CREATE TABLE notifications (
                     id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -269,12 +283,12 @@ def migrate(connection: sqlite3.Connection) -> None:
                 CREATE UNIQUE INDEX idx_notifications_recipient_event ON notifications(user_id, event_id);
                 CREATE INDEX idx_notifications_user ON notifications(user_id, created_at);
                 """
-            )
-            connection.execute("PRAGMA user_version = 4")
-    if version < 5:
-        with transaction(connection):
-            _execute_statements(connection,
-                """
+    )
+
+
+def _migrate_v5(connection: sqlite3.Connection) -> None:
+    _execute_statements(connection,
+        """
                 ALTER TABLE tasks ADD COLUMN baseline_start_date TEXT;
                 ALTER TABLE tasks ADD COLUMN baseline_due_date TEXT;
                 CREATE TABLE task_schedule_proposals (
@@ -293,12 +307,12 @@ def migrate(connection: sqlite3.Connection) -> None:
                 );
                 CREATE INDEX idx_schedule_proposals_task ON task_schedule_proposals(task_id, status);
                 """
-            )
-            connection.execute("PRAGMA user_version = 5")
-    if version < 6:
-        with transaction(connection):
-            _execute_statements(connection,
-                """
+    )
+
+
+def _migrate_v6(connection: sqlite3.Connection) -> None:
+    _execute_statements(connection,
+        """
                 ALTER TABLE projects ADD COLUMN working_days TEXT NOT NULL DEFAULT '0123456';
                 CREATE TABLE project_holidays (
                     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -309,22 +323,22 @@ def migrate(connection: sqlite3.Connection) -> None:
                     PRIMARY KEY(project_id, holiday_date)
                 );
                 """
-            )
-            connection.execute("PRAGMA user_version = 6")
-    if version < 7:
-        with transaction(connection):
-            _execute_statements(connection,
-                """
+    )
+
+
+def _migrate_v7(connection: sqlite3.Connection) -> None:
+    _execute_statements(connection,
+        """
                 ALTER TABLE projects ADD COLUMN budget_amount REAL;
                 ALTER TABLE projects ADD COLUMN budget_currency TEXT NOT NULL DEFAULT 'PKR';
                 ALTER TABLE projects ADD COLUMN primary_entity_id TEXT REFERENCES entities(id);
                 """
-            )
-            connection.execute("PRAGMA user_version = 7")
-    if version < 8:
-        with transaction(connection):
-            _execute_statements(connection,
-                """
+    )
+
+
+def _migrate_v8(connection: sqlite3.Connection) -> None:
+    _execute_statements(connection,
+        """
                 CREATE TABLE task_attachments (
                     id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -336,12 +350,12 @@ def migrate(connection: sqlite3.Connection) -> None:
                 );
                 CREATE INDEX idx_attachments_task ON task_attachments(task_id, added_at);
                 """
-            )
-            connection.execute("PRAGMA user_version = 8")
-    if version < 9:
-        with transaction(connection):
-            _execute_statements(connection,
-                """
+    )
+
+
+def _migrate_v9(connection: sqlite3.Connection) -> None:
+    _execute_statements(connection,
+        """
                 CREATE TABLE templates (
                     id TEXT PRIMARY KEY,
                     kind TEXT NOT NULL CHECK(kind IN ('project','task')),
@@ -353,12 +367,12 @@ def migrate(connection: sqlite3.Connection) -> None:
                 );
                 CREATE INDEX idx_templates_kind ON templates(kind, name);
                 """
-            )
-            connection.execute("PRAGMA user_version = 9")
-    if version < 10:
-        with transaction(connection):
-            _execute_statements(connection,
-                """
+    )
+
+
+def _migrate_v10(connection: sqlite3.Connection) -> None:
+    _execute_statements(connection,
+        """
                 CREATE TABLE final_results (
                     id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -375,21 +389,21 @@ def migrate(connection: sqlite3.Connection) -> None:
                 CREATE INDEX idx_final_results_task ON final_results(task_id);
                 CREATE INDEX idx_final_results_marked ON final_results(marked_at);
                 """
-            )
-            connection.execute("PRAGMA user_version = 10")
-    if version < 11:
-        with transaction(connection):
-            _execute_statements(connection,
-                """
+    )
+
+
+def _migrate_v11(connection: sqlite3.Connection) -> None:
+    _execute_statements(connection,
+        """
                 ALTER TABLE projects ADD COLUMN start_date TEXT;
                 ALTER TABLE projects ADD COLUMN target_date TEXT;
                 """
-            )
-            connection.execute("PRAGMA user_version = 11")
-    if version < 12:
-        with transaction(connection):
-            _execute_statements(connection,
-                """
+    )
+
+
+def _migrate_v12(connection: sqlite3.Connection) -> None:
+    _execute_statements(connection,
+        """
                 CREATE TABLE owner_action_requests (
                     id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -410,12 +424,7 @@ def migrate(connection: sqlite3.Connection) -> None:
                 CREATE INDEX idx_owner_action_requests_requester
                     ON owner_action_requests(requested_by, requested_at);
                 """
-            )
-            connection.execute("PRAGMA user_version = 12")
-    if version < 13:
-        _migrate_v13(connection)
-    if version < 14:
-        _migrate_v14(connection)
+    )
 
 
 # Columns the v13 step adds to tasks, in order (name, definition).
@@ -454,8 +463,9 @@ def _migrate_v13(connection: sqlite3.Connection) -> None:
     """v12 -> v13: the Excel import feature's task columns, ``imports`` and
     ``import_template_config``.
 
-    The statements run one at a time inside a single BEGIN IMMEDIATE transaction and
-    ``PRAGMA user_version = 13`` is the last statement of that same transaction.
+    The statements run one at a time inside the single BEGIN IMMEDIATE transaction that
+    ``migrate()`` opens for this step, and ``PRAGMA user_version = 13`` is the last
+    statement of that same transaction.
     ``executescript()`` commits any open transaction before it starts, so the earlier
     form of this step ran in autocommit: a crash, kill or disk error between two of its
     statements left user_version at 12 with some columns already present, and every
@@ -465,14 +475,12 @@ def _migrate_v13(connection: sqlite3.Connection) -> None:
     ALTER, IF NOT EXISTS on CREATE) so a database the earlier code left half-applied
     completes on the next start instead of needing hand SQL.
     """
-    with transaction(connection):
-        present = {row[1] for row in connection.execute("PRAGMA table_info(tasks)").fetchall()}
-        for name, definition in V13_TASK_COLUMNS:
-            if name not in present:
-                connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
-        for statement in V13_STATEMENTS:
-            connection.execute(statement)
-        connection.execute("PRAGMA user_version = 13")
+    present = {row[1] for row in connection.execute("PRAGMA table_info(tasks)").fetchall()}
+    for name, definition in V13_TASK_COLUMNS:
+        if name not in present:
+            connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
+    for statement in V13_STATEMENTS:
+        connection.execute(statement)
 
 
 V14_SUBMISSION_VERSION_INDEX = "idx_submissions_task_version"
@@ -545,10 +553,29 @@ def _migrate_v14(connection: sqlite3.Connection) -> None:
     being left at v13; the probe is repeated here, under the step's write lock, in case
     a duplicate was written in between. Either way nothing is committed.
     """
-    with transaction(connection):
-        _refuse_duplicate_submission_versions(connection)
-        connection.execute(
-            f"CREATE UNIQUE INDEX IF NOT EXISTS {V14_SUBMISSION_VERSION_INDEX}"
-            " ON task_submissions(task_id, version)"
-        )
-        connection.execute("PRAGMA user_version = 14")
+    _refuse_duplicate_submission_versions(connection)
+    connection.execute(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS {V14_SUBMISSION_VERSION_INDEX}"
+        " ON task_submissions(task_id, version)"
+    )
+
+
+# The ordered schema history: (version, step). migrate() runs every step whose version
+# is above the database's user_version, each in its own transaction with its bump.
+# Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
+MIGRATION_STEPS = (
+    (1, _migrate_v1),
+    (2, _migrate_v2),
+    (3, _migrate_v3),
+    (4, _migrate_v4),
+    (5, _migrate_v5),
+    (6, _migrate_v6),
+    (7, _migrate_v7),
+    (8, _migrate_v8),
+    (9, _migrate_v9),
+    (10, _migrate_v10),
+    (11, _migrate_v11),
+    (12, _migrate_v12),
+    (13, _migrate_v13),
+    (14, _migrate_v14),
+)

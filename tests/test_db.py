@@ -103,6 +103,40 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 0)
         connection.close()
 
+    def test_migration_step_registry_is_contiguous_from_one_to_schema_version(self):
+        """Ticket 39DNZT: migrate() runs one ordered registry. A gap, a duplicate or a
+        step out of order would silently skip or repeat a schema change."""
+        versions = [version for version, _ in db.MIGRATION_STEPS]
+        self.assertEqual(versions, list(range(1, db.SCHEMA_VERSION + 1)))
+        for version, step in db.MIGRATION_STEPS:
+            self.assertTrue(callable(step), f"step for v{version} is not callable")
+
+    def test_migration_steps_leave_transaction_and_user_version_to_migrate(self):
+        """Ticket 39DNZT: a step only applies statements. migrate() owns BEGIN IMMEDIATE,
+        the user_version bump and the commit, so a step that opened its own transaction
+        or bumped the version would break here. Applying the steps by hand this way
+        yields the same catalog as db.connect()."""
+        connection = self.raw()
+        try:
+            for version, step in db.MIGRATION_STEPS:
+                connection.execute("BEGIN IMMEDIATE")
+                step(connection)
+                self.assertTrue(connection.in_transaction, f"v{version} step ended the transaction")
+                self.assertEqual(
+                    connection.execute("PRAGMA user_version").fetchone()[0],
+                    version - 1,
+                    f"v{version} step changed user_version itself",
+                )
+                connection.execute(f"PRAGMA user_version = {version}")
+                connection.commit()
+            fresh = db.connect(Path(self.temp.name) / "fresh.sqlite3")
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
     def test_atomic_statement_runner_handles_quoted_semicolons_and_rejects_incomplete_sql(self):
         connection = self.raw()
         try:
