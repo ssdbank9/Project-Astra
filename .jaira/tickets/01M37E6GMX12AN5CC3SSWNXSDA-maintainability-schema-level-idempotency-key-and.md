@@ -1,7 +1,7 @@
 ---
 id: 01M37E6GMX12AN5CC3SSWNXSDA
 title: "Maintainability: schema-level idempotency key and indexed lookup for pending Owner requests"
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -20,13 +20,30 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:29:55Z
-updated-at: 2026-09-23T17:56:28Z
+updated-at: 2026-09-23T18:09:01Z
 updated-by: Claude
 claimed-by: vm-11138
 claimed-at: 2026-09-23T17:41:41Z
-outcome-what: "Schema 15: owner_action_requests.intent_key (sha256 of scope, action, stored payload_json, reason, requester) with a UNIQUE index on pending rows, an expected_revision column and a partial pending-lookup index; backfill; refusal of existing identical pending requests before any step. Service dedupe uses the key; resolve filters scope and revision in SQL."
-outcome-why: "Equivalent pending requests were only prevented by BEGIN IMMEDIATE lookup-then-insert and found by comparing payload text and decoding JSON per row; now the database enforces it and lookups are indexed."
-outcome-resolves: "WNXSDA DoD 1 and 3; DoD 2 partially (semantic intent test stays in Python, see note)"
+outcome-what: "Independent review recorded"
+outcome-why: "Reviewer approved: all DoD met, only low gaps"
+outcome-resolves: "Review lane complete for WNXSDA"
+review-summary: "Schema 15 adds an intent_key column to owner_action_requests: a sha256 of project, task, action, the stored payload_json text, reason and requester. A UNIQUE index covers pending rows only, so two identical pending requests can no longer exist. An untyped expected_revision column and a pending-scope index come with it. Existing rows are backfilled in the same atomic migration step. A database that already holds identical pending requests is refused before any step runs, with an id-only message, the same way v14 refuses duplicate submissions. Service: both dedupe paths (task and project requests) find an existing request with one indexed intent_key lookup inside the write transaction; inserts store the key and revision; reconciliation filters scope, action and revision in SQL on the new index, while the semantic intent test (_request_intent_matches, src/astra/service.py:1282) stays in Python because an exact key would change which requests an Owner action resolves. API responses now list 12 columns explicitly, so intent_key and expected_revision never reach JSON. require_owner, Manager and approver checks are untouched."
+review-gaps: |-
+  All low severity; nothing medium or above.
+  1. The implementer reworded DoD 2 themselves (commit 8dd26bc, jaira dod --text). Original: 'Dedupe and reconciliation look requests up by the fingerprint; no per-row json.loads filtering remains in _resolve_pending_requests'. New text keeps the semantic intent test in Python. The technical reason holds (_request_intent_matches skips absent fields, frozenset intents accept any member, special residual_work matching, cross-requester matching), but the person at signoff should confirm the rewording.
+  2. No test covers the refusal probe inside the v15 step (first line of _migrate_v15 in src/astra/db.py). Deleting it keeps test_db + test_state_integrity green; the early probe in migrate() catches every tested case. A duplicate inserted between the two probes still rolls back atomically, but with a raw IntegrityError instead of the SchemaMigrationRefused message.
+  3. No test exercises the SQL expected_revision=? filter in _resolve_pending_requests (src/astra/service.py ~1339). Gap predates this change. SQL and Python agree for every payload the service writes; they differ only for invalid JSON and duplicate-key JSON.
+  4. No test covers AND status='pending' in _pending_request_by_intent; dropping it leaves all tests green (a retry would get back a decided request). Gap predates this change.
+  5. New undocumented runtime dependency on SQLite JSON1 (json_valid, json_extract) in the v15 backfill and every request INSERT. Built in with Python 3.11+ (SQLite 3.45.1 here).
+  6. No live human browser acceptance was done; verification is automated tests and mutation runs only.
+review-verdict: Approve — independent reviewer
+review-check: |-
+  1. cd /workspace/project-astra (or any checkout of this branch).
+  2. Run: .venv/bin/python tests/run.py  -> expect 313 tests OK (about 5 minutes; count may be higher after rebase).
+  3. Run: cd tests && PYTHONPATH=../src ../.venv/bin/python -m unittest -v test_db test_state_integrity  -> expect all OK, including test_duplicate_pending_requests_in_an_older_database_refuse_before_any_step_runs, test_concurrent_identical_requests_leave_one_pending_row_per_intent_key, test_concurrent_equivalent_manager_requests_create_one_pending_request_and_event and test_concurrent_equivalent_close_requests_create_one_pending_request_and_event.
+  4. Open src/astra/db.py: SCHEMA_VERSION = 15 at line 11, and _migrate_v15 creates the intent_key column and the UNIQUE index WHERE status='pending'.
+  5. Read DoD 2 on this ticket (jaira show WNXSDA) and decide whether you accept the implementer's rewording (see review-gaps item 1).
+  6. Optional hand check: start the web app, file the same Manager request twice as the same user; the Owner inbox shows one pending request, not two. Reviewer mutation evidence: moving either dedupe lookup outside the transaction fails the race tests; removing the pending-only WHERE fails 4 tests.
 ---
 
 # Maintainability: schema-level idempotency key and indexed lookup for pending Owner requests
