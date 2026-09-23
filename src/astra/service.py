@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sqlite3
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -89,6 +90,19 @@ class Forbidden(PermissionError):
 
 class Conflict(ValueError):
     """The requested write was based on state that is no longer current."""
+
+
+@dataclass(frozen=True)
+class OwnerDecision:
+    """The Owner approval being executed (EXEZPM).
+
+    Passed explicitly to a governed action so the action re-checks and resolves
+    exactly this request. It is never stored on the service instance, so a nested
+    or concurrent call cannot inherit or clear another approval's context.
+    """
+
+    request_id: str
+    reason: str = ""
 
 
 class ImportBlocked(Forbidden):
@@ -613,7 +627,9 @@ class AstraService:
                 )
         return task
 
-    def update_task(self, actor: dict, task_id: str, payload: dict) -> dict:
+    def update_task(self, actor: dict, task_id: str, payload: dict,
+        *, owner_decision: OwnerDecision | None = None,
+    ) -> dict:
         before = self.get_task(actor, task_id)
         if not self.can_manage_project(actor, before["project_id"]):
             raise Forbidden("Task-management access denied.")
@@ -702,7 +718,7 @@ class AstraService:
             )
         with transaction(self.db):
             # An approval re-checks, under the write lock, that its request is still pending.
-            self._assert_active_request_revision(before)
+            self._assert_active_request_revision(before, owner_decision)
             cursor = self.db.execute(
                 """UPDATE tasks SET title=?,description=?,owner_user_id=?,status=?,criticality=?,start_date=?,due_date=?,
                    progress=?,updated_at=?,revision=revision+1 WHERE id=? AND revision=?""",
@@ -724,6 +740,7 @@ class AstraService:
                     task_id=task_id,
                     expected_revision=expected_revision,
                     decision_reason=reason or "",
+                    owner_decision=owner_decision,
                 )
         return after
 
@@ -1273,6 +1290,7 @@ class AstraService:
         task_id: str | None = None,
         expected_revision: int | None = None,
         decision_reason: str = "",
+        owner_decision: OwnerDecision | None = None,
     ) -> None:
         """Resolve the active approval and the equivalent requests the executed action satisfied.
 
@@ -1285,10 +1303,10 @@ class AstraService:
         independently. An approved request records the Owner's own decision note,
         never the Manager's request reason that the governed action itself carries.
         """
-        active_id = getattr(self, "_active_owner_request_id", None)
+        active_id = owner_decision.request_id if owner_decision else None
         active_rows = []
         if active_id:
-            decision_reason = getattr(self, "_active_owner_decision_reason", "")
+            decision_reason = owner_decision.reason
             active_rows = self.db.execute(
                 "SELECT * FROM owner_action_requests WHERE id=? AND status='pending'",
                 (active_id,),
@@ -1342,10 +1360,10 @@ class AstraService:
                     row["project_id"], actor["id"], "protected_action_approved", detail, decision_reason,
                 )
 
-    def _assert_active_request_revision(self, task: dict) -> None:
-        request_id = getattr(self, "_active_owner_request_id", None)
-        if not request_id:
+    def _assert_active_request_revision(self, task: dict, owner_decision: OwnerDecision | None) -> None:
+        if owner_decision is None:
             return
+        request_id = owner_decision.request_id
         row = self.db.execute(
             "SELECT task_id,payload_json FROM owner_action_requests WHERE id=? AND status='pending'",
             (request_id,),
@@ -1402,13 +1420,7 @@ class AstraService:
                     f"Task revision conflict: request expected {payload['expected_revision']}, "
                     f"current revision is {task['revision']}."
                 )
-        self._active_owner_request_id = request_id
-        self._active_owner_decision_reason = reason
-        try:
-            result = self._execute_owner_action_request(actor, request, payload, reason)
-        finally:
-            self._active_owner_request_id = None
-            self._active_owner_decision_reason = ""
+        result = self._execute_owner_action_request(actor, request, payload, reason)
         decided = self._owner_action_request(actor, request_id)
         if decided["status"] != "approved":
             raise RuntimeError("Approved action completed without resolving its Owner request.")
@@ -1416,38 +1428,48 @@ class AstraService:
 
     def _execute_owner_action_request(self, actor: dict, request: dict, payload: dict, reason: str):
         action = request["action"]
+        decision = OwnerDecision(request_id=request["id"], reason=reason)
         if action == "update_task_status":
             return self.update_task(actor, request["task_id"], {
                 "status": payload["status"],
                 "reason": payload.get("reason") or request["reason"],
                 "expected_revision": payload["expected_revision"],
-            })
+            }, owner_decision=decision)
         if action == "accept_submission":
             return self.accept_submission(
-                actor, payload["submission_id"], payload.get("decision_note", ""), payload.get("checklist")
+                actor, payload["submission_id"], payload.get("decision_note", ""), payload.get("checklist"),
+                owner_decision=decision,
             )
         if action == "request_changes":
-            return self.request_changes(actor, payload["submission_id"], payload.get("reason") or request["reason"])
+            return self.request_changes(
+                actor, payload["submission_id"], payload.get("reason") or request["reason"],
+                owner_decision=decision,
+            )
         if action == "reopen_task":
             return self.reopen_task(
-                actor, request["task_id"], payload.get("reason") or request["reason"], payload.get("new_due_date")
+                actor, request["task_id"], payload.get("reason") or request["reason"], payload.get("new_due_date"),
+                owner_decision=decision,
             )
         if action == "set_on_hold":
             return self.set_on_hold(
                 actor, request["task_id"], payload.get("reason") or request["reason"],
                 payload.get("checkpoint_date"), payload.get("owner_user_id"),
+                owner_decision=decision,
             )
         if action == "approve_schedule_proposal":
             return self.approve_schedule_proposal(
-                actor, payload["proposal_id"], payload.get("decision_reason") or reason
+                actor, payload["proposal_id"], payload.get("decision_reason") or reason,
+                owner_decision=decision,
             )
         if action == "reject_schedule_proposal":
             return self.reject_schedule_proposal(
-                actor, payload["proposal_id"], payload.get("reason") or request["reason"]
+                actor, payload["proposal_id"], payload.get("reason") or request["reason"],
+                owner_decision=decision,
             )
         if action == "close_project":
             return self.close_project(
-                actor, request["project_id"], payload.get("note", ""), bool(payload.get("exceptional"))
+                actor, request["project_id"], payload.get("note", ""), bool(payload.get("exceptional")),
+                owner_decision=decision,
             )
         raise ValueError(f"Unsupported Owner action request: {action}.")
 
@@ -1534,7 +1556,9 @@ class AstraService:
                         {"submission_id": submission_id, "version": version, "note": note}, None)
         return self.get_submission(actor, submission_id)
 
-    def accept_submission(self, actor: dict, submission_id: str, decision_note: str = "", checklist=None) -> dict:
+    def accept_submission(self, actor: dict, submission_id: str, decision_note: str = "", checklist=None,
+        *, owner_decision: OwnerDecision | None = None,
+    ) -> dict:
         submission = self.get_submission(actor, submission_id)
         task = self.get_task(actor, submission["task_id"])
         if submission["status"] != "submitted":
@@ -1560,7 +1584,7 @@ class AstraService:
             task = self.get_task(actor, submission["task_id"])
             if task["revision"] != expected_task_revision:
                 raise Conflict("Submission decision conflict: the task changed before acceptance began.")
-            self._assert_active_request_revision(task)
+            self._assert_active_request_revision(task, owner_decision)
             if submission["status"] != "submitted" or task["status"] != "submitted":
                 raise Conflict("Submission decision conflict: this submission is no longer pending.")
             cursor = self.db.execute(
@@ -1588,6 +1612,7 @@ class AstraService:
                 task_id=task["id"],
                 expected_revision=task["revision"],
                 decision_reason=decision_note,
+                owner_decision=owner_decision,
             )
             # CS93C6 (owner decision 2026-09-15): acceptance does NOT auto-add the
             # submission to the final-results repository. Every final result is an
@@ -1595,7 +1620,9 @@ class AstraService:
             # becomes eligible to be marked, but is not recorded automatically.
         return self.get_submission(actor, submission_id)
 
-    def request_changes(self, actor: dict, submission_id: str, reason: str) -> dict:
+    def request_changes(self, actor: dict, submission_id: str, reason: str,
+        *, owner_decision: OwnerDecision | None = None,
+    ) -> dict:
         submission = self.get_submission(actor, submission_id)
         task = self.get_task(actor, submission["task_id"])
         if submission["status"] != "submitted":
@@ -1614,7 +1641,7 @@ class AstraService:
             task = self.get_task(actor, submission["task_id"])
             if task["revision"] != expected_task_revision:
                 raise Conflict("Submission decision conflict: the task changed before the decision began.")
-            self._assert_active_request_revision(task)
+            self._assert_active_request_revision(task, owner_decision)
             if submission["status"] != "submitted" or task["status"] != "submitted":
                 raise Conflict("Submission decision conflict: this submission is no longer pending.")
             cursor = self.db.execute(
@@ -1641,10 +1668,13 @@ class AstraService:
                 task_id=task["id"],
                 expected_revision=task["revision"],
                 decision_reason=reason,
+                owner_decision=owner_decision,
             )
         return self.get_submission(actor, submission_id)
 
-    def reopen_task(self, actor: dict, task_id: str, reason: str, new_due_date) -> dict:
+    def reopen_task(self, actor: dict, task_id: str, reason: str, new_due_date,
+        *, owner_decision: OwnerDecision | None = None,
+    ) -> dict:
         task = self.get_task(actor, task_id)
         if task["status"] not in {"completed", "cancelled", "abandoned"}:
             raise ValueError("Only a completed, cancelled, or abandoned task can be reopened.")
@@ -1664,7 +1694,7 @@ class AstraService:
             current = self.get_task(actor, task_id)
             if current["revision"] != task["revision"]:
                 raise Conflict("Task revision conflict: the task changed before reopening began.")
-            self._assert_active_request_revision(current)
+            self._assert_active_request_revision(current, owner_decision)
             # accepted_submission_id is retained so the prior accepted version stays visible.
             cursor = self.db.execute(
                 "UPDATE tasks SET status='reopened', due_date=?, updated_at=?, revision=revision+1"
@@ -1683,6 +1713,7 @@ class AstraService:
                 task_id=task_id,
                 expected_revision=task["revision"],
                 decision_reason=reason,
+                owner_decision=owner_decision,
             )
             # A Manager may have attempted to move a terminal task back into work
             # through the generic editor. That creates an update_task_status request,
@@ -1697,10 +1728,13 @@ class AstraService:
                 task_id=task_id,
                 expected_revision=task["revision"],
                 decision_reason=reason,
+                owner_decision=owner_decision,
             )
         return self.get_task(actor, task_id)
 
-    def set_on_hold(self, actor: dict, task_id: str, reason: str, checkpoint_date, hold_owner_id=None) -> dict:
+    def set_on_hold(self, actor: dict, task_id: str, reason: str, checkpoint_date, hold_owner_id=None,
+        *, owner_decision: OwnerDecision | None = None,
+    ) -> dict:
         task = self.get_task(actor, task_id)
         if task["status"] in REOPEN_ONLY_STATUSES:
             raise ValueError(f"A {task['status']} task must be reopened before it can be put on hold.")
@@ -1726,7 +1760,7 @@ class AstraService:
             current = self.get_task(actor, task_id)
             if current["revision"] != task["revision"]:
                 raise Conflict("Task revision conflict: the task changed before the hold began.")
-            self._assert_active_request_revision(current)
+            self._assert_active_request_revision(current, owner_decision)
             if current["status"] in REOPEN_ONLY_STATUSES:
                 raise Conflict(f"A {current['status']} task must be reopened before it can be put on hold.")
             cursor = self.db.execute(
@@ -1751,6 +1785,7 @@ class AstraService:
                 task_id=task_id,
                 expected_revision=task["revision"],
                 decision_reason=reason,
+                owner_decision=owner_decision,
             )
         return self.get_task(actor, task_id)
 
@@ -2358,7 +2393,9 @@ class AstraService:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def close_project(self, actor: dict, project_id: str, note: str = "", exceptional: bool = False) -> dict:
+    def close_project(self, actor: dict, project_id: str, note: str = "", exceptional: bool = False,
+        *, owner_decision: OwnerDecision | None = None,
+    ) -> dict:
         project = self.get_project(actor, project_id)
         if project["status"] == "closed":
             raise ValueError("This project is already closed.")
@@ -2379,7 +2416,7 @@ class AstraService:
                 note,
             )
         # An approval is re-checked against its request inside the transaction below.
-        if outstanding and not getattr(self, "_active_owner_request_id", None):
+        if outstanding and owner_decision is None:
             if not exceptional:
                 raise ValueError("This project has outstanding work; an exceptional owner closure is required.")
             if not note:
@@ -2394,8 +2431,8 @@ class AstraService:
                 " AND status NOT IN ('completed','cancelled','abandoned') ORDER BY title COLLATE NOCASE",
                 (project_id,),
             ).fetchall()]
-            request_id = getattr(self, "_active_owner_request_id", None)
-            if request_id:
+            if owner_decision is not None:
+                request_id = owner_decision.request_id
                 row = self.db.execute(
                     "SELECT project_id,action,payload_json FROM owner_action_requests WHERE id=? AND status='pending'",
                     (request_id,),
@@ -2432,6 +2469,7 @@ class AstraService:
                 project_id=project_id,
                 intent={"note": note, "exceptional": bool(outstanding), "residual_work": outstanding},
                 decision_reason=note,
+                owner_decision=owner_decision,
             )
         return self.get_project(actor, project_id)
 
@@ -2523,7 +2561,9 @@ class AstraService:
         proposal["impacted_successors"] = self._impacted_successors(task_id)
         return proposal
 
-    def approve_schedule_proposal(self, actor: dict, proposal_id: str, decision_reason: str = "") -> dict:
+    def approve_schedule_proposal(self, actor: dict, proposal_id: str, decision_reason: str = "",
+        *, owner_decision: OwnerDecision | None = None,
+    ) -> dict:
         proposal = self.get_schedule_proposal(actor, proposal_id)
         task = self.get_task(actor, proposal["task_id"])
         if proposal["status"] != "pending":
@@ -2549,7 +2589,7 @@ class AstraService:
             # Defence in depth: every closing write bumps the revision, so the check above
             # already refuses a task closed after the pre-check (review SVC-4).
             self._refuse_closed_in_transaction(task["id"])
-            self._assert_active_request_revision(task)
+            self._assert_active_request_revision(task, owner_decision)
             if proposal["status"] != "pending":
                 raise Conflict("Schedule decision conflict: this proposal is no longer pending.")
             cursor = self.db.execute(
@@ -2576,10 +2616,13 @@ class AstraService:
                 task_id=task["id"],
                 expected_revision=task["revision"],
                 decision_reason=str(decision_reason or "").strip(),
+                owner_decision=owner_decision,
             )
         return self.get_task(actor, task["id"])
 
-    def reject_schedule_proposal(self, actor: dict, proposal_id: str, reason: str) -> dict:
+    def reject_schedule_proposal(self, actor: dict, proposal_id: str, reason: str,
+        *, owner_decision: OwnerDecision | None = None,
+    ) -> dict:
         proposal = self.get_schedule_proposal(actor, proposal_id)
         task = self.get_task(actor, proposal["task_id"])
         if proposal["status"] != "pending":
@@ -2594,7 +2637,7 @@ class AstraService:
         with transaction(self.db):
             proposal = self.get_schedule_proposal(actor, proposal_id)
             task = self.get_task(actor, proposal["task_id"])
-            self._assert_active_request_revision(task)
+            self._assert_active_request_revision(task, owner_decision)
             if proposal["status"] != "pending":
                 raise Conflict("Schedule decision conflict: this proposal is no longer pending.")
             cursor = self.db.execute(
@@ -2614,6 +2657,7 @@ class AstraService:
                 task_id=task["id"],
                 expected_revision=task["revision"],
                 decision_reason=reason,
+                owner_decision=owner_decision,
             )
         return self.get_schedule_proposal(actor, proposal_id)
 

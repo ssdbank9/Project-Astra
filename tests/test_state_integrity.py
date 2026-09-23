@@ -1335,14 +1335,82 @@ class AstraStateIntegrityTests(unittest.TestCase):
         with self.assertRaisesRegex(service_module.Conflict, "open work changed since this close was requested"):
             self.service.decide_owner_action_request(self.owner, request["id"], "approved", "OWNER NOTE")
 
-        self.assertIsNone(self.service._active_owner_request_id)
-        self.assertEqual(self.service._active_owner_decision_reason, "")
+        # EXEZPM: the decision context is passed explicitly, never kept on the instance.
+        self.assertFalse(hasattr(self.service, "_active_owner_request_id"))
+        self.assertFalse(hasattr(self.service, "_active_owner_decision_reason"))
         task = self.service.list_tasks(self.owner, project["id"])[0]
         updated = self.service.update_task(
             self.owner, task["id"], {"title": "Unrelated edit", "expected_revision": task["revision"]}
         )
         self.assertEqual(updated["title"], "Unrelated edit")
         self._assert_untouched(request, project_id=project["id"])
+
+    # EXEZPM: a call nested inside one approval, on the same service instance, must
+    # neither inherit that approval's decision context nor clear it for the outer call.
+    def _reentrant_fixture(self, name):
+        project, manager = self._intent_fixture(name)
+        task_a = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Task A"})
+        task_b = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Task B"})
+        request_a = self.service.update_task(
+            manager, task_a["id"],
+            {"status": "cancelled", "reason": "Manager reason A", "expected_revision": task_a["revision"]},
+        )["request"]
+        return project, manager, task_a, task_b, request_a
+
+    def _run_nested_inside_approval(self, nested):
+        original = self.service._execute_owner_action_request
+        calls = []
+
+        def wrapped(actor, request, payload, reason):
+            if not calls:
+                calls.append(request["id"])
+                nested()
+            return original(actor, request, payload, reason)
+
+        return patch.object(self.service, "_execute_owner_action_request", side_effect=wrapped)
+
+    def test_nested_direct_owner_action_does_not_inherit_the_outer_approval(self):
+        _, _, task_a, task_b, request_a = self._reentrant_fixture("Reentrant direct")
+        nested_results = []
+
+        def nested():
+            nested_results.append(self.service.update_task(
+                self.owner, task_b["id"], {"title": "Nested edit", "expected_revision": task_b["revision"]}
+            ))
+
+        with self._run_nested_inside_approval(nested):
+            decided = self.service.decide_owner_action_request(self.owner, request_a["id"], "approved", "OWNER NOTE A")
+
+        self.assertEqual(nested_results[0]["title"], "Nested edit")
+        self.assertEqual(decided["request"]["status"], "approved")
+        self.assertEqual(decided["request"]["decision_reason"], "OWNER NOTE A")
+        self.assertEqual(self.service.get_task(self.owner, task_a["id"])["status"], "cancelled")
+
+    def test_nested_approval_does_not_replace_or_clear_the_outer_approval(self):
+        _, manager, task_a, task_b, request_a = self._reentrant_fixture("Reentrant approval")
+        request_b = self.service.update_task(
+            manager, task_b["id"],
+            {"status": "cancelled", "reason": "Manager reason B", "expected_revision": task_b["revision"]},
+        )["request"]
+        nested_results = []
+
+        def nested():
+            nested_results.append(self.service.decide_owner_action_request(
+                self.owner, request_b["id"], "approved", "OWNER NOTE B"
+            ))
+
+        with self._run_nested_inside_approval(nested):
+            decided = self.service.decide_owner_action_request(self.owner, request_a["id"], "approved", "OWNER NOTE A")
+
+        self.assertEqual(nested_results[0]["request"]["decision_reason"], "OWNER NOTE B")
+        self.assertEqual(decided["request"]["status"], "approved")
+        self.assertEqual(decided["request"]["decision_reason"], "OWNER NOTE A")
+        events_a = [
+            json.loads(event["after_json"]) for event in self.service.task_events(self.owner, task_a["id"])
+            if event["event_type"] == "protected_action_approved"
+        ]
+        self.assertEqual([event["request_id"] for event in events_a], [request_a["id"]])
+        self.assertNotIn("approved_request_id", events_a[0])
 
     # SRFCZD R5 (SEM-2): a Manager's generic edit into a governed status, or out of review,
     # is refused before any request exists, with the Owner's message: the Owner could never
