@@ -2,6 +2,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -97,24 +98,48 @@ SCHEMA_WRITE_ACTIONS = frozenset({
 })
 
 
-def stop_before_step(version):
-    """An authorizer that lets steps 1..version-1 commit, then refuses every write, so
-    the database stops at version-1 without any statement of step ``version`` running.
+@contextmanager
+def stopped_before_step(connection, version):
+    """Let steps 1..version-1 commit on ``connection``, then refuse every write, so a
+    migration stops at version-1 without any statement of step ``version`` running.
 
-    Building the starting database this way does not rely on the atomicity under test.
-    It keys on writes rather than on the step's BEGIN: ``BEGIN IMMEDIATE`` is the same
-    SQL every step, so sqlite3's statement cache reuses it without asking the authorizer.
+    Building the starting database this way does not rely on the atomicity under test,
+    and it does not assume where in step version-1 its ``PRAGMA user_version`` bump sits
+    or how that step commits. A trace callback watches for the bump and then for the
+    next ``BEGIN IMMEDIATE``, which opens step ``version``; only from then on does the
+    authorizer refuse writes. The BEGIN is seen through the trace callback, which fires
+    on every executed statement, because sqlite3's statement cache reuses the identical
+    ``BEGIN IMMEDIATE`` of every step without asking the authorizer again.
     """
-    previous_bump_seen = version == 1
+    previous_bump_seen = False
+    step_started = version == 1
+
+    def trace(statement):
+        nonlocal previous_bump_seen, step_started
+        if statement == f"PRAGMA user_version = {version - 1}":
+            previous_bump_seen = True
+        elif previous_bump_seen and statement == "BEGIN IMMEDIATE":
+            step_started = True
 
     def authorizer(action, arg1, arg2, db_name, trigger):
-        nonlocal previous_bump_seen
-        if action == sqlite3.SQLITE_PRAGMA and arg1 == "user_version" and arg2 == str(version - 1):
-            previous_bump_seen = True
-        elif previous_bump_seen and action in SCHEMA_WRITE_ACTIONS:
+        if step_started and action in SCHEMA_WRITE_ACTIONS:
             return sqlite3.SQLITE_DENY
         return sqlite3.SQLITE_OK
-    return authorizer
+
+    connection.set_trace_callback(trace)
+    connection.set_authorizer(authorizer)
+    try:
+        yield
+    finally:
+        connection.set_authorizer(None)
+        connection.set_trace_callback(None)
+
+
+def open_without_migrating(path):
+    """``db.connect(path)`` with its exact settings (row_factory, foreign_keys, WAL,
+    busy_timeout) but without the ``migrate()`` call, so a test can drive migrate()."""
+    with patch.object(db, "migrate", lambda connection: None):
+        return db.connect(path)
 
 
 def first_statement_then_fail(connection, script):
@@ -344,7 +369,8 @@ class MigrationTests(unittest.TestCase):
         For every step N, from a database at N-1: fail after the step's first statement,
         and separately fail at its ``PRAGMA user_version = N``, after all of its other
         statements. Either way user_version must still be N-1 and the catalog must be
-        exactly as before; the retry must reach SCHEMA_VERSION with a fresh catalog.
+        exactly as before; re-opening through db.connect() (WAL, as in production) must
+        migrate to SCHEMA_VERSION with a catalog equal to a fresh database.
         Putting ``executescript()`` back into a step, or moving its bump outside the
         ``transaction()`` block, commits part of the step and fails here.
         """
@@ -373,15 +399,14 @@ class MigrationTests(unittest.TestCase):
             for fault_name, (inject, expected) in faults.items():
                 with self.subTest(step=version, fault=fault_name):
                     path = Path(self.temp.name) / f"v{version}-{fault_name.replace(' ', '-')}.sqlite3"
-                    connection = sqlite3.connect(path, timeout=30, isolation_level=None)
+                    connection = open_without_migrating(path)
                     try:
-                        connection.execute("PRAGMA foreign_keys = ON")
+                        self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone()[0], "wal")
 
                         if version > 1:   # build the database at version - 1
-                            connection.set_authorizer(stop_before_step(version))
-                            with self.assertRaises(sqlite3.DatabaseError):
-                                db.migrate(connection)
-                            connection.set_authorizer(None)
+                            with stopped_before_step(connection, version):
+                                with self.assertRaises(sqlite3.DatabaseError):
+                                    db.migrate(connection)
                         self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], version - 1)
                         before = full_catalog(connection)
 
@@ -392,7 +417,9 @@ class MigrationTests(unittest.TestCase):
                         self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], version - 1)
                         self.assertEqual(full_catalog(connection), before, f"step {version} left part of itself committed")
 
-                        db.migrate(connection)
+                        # the next start: re-open through db.connect(), which migrates
+                        connection.close()
+                        connection = db.connect(path)
                         self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
                         self.assertEqual(full_catalog(connection), fresh_catalog)
                         self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")

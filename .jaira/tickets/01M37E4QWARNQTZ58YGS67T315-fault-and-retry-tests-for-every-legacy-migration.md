@@ -20,7 +20,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:28:57Z
-updated-at: 2026-09-23T16:56:21Z
+updated-at: 2026-09-23T17:16:37Z
 updated-by: Claude
 claimed-by: vm-22489
 claimed-at: 2026-09-23T16:46:25Z
@@ -34,13 +34,13 @@ outcome-resolves: "DoD 1-2: the new test. DoD 3: 24 mutants (executescript() per
 ## Definition of Done
 
 - [x] tests/test_db.py has a parameterised test that, for each version N in 1-12, starts from a database at N-1, injects a failure after the step's first statement, and asserts user_version is still N-1 and sqlite_master is unchanged
-  proof: tests/test_db.py test_every_legacy_step_rolls_back_a_mid_step_failure_and_retries_to_the_fresh_schema: subTest step=1..12, fault 'after the first statement' (first_statement_then_fail) and 'at the user_version bump' (deny_version_bump); start db built by stop_before_step(N); asserts user_version N-1, full sqlite_master unchanged, not in_transaction
+  proof: tests/test_db.py test_every_legacy_step_rolls_back_a_mid_step_failure_and_retries_to_the_fresh_schema: subTest step=1..12, fault 'after the first statement' (first_statement_then_fail) and 'at the user_version bump' (deny_version_bump); start db built by stopped_before_step(connection, N) on a db.connect()-configured (WAL) connection; asserts user_version N-1, full sqlite_master unchanged, not in_transaction
 - [x] The same test re-opens and migrates again and asserts the final user_version is SCHEMA_VERSION and the catalog equals a fresh database's
-  proof: same test: db.migrate() retry on the same connection, asserts user_version == db.SCHEMA_VERSION, full_catalog == fresh db.connect() catalog, integrity_check ok
+  proof: tests/test_db.py test_every_legacy_step_rolls_back_a_mid_step_failure_and_retries_to_the_fresh_schema: after the fault asserts, connection.close(); connection = db.connect(path) (the real startup path: row_factory, WAL, busy_timeout, migrate); asserts user_version == db.SCHEMA_VERSION, full_catalog == fresh db.connect() catalog, integrity_check ok; 24 subTests, test_db OK 3/3 runs
 - [x] Mutation check recorded in the ticket: executescript() restored in any one step, or that step's user_version bump moved outside its transaction, makes the test fail
   proof: 24 mutants (executescript() in step N, bump N dedented out of transaction, N=1..12): new test fails at exactly step N for all 24; pre-ticket tests/test_db.py caught 3/24 (exec v1,v5,v12). Matrix in jaira note
 - [x] Full suite green and git diff --check clean
-  proof: tests/run.py: Ran 286 tests, OK (exit 0); test_db 16 tests OK; node --check app.js ok; compileall ok; git diff --check origin/codex/migration-safety-remediation clean
+  proof: tests/run.py: Ran 286 tests, OK (exit 0) after review fixes; test_db 16 OK x3; node --check app.js ok; compileall ok; git diff --check against merge-base clean
 
 ## Options
 
@@ -69,3 +69,10 @@ Dead end 2: denying the BEGIN of step N via the authorizer does not work. 'BEGIN
 Used instead: stop_before_step(N) denies every CREATE/ALTER/INSERT/UPDATE/DELETE once 'user_version = N-1' has been authorized. Each bump string is unique per connection, so it is always prepared fresh and the authorizer sees it.
 Mutation matrix, run against copies of src/ (not committed): executescript() restored in step N, and 'PRAGMA user_version = N' dedented out of its with-transaction block, for N=1..12, 24 mutants in all. New test: 24/24 fail, each at exactly step=N. Pre-ticket tests/test_db.py: 3/24 fail (executescript in v1, v5, v12); the other 21, including all 12 bump moves, stay green.
 Not done, out of plan scope: A836XC gap 4 (four older tests in tests/test_db.py close SQLite handles without try/finally). The new test closes its connections in finally. Left for a separate change so this diff stays test-additive.
+- **2026-09-23 17:16 · Claude** — Review round 1 fixes (reviewer: 1 medium, 2 low).
+Medium (DoD 2 said re-opens, test retried on the same raw connection): the retry now closes and re-opens through db.connect(path), which migrates. So the retry goes through startup and reads what is on disk.
+Low 3 (bare sqlite3.connect, no WAL): the test connection now comes from open_without_migrating(path) = db.connect(path) with db.migrate patched to a no-op. Same settings as production with no copied pragma list to drift; the test asserts journal_mode is wal. The faults now run in WAL.
+Low 2 (stop_before_step assumed the N-1 bump was that step's last statement): replaced by the stopped_before_step(connection, N) context manager. A trace callback watches for 'PRAGMA user_version = N-1' and then the next 'BEGIN IMMEDIATE' (step N opening); only then does the authorizer refuse writes. Trace, not authorizer, because the cached BEGIN is never re-authorized.
+Dead end: first I armed on the COMMIT after the bump. That made the executescript/dedent mutants fail at N and at N+1: a non-atomic step N never sends a COMMIT with an open transaction (Python commit() is a no-op outside a transaction), so the N+1 setup never stopped. Arming on the next BEGIN makes setup independent of how step N-1 commits.
+Mutation re-run (scratch script, db.py mutants): executescript() in step N -> fails at exactly step N, N=1..12; bump N dedented out of transaction -> exactly step N, N=1..12; bump moved to the top of its transaction (bumpfirst, still atomic) -> passes, N=1..12 (before this fix it failed at N+1).
+Not rebased: origin/codex/migration-safety-remediation gained 7c0fb9e refactor(39DNZT) (migrate step registry) after this branch was cut. Compatibility with it is checked separately below.
