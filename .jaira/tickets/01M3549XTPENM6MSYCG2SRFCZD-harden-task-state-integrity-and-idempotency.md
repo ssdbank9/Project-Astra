@@ -1,10 +1,10 @@
 ---
 id: 01M3549XTPENM6MSYCG2SRFCZD
 title: Harden task state integrity and idempotency
-status: review
+status: in-progress
 ready: true
 creator: Aly Jafferani
-assignee: Aly Jafferani
+assignee: Claude
 goal: "Make Astra task edits, lifecycle decisions, Owner requests and final-result publication concurrency-safe, immutable where governed, and idempotent, with regression tests that fail on the previously reproduced defects."
 context: "The 2026-09-22 Codex adversarial review reproduced five defects against disposable SQLite databases while the full suite stayed green: stale full-form edits silently overwrite newer revisions; completed tasks accept ordinary field changes without reopen; two synchronized acceptance calls both succeed and emit duplicate events; identical protected-action retries create duplicate pending requests with no complete decision/reconciliation seam; repeated final-result marking keeps one row but emits duplicate final_result_marked events. Current claude/excel-import head 5adec82 still has unconditional task and lifecycle updates and unconditional event emission after INSERT OR IGNORE. Preserve all reviewed PR #2/#4 fixes and do not broaden into public-auth, deployment, Chairman, mixed-edit, UI or importer follow-up tickets."
 definition-of-done: Task updates require an expected revision and atomically reject stale writes without changing the task or audit history; service and HTTP regression tests prove the conflict.
@@ -15,9 +15,9 @@ related: []
 commits:
   - c109687a639bee150a18a72a729bd1d9393fe94a
 created-at: 2026-09-22T17:58:32Z
-updated-at: 2026-09-23T12:07:59Z
-claimed-by: X1CarbonPC-37080
-claimed-at: 2026-09-22T17:58:55Z
+updated-at: 2026-09-23T12:11:55Z
+claimed-by: vm-3302
+claimed-at: 2026-09-23T12:11:07Z
 updated-by: Claude
 outcome-what: "Added revision-checked task writes, terminal-state immutability, transactional single-winner lifecycle decisions, idempotent Owner requests with decision/reconciliation controls, and idempotent final-result audit emission, with focused service and HTTP regressions."
 outcome-why: "The adversarial review reproduced lost updates, mutable accepted state, duplicate lifecycle events, duplicate unresolved approvals, and duplicate audit events despite a green baseline suite."
@@ -72,3 +72,4 @@ review-check: "1. cd to the repo and run: .venv/bin/python tests/run.py ; expect
 - **2026-09-22 18:03 · Aly Jafferani** — Implementation rationale: preserve accepted-version immutability and use the existing owner_action_requests decision columns, avoiding an unnecessary schema change. Require an explicit expected_revision at the service/API/UI boundary and use conditional SQL updates inside BEGIN IMMEDIATE transactions so stale writers fail without emitting events. Canonicalize protected-action payloads (including the task revision) and deduplicate equivalent pending requests inside the same transaction. Add a generic Owner decision path that dispatches existing Owner-only service methods; successful direct or approved actions reconcile matching pending requests atomically, while rejected/cancelled requests never execute. Emit final-result events only when the marker row actually changes. Add focused service, HTTP, idempotency, and concurrency regressions before implementation, then run the full suite and node syntax check.
 - **2026-09-23 03:51 · Aly Jafferani** — Adjacent issue deliberately left out of this bounded ticket: migration steps 1-12 still use sqlite executescript semantics that the adversarial probe showed can persist partial DDL after failure. Treat that as a separate migration-safety remediation. This branch has automated service/HTTP/static verification only; no live browser click acceptance, push, or deployment was performed.
 - **2026-09-23 12:07 · Claude** — Review 2026-09-23 (Claude): sent back. Main defect: request reconciliation approves non-matching pending requests (see review-gaps 1). Fix plan: match on the executed intent (status/from_status, proposal_id, checkpoint, hold owner, close payload); non-matching stale requests are left pending or marked superseded, never approved; record the Owner's decision note; stale-check close_project; add two-connection race regressions for update_task's revision predicate and the in-transaction request guards. The move back to in-progress waits on Aly allowing reassignment (not_owner gate).
+- **2026-09-23 12:11 · Claude** — Moved back to in-progress 2026-09-23 after independent review (see review-gaps). Reassigned to Claude with Aly's approval in Slack (12:10 UTC). Rework is one bounded change at a time: 1) intent-matching reconciliation, 2) record the Owner decision note, 3) close_project stale check, 4) race regressions for the untested in-transaction guards.

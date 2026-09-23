@@ -1,10 +1,10 @@
 ---
 id: 01M3675JP3ADPB1KQ5R2A836XC
 title: Make legacy SQLite migrations atomic and retry-safe
-status: review
+status: signoff
 ready: true
 creator: Aly Jafferani
-assignee: Aly Jafferani
+assignee: Claude
 goal: "Ensure every Astra schema migration either commits completely with its user_version update or rolls back completely, and can be retried after an injected failure without leaving partial DDL."
 context: "The 2026-09-22 adversarial probe confirmed that migration steps 1-12 in src/astra/db.py use sqlite3.executescript inside a transaction helper. SQLite executescript commits an open transaction before running its script, so an injected error can persist earlier DDL while user_version remains old. Migration v13 already avoids this pattern by executing statements individually inside BEGIN IMMEDIATE. This ticket must harden the legacy migration path without changing the resulting v13 schema or production data semantics."
 definition-of-done: Migrations 1-12 execute atomically without executescript transaction escape; an injected mid-migration failure leaves schema and user_version unchanged; reconnect/retry succeeds; fresh and representative legacy-version upgrades produce the expected v13 schema; the full suite and Git diff checks pass.
@@ -16,7 +16,7 @@ follows: 01M3549XTPENM6MSYCG2SRFCZD
 commits:
   - 3fd31ec0094798b867aadfa5e94a5de9fb9b7906
 created-at: 2026-09-23T04:07:50Z
-updated-at: 2026-09-23T12:08:05Z
+updated-at: 2026-09-23T12:11:36Z
 updated-by: Claude
 claimed-by: X1CarbonPC-33252
 claimed-at: 2026-09-23T04:17:12Z
@@ -58,3 +58,4 @@ review-check: "1. cd to the repo and run: .venv/bin/python -m unittest -v tests.
 ## Progress
 - **2026-09-23 04:32 · Aly Jafferani** — The first red v1 regression proved six tables persisted with user_version 0. Its initial failing assertion left the SQLite handle open and produced a secondary Windows cleanup error; the test now closes in finally so failures remain unambiguous. Jaira ticket creation also initially failed to record its coordination outbox under the sandbox, although the local ticket file was created; narrow permission to the project-specific .jaira state directory restored normal board writes.
 - **2026-09-23 12:08 · Claude** — Review 2026-09-23 (Claude): runtime atomicity verified for all 13 versions with injected faults and hard kills; committed tests cover v1, v5, v12 only. Move to signoff waits on Aly allowing reassignment (not_owner gate). Follow-ups to file: per-version parameterised fault test; re-read user_version inside each step's BEGIN IMMEDIATE (concurrent migrators). T81ZV6 on claude/review-report-2026-09-22 overlaps this ticket's scope.
+- **2026-09-23 12:11 · Claude** — Moved to signoff 2026-09-23. Independent review found the definition of done met at runtime for all 13 versions. The test coverage gap (fault tests cover only v1, v5, v12) and the pre-existing concurrency items are recorded in review-gaps for follow-up tickets.
