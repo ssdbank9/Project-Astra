@@ -1,5 +1,5 @@
 const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality"};
-async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");return data}
+async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.error||"Request failed");err.status=response.status;throw err}return data}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
 function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=`${state.user.display_name} · ${state.user.global_role}`;const isOwner=state.user.global_role==="owner";document.querySelector("#new-project").hidden=!isOwner;document.querySelector("#people").hidden=!isOwner;document.querySelector("#close-project").hidden=!isOwner;document.querySelector("#save-template-btn").hidden=!isOwner;refreshImportAccess()}
 async function load(){const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;updateBell();fillFilters();render()}
@@ -500,19 +500,48 @@ function renderInbox(items,requests=[]){
     const mark=unread?`<button type="button" class="link" data-read="${escapeHtml(n.id)}">Mark read</button>`:"read";
     return `<li class="${unread?"unread":""}"><strong>${escapeHtml(n.summary)}</strong><br><small>${escapeHtml(when)}</small> · ${mark}</li>`;
   }).join("")||"<li>No notifications.</li>";
-  const requestRows=requests.map(r=>`<li class="unread"><strong>${escapeHtml(r.action.replaceAll("_"," "))}</strong><br><small>${escapeHtml(r.requested_by_name)} · ${escapeHtml(r.task_title||r.project_name)} · ${escapeHtml(new Date(r.requested_at).toLocaleString())}</small><div class="actions"><button type="button" data-request-decision="approved" data-request-id="${escapeHtml(r.id)}">Approve</button><button type="button" class="quiet" data-request-decision="rejected" data-request-id="${escapeHtml(r.id)}">Reject</button><button type="button" class="quiet" data-request-decision="cancelled" data-request-id="${escapeHtml(r.id)}">Cancel request</button></div></li>`).join("")||"<li>No pending Owner requests.</li>";
-  document.querySelector("#inbox-body").innerHTML=`<h2>Needs action</h2><ul class="people-list">${requestRows}</ul><h2>Activity</h2>
+  const requestRows=requests.map(r=>`<li class="unread owner-request"><strong>${escapeHtml(REQUEST_LABELS[r.action]||r.action.replaceAll("_"," "))} · ${escapeHtml(r.task_title||r.project_name)}</strong>${requestDetail(r)}
+    <small>Requested by ${escapeHtml(r.requested_by_name)} · ${escapeHtml(new Date(r.requested_at).toLocaleString())}${r.task_id?` · <button type="button" class="link" data-detail="${escapeHtml(r.task_id)}">Open task</button>`:""}</small><div class="actions"><button type="button" data-request-decision="approved" data-request-id="${escapeHtml(r.id)}">Approve</button><button type="button" class="quiet" data-request-decision="rejected" data-request-id="${escapeHtml(r.id)}">Reject</button><button type="button" class="quiet" data-request-decision="cancelled" data-request-id="${escapeHtml(r.id)}">Cancel request</button></div></li>`).join("")||"<li>No pending Owner requests.</li>";
+  document.querySelector("#inbox-body").innerHTML=`<h2>Needs action</h2><div class="error" id="inbox-error" role="alert" tabindex="-1"></div><ul class="people-list">${requestRows}</ul><h2>Activity</h2>
     <div class="actions"><button type="button" id="read-all" class="quiet">Mark all read</button></div>
     <ul class="people-list">${rows}</ul>`;
   document.querySelector("#read-all").addEventListener("click",markAllRead);
   document.querySelectorAll("#inbox-body [data-read]").forEach(b=>b.addEventListener("click",()=>markRead(b.dataset.read)));
   document.querySelectorAll("#inbox-body [data-request-decision]").forEach(b=>b.addEventListener("click",()=>decideOwnerRequest(b.dataset.requestId,b.dataset.requestDecision)));
+  document.querySelectorAll("#inbox-body [data-detail]").forEach(b=>b.addEventListener("click",()=>openDetail(b.dataset.detail)));
+}
+// 0D9Q3X: the Owner decides from the inbox, so each request says what it would change and why.
+const REQUEST_LABELS={update_task_status:"Status change",accept_submission:"Accept submission",request_changes:"Request changes",reopen_task:"Reopen task",set_on_hold:"Put on hold",approve_schedule_proposal:"Approve schedule change",reject_schedule_proposal:"Reject schedule change",close_project:"Close project"};
+function requestDetail(r){
+  const p=r.payload||{};
+  const change=r.action==="update_task_status"&&p.status
+    ?`<p>Change status ${p.from_status?`from <strong>${escapeHtml(statusLabel(p.from_status))}</strong> `:""}to <strong>${escapeHtml(statusLabel(p.status))}</strong></p>`:"";
+  const reason=r.reason?`<p><em>Reason: ${escapeHtml(r.reason)}</em></p>`:`<p class="muted">No reason given.</p>`;
+  return `<div class="request-detail">${change}${reason}</div>`;
+}
+// 0D9Q3X: a 409 means the record moved on under the user; show the current one instead of the stale form.
+const TASK_CONFLICT="This task changed since you opened it, so nothing was saved. It now shows the latest version; check it and try again.";
+const REQUEST_CONFLICT="This request or its task changed since you opened it, so nothing was decided. The inbox now shows the latest; open the task to check it.";
+function showConflict(box,text){if(!box)return;box.style.color="";box.textContent=text;box.focus?.()}
+async function reloadTaskAfterConflict(taskId,errorId){
+  await load().catch(()=>{});await openDetail(taskId);
+  let box=document.querySelector("#"+errorId);
+  if(!box){ // the reload can remove the form (for example the task was closed meanwhile)
+    document.querySelector("#detail-body")?.insertAdjacentHTML("afterbegin",'<div class="error" id="detail-conflict" role="alert" tabindex="-1"></div>');
+    box=document.querySelector("#detail-conflict");
+  }else{box.setAttribute("role","alert");box.tabIndex=-1}
+  showConflict(box,TASK_CONFLICT);
 }
 async function decideOwnerRequest(id,decision){
   const reason=prompt(decision==="approved"?"Decision note (optional)":`Reason this request is ${decision}:`);
   if(reason===null)return;
   if(decision!=="approved"&&!reason.trim()){alert("A reason is required.");return}
-  try{await api(`/api/owner-action-requests/${id}/decision`,{method:"POST",body:JSON.stringify({decision,reason})});await load();await openInbox()}catch(x){alert(x.message)}
+  const err=document.querySelector("#inbox-error");if(err)err.textContent="";
+  try{await api(`/api/owner-action-requests/${id}/decision`,{method:"POST",body:JSON.stringify({decision,reason})});await load();await openInbox()}
+  catch(x){
+    if(x.status===409){await load().catch(()=>{});await openInbox();showConflict(document.querySelector("#inbox-error"),REQUEST_CONFLICT);return}
+    showConflict(document.querySelector("#inbox-error"),x.message);
+  }
 }
 async function markRead(id){
   try{await api(`/api/notifications/${id}/read`,{method:"POST",body:"{}"});await openInbox()}catch(x){alert(x.message)}
@@ -829,7 +858,7 @@ async function lifecycleAction(e,task){
     else if(kind==="hold")outcome=await api(`/api/tasks/${task.id}/hold`,{method:"POST",body:JSON.stringify(body)});
     await load();await openDetail(task.id);
     if(outcome?.request){const current=document.querySelector("#lifecycle-error");current.style.color="#0c7c86";current.textContent="Owner request created; accepted live state is unchanged."}
-  }catch(x){err.textContent=x.message}
+  }catch(x){if(x.status===409)return reloadTaskAfterConflict(task.id,"lifecycle-error");err.textContent=x.message}
 }
 
 function buildAttachments(task){
@@ -922,7 +951,7 @@ async function submitDetailEdit(e,{statusLocked=false}={}){
     const outcome=await api(`/api/tasks/${detailTaskId}`,{method:"POST",body:JSON.stringify(body)});
     await load();await openDetail(detailTaskId);
     if(outcome.request){const current=document.querySelector("#detail-edit-error");current.style.color="#0c7c86";current.textContent="Owner request created; accepted live state is unchanged."}
-  }catch(err){error.textContent=err.message}
+  }catch(err){if(err.status===409)return reloadTaskAfterConflict(detailTaskId,"detail-edit-error");error.textContent=err.message}
 }
 
 async function addDependency(){

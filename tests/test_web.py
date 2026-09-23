@@ -1166,6 +1166,18 @@ def _detail_task(status, permissions):
     }
 
 
+CONFLICT_TEXT = "This task changed since you opened it"
+INBOX_REQUESTS = [
+    {"id": "r1", "action": "update_task_status", "task_id": "t9", "task_title": "Vendor shortlist",
+     "project_name": "P", "requested_by_name": "Mia Manager", "requested_at": "2026-09-23T10:00:00Z",
+     "reason": "Client withdrew <b>the site</b>",
+     "payload": {"status": "in_progress", "from_status": "cancelled", "expected_revision": 1}},
+    {"id": "r2", "action": "update_task_status", "task_id": "t8", "task_title": "Site survey",
+     "project_name": "P", "requested_by_name": "Mia Manager", "requested_at": "2026-09-23T10:00:00Z",
+     "reason": "", "payload": {"status": "abandoned", "expected_revision": 1}},
+]
+
+
 # ARZWV7 round 2: a stricter stub that runs the dialog's real click/submit wiring. An id selector
 # resolves only if that id is in index.html or in the markup renderDetail just wrote, so a handler
 # that reaches for a missing element fails here the way it fails in a browser.
@@ -1184,13 +1196,14 @@ function el(init){
   return new Proxy(t,{get(o,k){if(k===Symbol.toPrimitive)return()=>"";if(k in o)return o[k];return function(){return el()}},
     set(o,k,v){o[k]=v;if(k==="innerHTML"&&o.isBody){dyn={};nodes={}}return true}});
 }
-function bodyHtml(){return store["#detail-body"]?store["#detail-body"].innerHTML:""}
+function bodyHtml(){return ["#detail-body","#inbox-body"].map(k=>store[k]?store[k].innerHTML:"").join("")}
 globalThis.bodyHtml=bodyHtml;
+globalThis.__resetBodies=()=>{for(const k of ["#detail-body","#inbox-body"])if(store[k])store[k].innerHTML=""};
 globalThis.document={
   querySelector(s){
     const m=/^#([\w-]+)$/.exec(s);
     if(!m)return el();
-    if(s==="#detail-body")return store[s]||(store[s]=el({isBody:true}));
+    if(s==="#detail-body"||s==="#inbox-body")return store[s]||(store[s]=el({isBody:true}));
     if(indexIds.has(m[1]))return store[s]||(store[s]=el());
     if(bodyHtml().includes(`id="${m[1]}"`))return dyn[m[1]]||(dyn[m[1]]=el());
     return null;
@@ -1214,21 +1227,31 @@ globalThis.FormData=function(form){return form.__entries||[]};
 globalThis.location={hash:"",search:""};globalThis.history={replaceState(){}};
 const harness=`;globalThis.__run=async(sc)=>{
   const calls=[];
-  api=async(path,opts)=>{calls.push({path,method:opts&&opts.method,body:opts&&opts.body?JSON.parse(opts.body):null});if(sc.fail)throw new Error(sc.fail);return {}};
-  load=async()=>{};openDetail=async()=>{calls.push({reload:true})};
-  detailTaskId=sc.task.id;globalThis.__reason=sc.reason||"";
-  renderDetail(sc.task,[]);
-  const target=sc.click?document.querySelectorAll("["+sc.click[0]+"]").find(n=>Object.values(n.dataset).includes(sc.click[1]))
+  __resetBodies();
+  api=async(path,opts)=>{
+    const method=opts&&opts.method;
+    if(!method||method==="GET"){if(path.startsWith("/api/owner-action-requests"))calls.push({reloadInbox:true});
+      return {notifications:[],unread:0,requests:sc.requests||[]}}
+    calls.push({path,method,body:opts&&opts.body?JSON.parse(opts.body):null});
+    if(sc.fail){const e=new Error(sc.fail);if(sc.status)e.status=sc.status;throw e}return {}};
+  // 0D9Q3X: the reload re-renders, so a message written to the pre-reload node is lost here as in a browser.
+  load=async()=>{calls.push({load:true})};openDetail=async()=>{calls.push({reload:true});renderDetail(sc.task,[])};
+  globalThis.prompt=()=>sc.prompt??"";globalThis.alert=m=>{calls.push({alert:m})};
+  globalThis.__reason=sc.reason||"";
+  if(sc.requests){state.user={global_role:"owner"};renderInbox([],sc.requests)}
+  else{detailTaskId=sc.task.id;renderDetail(sc.task,[])}
+  const pick=sc.click||sc.submitAt;
+  const target=pick?document.querySelectorAll("["+pick[0]+"]").find(n=>Object.values(n.dataset).includes(pick[1]))
     :document.querySelector(sc.submit||sc.button);
   if(!target)return {missing:true};
   await new Promise(r=>setTimeout(r,0));calls.length=0;
   if(sc.entries)target.__entries=sc.entries;
-  const handlers=target._l[sc.submit?"submit":"click"]||[];
+  const handlers=target._l[sc.submit||sc.submitAt?"submit":"click"]||[];
   let threw=null;
   try{await Promise.all(handlers.map(f=>f({target,preventDefault(){}})))}catch(e){threw=String(e)}
   const messages={};
   for(const m of bodyHtml().matchAll(/id="([\\w-]*error)"/g)){const n=document.querySelector("#"+m[1]);if(n&&n.textContent)messages[m[1]]=n.textContent}
-  return {calls,threw,handlers:handlers.length,messages};
+  return {calls,threw,handlers:handlers.length,messages,html:sc.requests?bodyHtml():undefined};
 };`;
 (0,eval)(src+harness);
 (async()=>{const out={};for(const [name,sc] of Object.entries(scenarios))out[name]=await globalThis.__run(sc);
@@ -1395,6 +1418,19 @@ class AstraDetailDialogWiringTests(unittest.TestCase):
             "manager-request-closed": {"task": manager_done, "submit": "#detail-edit",
                                        "entries": [["expected_revision", "3"], ["status", "in_progress"],
                                                    ["reason", "more work found"]]},
+            # 0D9Q3X: a 409 reloads the task; any other refusal keeps the form and the server's message.
+            "save-conflict": {"task": owner_open, "submit": "#detail-edit", "status": 409,
+                              "fail": "Task revision conflict: expected 3, current revision is 4.",
+                              "entries": [["expected_revision", "3"], ["title", "Renamed"]]},
+            "save-refused": {"task": owner_open, "submit": "#detail-edit", "status": 400,
+                             "fail": "A reason is required.", "entries": [["expected_revision", "3"], ["title", "X"]]},
+            "submit-conflict": {"task": owner_open, "submitAt": ["data-life", "submit"], "status": 409,
+                                "fail": "Task revision conflict.", "entries": [["note", "done"]]},
+            "inbox-decision-conflict": {"requests": INBOX_REQUESTS, "click": ["data-request-decision", "approved"],
+                                        "prompt": "ok", "status": 409,
+                                        "fail": "Task revision conflict: request expected 1, current revision is 2."},
+            "inbox-decision-refused": {"requests": INBOX_REQUESTS, "click": ["data-request-decision", "approved"],
+                                       "prompt": "ok", "status": 400, "fail": "Owner cannot do that."},
         }
         with tempfile.TemporaryDirectory() as tmp:
             driver = Path(tmp) / "wiring.js"
@@ -1445,6 +1481,47 @@ class AstraDetailDialogWiringTests(unittest.TestCase):
     def test_manager_status_request_on_a_closed_task_sends_the_status(self):
         run = self._ran("manager-request-closed")
         self.assertEqual(run["calls"][0]["body"]["status"], "in_progress")
+
+    def test_a_conflicting_save_reloads_the_task_and_says_it_changed(self):
+        run = self._ran("save-conflict")
+        self.assertEqual(run["calls"][0]["path"], "/api/tasks/t1")
+        self.assertIn({"load": True}, run["calls"])
+        self.assertIn({"reload": True}, run["calls"])
+        self.assertIn(CONFLICT_TEXT, run["messages"].get("detail-edit-error", ""))
+
+    def test_a_conflicting_submit_reloads_the_task_and_says_it_changed(self):
+        run = self._ran("submit-conflict")
+        self.assertEqual(run["calls"][0]["path"], "/api/tasks/t1/submit")
+        self.assertIn({"reload": True}, run["calls"])
+        self.assertIn(CONFLICT_TEXT, run["messages"].get("lifecycle-error", ""))
+
+    def test_any_other_refusal_keeps_the_form_and_the_servers_message(self):
+        run = self._ran("save-refused")
+        self.assertNotIn({"reload": True}, run["calls"])
+        self.assertEqual(run["messages"].get("detail-edit-error"), "A reason is required.")
+
+    def test_a_conflicting_inbox_decision_reloads_the_inbox_and_says_it_changed(self):
+        run = self._ran("inbox-decision-conflict")
+        self.assertEqual(run["calls"][0]["path"], "/api/owner-action-requests/r1/decision")
+        self.assertIn({"load": True}, run["calls"])
+        self.assertIn({"reloadInbox": True}, run["calls"])
+        self.assertFalse([c for c in run["calls"] if "alert" in c])
+        self.assertIn("changed since you opened it", run["messages"].get("inbox-error", ""))
+
+    def test_a_refused_inbox_decision_shows_the_reason_inline(self):
+        run = self._ran("inbox-decision-refused")
+        self.assertNotIn({"reloadInbox": True}, run["calls"])
+        self.assertFalse([c for c in run["calls"] if "alert" in c])
+        self.assertEqual(run["messages"].get("inbox-error"), "Owner cannot do that.")
+
+    def test_inbox_request_shows_target_status_from_status_and_reason_escaped(self):
+        html = self._ran("inbox-decision-refused")["html"]
+        self.assertIn("Change status from <strong>Cancelled</strong> to <strong>In progress</strong>", html)
+        self.assertIn("Change status to <strong>Abandoned</strong>", html)
+        self.assertIn("Reason: Client withdrew &lt;b&gt;the site&lt;/b&gt;", html)
+        self.assertNotIn("<b>the site</b>", html)
+        self.assertIn("No reason given.", html)
+        self.assertIn('data-detail="t9"', html)  # Open task, to check it before deciding
 
 
 if __name__ == "__main__":

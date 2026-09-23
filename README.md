@@ -22,7 +22,9 @@ This first vertical slice provides:
   protected actions — accept, request changes, reopen, hold, close, and schedule proposal
   decisions; an eligible project manager or designated approver may request them, which
   records one idempotent Owner request without changing live state; the Owner can approve,
-  reject, or cancel that request from **Inbox — Needs action**; an accepted version is immutable
+  reject, or cancel that request from **Inbox — Needs action**, where each request shows the
+  status it asks for (and the status it moves from, when recorded), the requester's reason, and
+  an Open task link; an accepted version is immutable
   and can only be superseded after an explicit reopen with a revised timeline; on-hold work
   requires a reason plus a mandatory follow-up checkpoint; and project closure is a separate
   App Owner-only event, with exceptional closure preserving a residual-work snapshot rather
@@ -57,7 +59,8 @@ This first vertical slice provides:
 
 Integrity rules enforced at the service boundary: ordinary task updates must carry the
 task's current `expected_revision` and stale writes return HTTP 409 without changing state
-or audit history; completed, cancelled, and abandoned tasks are fixed records until the
+or audit history (the browser then reloads the task, or the inbox for an Owner decision, and
+says it changed since it was opened, so nobody keeps editing a stale revision); completed, cancelled, and abandoned tasks are fixed records until the
 dedicated reopen action records a reason and a revised timeline: field edits (including a
 reason-only save), re-parenting the task, confirming its criticality, proposing or approving
 a schedule change for it, adding or removing its predecessors, and adding or removing its
