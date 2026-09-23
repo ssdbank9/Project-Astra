@@ -20,7 +20,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:28:57Z
-updated-at: 2026-09-23T17:30:53Z
+updated-at: 2026-09-23T19:12:00Z
 updated-by: Claude
 claimed-by: vm-22489
 claimed-at: 2026-09-23T16:46:25Z
@@ -81,3 +81,4 @@ Dead end: first I armed on the COMMIT after the bump. That made the executescrip
 Mutation re-run (scratch script, db.py mutants): executescript() in step N -> fails at exactly step N, N=1..12; bump N dedented out of transaction -> exactly step N, N=1..12; bump moved to the top of its transaction (bumpfirst, still atomic) -> passes, N=1..12 (before this fix it failed at N+1).
 Not rebased: origin/codex/migration-safety-remediation gained 7c0fb9e refactor(39DNZT) (migrate step registry) after this branch was cut. Compatibility with it is checked separately below.
 - **2026-09-23 17:16 · Claude** — Compatibility with origin 7c0fb9e/8ef8fd8 (39DNZT migrate step registry): a scratch merge of e473b6e onto origin/codex/migration-safety-remediation auto-merges with no conflicts, and test_db passes there (18 tests OK). Mutation matrix not re-run on the registry form (the mutant script finds steps by the old inline layout). Branch not pushed; the ticket stays in review.
+- **2026-09-23 19:12 · Claude** — Accepted by Aly Jafferani in Slack 2026-09-23 19:07 UTC (thread 1790160392.461299, ts 1790190457.194569). Awaiting Aly's local move to done; agents cannot leave signoff.

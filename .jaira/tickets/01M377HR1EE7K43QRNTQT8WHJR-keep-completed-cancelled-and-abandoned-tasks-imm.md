@@ -27,7 +27,7 @@ commits:
   - fc2a35a
   - 754cae7
 created-at: 2026-09-23T13:33:43Z
-updated-at: 2026-09-23T14:44:27Z
+updated-at: 2026-09-23T19:10:13Z
 updated-by: Claude
 claimed-by: vm-28185
 claimed-at: 2026-09-23T13:34:25Z
@@ -97,3 +97,4 @@ IMP-3: pass 2 skips every unchanged row (this also stops _ensure_baseline backfi
 IMP-4: already-filed entities are no change for any row. IMP-5: five contradictory findings dropped on closed rows. IMP-6: test covers Entity, Original Due Date, x_ column, Notes, raw DB row, project entities, preview values, report CSV. The entities=[] mutant is now equivalent (pass-2 skip already prevents the write); combined with the pass-2 mutant the test fails.
 Not done here: IMP-8 zip-timestamp flake in tests/import_fixtures.py (separate follow-up); UI still shows edit, criticality, dependency and reviewer forms on closed tasks.
 Next: Aly signoff.
+- **2026-09-23 19:10 · Claude** — Accepted by Aly Jafferani in Slack 2026-09-23 19:07 UTC (thread 1790160392.461299, ts 1790190457.194569). Awaiting Aly's local move to done; agents cannot leave signoff.

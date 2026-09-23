@@ -16,7 +16,7 @@ follows: 01M3549XTPENM6MSYCG2SRFCZD
 commits:
   - 3fd31ec0094798b867aadfa5e94a5de9fb9b7906
 created-at: 2026-09-23T04:07:50Z
-updated-at: 2026-09-23T12:11:36Z
+updated-at: 2026-09-23T19:09:30Z
 updated-by: Claude
 claimed-by: X1CarbonPC-33252
 claimed-at: 2026-09-23T04:17:12Z
@@ -59,3 +59,4 @@ review-check: "1. cd to the repo and run: .venv/bin/python -m unittest -v tests.
 - **2026-09-23 04:32 · Aly Jafferani** — The first red v1 regression proved six tables persisted with user_version 0. Its initial failing assertion left the SQLite handle open and produced a secondary Windows cleanup error; the test now closes in finally so failures remain unambiguous. Jaira ticket creation also initially failed to record its coordination outbox under the sandbox, although the local ticket file was created; narrow permission to the project-specific .jaira state directory restored normal board writes.
 - **2026-09-23 12:08 · Claude** — Review 2026-09-23 (Claude): runtime atomicity verified for all 13 versions with injected faults and hard kills; committed tests cover v1, v5, v12 only. Move to signoff waits on Aly allowing reassignment (not_owner gate). Follow-ups to file: per-version parameterised fault test; re-read user_version inside each step's BEGIN IMMEDIATE (concurrent migrators). T81ZV6 on claude/review-report-2026-09-22 overlaps this ticket's scope.
 - **2026-09-23 12:11 · Claude** — Moved to signoff 2026-09-23. Independent review found the definition of done met at runtime for all 13 versions. The test coverage gap (fault tests cover only v1, v5, v12) and the pre-existing concurrency items are recorded in review-gaps for follow-up tickets.
+- **2026-09-23 19:09 · Claude** — Accepted by Aly Jafferani in Slack 2026-09-23 19:07 UTC (thread 1790160392.461299, ts 1790190457.194569). Awaiting Aly's local move to done; agents cannot leave signoff.

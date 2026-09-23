@@ -20,7 +20,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:30:54Z
-updated-at: 2026-09-23T17:35:59Z
+updated-at: 2026-09-23T19:12:36Z
 updated-by: Claude
 claimed-by: vm-32730
 claimed-at: 2026-09-23T17:11:29Z
@@ -63,3 +63,4 @@ review-check: "1. cd /workspace/project-astra && grep -rn _active_owner src/ —
 ## Progress
 - **2026-09-23 17:12 · Claude** — Plan reasoning: a contextvars.ContextVar would fix thread safety but keeps the dependency implicit, which is what the ticket objects to. An explicit keyword-only owner_decision parameter is chosen instead: 8 public actions (update_task, accept_submission, request_changes, reopen_task, set_on_hold, approve_schedule_proposal, reject_schedule_proposal, close_project) gain owner_decision=None; only _execute_owner_action_request passes it. web.py never forwards **kwargs, so HTTP callers cannot supply it. test_failed_approval_clears_the_active_request_for_the_next_action reads the two attributes directly; its two asserts must change to 'attribute absent' since the DoD removes the attributes.
 - **2026-09-23 17:21 · Claude** — Findings: (1) with the old instance flags, a nested decide_owner_action_request cleared the outer approval's flag in its finally, so the outer action ran as a direct Owner action and recorded the Manager's request reason instead of the Owner's note - no error raised, silent audit drift. (2) a nested direct Owner action inherited the outer request id and was refused with 'the pending request changed'. Re-entrancy tests inject the nested call by patching the instance's _execute_owner_action_request, whose signature (actor, request, payload, reason) was kept on purpose so the wrapper stays valid. owner_decision is keyword-only with default None; web.py never forwards kwargs, so an HTTP caller cannot supply it. CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md lines 261/578 still describe the old flag; left alone because it is a dated handoff other tracks edit.
+- **2026-09-23 19:12 · Claude** — Accepted by Aly Jafferani in Slack 2026-09-23 19:07 UTC (thread 1790160392.461299, ts 1790190457.194569). Awaiting Aly's local move to done; agents cannot leave signoff.

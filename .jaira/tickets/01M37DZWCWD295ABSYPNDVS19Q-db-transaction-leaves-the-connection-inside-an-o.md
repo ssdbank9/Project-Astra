@@ -21,7 +21,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:26:18Z
-updated-at: 2026-09-23T15:55:33Z
+updated-at: 2026-09-23T19:10:32Z
 updated-by: Claude
 claimed-by: vm-28526
 claimed-at: 2026-09-23T15:40:32Z
@@ -64,3 +64,4 @@ review-check: "(1) Old db.py from origin/codex/migration-safety-remediation in a
 - **2026-09-23 15:41 · Claude** — Brainstorm. Code confirms the note: src/astra/db.py transaction() calls connection.commit() in the try/else branch with no guard; the except branch only covers exceptions raised by the with-body. With isolation_level=None, a failed COMMIT (deferred FK violation -> IntegrityError) leaves the SQLite transaction open. Options: (A) wrap commit() in try/except, rollback (suppressing a secondary sqlite3.Error from rollback), re-raise the original - one place, keeps call sites unchanged. (B) replace the context manager with a savepoint-based helper - larger change, alters nesting semantics used by migrations, no benefit here. (C) fix at call sites - dozens of sites, easy to miss one. Choosing A: smallest, covers every service write and migration step. Secondary rollback error is suppressed so the caller sees the COMMIT error, which is the real cause.
 - **2026-09-23 15:41 · Claude** — Plan reasoning: the test uses a raw connection (MigrationTests.raw pattern, file-backed temp DB, foreign_keys=ON, isolation_level=None) with a throwaway parent/child schema, not the app schema, so it isolates transaction() from migrations. A deferred FK is the only deterministic, stdlib-only way to make COMMIT itself fail; SQLITE_BUSY or disk-full are not reproducible in a unit test without mocks. Rollback error is suppressed with contextlib.suppress(sqlite3.Error) rather than bare Exception so programming errors still surface.
 - **2026-09-23 15:47 · Claude** — Findings: (1) BaseException that is not Exception (KeyboardInterrupt, GeneratorExit) raised in the with-body still skips rollback - pre-existing, out of scope, not changed. (2) Rollback after a failed COMMIT is wrapped in suppress(sqlite3.Error) because on some failures (e.g. SQLite already auto-rolled back on I/O error) rollback() is a no-op or raises; the COMMIT error is the useful one. (3) Suite count is 270, not the 220 in CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md - the handoff doc is stale on that number. (4) No service-level test hits this path; the helper test covers every caller since they all go through db.transaction().
+- **2026-09-23 19:10 · Claude** — Accepted by Aly Jafferani in Slack 2026-09-23 19:07 UTC (thread 1790160392.461299, ts 1790190457.194569). Awaiting Aly's local move to done; agents cannot leave signoff.

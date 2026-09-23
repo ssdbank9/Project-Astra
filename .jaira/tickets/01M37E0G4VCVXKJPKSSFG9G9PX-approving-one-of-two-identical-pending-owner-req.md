@@ -21,7 +21,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:26:38Z
-updated-at: 2026-09-23T16:22:50Z
+updated-at: 2026-09-23T19:10:49Z
 updated-by: Claude
 claimed-by: vm-5858
 claimed-at: 2026-09-23T16:01:57Z
@@ -68,3 +68,4 @@ review-check: "1. cd /workspace/project-astra (branch codex/migration-safety-rem
 ## Progress
 - **2026-09-23 16:03 · Claude** — Plan reasoning: every caller already passes the executed intent and the pre-action revision to _resolve_pending_requests in approval mode too (it only ignored them). So the fix reuses the direct-path filter unchanged and prepends the active row; no new status, no new matching rule. Twins filed at an older revision are left pending, as the direct path does (they would 409 on approval anyway). A schema-level idempotency key was not chosen here: it would change filing semantics and need a migration; the related ticket owns that.
 - **2026-09-23 16:12 · Claude** — Found while fixing: _approved_event_count in tests/test_state_integrity.py counts events whose detail contains the request id as a substring, so once a twin's detail carries approved_request_id the approved request is counted twice. The new test compares request_id fields directly instead; existing tests are unaffected because they never create twins. Approval mode still resolves the active row even when its intent does not match (unchanged); twins filed at an older revision stay pending, as on the direct path. The reopen approval's secondary update_task_status call now also resolves REOPEN_EQUIVALENT_STATUSES requests, matching what a direct reopen already did.
+- **2026-09-23 19:10 · Claude** — Accepted by Aly Jafferani in Slack 2026-09-23 19:07 UTC (thread 1790160392.461299, ts 1790190457.194569). Awaiting Aly's local move to done; agents cannot leave signoff.
