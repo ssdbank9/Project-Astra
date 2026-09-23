@@ -374,6 +374,189 @@ class AstraStateIntegrityTests(unittest.TestCase):
         ]
         self.assertEqual(len(marked_events), 2)
 
+    # SRFCZD: a direct Owner action reconciles only the pending requests whose
+    # intent matches what was executed; every other request stays pending with no
+    # protected_action_approved event (a later approval of a stale one gets 409).
+    def _intent_fixture(self, name):
+        project = self.service.create_project(self.owner, name)
+        manager = self.service.create_user(
+            self.owner, f"{name.lower().replace(' ', '-')}@example.org", "Manager", "manager password safe"
+        )
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        return project, manager
+
+    def _completed_task(self, project, manager, title):
+        task = self.service.create_task(
+            self.owner, {"project_id": project["id"], "title": title, "owner_user_id": manager["id"]}
+        )
+        submission = self.service.submit_task(manager, task["id"], "done")
+        self.service.accept_submission(self.owner, submission["id"], "accepted")
+        return self.service.get_task(self.owner, task["id"])
+
+    def _request_status(self, request_id):
+        requests = self.service.list_owner_action_requests(self.owner, status=None)
+        return {request["id"]: request for request in requests}[request_id]["status"]
+
+    def _approved_event_count(self, request_id, task_id=None, project_id=None):
+        if task_id is not None:
+            events = self.service.task_events(self.owner, task_id)
+            details = [event["after_json"] for event in events if event["event_type"] == "protected_action_approved"]
+        else:
+            events = self.service.project_events(self.owner, project_id)
+            details = [event["detail_json"] for event in events if event["event_type"] == "protected_action_approved"]
+        return sum(1 for detail in details if detail and request_id in detail)
+
+    def _assert_untouched(self, request, task_id=None, project_id=None):
+        self.assertEqual(self._request_status(request["id"]), "pending")
+        self.assertEqual(self._approved_event_count(request["id"], task_id, project_id), 0)
+
+    def _assert_resolved(self, request, task_id=None, project_id=None):
+        self.assertEqual(self._request_status(request["id"]), "approved")
+        self.assertEqual(self._approved_event_count(request["id"], task_id, project_id), 1)
+
+    def test_direct_status_change_leaves_request_for_another_status_pending(self):
+        project, manager = self._intent_fixture("Intent status")
+        for owner_status in ("in_progress", "delayed"):
+            with self.subTest(owner_status=owner_status):
+                task = self.service.create_task(
+                    self.owner, {"project_id": project["id"], "title": f"Status {owner_status}"}
+                )
+                request = self.service.update_task(
+                    manager, task["id"],
+                    {"status": "cancelled", "reason": "Manager wants it cancelled",
+                     "expected_revision": task["revision"]},
+                )["request"]
+                self.service.update_task(
+                    self.owner, task["id"],
+                    {"status": owner_status, "reason": "Owner keeps it going",
+                     "expected_revision": task["revision"]},
+                )
+                self._assert_untouched(request, task_id=task["id"])
+
+    def test_direct_reopen_leaves_terminal_cancel_or_abandon_request_pending(self):
+        project, manager = self._intent_fixture("Intent reopen")
+        for requested in ("cancelled", "abandoned"):
+            with self.subTest(requested=requested):
+                task = self._completed_task(project, manager, f"Reopen {requested}")
+                request = self.service.update_task(
+                    manager, task["id"],
+                    {"status": requested, "reason": "Manager wants it closed out",
+                     "expected_revision": task["revision"]},
+                )["request"]
+                self.service.reopen_task(self.owner, task["id"], "Owner reopens instead", "2027-08-01")
+                self._assert_untouched(request, task_id=task["id"])
+
+        task = self._completed_task(project, manager, "Reopen matching")
+        back_to_work = self.service.update_task(
+            manager, task["id"],
+            {"status": "in_progress", "reason": "More work", "expected_revision": task["revision"]},
+        )["request"]
+        same_date = self.service.reopen_task(manager, task["id"], "More work", "2027-08-01")["request"]
+        other_date = self.service.reopen_task(manager, task["id"], "Much later", "2030-12-31")["request"]
+        self.service.reopen_task(self.owner, task["id"], "Owner reopens", "2027-08-01")
+        self._assert_resolved(back_to_work, task_id=task["id"])
+        self._assert_resolved(same_date, task_id=task["id"])
+        self._assert_untouched(other_date, task_id=task["id"])
+
+    def test_direct_schedule_decision_resolves_only_the_same_proposal(self):
+        project, manager = self._intent_fixture("Intent schedule")
+        for decision in ("approve", "reject"):
+            with self.subTest(decision=decision):
+                task = self.service.create_task(
+                    self.owner,
+                    {"project_id": project["id"], "title": f"Schedule {decision}",
+                     "owner_user_id": manager["id"], "due_date": "2027-01-01"},
+                )
+                proposal_a = self.service.propose_schedule(manager, task["id"], None, "2027-02-01", "A")
+                proposal_b = self.service.propose_schedule(manager, task["id"], None, "2027-03-01", "B")
+                if decision == "approve":
+                    request_a = self.service.approve_schedule_proposal(manager, proposal_a["id"], "take A")["request"]
+                    request_b = self.service.approve_schedule_proposal(manager, proposal_b["id"], "take B")["request"]
+                    self.service.approve_schedule_proposal(self.owner, proposal_a["id"], "Owner takes A")
+                else:
+                    request_a = self.service.reject_schedule_proposal(manager, proposal_a["id"], "drop A")["request"]
+                    request_b = self.service.reject_schedule_proposal(manager, proposal_b["id"], "drop B")["request"]
+                    self.service.reject_schedule_proposal(self.owner, proposal_a["id"], "Owner drops A")
+                self._assert_resolved(request_a, task_id=task["id"])
+                self._assert_untouched(request_b, task_id=task["id"])
+                self.assertEqual(
+                    self.service.get_schedule_proposal(self.owner, proposal_b["id"])["status"], "pending"
+                )
+
+    def test_direct_hold_resolves_only_the_same_checkpoint_and_hold_owner(self):
+        project, manager = self._intent_fixture("Intent hold")
+        other = self.service.create_user(
+            self.owner, "intent-hold-other@example.org", "Other", "other password safe"
+        )
+        self.service.grant_project_access(self.owner, project["id"], other["id"], "member")
+        cases = (
+            ("different checkpoint", "2030-12-31", manager, False),
+            ("different hold owner", "2027-04-01", other, False),
+            ("same intent", "2027-04-01", manager, True),
+        )
+        for label, checkpoint, hold_owner, matches in cases:
+            with self.subTest(label=label):
+                task = self.service.create_task(
+                    self.owner,
+                    {"project_id": project["id"], "title": f"Hold {label}", "owner_user_id": manager["id"]},
+                )
+                request = self.service.set_on_hold(
+                    manager, task["id"], "vendor", "2027-04-01", manager["id"]
+                )["request"]
+                self.service.set_on_hold(self.owner, task["id"], "Owner hold", checkpoint, hold_owner["id"])
+                if matches:
+                    self._assert_resolved(request, task_id=task["id"])
+                else:
+                    self._assert_untouched(request, task_id=task["id"])
+
+    def test_direct_cancel_leaves_another_managers_abandon_request_pending(self):
+        project, manager = self._intent_fixture("Intent cancel")
+        second = self.service.create_user(
+            self.owner, "intent-cancel-second@example.org", "Second", "second password safe"
+        )
+        self.service.grant_project_access(self.owner, project["id"], second["id"], "manager")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Cancel"})
+        cancel = self.service.update_task(
+            manager, task["id"],
+            {"status": "cancelled", "reason": "Cancel it", "expected_revision": task["revision"]},
+        )["request"]
+        abandon = self.service.update_task(
+            second, task["id"],
+            {"status": "abandoned", "reason": "Abandon it", "expected_revision": task["revision"]},
+        )["request"]
+        self.service.update_task(
+            self.owner, task["id"],
+            {"status": "cancelled", "reason": "Owner cancels", "expected_revision": task["revision"]},
+        )
+        self._assert_resolved(cancel, task_id=task["id"])
+        self._assert_untouched(abandon, task_id=task["id"])
+
+    def test_direct_close_resolves_only_the_same_residual_set_whatever_the_note(self):
+        _, manager = self._intent_fixture("Intent close")
+        for label in ("different note", "different residual set", "same intent"):
+            with self.subTest(label=label):
+                project = self.service.create_project(self.owner, f"Close {label}")
+                self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+                self.service.create_task(self.owner, {"project_id": project["id"], "title": "Residual A"})
+                residual_b = self.service.create_task(
+                    self.owner, {"project_id": project["id"], "title": "Residual B"}
+                )
+                request = self.service.close_project(manager, project["id"], "A and B remain")["request"]
+                note = "A and B remain"
+                if label == "different note":
+                    note = "Owner closes with other residual notes"
+                elif label == "different residual set":
+                    self.service.update_task(
+                        self.owner, residual_b["id"],
+                        {"status": "cancelled", "reason": "Not needed",
+                         "expected_revision": residual_b["revision"]},
+                    )
+                self.service.close_project(self.owner, project["id"], note, exceptional=True)
+                if label != "different residual set":
+                    self._assert_resolved(request, project_id=project["id"])
+                else:
+                    self._assert_untouched(request, project_id=project["id"])
+
 
 if __name__ == "__main__":
     unittest.main()

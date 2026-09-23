@@ -15,7 +15,7 @@ related: []
 commits:
   - c109687a639bee150a18a72a729bd1d9393fe94a
 created-at: 2026-09-22T17:58:32Z
-updated-at: 2026-09-23T12:11:55Z
+updated-at: 2026-09-23T12:17:56Z
 claimed-by: vm-3302
 claimed-at: 2026-09-23T12:11:07Z
 updated-by: Claude
@@ -39,7 +39,7 @@ review-check: "1. cd to the repo and run: .venv/bin/python tests/run.py ; expect
   proof: src/astra/service.py blocks ordinary changes in completed/cancelled/abandoned; test_terminal_tasks_reject_ordinary_edits_until_reopened explicitly covers unchanged-status title, due_date and progress edits for all three states, plus hold rejection.
 - [x] Submission acceptance is one transaction with a conditional state transition so two synchronized calls produce exactly one acceptance and one submission_accepted event.
   proof: src/astra/service.py revalidates and conditionally updates submission/task inside one transaction; synchronized test_concurrent_acceptance_has_one_winner_and_one_event passes.
-- [x] Equivalent protected-action retries reuse one pending request and one protected_action_requested event; the Owner can approve, reject or cancel a pending request with stale expected revisions refused and direct completed actions reconciling matching requests.
+- [~] Equivalent protected-action retries reuse one pending request and one protected_action_requested event; the Owner can approve, reject or cancel a pending request with stale expected revisions refused and direct completed actions reconciling matching requests.
   proof: src/astra/service.py canonical request dedupe, Owner decision dispatcher, stale revision refusal and transactional reconciliation; state-integrity dispatcher/direct-reconcile tests and HTTP approval test pass.
 - [x] Repeated final-result marking is idempotent: one result row and one final_result_marked event; unmark and later re-mark remain explicitly auditable.
   proof: src/astra/service.py emits final_result_marked only when INSERT OR IGNORE changes a row; repeated mark and unmark/re-mark regression passes.
@@ -67,9 +67,15 @@ review-check: "1. cd to the repo and run: .venv/bin/python tests/run.py ; expect
   proof: src/astra/service.py mark_final_result emits only when INSERT OR IGNORE rowcount is 1; repeated mark and unmark/re-mark regression passes
 - [x] Run focused tests, full suite, JavaScript and diff checks; update docs, Jaira proof and review the exact diff.
   proof: Focused state-integrity suite 7/7; full tests/run.py 216/216 in 220.615s; node --check src/astra/static/app.js and git diff --check passed; exact changed-file diff reviewed.
+- [x] R1 intent-matching reconciliation
+  proof: src/astra/service.py OWNER_REQUEST_INTENT_FIELDS + _request_intent_matches; 6 tests in tests/test_state_integrity.py (test_direct_*) failed 12 subcases before the fix and pass after; removing the intent filter fails 11 of them
+- [ ] R2 record the Owner decision note on approval
+- [ ] R3 stale-check close_project approvals
+- [ ] R4 two-connection race regressions for update_task's revision predicate and the in-transaction request guards
 
 ## Progress
 - **2026-09-22 18:03 · Aly Jafferani** — Implementation rationale: preserve accepted-version immutability and use the existing owner_action_requests decision columns, avoiding an unnecessary schema change. Require an explicit expected_revision at the service/API/UI boundary and use conditional SQL updates inside BEGIN IMMEDIATE transactions so stale writers fail without emitting events. Canonicalize protected-action payloads (including the task revision) and deduplicate equivalent pending requests inside the same transaction. Add a generic Owner decision path that dispatches existing Owner-only service methods; successful direct or approved actions reconcile matching pending requests atomically, while rejected/cancelled requests never execute. Emit final-result events only when the marker row actually changes. Add focused service, HTTP, idempotency, and concurrency regressions before implementation, then run the full suite and node syntax check.
 - **2026-09-23 03:51 · Aly Jafferani** — Adjacent issue deliberately left out of this bounded ticket: migration steps 1-12 still use sqlite executescript semantics that the adversarial probe showed can persist partial DDL after failure. Treat that as a separate migration-safety remediation. This branch has automated service/HTTP/static verification only; no live browser click acceptance, push, or deployment was performed.
 - **2026-09-23 12:07 · Claude** — Review 2026-09-23 (Claude): sent back. Main defect: request reconciliation approves non-matching pending requests (see review-gaps 1). Fix plan: match on the executed intent (status/from_status, proposal_id, checkpoint, hold owner, close payload); non-matching stale requests are left pending or marked superseded, never approved; record the Owner's decision note; stale-check close_project; add two-connection race regressions for update_task's revision predicate and the in-transaction request guards. The move back to in-progress waits on Aly allowing reassignment (not_owner gate).
 - **2026-09-23 12:11 · Claude** — Moved back to in-progress 2026-09-23 after independent review (see review-gaps). Reassigned to Claude with Aly's approval in Slack (12:10 UTC). Rework is one bounded change at a time: 1) intent-matching reconciliation, 2) record the Owner decision note, 3) close_project stale check, 4) race regressions for the untested in-transaction guards.
+- **2026-09-23 12:17 · Claude** — R1 done: direct Owner actions now resolve only pending requests whose intent matches (OWNER_REQUEST_INTENT_FIELDS in service.py). Non-matching requests stay pending: owner_action_requests.status has a CHECK that excludes 'superseded', so no migration. A later approval of a stale one gets 409. Reopen compares new_due_date; hold compares checkpoint and owner; close compares exceptional and residual set, not the note. 6 new tests; they failed 12/13 before the fix.

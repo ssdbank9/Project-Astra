@@ -32,6 +32,24 @@ PROTECTED_STATUSES = {"changes_requested", "completed", "on_hold", "cancelled", 
 LOCKED_SOURCE_STATUSES = GOVERNED_STATUSES | PROTECTED_STATUSES | {"cancelled", "abandoned"}
 REOPEN_ONLY_STATUSES = {"completed", "cancelled", "abandoned"}
 REVIEWER_ROLES = {"reviewer", "approver", "collaborator"}
+# SRFCZD: the request payload fields that carry an Owner-action request's intent. A
+# direct Owner action resolves only the pending requests whose values for these fields
+# equal what it executed; the free-text reason/note, the requester and expected_revision
+# (filtered separately) are not intent. A field a request payload does not carry is not
+# compared (only update_task_status omits from_status, when the source is not locked).
+OWNER_REQUEST_INTENT_FIELDS = {
+    "update_task_status": ("status", "from_status"),
+    "accept_submission": ("submission_id",),
+    "request_changes": ("submission_id",),
+    "reopen_task": ("new_due_date",),
+    "set_on_hold": ("checkpoint_date", "owner_user_id"),
+    "approve_schedule_proposal": ("proposal_id",),
+    "reject_schedule_proposal": ("proposal_id",),
+    "close_project": ("exceptional", "residual_work"),
+}
+# A dedicated reopen also satisfies a Manager's generic request to move a terminal task
+# back into work, but never one to cancel, abandon, hold or otherwise govern it.
+REOPEN_EQUIVALENT_STATUSES = frozenset(MANAGER_ORDINARY_STATUSES | {"reopened"})
 
 LOGIN_WINDOW_SECONDS = 900
 LOGIN_MAX_FAILURES = 5
@@ -691,6 +709,7 @@ class AstraService:
                     actor,
                     "update_task_status",
                     project_id=before["project_id"],
+                    intent={"status": status, "from_status": before["status"]},
                     task_id=task_id,
                     expected_revision=expected_revision,
                     decision_reason=reason or "",
@@ -1182,20 +1201,39 @@ class AstraService:
         row["payload"] = json.loads(row["payload_json"])
         return row
 
+    @staticmethod
+    def _request_intent_matches(action: str, payload: dict, intent: dict) -> bool:
+        # An intent value given as a frozenset accepts any of its members.
+        for field in OWNER_REQUEST_INTENT_FIELDS[action]:
+            if field not in payload:
+                continue
+            requested, executed = payload[field], intent.get(field)
+            if field == "residual_work":
+                requested = sorted(item["id"] for item in requested or [])
+                executed = sorted(item["id"] for item in executed or [])
+            matched = requested in executed if isinstance(executed, frozenset) else requested == executed
+            if not matched:
+                return False
+        return True
+
     def _resolve_pending_requests(
         self,
         actor: dict,
         action: str,
         *,
         project_id: str,
+        intent: dict,
         task_id: str | None = None,
         expected_revision: int | None = None,
         decision_reason: str = "",
     ) -> None:
-        """Resolve the active approval, or equivalent requests superseded by a direct Owner action.
+        """Resolve the active approval, or the equivalent requests a direct Owner action executed.
 
-        Callers invoke this inside the action's transaction, so the governed state and
-        its queue record cannot commit independently.
+        Without an active approval only pending requests whose intent fields (see
+        OWNER_REQUEST_INTENT_FIELDS) match ``intent`` are resolved; any other request
+        stays pending and untouched. Callers invoke this inside the action's
+        transaction, so the governed state and its queue record cannot commit
+        independently.
         """
         active_id = getattr(self, "_active_owner_request_id", None)
         if active_id:
@@ -1221,6 +1259,10 @@ class AstraService:
                         row for row in rows
                         if json.loads(row["payload_json"]).get("expected_revision") == expected_revision
                     ]
+            rows = [
+                row for row in rows
+                if self._request_intent_matches(action, json.loads(row["payload_json"]), intent)
+            ]
         timestamp = now_text()
         for row in rows:
             cursor = self.db.execute(
@@ -1457,6 +1499,7 @@ class AstraService:
                 actor,
                 "accept_submission",
                 project_id=task["project_id"],
+                intent={"submission_id": submission_id},
                 task_id=task["id"],
                 expected_revision=task["revision"],
                 decision_reason=decision_note,
@@ -1509,6 +1552,7 @@ class AstraService:
                 actor,
                 "request_changes",
                 project_id=task["project_id"],
+                intent={"submission_id": submission_id},
                 task_id=task["id"],
                 expected_revision=task["revision"],
                 decision_reason=reason,
@@ -1550,6 +1594,7 @@ class AstraService:
                 actor,
                 "reopen_task",
                 project_id=task["project_id"],
+                intent={"new_due_date": new_due},
                 task_id=task_id,
                 expected_revision=task["revision"],
                 decision_reason=reason,
@@ -1563,6 +1608,7 @@ class AstraService:
                 actor,
                 "update_task_status",
                 project_id=task["project_id"],
+                intent={"status": REOPEN_EQUIVALENT_STATUSES, "from_status": current["status"]},
                 task_id=task_id,
                 expected_revision=task["revision"],
                 decision_reason=reason,
@@ -1616,6 +1662,7 @@ class AstraService:
                 actor,
                 "set_on_hold",
                 project_id=task["project_id"],
+                intent={"checkpoint_date": checkpoint, "owner_user_id": hold_owner},
                 task_id=task_id,
                 expected_revision=task["revision"],
                 decision_reason=reason,
@@ -2268,6 +2315,7 @@ class AstraService:
                 actor,
                 "close_project",
                 project_id=project_id,
+                intent={"note": note, "exceptional": bool(outstanding), "residual_work": outstanding},
                 decision_reason=note,
             )
         return self.get_project(actor, project_id)
@@ -2403,6 +2451,7 @@ class AstraService:
                 actor,
                 "approve_schedule_proposal",
                 project_id=task["project_id"],
+                intent={"proposal_id": proposal_id},
                 task_id=task["id"],
                 expected_revision=task["revision"],
                 decision_reason=str(decision_reason or "").strip(),
@@ -2440,6 +2489,7 @@ class AstraService:
                 actor,
                 "reject_schedule_proposal",
                 project_id=task["project_id"],
+                intent={"proposal_id": proposal_id},
                 task_id=task["id"],
                 expected_revision=task["revision"],
                 decision_reason=reason,

@@ -42,7 +42,10 @@ the browser Inbox shows them under **Needs action**. The Owner approves, rejects
 or cancels with `POST /api/owner-action-requests/{id}/decision`; stale task
 revisions return HTTP 409 and leave the request pending. A successful approval and
 the governed action commit together, while a direct equivalent Owner action
-reconciles the matching pending request in the same transaction.
+reconciles the matching pending request in the same transaction. A direct Owner
+action resolves only pending requests with the same intent (for example the same
+target status, submission, proposal, hold checkpoint and owner, or closure
+residual set); every other request stays pending and untouched for an explicit decision.
 
 An unauthorized Viewer/member or read-only Chairman attempt is rejected, audited,
 and notified to the Owner when it targets a visible record. A blocked attachment
