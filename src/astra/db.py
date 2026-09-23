@@ -45,13 +45,34 @@ def transaction(connection: sqlite3.Connection):
         connection.commit()
 
 
+def _execute_statements(connection: sqlite3.Connection, script: str) -> None:
+    """Execute a SQL script without ``sqlite3.executescript`` transaction escape.
+
+    ``executescript`` commits an open transaction before running its input. Migration
+    callers instead hold ``BEGIN IMMEDIATE`` and feed each complete statement through
+    ``execute`` so every schema change and its ``user_version`` update share one commit.
+    ``sqlite3.complete_statement`` keeps semicolons inside quoted values or compound SQL
+    from being treated as boundaries.
+    """
+    buffer: list[str] = []
+    for character in script:
+        buffer.append(character)
+        if character == ";" and sqlite3.complete_statement("".join(buffer)):
+            statement = "".join(buffer).strip()
+            if statement:
+                connection.execute(statement)
+            buffer.clear()
+    if "".join(buffer).strip():
+        raise ValueError("Migration SQL ended with an incomplete statement.")
+
+
 def migrate(connection: sqlite3.Connection) -> None:
     version = connection.execute("PRAGMA user_version").fetchone()[0]
     if version > SCHEMA_VERSION:
         raise RuntimeError("Database was created by a newer Astra version.")
     if version < 1:
         with transaction(connection):
-            connection.executescript(
+            _execute_statements(connection,
                 """
                 CREATE TABLE users (
                     id TEXT PRIMARY KEY,
@@ -145,7 +166,7 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 1")
     if version < 2:
         with transaction(connection):
-            connection.executescript(
+            _execute_statements(connection,
                 """
                 CREATE TABLE login_attempts (
                     id TEXT PRIMARY KEY,
@@ -160,7 +181,7 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 2")
     if version < 3:
         with transaction(connection):
-            connection.executescript(
+            _execute_statements(connection,
                 """
                 CREATE TABLE task_submissions (
                     id TEXT PRIMARY KEY,
@@ -217,7 +238,7 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 3")
     if version < 4:
         with transaction(connection):
-            connection.executescript(
+            _execute_statements(connection,
                 """
                 CREATE TABLE notifications (
                     id TEXT PRIMARY KEY,
@@ -236,7 +257,7 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 4")
     if version < 5:
         with transaction(connection):
-            connection.executescript(
+            _execute_statements(connection,
                 """
                 ALTER TABLE tasks ADD COLUMN baseline_start_date TEXT;
                 ALTER TABLE tasks ADD COLUMN baseline_due_date TEXT;
@@ -260,7 +281,7 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 5")
     if version < 6:
         with transaction(connection):
-            connection.executescript(
+            _execute_statements(connection,
                 """
                 ALTER TABLE projects ADD COLUMN working_days TEXT NOT NULL DEFAULT '0123456';
                 CREATE TABLE project_holidays (
@@ -276,7 +297,7 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 6")
     if version < 7:
         with transaction(connection):
-            connection.executescript(
+            _execute_statements(connection,
                 """
                 ALTER TABLE projects ADD COLUMN budget_amount REAL;
                 ALTER TABLE projects ADD COLUMN budget_currency TEXT NOT NULL DEFAULT 'PKR';
@@ -286,7 +307,7 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 7")
     if version < 8:
         with transaction(connection):
-            connection.executescript(
+            _execute_statements(connection,
                 """
                 CREATE TABLE task_attachments (
                     id TEXT PRIMARY KEY,
@@ -303,7 +324,7 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 8")
     if version < 9:
         with transaction(connection):
-            connection.executescript(
+            _execute_statements(connection,
                 """
                 CREATE TABLE templates (
                     id TEXT PRIMARY KEY,
@@ -320,7 +341,7 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 9")
     if version < 10:
         with transaction(connection):
-            connection.executescript(
+            _execute_statements(connection,
                 """
                 CREATE TABLE final_results (
                     id TEXT PRIMARY KEY,
@@ -342,7 +363,7 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 10")
     if version < 11:
         with transaction(connection):
-            connection.executescript(
+            _execute_statements(connection,
                 """
                 ALTER TABLE projects ADD COLUMN start_date TEXT;
                 ALTER TABLE projects ADD COLUMN target_date TEXT;
@@ -351,7 +372,7 @@ def migrate(connection: sqlite3.Connection) -> None:
             connection.execute("PRAGMA user_version = 11")
     if version < 12:
         with transaction(connection):
-            connection.executescript(
+            _execute_statements(connection,
                 """
                 CREATE TABLE owner_action_requests (
                     id TEXT PRIMARY KEY,

@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from .auth import new_token, token_digest, verify_password
 from .db import connect, database_path
 from .importer import ImportConflict, ImportTooLarge
-from .service import AstraService, Forbidden, now_text
+from .service import AstraService, Conflict, Forbidden, now_text
 
 
 SESSION_COOKIE = "astra_session"
@@ -267,6 +267,13 @@ class AstraHandler(BaseHTTPRequestHandler):
                 notification_id = path.split("/")[3]
                 self.service.mark_notification_read(user, notification_id)
                 return self._json({"ok": True})
+            if (path.startswith("/api/owner-action-requests/") and path.endswith("/decision")
+                    and path.count("/") == 4):
+                request_id = path.split("/")[3]
+                result = self.service.decide_owner_action_request(
+                    user, request_id, payload.get("decision", ""), payload.get("reason", "")
+                )
+                return self._json(result)
             if path.startswith("/api/users/") and path.endswith("/active"):
                 user_id = path.split("/")[3]
                 updated = self.service.set_user_active(user, user_id, bool(payload.get("active")))
@@ -620,7 +627,7 @@ class AstraHandler(BaseHTTPRequestHandler):
     def _error(self, exc: Exception):
         if isinstance(exc, Forbidden):
             return self._json({"error": str(exc)}, HTTPStatus.FORBIDDEN)
-        if isinstance(exc, ImportConflict):
+        if isinstance(exc, (Conflict, ImportConflict)):
             return self._json({"error": str(exc)}, HTTPStatus.CONFLICT)
         if isinstance(exc, (PayloadTooLarge, ImportTooLarge)):
             return self._json({"error": str(exc)}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)

@@ -68,6 +68,10 @@ class Forbidden(PermissionError):
     pass
 
 
+class Conflict(ValueError):
+    """The requested write was based on state that is no longer current."""
+
+
 class ImportBlocked(Forbidden):
     """A non-permitted import attempt. Raised inside the import path and audited by the
     caller once no transaction is open, so the audit row survives the rollback."""
@@ -594,6 +598,13 @@ class AstraService:
         before = self.get_task(actor, task_id)
         if not self.can_manage_project(actor, before["project_id"]):
             raise Forbidden("Task-management access denied.")
+        expected_revision = payload.get("expected_revision")
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+            raise ValueError("An integer expected_revision is required to update a task.")
+        if expected_revision != before["revision"]:
+            raise Conflict(
+                f"Task revision conflict: expected {expected_revision}, current revision is {before['revision']}."
+            )
         merged = {**before, **payload}
         status = merged["status"]
         criticality = merged.get("criticality") or None
@@ -604,13 +615,23 @@ class AstraService:
             raise ValueError("Use the dedicated submitted action for this transition.")
         if status_changed and actor["global_role"] == "owner" and status in GOVERNED_STATUSES:
             raise ValueError(f"Use the dedicated {status.replace('_', ' ')} action for this transition.")
+        ordinary_fields = (
+            "title", "description", "owner_user_id", "criticality",
+            "start_date", "due_date", "progress",
+        )
+        if before["status"] in REOPEN_ONLY_STATUSES and not status_changed and any(
+            key in payload and before.get(key) != merged.get(key) for key in ordinary_fields
+        ):
+            raise ValueError(
+                f"A {before['status']} task is immutable; use the dedicated reopen task action before editing it."
+            )
         if criticality != (before.get("criticality") or None):
             raise ValueError("Use the confirm criticality action to change criticality.")
         reason = str(payload.get("reason", "")).strip() or None
         sensitive_change = any(before.get(key) != merged.get(key) for key in ("start_date", "due_date", "status"))
         if sensitive_change and not reason:
             raise ValueError("A reason is required for schedule or status changes.")
-        if status in {"cancelled", "abandoned", "on_hold", "delayed", "reopened"} and not reason:
+        if status_changed and status in {"cancelled", "abandoned", "on_hold", "delayed", "reopened"} and not reason:
             raise ValueError("This lifecycle change requires a reason.")
         start_date, due_date = self._date(merged.get("start_date")), self._date(merged.get("due_date"))
         if start_date and due_date and due_date < start_date:
@@ -653,15 +674,27 @@ class AstraService:
                 reason or "",
             )
         with transaction(self.db):
-            self.db.execute(
+            cursor = self.db.execute(
                 """UPDATE tasks SET title=?,description=?,owner_user_id=?,status=?,criticality=?,start_date=?,due_date=?,
-                   progress=?,updated_at=?,revision=revision+1 WHERE id=?""",
+                   progress=?,updated_at=?,revision=revision+1 WHERE id=? AND revision=?""",
                 (title, str(merged.get("description", "")).strip(), owner_user_id,
-                 status, criticality, start_date, due_date, self._progress(merged.get("progress")), now_text(), task_id),
+                 status, criticality, start_date, due_date, self._progress(merged.get("progress")), now_text(), task_id,
+                 expected_revision),
             )
+            if cursor.rowcount != 1:
+                raise Conflict("Task revision conflict: the task changed before this update could be saved.")
             self._ensure_baseline(task_id)
             after = self.get_task(actor, task_id)
             self._event(task_id, actor["id"], "task_updated", before, after, reason)
+            if status_changed:
+                self._resolve_pending_requests(
+                    actor,
+                    "update_task_status",
+                    project_id=before["project_id"],
+                    task_id=task_id,
+                    expected_revision=expected_revision,
+                    decision_reason=reason or "",
+                )
         return after
 
     def get_task(self, actor: dict, task_id: str) -> dict:
@@ -1014,34 +1047,47 @@ class AstraService:
                 {"action": action, "payload": payload or {}}, "Actor cannot request this Owner action",
             )
             raise Forbidden("Only a project Manager or designated approver may request this Owner action.")
-        request_id = new_id()
-        requested_at = now_text()
+        request_payload = dict(payload or {})
+        request_payload.setdefault("expected_revision", task["revision"])
+        payload_json = json.dumps(request_payload, default=str, sort_keys=True)
+        request_reason = str(reason or "").strip()
         request = {
-            "id": request_id,
+            "id": None,
             "project_id": task["project_id"],
             "task_id": task["id"],
             "action": action,
-            "payload_json": json.dumps(payload or {}, default=str, sort_keys=True),
-            "reason": str(reason or "").strip(),
+            "payload_json": payload_json,
+            "reason": request_reason,
             "requested_by": actor["id"],
-            "requested_at": requested_at,
+            "requested_at": None,
             "status": "pending",
             "decided_by": None,
             "decided_at": None,
             "decision_reason": None,
         }
         with transaction(self.db):
+            existing = self.db.execute(
+                """SELECT * FROM owner_action_requests
+                   WHERE project_id=? AND task_id=? AND action=? AND payload_json=? AND reason=?
+                     AND requested_by=? AND status='pending'
+                   ORDER BY requested_at LIMIT 1""",
+                (task["project_id"], task["id"], action, payload_json, request_reason, actor["id"]),
+            ).fetchone()
+            if existing:
+                return {"request": dict(existing)}
+            request_id, requested_at = new_id(), now_text()
+            request["id"], request["requested_at"] = request_id, requested_at
             self.db.execute(
                 "INSERT INTO owner_action_requests"
                 "(id,project_id,task_id,action,payload_json,reason,requested_by,requested_at,status)"
                 " VALUES(?,?,?,?,?,?,?,?,?)",
-                (request_id, task["project_id"], task["id"], action, request["payload_json"],
-                 request["reason"], actor["id"], requested_at, "pending"),
+                (request_id, task["project_id"], task["id"], action, payload_json,
+                 request_reason, actor["id"], requested_at, "pending"),
             )
             self._event(
                 task["id"], actor["id"], "protected_action_requested", None,
-                {"request_id": request_id, "action": action, "payload": payload or {}},
-                request["reason"] or None,
+                {"request_id": request_id, "action": action, "payload": request_payload},
+                request_reason or None,
             )
         return {"request": request}
 
@@ -1070,34 +1116,46 @@ class AstraService:
                      f"blocked {action.replace('_', ' ')} attempt: {project['name']}", occurred_at),
                 )
             raise Forbidden("Only a project Manager may request this Owner action.")
-        request_id = new_id()
-        requested_at = now_text()
+        request_payload = dict(payload or {})
+        payload_json = json.dumps(request_payload, default=str, sort_keys=True)
+        request_reason = str(reason or "").strip()
         request = {
-            "id": request_id,
+            "id": None,
             "project_id": project["id"],
             "task_id": None,
             "action": action,
-            "payload_json": json.dumps(payload or {}, default=str, sort_keys=True),
-            "reason": str(reason or "").strip(),
+            "payload_json": payload_json,
+            "reason": request_reason,
             "requested_by": actor["id"],
-            "requested_at": requested_at,
+            "requested_at": None,
             "status": "pending",
             "decided_by": None,
             "decided_at": None,
             "decision_reason": None,
         }
         with transaction(self.db):
+            existing = self.db.execute(
+                """SELECT * FROM owner_action_requests
+                   WHERE project_id=? AND task_id IS NULL AND action=? AND payload_json=? AND reason=?
+                     AND requested_by=? AND status='pending'
+                   ORDER BY requested_at LIMIT 1""",
+                (project["id"], action, payload_json, request_reason, actor["id"]),
+            ).fetchone()
+            if existing:
+                return {"request": dict(existing)}
+            request_id, requested_at = new_id(), now_text()
+            request["id"], request["requested_at"] = request_id, requested_at
             self.db.execute(
                 "INSERT INTO owner_action_requests"
                 "(id,project_id,task_id,action,payload_json,reason,requested_by,requested_at,status)"
                 " VALUES(?,?,?,?,?,?,?,?,?)",
-                (request_id, project["id"], None, action, request["payload_json"], request["reason"],
+                (request_id, project["id"], None, action, payload_json, request_reason,
                  actor["id"], requested_at, "pending"),
             )
             self._project_event(
                 project["id"], actor["id"], "protected_action_requested",
-                {"request_id": request_id, "action": action, "payload": payload or {}},
-                request["reason"] or None,
+                {"request_id": request_id, "action": action, "payload": request_payload},
+                request_reason or None,
             )
             owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
             if owner and owner["id"] != actor["id"]:
@@ -1108,6 +1166,190 @@ class AstraService:
                      f"{action.replace('_', ' ')} requested: {project['name']}", requested_at),
                 )
         return {"request": request}
+
+    def _owner_action_request(self, actor: dict, request_id: str) -> dict:
+        self.require_owner(actor)
+        row = row_dict(self.db.execute(
+            """SELECT r.*, p.name project_name, t.title task_title, u.display_name requested_by_name
+               FROM owner_action_requests r
+               JOIN projects p ON p.id=r.project_id
+               LEFT JOIN tasks t ON t.id=r.task_id
+               JOIN users u ON u.id=r.requested_by WHERE r.id=?""",
+            (request_id,),
+        ).fetchone())
+        if not row:
+            raise KeyError("Owner-action request not found.")
+        row["payload"] = json.loads(row["payload_json"])
+        return row
+
+    def _resolve_pending_requests(
+        self,
+        actor: dict,
+        action: str,
+        *,
+        project_id: str,
+        task_id: str | None = None,
+        expected_revision: int | None = None,
+        decision_reason: str = "",
+    ) -> None:
+        """Resolve the active approval, or equivalent requests superseded by a direct Owner action.
+
+        Callers invoke this inside the action's transaction, so the governed state and
+        its queue record cannot commit independently.
+        """
+        active_id = getattr(self, "_active_owner_request_id", None)
+        if active_id:
+            rows = self.db.execute(
+                "SELECT * FROM owner_action_requests WHERE id=? AND status='pending'",
+                (active_id,),
+            ).fetchall()
+        else:
+            if task_id is None:
+                rows = self.db.execute(
+                    """SELECT * FROM owner_action_requests
+                       WHERE project_id=? AND task_id IS NULL AND action=? AND status='pending'""",
+                    (project_id, action),
+                ).fetchall()
+            else:
+                rows = self.db.execute(
+                    """SELECT * FROM owner_action_requests
+                       WHERE project_id=? AND task_id=? AND action=? AND status='pending'""",
+                    (project_id, task_id, action),
+                ).fetchall()
+                if expected_revision is not None:
+                    rows = [
+                        row for row in rows
+                        if json.loads(row["payload_json"]).get("expected_revision") == expected_revision
+                    ]
+        timestamp = now_text()
+        for row in rows:
+            cursor = self.db.execute(
+                """UPDATE owner_action_requests
+                   SET status='approved', decided_by=?, decided_at=?, decision_reason=?
+                   WHERE id=? AND status='pending'""",
+                (actor["id"], timestamp, str(decision_reason or "").strip() or None, row["id"]),
+            )
+            if cursor.rowcount != 1:
+                continue
+            detail = {"request_id": row["id"], "action": action, "status": "approved"}
+            if row["task_id"]:
+                self._event(
+                    row["task_id"], actor["id"], "protected_action_approved",
+                    {"request_id": row["id"], "status": "pending"}, detail,
+                    str(decision_reason or "").strip() or None,
+                )
+            else:
+                self._project_event(
+                    row["project_id"], actor["id"], "protected_action_approved", detail,
+                    str(decision_reason or "").strip() or None,
+                )
+
+    def _assert_active_request_revision(self, task: dict) -> None:
+        request_id = getattr(self, "_active_owner_request_id", None)
+        if not request_id:
+            return
+        row = self.db.execute(
+            "SELECT task_id,payload_json FROM owner_action_requests WHERE id=? AND status='pending'",
+            (request_id,),
+        ).fetchone()
+        if not row or row["task_id"] != task["id"]:
+            raise Conflict("Owner-action request conflict: the pending request changed.")
+        expected_revision = json.loads(row["payload_json"]).get("expected_revision")
+        if expected_revision is not None and expected_revision != task["revision"]:
+            raise Conflict(
+                f"Task revision conflict: request expected {expected_revision}, "
+                f"current revision is {task['revision']}."
+            )
+
+    def decide_owner_action_request(
+        self, actor: dict, request_id: str, decision: str, reason: str = ""
+    ) -> dict:
+        request = self._owner_action_request(actor, request_id)
+        if request["status"] != "pending":
+            raise Conflict("Owner-action request conflict: this request has already been decided.")
+        decision = str(decision or "").strip().lower()
+        if decision not in {"approved", "rejected", "cancelled"}:
+            raise ValueError("Decision must be approved, rejected, or cancelled.")
+        reason = str(reason or "").strip()
+        if decision in {"rejected", "cancelled"}:
+            if not reason:
+                raise ValueError(f"A reason is required when a request is {decision}.")
+            timestamp = now_text()
+            with transaction(self.db):
+                cursor = self.db.execute(
+                    """UPDATE owner_action_requests
+                       SET status=?, decided_by=?, decided_at=?, decision_reason=?
+                       WHERE id=? AND status='pending'""",
+                    (decision, actor["id"], timestamp, reason, request_id),
+                )
+                if cursor.rowcount != 1:
+                    raise Conflict("Owner-action request conflict: this request has already been decided.")
+                detail = {"request_id": request_id, "action": request["action"], "status": decision}
+                if request["task_id"]:
+                    self._event(
+                        request["task_id"], actor["id"], f"protected_action_{decision}",
+                        {"request_id": request_id, "status": "pending"}, detail, reason,
+                    )
+                else:
+                    self._project_event(
+                        request["project_id"], actor["id"], f"protected_action_{decision}", detail, reason
+                    )
+            return {"request": self._owner_action_request(actor, request_id)}
+
+        payload = request["payload"]
+        if request["task_id"] and payload.get("expected_revision") is not None:
+            task = self.get_task(actor, request["task_id"])
+            if task["revision"] != payload["expected_revision"]:
+                raise Conflict(
+                    f"Task revision conflict: request expected {payload['expected_revision']}, "
+                    f"current revision is {task['revision']}."
+                )
+        self._active_owner_request_id = request_id
+        try:
+            result = self._execute_owner_action_request(actor, request, payload, reason)
+        finally:
+            self._active_owner_request_id = None
+        decided = self._owner_action_request(actor, request_id)
+        if decided["status"] != "approved":
+            raise RuntimeError("Approved action completed without resolving its Owner request.")
+        return {"request": decided, "result": result}
+
+    def _execute_owner_action_request(self, actor: dict, request: dict, payload: dict, reason: str):
+        action = request["action"]
+        if action == "update_task_status":
+            return self.update_task(actor, request["task_id"], {
+                "status": payload["status"],
+                "reason": payload.get("reason") or request["reason"],
+                "expected_revision": payload["expected_revision"],
+            })
+        if action == "accept_submission":
+            return self.accept_submission(
+                actor, payload["submission_id"], payload.get("decision_note", ""), payload.get("checklist")
+            )
+        if action == "request_changes":
+            return self.request_changes(actor, payload["submission_id"], payload.get("reason") or request["reason"])
+        if action == "reopen_task":
+            return self.reopen_task(
+                actor, request["task_id"], payload.get("reason") or request["reason"], payload.get("new_due_date")
+            )
+        if action == "set_on_hold":
+            return self.set_on_hold(
+                actor, request["task_id"], payload.get("reason") or request["reason"],
+                payload.get("checkpoint_date"), payload.get("owner_user_id"),
+            )
+        if action == "approve_schedule_proposal":
+            return self.approve_schedule_proposal(
+                actor, payload["proposal_id"], payload.get("decision_reason") or reason
+            )
+        if action == "reject_schedule_proposal":
+            return self.reject_schedule_proposal(
+                actor, payload["proposal_id"], payload.get("reason") or request["reason"]
+            )
+        if action == "close_project":
+            return self.close_project(
+                actor, request["project_id"], payload.get("note", ""), bool(payload.get("exceptional"))
+            )
+        raise ValueError(f"Unsupported Owner action request: {action}.")
 
     def list_owner_action_requests(self, actor: dict, status: str | None = "pending") -> list[dict]:
         self.require_owner(actor)
@@ -1182,19 +1424,43 @@ class AstraService:
         timestamp = now_text()
         decision_note = str(decision_note).strip()
         checklist_text = json.dumps(checklist, default=str, sort_keys=True) if checklist else None
+        expected_task_revision = task["revision"]
         with transaction(self.db):
-            self.db.execute(
+            # Re-read after the write lock is held. Two Owner requests may both have
+            # observed "submitted" before entering this transaction; only the first
+            # may decide it and emit the acceptance event.
+            submission = self.get_submission(actor, submission_id)
+            task = self.get_task(actor, submission["task_id"])
+            if task["revision"] != expected_task_revision:
+                raise Conflict("Submission decision conflict: the task changed before acceptance began.")
+            self._assert_active_request_revision(task)
+            if submission["status"] != "submitted" or task["status"] != "submitted":
+                raise Conflict("Submission decision conflict: this submission is no longer pending.")
+            cursor = self.db.execute(
                 "UPDATE task_submissions SET status='accepted', decided_by=?, decided_at=?, decision_note=?, checklist=?"
-                " WHERE id=?",
+                " WHERE id=? AND status='submitted'",
                 (actor["id"], timestamp, decision_note, checklist_text, submission_id),
             )
-            self.db.execute(
-                "UPDATE tasks SET status='completed', accepted_submission_id=?, updated_at=?, revision=revision+1 WHERE id=?",
-                (submission_id, timestamp, task["id"]),
+            if cursor.rowcount != 1:
+                raise Conflict("Submission decision conflict: this submission is no longer pending.")
+            cursor = self.db.execute(
+                "UPDATE tasks SET status='completed', accepted_submission_id=?, updated_at=?, revision=revision+1"
+                " WHERE id=? AND status='submitted' AND revision=?",
+                (submission_id, timestamp, task["id"], task["revision"]),
             )
+            if cursor.rowcount != 1:
+                raise Conflict("Submission decision conflict: the task changed before acceptance was saved.")
             self._event(task["id"], actor["id"], "submission_accepted", {"status": task["status"]},
                         {"submission_id": submission_id, "version": submission["version"], "status": "completed"},
                         decision_note or None)
+            self._resolve_pending_requests(
+                actor,
+                "accept_submission",
+                project_id=task["project_id"],
+                task_id=task["id"],
+                expected_revision=task["revision"],
+                decision_reason=decision_note,
+            )
             # CS93C6 (owner decision 2026-09-15): acceptance does NOT auto-add the
             # submission to the final-results repository. Every final result is an
             # explicit manual mark (see mark_final_result) — an accepted submission
@@ -1214,18 +1480,39 @@ class AstraService:
                 actor, task, "request_changes", {"submission_id": submission_id, "reason": reason}, reason
             )
         timestamp = now_text()
+        expected_task_revision = task["revision"]
         with transaction(self.db):
-            self.db.execute(
+            submission = self.get_submission(actor, submission_id)
+            task = self.get_task(actor, submission["task_id"])
+            if task["revision"] != expected_task_revision:
+                raise Conflict("Submission decision conflict: the task changed before the decision began.")
+            self._assert_active_request_revision(task)
+            if submission["status"] != "submitted" or task["status"] != "submitted":
+                raise Conflict("Submission decision conflict: this submission is no longer pending.")
+            cursor = self.db.execute(
                 "UPDATE task_submissions SET status='changes_requested', decided_by=?, decided_at=?, decision_note=?"
-                " WHERE id=?",
+                " WHERE id=? AND status='submitted'",
                 (actor["id"], timestamp, reason, submission_id),
             )
-            self.db.execute(
-                "UPDATE tasks SET status='changes_requested', updated_at=?, revision=revision+1 WHERE id=?",
-                (timestamp, task["id"]),
+            if cursor.rowcount != 1:
+                raise Conflict("Submission decision conflict: this submission is no longer pending.")
+            cursor = self.db.execute(
+                "UPDATE tasks SET status='changes_requested', updated_at=?, revision=revision+1"
+                " WHERE id=? AND status='submitted' AND revision=?",
+                (timestamp, task["id"], task["revision"]),
             )
+            if cursor.rowcount != 1:
+                raise Conflict("Submission decision conflict: the task changed before the decision was saved.")
             self._event(task["id"], actor["id"], "changes_requested", None,
                         {"submission_id": submission_id, "version": submission["version"]}, reason)
+            self._resolve_pending_requests(
+                actor,
+                "request_changes",
+                project_id=task["project_id"],
+                task_id=task["id"],
+                expected_revision=task["revision"],
+                decision_reason=reason,
+            )
         return self.get_submission(actor, submission_id)
 
     def reopen_task(self, actor: dict, task_id: str, reason: str, new_due_date) -> dict:
@@ -1245,17 +1532,47 @@ class AstraService:
         timestamp = now_text()
         before = {"status": task["status"], "due_date": task.get("due_date")}
         with transaction(self.db):
+            current = self.get_task(actor, task_id)
+            if current["revision"] != task["revision"]:
+                raise Conflict("Task revision conflict: the task changed before reopening began.")
+            self._assert_active_request_revision(current)
             # accepted_submission_id is retained so the prior accepted version stays visible.
-            self.db.execute(
-                "UPDATE tasks SET status='reopened', due_date=?, updated_at=?, revision=revision+1 WHERE id=?",
-                (new_due, timestamp, task_id),
+            cursor = self.db.execute(
+                "UPDATE tasks SET status='reopened', due_date=?, updated_at=?, revision=revision+1"
+                " WHERE id=? AND revision=? AND status IN ('completed','cancelled','abandoned')",
+                (new_due, timestamp, task_id, current["revision"]),
             )
+            if cursor.rowcount != 1:
+                raise Conflict("Task revision conflict: the task changed before it could be reopened.")
             self._event(task_id, actor["id"], "task_reopened", before,
                         {"status": "reopened", "due_date": new_due}, reason)
+            self._resolve_pending_requests(
+                actor,
+                "reopen_task",
+                project_id=task["project_id"],
+                task_id=task_id,
+                expected_revision=task["revision"],
+                decision_reason=reason,
+            )
+            # A Manager may have attempted to move a terminal task back into work
+            # through the generic editor. That creates an update_task_status request,
+            # but the Owner must still use this dedicated reopen path so a revised
+            # timeline is recorded. A proper direct reopen therefore supersedes that
+            # matching request as well as an explicit reopen_task request.
+            self._resolve_pending_requests(
+                actor,
+                "update_task_status",
+                project_id=task["project_id"],
+                task_id=task_id,
+                expected_revision=task["revision"],
+                decision_reason=reason,
+            )
         return self.get_task(actor, task_id)
 
     def set_on_hold(self, actor: dict, task_id: str, reason: str, checkpoint_date, hold_owner_id=None) -> dict:
         task = self.get_task(actor, task_id)
+        if task["status"] in REOPEN_ONLY_STATUSES:
+            raise ValueError(f"A {task['status']} task must be reopened before it can be put on hold.")
         reason = str(reason).strip()
         if not reason:
             raise ValueError("On-hold work requires a reason.")
@@ -1275,10 +1592,19 @@ class AstraService:
             )
         timestamp = now_text()
         with transaction(self.db):
-            self.db.execute(
-                "UPDATE tasks SET status='on_hold', owner_user_id=?, updated_at=?, revision=revision+1 WHERE id=?",
-                (hold_owner, timestamp, task_id),
+            current = self.get_task(actor, task_id)
+            if current["revision"] != task["revision"]:
+                raise Conflict("Task revision conflict: the task changed before the hold began.")
+            self._assert_active_request_revision(current)
+            if current["status"] in REOPEN_ONLY_STATUSES:
+                raise Conflict(f"A {current['status']} task must be reopened before it can be put on hold.")
+            cursor = self.db.execute(
+                "UPDATE tasks SET status='on_hold', owner_user_id=?, updated_at=?, revision=revision+1"
+                " WHERE id=? AND revision=?",
+                (hold_owner, timestamp, task_id, current["revision"]),
             )
+            if cursor.rowcount != 1:
+                raise Conflict("Task revision conflict: the task changed before it could be put on hold.")
             self.db.execute(
                 "INSERT INTO task_checkpoints(id,task_id,checkpoint_date,reason,owner_user_id,created_by,created_at)"
                 " VALUES(?,?,?,?,?,?,?)",
@@ -1286,6 +1612,14 @@ class AstraService:
             )
             self._event(task_id, actor["id"], "task_on_hold", {"status": task["status"]},
                         {"status": "on_hold", "checkpoint_date": checkpoint, "owner_user_id": hold_owner}, reason)
+            self._resolve_pending_requests(
+                actor,
+                "set_on_hold",
+                project_id=task["project_id"],
+                task_id=task_id,
+                expected_revision=task["revision"],
+                decision_reason=reason,
+            )
         return self.get_task(actor, task_id)
 
     def list_subtasks(self, actor: dict, task_id: str) -> list[dict]:
@@ -1782,13 +2116,14 @@ class AstraService:
             title = attachment["display_name"]
             columns, values = ("attachment_id",), (source_id,)
         with transaction(self.db):
-            self.db.execute(
+            cursor = self.db.execute(
                 f"INSERT OR IGNORE INTO final_results(id,task_id,source_type,{columns[0]},title,note,marked_by,marked_at)"
                 " VALUES(?,?,?,?,?,?,?,?)",
                 (result_id, task_id, source_type, values[0], title, note, actor["id"], timestamp),
             )
-            self._event(task_id, actor["id"], "final_result_marked", None,
-                        {"source_type": source_type, "title": title}, note or None)
+            if cursor.rowcount == 1:
+                self._event(task_id, actor["id"], "final_result_marked", None,
+                            {"source_type": source_type, "title": title}, note or None)
         return self._get_final_result_for_source(task_id, source_type, source_id)
 
     def unmark_final_result(self, actor: dict, result_id: str) -> None:
@@ -1906,14 +2241,34 @@ class AstraService:
                 raise ValueError("Exceptional closure requires a note describing the residual work.")
         timestamp = now_text()
         with transaction(self.db):
-            self.db.execute(
+            current = row_dict(self.db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
+            if not current or current["status"] == "closed":
+                raise Conflict("Project closure conflict: this project is already closed.")
+            outstanding = [dict(row) for row in self.db.execute(
+                "SELECT id,title,status FROM tasks WHERE project_id=?"
+                " AND status NOT IN ('completed','cancelled','abandoned') ORDER BY title COLLATE NOCASE",
+                (project_id,),
+            ).fetchall()]
+            if outstanding and not exceptional:
+                raise Conflict("Project closure conflict: outstanding work now requires exceptional closure.")
+            if outstanding and not note:
+                raise Conflict("Project closure conflict: outstanding work now requires a closure note.")
+            cursor = self.db.execute(
                 "UPDATE projects SET status='closed', closed_at=?, closed_by=?, closure_note=?, closure_is_exceptional=?"
-                " WHERE id=?",
+                " WHERE id=? AND status<>'closed'",
                 (timestamp, actor["id"], note, 1 if outstanding else 0, project_id),
             )
+            if cursor.rowcount != 1:
+                raise Conflict("Project closure conflict: this project is already closed.")
             self._project_event(
                 project_id, actor["id"], "project_closed",
                 {"exceptional": bool(outstanding), "note": note, "residual_work": outstanding}, note or None,
+            )
+            self._resolve_pending_requests(
+                actor,
+                "close_project",
+                project_id=project_id,
+                decision_reason=note,
             )
         return self.get_project(actor, project_id)
 
@@ -2019,18 +2374,39 @@ class AstraService:
         timestamp = now_text()
         before = {"start_date": task.get("start_date"), "due_date": task.get("due_date")}
         after = {"start_date": proposal["start_date"], "due_date": proposal["due_date"]}
+        expected_task_revision = task["revision"]
         with transaction(self.db):
-            self.db.execute(
-                "UPDATE tasks SET start_date=?, due_date=?, updated_at=?, revision=revision+1 WHERE id=?",
-                (proposal["start_date"], proposal["due_date"], timestamp, task["id"]),
+            proposal = self.get_schedule_proposal(actor, proposal_id)
+            task = self.get_task(actor, proposal["task_id"])
+            if task["revision"] != expected_task_revision:
+                raise Conflict("Task revision conflict: the task changed before schedule approval began.")
+            self._assert_active_request_revision(task)
+            if proposal["status"] != "pending":
+                raise Conflict("Schedule decision conflict: this proposal is no longer pending.")
+            cursor = self.db.execute(
+                "UPDATE tasks SET start_date=?, due_date=?, updated_at=?, revision=revision+1"
+                " WHERE id=? AND revision=?",
+                (proposal["start_date"], proposal["due_date"], timestamp, task["id"], task["revision"]),
             )
+            if cursor.rowcount != 1:
+                raise Conflict("Task revision conflict: the task changed before the schedule was approved.")
             self._ensure_baseline(task["id"])
-            self.db.execute(
+            cursor = self.db.execute(
                 "UPDATE task_schedule_proposals SET status='approved', decided_by=?, decided_at=?, decision_reason=?"
-                " WHERE id=?",
+                " WHERE id=? AND status='pending'",
                 (actor["id"], timestamp, str(decision_reason).strip() or None, proposal_id),
             )
+            if cursor.rowcount != 1:
+                raise Conflict("Schedule decision conflict: this proposal is no longer pending.")
             self._event(task["id"], actor["id"], "schedule_revised", before, after, proposal["reason"])
+            self._resolve_pending_requests(
+                actor,
+                "approve_schedule_proposal",
+                project_id=task["project_id"],
+                task_id=task["id"],
+                expected_revision=task["revision"],
+                decision_reason=str(decision_reason or "").strip(),
+            )
         return self.get_task(actor, task["id"])
 
     def reject_schedule_proposal(self, actor: dict, proposal_id: str, reason: str) -> dict:
@@ -2046,13 +2422,28 @@ class AstraService:
                 actor, task, "reject_schedule_proposal", {"proposal_id": proposal_id, "reason": reason}, reason
             )
         with transaction(self.db):
-            self.db.execute(
+            proposal = self.get_schedule_proposal(actor, proposal_id)
+            task = self.get_task(actor, proposal["task_id"])
+            self._assert_active_request_revision(task)
+            if proposal["status"] != "pending":
+                raise Conflict("Schedule decision conflict: this proposal is no longer pending.")
+            cursor = self.db.execute(
                 "UPDATE task_schedule_proposals SET status='rejected', decided_by=?, decided_at=?, decision_reason=?"
-                " WHERE id=?",
+                " WHERE id=? AND status='pending'",
                 (actor["id"], now_text(), reason, proposal_id),
             )
+            if cursor.rowcount != 1:
+                raise Conflict("Schedule decision conflict: this proposal is no longer pending.")
             self._event(task["id"], actor["id"], "schedule_proposal_rejected", None,
                         {"proposal_id": proposal_id}, reason)
+            self._resolve_pending_requests(
+                actor,
+                "reject_schedule_proposal",
+                project_id=task["project_id"],
+                task_id=task["id"],
+                expected_revision=task["revision"],
+                decision_reason=reason,
+            )
         return self.get_schedule_proposal(actor, proposal_id)
 
     def add_task_dependency(
