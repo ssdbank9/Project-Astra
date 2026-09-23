@@ -500,12 +500,19 @@ function renderInbox(items,requests=[]){
     const mark=unread?`<button type="button" class="link" data-read="${escapeHtml(n.id)}">Mark read</button>`:"read";
     return `<li class="${unread?"unread":""}"><strong>${escapeHtml(n.summary)}</strong><br><small>${escapeHtml(when)}</small> · ${mark}</li>`;
   }).join("")||"<li>No notifications.</li>";
-  const requestRows=requests.map(r=>`<li class="unread"><strong>${escapeHtml(r.action.replaceAll("_"," "))}</strong><br><small>${escapeHtml(r.requested_by_name)} · ${escapeHtml(r.task_title||r.project_name)} · ${escapeHtml(new Date(r.requested_at).toLocaleString())}</small></li>`).join("")||"<li>No pending Owner requests.</li>";
+  const requestRows=requests.map(r=>`<li class="unread"><strong>${escapeHtml(r.action.replaceAll("_"," "))}</strong><br><small>${escapeHtml(r.requested_by_name)} · ${escapeHtml(r.task_title||r.project_name)} · ${escapeHtml(new Date(r.requested_at).toLocaleString())}</small><div class="actions"><button type="button" data-request-decision="approved" data-request-id="${escapeHtml(r.id)}">Approve</button><button type="button" class="quiet" data-request-decision="rejected" data-request-id="${escapeHtml(r.id)}">Reject</button><button type="button" class="quiet" data-request-decision="cancelled" data-request-id="${escapeHtml(r.id)}">Cancel request</button></div></li>`).join("")||"<li>No pending Owner requests.</li>";
   document.querySelector("#inbox-body").innerHTML=`<h2>Needs action</h2><ul class="people-list">${requestRows}</ul><h2>Activity</h2>
     <div class="actions"><button type="button" id="read-all" class="quiet">Mark all read</button></div>
     <ul class="people-list">${rows}</ul>`;
   document.querySelector("#read-all").addEventListener("click",markAllRead);
   document.querySelectorAll("#inbox-body [data-read]").forEach(b=>b.addEventListener("click",()=>markRead(b.dataset.read)));
+  document.querySelectorAll("#inbox-body [data-request-decision]").forEach(b=>b.addEventListener("click",()=>decideOwnerRequest(b.dataset.requestId,b.dataset.requestDecision)));
+}
+async function decideOwnerRequest(id,decision){
+  const reason=prompt(decision==="approved"?"Decision note (optional)":`Reason this request is ${decision}:`);
+  if(reason===null)return;
+  if(decision!=="approved"&&!reason.trim()){alert("A reason is required.");return}
+  try{await api(`/api/owner-action-requests/${id}/decision`,{method:"POST",body:JSON.stringify({decision,reason})});await load();await openInbox()}catch(x){alert(x.message)}
 }
 async function markRead(id){
   try{await api(`/api/notifications/${id}/read`,{method:"POST",body:"{}"});await openInbox()}catch(x){alert(x.message)}
@@ -606,6 +613,7 @@ function renderDetail(task,events){
     ${attachments}
     <form id="detail-edit">
       <h3>Edit</h3>
+      <input name="expected_revision" type="hidden" value="${task.revision}">
       <label>Title<input name="title" value="${escapeHtml(task.title)}" required></label>
       <label>Owner<select name="owner_user_id"><option value="">Unassigned</option></select></label>
       <div class="grid">
@@ -879,6 +887,7 @@ async function submitDetailEdit(e){
   e.preventDefault();
   const form=e.target,error=document.querySelector("#detail-edit-error");error.textContent="";
   const body=Object.fromEntries(new FormData(form));
+  body.expected_revision=Number(body.expected_revision);
   try{
     const outcome=await api(`/api/tasks/${detailTaskId}`,{method:"POST",body:JSON.stringify(body)});
     await load();await openDetail(detailTaskId);
