@@ -70,11 +70,24 @@ STYLES = (
 )
 
 
+# Every part carries this timestamp so identical input gives identical bytes (and sha256).
+# writestr() with a bare name stamps the wall clock instead; 1980-01-01 is the earliest DOS date.
+FIXED_ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
+
+
+class _DeterministicZip(zipfile.ZipFile):
+    def writestr(self, name, data, *args, **kwargs):
+        if isinstance(name, str):
+            name = zipfile.ZipInfo(name, date_time=FIXED_ZIP_DATE_TIME)
+            name.compress_type = zipfile.ZIP_DEFLATED   # a ZipInfo does not inherit the archive's default
+        super().writestr(name, data, *args, **kwargs)
+
+
 def workbook_bytes(sheets, *, date1904=False, shared_strings=None, absolute_targets=False, hidden=(),
                    defined_names=None, styles=STYLES):
-    """sheets: list of (name, sheet_xml). Returns .xlsx bytes."""
+    """sheets: list of (name, sheet_xml). Returns .xlsx bytes, byte-identical for identical input."""
     buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+    with _DeterministicZip(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         overrides = "".join(
             f'<Override PartName="/xl/worksheets/sheet{i}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
             for i in range(1, len(sheets) + 1)

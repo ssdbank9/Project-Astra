@@ -6,6 +6,7 @@ import re
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from datetime import date
 from pathlib import Path
 from urllib.parse import quote
@@ -689,10 +690,10 @@ class ImportServiceTests(unittest.TestCase):
         self.assertEqual((task["title"], task["due_date"]), ("Typed by the Owner", "2026-10-20"))
         self.assertEqual(self.db.execute("SELECT COUNT(*) c FROM imports").fetchone()["c"], 0)
         # a fresh preview shows the row as an update of the Owner's task; committing that plan is allowed
-        _, again = self.preview(self.waseem, rows)
+        data_again, again = self.preview(self.waseem, rows)
         self.assertEqual(again["rows"][0]["action"], "update")
         self.assertNotEqual(again["plan_fingerprint"], preview["plan_fingerprint"])
-        result = self.service.import_commit(self.waseem, self.project["id"], "demo.xlsx", data, {}, again["sha256"],
+        result = self.service.import_commit(self.waseem, self.project["id"], "demo.xlsx", data_again, {}, again["sha256"],
                                             again["plan_fingerprint"])
         self.assertEqual(result["update"], 1)
 
@@ -1574,6 +1575,18 @@ class ImportServiceTests(unittest.TestCase):
         template_rows = [dict(zip(keys, r)) for r in cells(payload.decode("utf-8-sig"))[1:]]
         self.assertEqual([r["title"] for r in template_rows if r["import_key"] == "INJ-002"], ["'" + title])
         self.assertEqual([c[0] for c in report if c and c[0].startswith("'")], [])   # only text columns are prefixed
+
+
+class FixtureDeterminismTests(unittest.TestCase):
+    def test_same_workbook_built_across_a_clock_change_has_identical_bytes(self):
+        # A test that previews one build and commits another relies on this: the import checks the
+        # file's sha256, and zip entries stamped with the wall clock made two builds differ.
+        rows = [{"import_key": "T-001", "title": "Same row", "start_date": "01-09-2026", "due_date": "05-09-2026"}]
+        with mock.patch("time.time", return_value=1_800_000_000.0):
+            first = filled_template(rows)
+        with mock.patch("time.time", return_value=1_800_000_000.0 + 3600 + 7):
+            second = filled_template(rows)
+        self.assertEqual(first, second)
 
 
 class PredecessorSyntaxTests(unittest.TestCase):
