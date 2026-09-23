@@ -1,7 +1,7 @@
 ---
 id: 01M37E3CYGRZY4X3XJTS1Z4PHZ
 title: Make the xlsx test fixture deterministic (zip timestamps flake an import test)
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -20,13 +20,17 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:28:13Z
-updated-at: 2026-09-23T16:13:31Z
+updated-at: 2026-09-23T16:40:52Z
 updated-by: Claude
 claimed-by: vm-29298
 claimed-at: 2026-09-23T15:41:51Z
-outcome-what: "tests/import_fixtures.py: workbook_bytes now writes through _DeterministicZip, whose writestr stamps every part with FIXED_ZIP_DATE_TIME (1980-01-01) and ZIP_DEFLATED. tests/test_import.py: new FixtureDeterminismTests regression test; test_commit_refuses_a_plan_that_changed_since_the_preview commits the second preview's own bytes (data_again) with its sha256."
-outcome-why: "zipfile.writestr with a bare name stamps the wall clock, so two builds seconds apart differed in bytes and sha256, and the test committed one build's bytes with another build's sha256 - it failed about 1 in 10 runs across a 2 s boundary."
-outcome-resolves: "DoD 1: fixed ZipInfo date_time + ZIP_DEFLATED on every part. DoD 2: FixtureDeterminismTests asserts equal bytes across a patched clock (failed before the fix); flaky test uses its own workbook. DoD 3: test_import 20/20 green, full suite 270 OK."
+outcome-what: "Independent review approved"
+outcome-why: "No medium+ findings; four low gaps recorded"
+outcome-resolves: "Review fields filled; ready for a person to sign off"
+review-summary: "tests/import_fixtures.py now builds test workbooks through a small zipfile subclass (_DeterministicZip) that writes every part with a fixed date (1980-01-01) and DEFLATE compression instead of the current time, so the same input always gives the same bytes. The flaky test test_commit_refuses_a_plan_that_changed_since_the_preview now commits the workbook bytes that belong to the preview whose sha256 it passes, so it no longer depends on two builds matching. A new test (FixtureDeterminismTests) builds the same workbook at two different patched clock times and asserts the bytes are equal. Only test files and the ticket changed; no production code."
+review-gaps: "No medium or higher problems. Low gaps: (1) no test catches removal of the ZIP_DEFLATED line in _DeterministicZip.writestr (tests/import_fixtures.py:82) - a mutation storing parts uncompressed still passes test_import and test_xlsx_reader; DoD 1 is met by inspection (every part compress_type 8, date_time 1980-01-01). (2) CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md:215-217, 259, 322 still call the test a known flake (about 1 in 10); stale once this merges. (3) The regression test uses mock.patch(\"time.time\"), process-wide while active; fine under the sequential TextTestRunner in tests/run.py, could affect other threads under a future parallel runner. (4) Branch had to be rebased on 2 newer shared-branch commits (DVS19Q); files do not overlap."
+review-verdict: Approve — independent reviewer
+review-check: "1. cd to the repo root on codex/migration-safety-remediation.  2. Run: cd tests && PYTHONPATH=../src ../.venv/bin/python -m unittest -v test_import  - expect \"Ran 68 tests ... OK\", including FixtureDeterminismTests and test_commit_refuses_a_plan_that_changed_since_the_preview.  3. Run it 20 times in a loop: for i in $(seq 20); do PYTHONPATH=../src ../.venv/bin/python -m unittest test_import 2>&1 | tail -1; done  - expect OK every time (before the fix about 1 in 10 failed).  4. Optional: revert tests/import_fixtures.py to its pre-1Z4PHZ version (git show 23cc15b^:tests/import_fixtures.py) and rerun FixtureDeterminismTests - it fails because the bytes differ in the ZIP DOS timestamp.  5. From the repo root run: .venv/bin/python tests/run.py  - expect Ran 270 tests, OK. Reviewer results: 25/25 targeted runs with a 2s-jumping clock, a start 30ms before a DOS 2s boundary, and the plain clock; 20/20 full test_import runs; mutations M1 (wall-clock date_time) and M2 (override disabled) caught, M3 (ZIP_DEFLATED removed) not caught."
 ---
 
 # Make the xlsx test fixture deterministic (zip timestamps flake an import test)
