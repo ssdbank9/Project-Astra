@@ -356,55 +356,97 @@ class AstraStateIntegrityTests(unittest.TestCase):
     def test_owner_approval_records_owner_decision_note_not_manager_reason(self):
         project, manager = self._intent_fixture("Decision note")
 
-        def request_status(task):
+        def new_task(title, **fields):
+            return self.service.create_task(
+                self.owner,
+                {"project_id": project["id"], "title": title, "owner_user_id": manager["id"], **fields},
+            )
+
+        def task_events(task_id):
+            return lambda: [
+                (event["event_type"], event["after_json"], event["reason"])
+                for event in self.service.task_events(self.owner, task_id)
+            ]
+
+        def request_status(title):
+            task = new_task(title)
             return self.service.update_task(
                 manager, task["id"],
                 {"status": "cancelled", "reason": "manager reason", "expected_revision": task["revision"]},
-            )["request"]
+            )["request"], task_events(task["id"])
 
-        def request_hold(task):
+        def request_hold(title):
+            task = new_task(title)
             return self.service.set_on_hold(
                 manager, task["id"], "manager reason", "2027-04-01", manager["id"]
-            )["request"]
+            )["request"], task_events(task["id"])
 
-        def request_reopen(task):
-            return self.service.reopen_task(manager, task["id"], "manager reason", "2027-03-01")["request"]
+        def request_reopen(title):
+            task = self._completed_task(project, manager, title)
+            return self.service.reopen_task(
+                manager, task["id"], "manager reason", "2027-03-01"
+            )["request"], task_events(task["id"])
+
+        # SRFCZD R5 (SEM-5): the submission, schedule-rejection and project-close paths
+        # record the Owner's note too; close_project's approval is a project event.
+        def request_accept(title):
+            task = new_task(title)
+            submission = self.service.submit_task(manager, task["id"], "ready")
+            return self.service.accept_submission(
+                manager, submission["id"], "manager reason"
+            )["request"], task_events(task["id"])
+
+        def request_changes(title):
+            task = new_task(title)
+            submission = self.service.submit_task(manager, task["id"], "draft")
+            return self.service.request_changes(
+                manager, submission["id"], "manager reason"
+            )["request"], task_events(task["id"])
+
+        def request_schedule_reject(title):
+            task = new_task(title, due_date="2027-01-01")
+            proposal = self.service.propose_schedule(manager, task["id"], None, "2027-02-01", "later")
+            return self.service.reject_schedule_proposal(
+                manager, proposal["id"], "manager reason"
+            )["request"], task_events(task["id"])
+
+        def request_close(title):
+            close = self.service.create_project(self.owner, title)
+            self.service.grant_project_access(self.owner, close["id"], manager["id"], "manager")
+            return self.service.close_project(manager, close["id"], "manager reason")["request"], lambda: [
+                (event["event_type"], event["detail_json"], event["reason"])
+                for event in self.service.project_events(self.owner, close["id"])
+            ]
 
         cases = (
-            ("update_task_status", request_status, "task_updated", False),
-            ("set_on_hold", request_hold, "task_on_hold", False),
-            ("reopen_task", request_reopen, "task_reopened", True),
+            ("update_task_status", request_status, "task_updated"),
+            ("set_on_hold", request_hold, "task_on_hold"),
+            ("reopen_task", request_reopen, "task_reopened"),
+            ("accept_submission", request_accept, "submission_accepted"),
+            ("request_changes", request_changes, "changes_requested"),
+            ("reject_schedule_proposal", request_schedule_reject, "schedule_proposal_rejected"),
+            ("close_project", request_close, "project_closed"),
         )
-        for action, make_request, action_event, needs_completed in cases:
+        for action, make_request, action_event in cases:
             for owner_note, expected in (("OWNER NOTE", "OWNER NOTE"), ("", None), ("   ", None)):
                 with self.subTest(action=action, owner_note=owner_note):
-                    title = f"{action} {owner_note!r}"
-                    if needs_completed:
-                        task = self._completed_task(project, manager, title)
-                    else:
-                        task = self.service.create_task(
-                            self.owner,
-                            {"project_id": project["id"], "title": title, "owner_user_id": manager["id"]},
-                        )
-                    request = make_request(task)
+                    request, events = make_request(f"{action} {owner_note!r}")
+                    self.assertEqual(request["action"], action)
                     decided = self.service.decide_owner_action_request(
                         self.owner, request["id"], "approved", owner_note
                     )["request"]
                     self.assertEqual(decided["status"], "approved")
                     self.assertEqual(decided["reason"], "manager reason")
                     self.assertEqual(decided["decision_reason"], expected)
-                    events = self.service.task_events(self.owner, task["id"])
                     approved = [
-                        event for event in events
-                        if event["event_type"] == "protected_action_approved"
-                        and request["id"] in (event["after_json"] or "")
+                        (detail, reason) for event_type, detail, reason in events()
+                        if event_type == "protected_action_approved" and request["id"] in (detail or "")
                     ]
                     self.assertEqual(len(approved), 1)
-                    self.assertEqual(approved[0]["reason"], expected)
-                    detail = json.loads(approved[0]["after_json"])
-                    self.assertEqual(detail["request_reason"], "manager reason")
-                    governed = [event for event in events if event["event_type"] == action_event]
-                    self.assertEqual(governed[-1]["reason"], "manager reason")
+                    self.assertEqual(approved[0][1], expected)
+                    self.assertEqual(json.loads(approved[0][0])["request_reason"], "manager reason")
+                    governed = [reason for event_type, _, reason in events() if event_type == action_event]
+                    self.assertEqual(governed[-1], "manager reason")
 
         # Schedule approval keeps its existing proposal decision reason (the Manager's
         # recommendation when given); the request row still records the Owner's note.
@@ -700,6 +742,44 @@ class AstraStateIntegrityTests(unittest.TestCase):
         self.assertEqual(closed["status"], "closed")
         self._assert_untouched(request, project_id=project["id"])
         self.assertIn("project_closed", self._project_event_types(project["id"]))
+
+    # SRFCZD R5 (SEM-1): a direct close reconciles a Manager's close request only when
+    # every residual task still has the status the request recorded, the same test an
+    # approval applies; otherwise approving that request would return 409.
+    def test_direct_close_leaves_request_pending_when_a_residual_status_changed(self):
+        project, _, request = self._close_request_fixture("Close residual status")
+        residual = self.service.list_tasks(self.owner, project["id"])[0]
+        self.assertEqual(residual["status"], "draft")
+        self.service.update_task(
+            self.owner, residual["id"],
+            {"status": "in_progress", "reason": "Started", "expected_revision": residual["revision"]},
+        )
+
+        closed = self.service.close_project(self.owner, project["id"], "A remains", exceptional=True)
+
+        self.assertEqual(closed["status"], "closed")
+        self._assert_untouched(request, project_id=project["id"])
+
+    # SRFCZD R5 (SEM-4): residual titles and their order are not intent. Renaming a
+    # residual task (which also reorders the title-sorted list) before the Owner closes
+    # still resolves the request, directly or through its approval.
+    def test_renamed_residual_work_still_resolves_or_approves_the_close_request(self):
+        for path in ("direct", "approval"):
+            with self.subTest(path=path):
+                project, manager = self._intent_fixture(f"Close rename {path}")
+                alpha = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Alpha"})
+                self.service.create_task(self.owner, {"project_id": project["id"], "title": "Bravo"})
+                request = self.service.close_project(manager, project["id"], "Alpha and Bravo remain")["request"]
+                self.service.update_task(
+                    self.owner, alpha["id"], {"title": "Zulu", "expected_revision": alpha["revision"]}
+                )
+                if path == "direct":
+                    self.service.close_project(self.owner, project["id"], "Owner closes", exceptional=True)
+                else:
+                    decided = self.service.decide_owner_action_request(self.owner, request["id"], "approved", "ok")
+                    self.assertEqual(decided["request"]["status"], "approved")
+                self.assertEqual(self.service.get_project(self.owner, project["id"])["status"], "closed")
+                self._assert_resolved(request, project_id=project["id"])
 
     def test_close_approval_racing_a_reject_rolls_back_without_closing(self):
         project, _, request = self._close_request_fixture("Close race")
@@ -1095,6 +1175,156 @@ class AstraStateIntegrityTests(unittest.TestCase):
         self.assertEqual(interleaved, [True])
         self._assert_not_submitted(task)
 
+
+    # SRFCZD R5 (RT-1): every governed action re-checks its Owner request inside its own
+    # transaction. A reject that lands after the approval's pre-checks refuses the
+    # approval with 409 and leaves the task, its record and the rejection as they were.
+    def test_each_action_approval_racing_a_reject_is_refused_without_changing_the_task(self):
+        project, manager = self._intent_fixture("Guard race")
+
+        def new_task(title, **fields):
+            return self.service.create_task(
+                self.owner,
+                {"project_id": project["id"], "title": title, "owner_user_id": manager["id"], **fields},
+            )
+
+        def submission_status(submission_id):
+            return lambda: self.service.get_submission(self.owner, submission_id)["status"]
+
+        def proposal_status(proposal_id):
+            return lambda: self.service.get_schedule_proposal(self.owner, proposal_id)["status"]
+
+        def accept(title):
+            task = new_task(title)
+            submission = self.service.submit_task(manager, task["id"], "ready")
+            request = self.service.accept_submission(manager, submission["id"], "recommend")["request"]
+            return task["id"], request, submission_status(submission["id"])
+
+        def changes(title):
+            task = new_task(title)
+            submission = self.service.submit_task(manager, task["id"], "draft")
+            request = self.service.request_changes(manager, submission["id"], "revise")["request"]
+            return task["id"], request, submission_status(submission["id"])
+
+        def reopen(title):
+            task = self._completed_task(project, manager, title)
+            request = self.service.reopen_task(manager, task["id"], "new scope", "2027-03-01")["request"]
+            return task["id"], request, lambda: None
+
+        def hold(title):
+            task = new_task(title)
+            request = self.service.set_on_hold(manager, task["id"], "vendor", "2027-04-01", manager["id"])["request"]
+            return task["id"], request, lambda: None
+
+        def schedule(decide):
+            def make(title):
+                task = new_task(title, due_date="2027-01-01")
+                proposal = self.service.propose_schedule(manager, task["id"], None, "2027-02-01", "later")
+                request = decide(manager, proposal["id"], "manager reason")["request"]
+                return task["id"], request, proposal_status(proposal["id"])
+            return make
+
+        cases = (
+            ("accept_submission", accept),
+            ("request_changes", changes),
+            ("reopen_task", reopen),
+            ("set_on_hold", hold),
+            ("approve_schedule_proposal", schedule(self.service.approve_schedule_proposal)),
+            ("reject_schedule_proposal", schedule(self.service.reject_schedule_proposal)),
+        )
+        other = connect(self.db_path)
+        self.addCleanup(other.close)
+        original = self.service._execute_owner_action_request
+        for action, make in cases:
+            with self.subTest(action=action):
+                task_id, request, record_status = make(f"Race {action}")
+                self.assertEqual(request["action"], action)
+                before = self.service.get_task(self.owner, task_id)
+                record_before = record_status()
+
+                def reject_first(*args, **kwargs):
+                    AstraService(other).decide_owner_action_request(self.owner, request["id"], "rejected", "no")
+                    return original(*args, **kwargs)
+
+                with patch.object(self.service, "_execute_owner_action_request", side_effect=reject_first):
+                    with self.assertRaisesRegex(service_module.Conflict, "pending request changed"):
+                        self.service.decide_owner_action_request(self.owner, request["id"], "approved", "ok")
+
+                current = self.service.get_task(self.owner, task_id)
+                fields = ("status", "revision", "due_date")
+                self.assertEqual([current[f] for f in fields], [before[f] for f in fields])
+                self.assertEqual(record_status(), record_before)
+                self.assertEqual(self._request_status(request["id"]), "rejected")
+                self.assertEqual(self._approved_event_count(request["id"], task_id=task_id), 0)
+
+    # SRFCZD R5 (RT-2): an approval whose dispatched action fails must not leave the
+    # service instance in approval mode for the next, unrelated Owner action.
+    def test_failed_approval_clears_the_active_request_for_the_next_action(self):
+        project, _, request = self._close_request_fixture("Close flag reset")
+        self.service.create_task(self.owner, {"project_id": project["id"], "title": "Residual B"})
+
+        with self.assertRaisesRegex(service_module.Conflict, "open work changed since this close was requested"):
+            self.service.decide_owner_action_request(self.owner, request["id"], "approved", "OWNER NOTE")
+
+        self.assertIsNone(self.service._active_owner_request_id)
+        self.assertEqual(self.service._active_owner_decision_reason, "")
+        task = self.service.list_tasks(self.owner, project["id"])[0]
+        updated = self.service.update_task(
+            self.owner, task["id"], {"title": "Unrelated edit", "expected_revision": task["revision"]}
+        )
+        self.assertEqual(updated["title"], "Unrelated edit")
+        self._assert_untouched(request, project_id=project["id"])
+
+    # SRFCZD R5 (SEM-2): a Manager's generic edit into a governed status, or out of review,
+    # is refused before any request exists, with the Owner's message: the Owner could never
+    # approve it and no direct action reconciles it. A terminal task edited back into work
+    # still becomes a request, which a dedicated reopen resolves (handoff 7.1).
+    def test_manager_generic_update_refuses_governed_targets_and_leaving_review(self):
+        project, manager = self._intent_fixture("Governed generic")
+
+        def make(source, title):
+            task = self.service.create_task(
+                self.owner, {"project_id": project["id"], "title": title, "owner_user_id": manager["id"]}
+            )
+            if source == "completed":
+                return self._completed_task(project, manager, title + " done")
+            if source == "submitted":
+                self.service.submit_task(manager, task["id"], "ready")
+            return self.service.get_task(self.owner, task["id"])
+
+        on_review = "A submitted task leaves review through the dedicated accept or request changes action."
+        cases = (
+            ("draft", "on_hold", "Use the dedicated on hold action for this transition."),
+            ("draft", "completed", "Use the dedicated completed action for this transition."),
+            ("draft", "reopened", "Use the dedicated reopened action for this transition."),
+            ("completed", "on_hold", "Use the dedicated on hold action for this transition."),
+            ("completed", "reopened", "Use the dedicated reopened action for this transition."),
+            ("submitted", "in_progress", on_review),
+            ("submitted", "cancelled", on_review),
+        )
+        for source, target, message in cases:
+            with self.subTest(source=source, target=target):
+                task = make(source, f"{source} to {target}")
+                events_before = len(self.service.task_events(self.owner, task["id"]))
+                with self.assertRaises(ValueError) as caught:
+                    self.service.update_task(
+                        manager, task["id"],
+                        {"status": target, "reason": "Manager asks", "expected_revision": task["revision"]},
+                    )
+                self.assertEqual(str(caught.exception), message)
+                current = self.service.get_task(self.owner, task["id"])
+                self.assertEqual((current["status"], current["revision"]), (source, task["revision"]))
+                self.assertEqual(len(self.service.task_events(self.owner, task["id"])), events_before)
+                self.assertEqual(self.service.list_owner_action_requests(self.owner), [])
+
+        task = make("completed", "Back to work")
+        request = self.service.update_task(
+            manager, task["id"],
+            {"status": "in_progress", "reason": "More work", "expected_revision": task["revision"]},
+        )["request"]
+        self.assertEqual(json.loads(request["payload_json"])["from_status"], "completed")
+        self.service.reopen_task(self.owner, task["id"], "Owner reopens", "2027-08-01")
+        self._assert_resolved(request, task_id=task["id"])
 
 if __name__ == "__main__":
     unittest.main()

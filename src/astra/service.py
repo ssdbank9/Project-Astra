@@ -632,7 +632,9 @@ class AstraService:
         status_changed = status != before["status"]
         if status_changed and status == "submitted":
             raise ValueError("Use the dedicated submitted action for this transition.")
-        if status_changed and actor["global_role"] == "owner" and status in GOVERNED_STATUSES:
+        # SRFCZD R5 (SEM-2): refused for a Manager too, before any request exists; the Owner
+        # could never approve a generic request into these statuses.
+        if status_changed and status in GOVERNED_STATUSES:
             raise ValueError(f"Use the dedicated {status.replace('_', ' ')} action for this transition.")
         ordinary_fields = (
             "title", "description", "owner_user_id", "criticality",
@@ -667,7 +669,10 @@ class AstraService:
             # the Owner leaves completed / cancelled / abandoned through reopen_task (reason
             # and revised due date) and submitted through the submission decision. There is
             # no dedicated release action for on_hold, changes_requested or reopened, so the
-            # Owner's update with a reason is the recorded path out of those.
+            # Owner's update with a reason is the recorded path out of those. Leaving review is
+            # refused for a Manager as well (SEM-2): only the submission decision does it.
+            if before["status"] == "submitted":
+                raise ValueError("A submitted task leaves review through the dedicated accept or request changes action.")
             if actor["global_role"] != "owner":
                 return self._request_protected_action(
                     actor,
@@ -682,8 +687,6 @@ class AstraService:
                     f"A {before['status']} task is not edited back into work; use the dedicated reopen task action "
                     "(reason and revised due date) so the reopening is recorded."
                 )
-            if before["status"] == "submitted":
-                raise ValueError("A submitted task leaves review through the dedicated accept or request changes action.")
         if status_changed and actor["global_role"] != "owner" and status in PROTECTED_STATUSES:
             return self._request_protected_action(
                 actor,
@@ -1205,6 +1208,20 @@ class AstraService:
         return row
 
     @staticmethod
+    def _residual_work_matches(requested: list | None, current: list | None) -> bool:
+        """Whether a close request's recorded residual work is still the open work.
+
+        Compared as {task id: status}; titles and order are not intent. A recorded item
+        without a status (a request made before statuses were recorded) matches any status.
+        Both a direct close's reconciliation and an approval's re-check use this test.
+        """
+        requested_work = {item["id"]: item.get("status") for item in requested or []}
+        current_work = {item["id"]: item.get("status") for item in current or []}
+        return requested_work.keys() == current_work.keys() and all(
+            status is None or status == current_work[task_id] for task_id, status in requested_work.items()
+        )
+
+    @staticmethod
     def _request_intent_matches(action: str, payload: dict, intent: dict) -> bool:
         # An intent value given as a frozenset accepts any of its members.
         for field in OWNER_REQUEST_INTENT_FIELDS[action]:
@@ -1212,9 +1229,11 @@ class AstraService:
                 continue
             requested, executed = payload[field], intent.get(field)
             if field == "residual_work":
-                requested = sorted(item["id"] for item in requested or [])
-                executed = sorted(item["id"] for item in executed or [])
-            matched = requested in executed if isinstance(executed, frozenset) else requested == executed
+                matched = AstraService._residual_work_matches(requested, executed)
+            elif isinstance(executed, frozenset):
+                matched = requested in executed
+            else:
+                matched = requested == executed
             if not matched:
                 return False
         return True
@@ -2342,13 +2361,9 @@ class AstraService:
                 if not row or row["project_id"] != project_id or row["action"] != "close_project":
                     raise Conflict("Owner-action request conflict: the pending request changed.")
                 requested = json.loads(row["payload_json"])
-                requested_work = {item["id"]: item.get("status") for item in requested.get("residual_work") or []}
-                current_work = {item["id"]: item["status"] for item in outstanding}
                 if (
                     bool(requested.get("exceptional")) != bool(outstanding)
-                    or requested_work.keys() != current_work.keys()
-                    or any(status is not None and status != current_work[task_id]
-                           for task_id, status in requested_work.items())
+                    or not self._residual_work_matches(requested.get("residual_work"), outstanding)
                 ):
                     raise Conflict(
                         "Project closure conflict: the project's open work changed since this close was "

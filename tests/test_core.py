@@ -737,8 +737,10 @@ class AstraCoreTests(unittest.TestCase):
         # Regression review TESTS-1 (2026-09-22): reopened and changes_requested are locked sources
         # too (authorization matrix row 24); until they were listed here a change in either
         # direction passed the suite.
+        # SRFCZD R5 (SEM-2): leaving submitted is refused for a Manager too (below), since the
+        # Owner could never approve that generic request; only the submission decision leaves review.
         for source, target in (("completed", "in_progress"), ("cancelled", "assigned"), ("on_hold", "in_progress"),
-                               ("submitted", "in_progress"), ("abandoned", "in_progress"),
+                               ("abandoned", "in_progress"),
                                ("reopened", "in_progress"), ("changes_requested", "in_progress")):
             with self.subTest(source=source, actor="manager"):
                 task = make(source)
@@ -754,9 +756,15 @@ class AstraCoreTests(unittest.TestCase):
                     self.update_task(self.owner, task["id"], {"status": "in_progress", "reason": "shortcut"})
                 self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], source)
         task = make("submitted")
-        with self.assertRaisesRegex(ValueError, "accept"):
-            self.update_task(self.owner, task["id"], {"status": "in_progress", "reason": "undo"})
-        self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], "submitted")
+        for label, actor in (("owner", self.owner), ("manager", manager)):
+            with self.subTest(source="submitted", actor=label):
+                with self.assertRaisesRegex(ValueError, "accept"):
+                    self.update_task(actor, task["id"], {"status": "in_progress", "reason": "undo"})
+                self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], "submitted")
+        self.assertEqual(
+            [r for r in self.service.list_owner_action_requests(self.owner, status=None) if r["task_id"] == task["id"]],
+            [],
+        )
         # the recorded way back: reopen with a reason and a revised due date
         done = make("completed")
         reopened = self.service.reopen_task(self.owner, done["id"], "second round", "2027-01-15")
