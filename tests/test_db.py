@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import tempfile
@@ -509,7 +510,7 @@ class MigrationTests(unittest.TestCase):
     def test_fresh_v14_database_refuses_a_second_submission_at_one_version(self):
         connection = db.connect(self.path)
         try:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 14)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
             self.assertEqual(self.unique_submission_index(connection), 1)
             task_id = self.submitted_task(connection)
             with self.assertRaisesRegex(sqlite3.IntegrityError, "UNIQUE"):
@@ -526,7 +527,7 @@ class MigrationTests(unittest.TestCase):
 
             db.migrate(connection)
 
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 14)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
             self.assertEqual(self.unique_submission_index(connection), 1)
             self.assertEqual(self.submission_rows(connection), before)
             self.assertEqual([row[1] for row in before], [task_id])
@@ -580,7 +581,7 @@ class MigrationTests(unittest.TestCase):
             repaired.close()
         reopened = db.connect(self.path)
         try:
-            self.assertEqual(reopened.execute("PRAGMA user_version").fetchone()[0], 14)
+            self.assertEqual(reopened.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
             self.assertEqual(self.unique_submission_index(reopened), 1)
         finally:
             reopened.close()
@@ -600,7 +601,7 @@ class MigrationTests(unittest.TestCase):
 
             db.migrate(connection)
 
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 14)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
             self.assertEqual(self.unique_submission_index(connection), 1)
             self.assertEqual(self.submission_rows(connection), before)
         finally:
@@ -655,6 +656,277 @@ class MigrationTests(unittest.TestCase):
                     entry.main(["serve", "--port", "0"])
         self.assertIsInstance(stopped.exception.code, str)
         self.assertIn("cannot upgrade this database to schema 14", stopped.exception.code)
+
+
+class PendingRequestIntentKeyTests(unittest.TestCase):
+    """WNXSDA: schema 15 stores an intent key on owner_action_requests and makes it
+    unique among pending rows, so equivalent pending requests are enforced by the
+    database and found by an index instead of by payload text compared per row."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "astra.sqlite3"
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def raw(self):
+        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA journal_mode = WAL")
+        return connection
+
+    def version(self, connection):
+        return connection.execute("PRAGMA user_version").fetchone()[0]
+
+    def at_v14(self):
+        """A complete v14 database: v15's unique index is refused, so the v15 step rolls
+        back (its ALTERs and backfill included) and leaves user_version at 14."""
+        connection = self.raw()
+        connection.set_authorizer(deny_create_index(db.V15_PENDING_INTENT_INDEX))
+        with self.assertRaises(sqlite3.DatabaseError):
+            db.migrate(connection)
+        connection.set_authorizer(None)
+        self.assertEqual(self.version(connection), 14)
+        return connection
+
+    def fixture(self, connection):
+        """Owner, project and task created by the service; the task's id and revision."""
+        service = AstraService(connection)
+        owner = service.create_initial_owner("owner@example.org", "Owner", "correct horse battery")
+        project = service.create_project(owner, "Intent key")
+        task = service.create_task(owner, {"project_id": project["id"], "title": "Governed secret title"})
+        return owner, project, task
+
+    def legacy_request(self, connection, request_id, owner, project, task, status="pending", reason="private reason"):
+        """A request row as the v12-v14 schema stores it, written without the service."""
+        payload_json = json.dumps(
+            {"expected_revision": task["revision"], "status": "cancelled"}, sort_keys=True
+        )
+        connection.execute(
+            "INSERT INTO owner_action_requests"
+            "(id,project_id,task_id,action,payload_json,reason,requested_by,requested_at,status)"
+            " VALUES(?,?,?,?,?,?,?,?,?)",
+            (request_id, project["id"], task["id"], "update_task_status", payload_json, reason,
+             owner["id"], f"2026-09-0{len(request_id) % 9 + 1}T00:00:00Z", status),
+        )
+        return payload_json
+
+    def request_rows(self, connection):
+        return [
+            tuple(row) for row in connection.execute(
+                "SELECT id,project_id,task_id,action,payload_json,reason,requested_by,status"
+                " FROM owner_action_requests ORDER BY id"
+            ).fetchall()
+        ]
+
+    def indexes(self, connection):
+        rows = connection.execute("PRAGMA index_list(owner_action_requests)").fetchall()
+        return {row["name"]: (row["unique"], row["partial"]) for row in rows}
+
+    def test_fresh_database_has_the_intent_key_and_its_indexes(self):
+        connection = db.connect(self.path)
+        try:
+            self.assertEqual(self.version(connection), db.SCHEMA_VERSION)
+            self.assertGreaterEqual(db.SCHEMA_VERSION, 15)
+            columns = table_columns(connection, "owner_action_requests")
+            self.assertIn("intent_key", columns)
+            self.assertIn("expected_revision", columns)
+            indexes = self.indexes(connection)
+            self.assertEqual(indexes.get(db.V15_PENDING_INTENT_INDEX), (1, 1))
+            self.assertEqual(indexes.get(db.V15_PENDING_LOOKUP_INDEX), (0, 1))
+        finally:
+            connection.close()
+
+    def test_schema_refuses_a_second_identical_pending_request(self):
+        connection = db.connect(self.path)
+        try:
+            owner, project, task = self.fixture(connection)
+            manager_request = {"status": "cancelled", "expected_revision": task["revision"]}
+            payload_json = json.dumps(manager_request, sort_keys=True)
+            key = db.owner_request_intent_key(
+                project["id"], task["id"], "update_task_status", payload_json, "why", owner["id"]
+            )
+            insert = (
+                "INSERT INTO owner_action_requests(id,project_id,task_id,action,payload_json,reason,"
+                "requested_by,requested_at,status,intent_key) VALUES(?,?,?,?,?,?,?,?,?,?)"
+            )
+            values = (project["id"], task["id"], "update_task_status", payload_json, "why",
+                      owner["id"], "2026-09-23T00:00:00Z")
+            connection.execute(insert, ("first", *values, "pending", key))
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "UNIQUE"):
+                connection.execute(insert, ("second", *values, "pending", key))
+            # a decided request with the same intent is history, not a duplicate
+            connection.execute(insert, ("decided", *values, "approved", key))
+        finally:
+            connection.close()
+
+    def test_v14_database_upgrades_with_backfilled_keys_and_matches_fresh_schema(self):
+        connection = self.at_v14()
+        try:
+            owner, project, task = self.fixture(connection)
+            payload_json = self.legacy_request(connection, "legacy-pending", owner, project, task)
+            self.legacy_request(connection, "legacy-approved", owner, project, task, status="approved")
+            before = self.request_rows(connection)
+
+            db.migrate(connection)
+
+            self.assertEqual(self.version(connection), db.SCHEMA_VERSION)
+            self.assertEqual(self.request_rows(connection), before, "the backfill changes no existing field")
+            expected_key = db.owner_request_intent_key(
+                project["id"], task["id"], "update_task_status", payload_json, "private reason", owner["id"]
+            )
+            keys = dict(connection.execute(
+                "SELECT id,intent_key FROM owner_action_requests").fetchall())
+            self.assertEqual(keys, {"legacy-pending": expected_key, "legacy-approved": expected_key})
+            revisions = {row[0] for row in connection.execute(
+                "SELECT expected_revision FROM owner_action_requests").fetchall()}
+            self.assertEqual(revisions, {task["revision"]})
+            fresh = db.connect(Path(self.temp.name) / "fresh.sqlite3")
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
+    def test_v14_duplicate_pending_requests_refuse_the_upgrade_without_touching_data(self):
+        connection = self.at_v14()
+        try:
+            owner, project, task = self.fixture(connection)
+            self.legacy_request(connection, "twin-a", owner, project, task)
+            self.legacy_request(connection, "twin-bb", owner, project, task)
+            self.legacy_request(connection, "old-decided", owner, project, task, status="rejected")
+            schema_before = schema_signature(connection)
+            before = self.request_rows(connection)
+
+            with self.assertRaises(db.SchemaMigrationRefused) as refused:
+                db.migrate(connection)
+
+            message = str(refused.exception)
+            self.assertIn("schema 15", message)
+            self.assertIn("Nothing was changed", message)
+            self.assertIn("request twin-a", message)
+            self.assertIn("request twin-bb", message)
+            self.assertNotIn("old-decided", message, "decided requests are not duplicates")
+            self.assertIn("update_task_status", message)
+            self.assertIn(f"task {task['id']}", message)
+            self.assertNotIn("private reason", message, "reasons must not be echoed")
+            self.assertNotIn("Governed secret title", message, "titles must not be echoed")
+            self.assertNotIn("WNXSDA", message)
+            self.assertEqual(self.version(connection), 14)
+            self.assertEqual(schema_signature(connection), schema_before)
+            self.assertEqual(self.request_rows(connection), before)
+            self.assertFalse(connection.in_transaction)
+        finally:
+            connection.close()
+        with self.assertRaises(db.SchemaMigrationRefused):   # connect() refuses the same way
+            db.connect(self.path)
+
+        repaired = self.raw()   # once one twin is cancelled, the next start upgrades
+        try:
+            repaired.execute("UPDATE owner_action_requests SET status='cancelled' WHERE id='twin-bb'")
+        finally:
+            repaired.close()
+        reopened = db.connect(self.path)
+        try:
+            self.assertEqual(self.version(reopened), db.SCHEMA_VERSION)
+        finally:
+            reopened.close()
+
+    def test_duplicate_pending_requests_in_an_older_database_refuse_before_any_step_runs(self):
+        connection = self.raw()
+        try:
+            connection.set_authorizer(deny_create_table(DENY_IMPORTS_TABLE))   # stop at v12
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(self.version(connection), 12)
+            connection.execute("PRAGMA foreign_keys = OFF")
+            for request_id in ("pair-a", "pair-b"):
+                connection.execute(
+                    "INSERT INTO owner_action_requests"
+                    "(id,project_id,task_id,action,payload_json,reason,requested_by,requested_at,status)"
+                    " VALUES(?,'project-1',NULL,'close_project','{}','private reason','user-1',"
+                    "'2026-01-01T00:00:00Z','pending')",
+                    (request_id,),
+                )
+            connection.execute("PRAGMA foreign_keys = ON")
+            schema_before = schema_signature(connection)
+            before = self.request_rows(connection)
+
+            with self.assertRaises(db.SchemaMigrationRefused) as refused:
+                db.migrate(connection)
+
+            message = str(refused.exception)
+            self.assertIn("project project-1 close_project: request pair-a, request pair-b", message)
+            self.assertNotIn("private reason", message)
+            self.assertEqual(self.version(connection), 12)
+            self.assertEqual(schema_signature(connection), schema_before, "no later step may have committed")
+            self.assertEqual(self.request_rows(connection), before)
+            self.assertFalse(connection.in_transaction)
+        finally:
+            connection.close()
+
+    def test_failure_late_in_the_v15_step_rolls_back_columns_and_backfill_then_retries(self):
+        connection = self.at_v14()
+        try:
+            owner, project, task = self.fixture(connection)
+            self.legacy_request(connection, "legacy-pending", owner, project, task)
+            columns_before = table_columns(connection, "owner_action_requests")
+            rows_before = self.request_rows(connection)
+            catalog_before = full_catalog(connection)
+
+            connection.set_authorizer(deny_create_index(db.V15_PENDING_INTENT_INDEX))
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+
+            self.assertEqual(self.version(connection), 14)
+            self.assertEqual(table_columns(connection, "owner_action_requests"), columns_before)
+            self.assertNotIn("intent_key", columns_before)
+            self.assertEqual(self.request_rows(connection), rows_before)
+            self.assertEqual(full_catalog(connection), catalog_before)
+            self.assertFalse(connection.in_transaction)
+
+            db.migrate(connection)
+
+            self.assertEqual(self.version(connection), db.SCHEMA_VERSION)
+            self.assertIsNotNone(connection.execute(
+                "SELECT intent_key FROM owner_action_requests WHERE id='legacy-pending'").fetchone()[0])
+        finally:
+            connection.close()
+
+    def test_service_finds_a_backfilled_request_by_its_key(self):
+        """A request filed before the upgrade is the one an identical retry returns."""
+        connection = self.at_v14()
+        try:
+            owner, project, task = self.fixture(connection)
+            service = AstraService(connection)
+            manager = service.create_user(owner, "manager@example.org", "Manager", "manager password safe")
+            service.grant_project_access(owner, project["id"], manager["id"], "manager")
+            payload_json = json.dumps(
+                {"expected_revision": task["revision"], "reason": "Manager recommendation", "status": "cancelled"},
+                sort_keys=True,
+            )
+            connection.execute(
+                "INSERT INTO owner_action_requests"
+                "(id,project_id,task_id,action,payload_json,reason,requested_by,requested_at,status)"
+                " VALUES('filed-before-upgrade',?,?,'update_task_status',?,'Manager recommendation',?,"
+                "'2026-09-01T00:00:00Z','pending')",
+                (project["id"], task["id"], payload_json, manager["id"]),
+            )
+            db.migrate(connection)
+
+            retried = service.update_task(manager, task["id"], {
+                "status": "cancelled", "reason": "Manager recommendation", "expected_revision": task["revision"],
+            })
+            self.assertEqual(retried["request"]["id"], "filed-before-upgrade")
+            self.assertEqual(connection.execute(
+                "SELECT COUNT(*) FROM owner_action_requests WHERE status='pending'").fetchone()[0], 1)
+        finally:
+            connection.close()
 
 
 if __name__ == "__main__":

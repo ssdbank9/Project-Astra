@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import sqlite3
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 
 class SchemaMigrationRefused(RuntimeError):
@@ -93,6 +95,10 @@ def migrate(connection: sqlite3.Connection) -> None:
         # Before any step commits: a database that v14 would refuse is refused now, at
         # the version it started at, so the refusal really changes nothing.
         _refuse_duplicate_submission_versions(connection)
+    if version < 15:
+        # Likewise for v15: duplicate pending Owner requests are refused at the
+        # starting version, before any step commits.
+        _refuse_duplicate_pending_requests(connection)
     for step_version, step in MIGRATION_STEPS:
         if version < step_version:
             with transaction(connection):
@@ -560,6 +566,119 @@ def _migrate_v14(connection: sqlite3.Connection) -> None:
     )
 
 
+V15_PENDING_INTENT_INDEX = "idx_owner_action_requests_pending_intent"
+V15_PENDING_LOOKUP_INDEX = "idx_owner_action_requests_pending_scope"
+
+# How expected_revision is derived from a payload, in the backfill and in every INSERT.
+# A payload that is not valid JSON yields NULL instead of failing the whole step.
+V15_EXPECTED_REVISION_SQL = (
+    "CASE WHEN json_valid({payload}) THEN json_extract({payload}, '$.expected_revision') END"
+)
+
+# Pending requests that are equivalent under the service's dedupe rule: same scope,
+# action, payload text, reason and requester. GROUP BY treats NULL task_id values as
+# equal, so project-level requests are grouped too. Needs no v15 column.
+V15_DUPLICATE_PENDING_REQUESTS = """
+    SELECT project_id, task_id, action, payload_json, reason, requested_by
+    FROM owner_action_requests WHERE status='pending'
+    GROUP BY project_id, task_id, action, payload_json, reason, requested_by
+    HAVING COUNT(*) > 1 ORDER BY project_id, task_id, action
+"""
+
+
+def owner_request_intent_key(
+    project_id: str, task_id: str | None, action: str, payload_json: str, reason: str, requested_by: str
+) -> str:
+    """The deterministic key two requests share exactly when the service treats the second
+    as a retry of the first (ticket WNXSDA).
+
+    It hashes the stored ``payload_json`` text as-is, not a re-serialised payload, so it
+    matches precisely the ``payload_json=?`` comparison it replaces. ``requested_by`` and
+    ``reason`` are part of it: a second Manager's equivalent request stays a row of its
+    own, and approval resolves both through the intent match in the service.
+    """
+    material = json.dumps(
+        [project_id, task_id, action, payload_json, reason, requested_by],
+        ensure_ascii=False, separators=(",", ":"),
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _refuse_duplicate_pending_requests(connection: sqlite3.Connection) -> None:
+    """Raise SchemaMigrationRefused if owner_action_requests (present from v12) holds more
+    than one pending row with the same intent. Lists request ids, scope and action only:
+    reasons and payloads are user content and stay out of logs."""
+    if not _table_exists(connection, "owner_action_requests"):
+        return
+    groups = connection.execute(V15_DUPLICATE_PENDING_REQUESTS).fetchall()
+    if not groups:
+        return
+    described = []
+    for project_id, task_id, action, payload_json, reason, requested_by in groups[:10]:
+        ids = [row[0] for row in connection.execute(
+            """SELECT id FROM owner_action_requests
+               WHERE status='pending' AND project_id=? AND task_id IS ? AND action=?
+                 AND payload_json=? AND reason=? AND requested_by=?
+               ORDER BY requested_at, id""",
+            (project_id, task_id, action, payload_json, reason, requested_by),
+        ).fetchall()]
+        scope = f"task {task_id}" if task_id is not None else f"project {project_id}"
+        described.append(f"{scope} {action}: {', '.join(f'request {i}' for i in ids)}")
+    more = f"; and {len(groups) - 10} more" if len(groups) > 10 else ""
+    raise SchemaMigrationRefused(
+        "Astra cannot upgrade this database to schema 15: owner_action_requests has "
+        f"{len(groups)} group(s) of identical pending Owner requests (same item, action, "
+        "details, reason and requester). Nothing was changed. Affected: "
+        f"{'; '.join(described)}{more}. To resolve: back up the database; in each group "
+        "keep the earliest request pending and mark the others cancelled "
+        "(UPDATE owner_action_requests SET status='cancelled' WHERE id=...); then start "
+        "Astra again."
+    )
+
+
+def _migrate_v15(connection: sqlite3.Connection) -> None:
+    """v14 -> v15: an intent key for pending Owner requests (ticket WNXSDA).
+
+    Adds ``intent_key`` (see owner_request_intent_key) with a UNIQUE index over pending
+    rows, so the database itself refuses a second identical pending request; until now
+    only the service's BEGIN IMMEDIATE lookup-then-insert prevented it. Adds
+    ``expected_revision``, copied from the payload by ``json_extract`` and declared
+    without a type so no affinity converts it, and a partial index for the pending
+    lookups the service makes by scope, action and revision. Existing rows are
+    backfilled. A database already holding identical pending requests is refused, as in
+    v14, before anything changes; the probe runs again here under the step's write lock.
+    """
+    _refuse_duplicate_pending_requests(connection)
+    present = {
+        row[1] for row in connection.execute("PRAGMA table_info(owner_action_requests)").fetchall()
+    }
+    if "intent_key" not in present:
+        connection.execute("ALTER TABLE owner_action_requests ADD COLUMN intent_key TEXT")
+    if "expected_revision" not in present:
+        connection.execute("ALTER TABLE owner_action_requests ADD COLUMN expected_revision")
+    rows = connection.execute(
+        "SELECT id,project_id,task_id,action,payload_json,reason,requested_by FROM owner_action_requests"
+    ).fetchall()
+    for request_id, project_id, task_id, action, payload_json, reason, requested_by in rows:
+        connection.execute(
+            "UPDATE owner_action_requests SET intent_key=? WHERE id=?",
+            (owner_request_intent_key(project_id, task_id, action, payload_json, reason, requested_by),
+             request_id),
+        )
+    connection.execute(
+        "UPDATE owner_action_requests SET expected_revision=" + V15_EXPECTED_REVISION_SQL.format(payload="payload_json")
+    )
+    connection.execute(
+        f"CREATE INDEX IF NOT EXISTS {V15_PENDING_LOOKUP_INDEX}"
+        " ON owner_action_requests(project_id, task_id, action, expected_revision)"
+        " WHERE status='pending'"
+    )
+    connection.execute(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS {V15_PENDING_INTENT_INDEX}"
+        " ON owner_action_requests(intent_key) WHERE status='pending'"
+    )
+
+
 # The ordered schema history: (version, step). migrate() runs every step whose version
 # is above the database's user_version, each in its own transaction with its bump.
 # Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
@@ -578,4 +697,5 @@ MIGRATION_STEPS = (
     (12, _migrate_v12),
     (13, _migrate_v13),
     (14, _migrate_v14),
+    (15, _migrate_v15),
 )

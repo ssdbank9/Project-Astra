@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import importer
 from .auth import hash_password, normalize_email
-from .db import transaction
+from .db import V15_EXPECTED_REVISION_SQL, owner_request_intent_key, transaction
 
 
 ROLES = {"owner", "chairman", "member"}
@@ -49,6 +49,14 @@ OWNER_REQUEST_INTENT_FIELDS = {
     "reject_schedule_proposal": ("proposal_id",),
     "close_project": ("exceptional", "residual_work"),
 }
+# The request fields callers and the API see. intent_key and expected_revision (schema 15,
+# ticket WNXSDA) are lookup columns derived from these and are not part of a request.
+OWNER_REQUEST_FIELDS = (
+    "id", "project_id", "task_id", "action", "payload_json", "reason", "requested_by",
+    "requested_at", "status", "decided_by", "decided_at", "decision_reason",
+)
+OWNER_REQUEST_COLUMNS = ",".join(OWNER_REQUEST_FIELDS)
+OWNER_REQUEST_COLUMNS_R = ",".join(f"r.{field}" for field in OWNER_REQUEST_FIELDS)
 # A dedicated reopen also satisfies a Manager's generic request to move a terminal task
 # back into work, but never one to cancel, abandon, hold or otherwise govern it.
 REOPEN_EQUIVALENT_STATUSES = frozenset(MANAGER_ORDINARY_STATUSES | {"reopened"})
@@ -1133,24 +1141,12 @@ class AstraService:
             current = self.db.execute("SELECT revision FROM tasks WHERE id=?", (task["id"],)).fetchone()
             if not current or current["revision"] != request_payload["expected_revision"]:
                 raise Conflict("Task revision conflict: the task changed before this request could be filed.")
-            existing = self.db.execute(
-                """SELECT * FROM owner_action_requests
-                   WHERE project_id=? AND task_id=? AND action=? AND payload_json=? AND reason=?
-                     AND requested_by=? AND status='pending'
-                   ORDER BY requested_at LIMIT 1""",
-                (task["project_id"], task["id"], action, payload_json, request_reason, actor["id"]),
-            ).fetchone()
+            existing = self._pending_request_by_intent(request)
             if existing:
-                return {"request": dict(existing)}
+                return {"request": existing}
             request_id, requested_at = new_id(), now_text()
             request["id"], request["requested_at"] = request_id, requested_at
-            self.db.execute(
-                "INSERT INTO owner_action_requests"
-                "(id,project_id,task_id,action,payload_json,reason,requested_by,requested_at,status)"
-                " VALUES(?,?,?,?,?,?,?,?,?)",
-                (request_id, task["project_id"], task["id"], action, payload_json,
-                 request_reason, actor["id"], requested_at, "pending"),
-            )
+            self._insert_owner_request(request)
             self._event(
                 task["id"], actor["id"], "protected_action_requested", None,
                 {"request_id": request_id, "action": action, "payload": request_payload},
@@ -1201,24 +1197,12 @@ class AstraService:
             "decision_reason": None,
         }
         with transaction(self.db):
-            existing = self.db.execute(
-                """SELECT * FROM owner_action_requests
-                   WHERE project_id=? AND task_id IS NULL AND action=? AND payload_json=? AND reason=?
-                     AND requested_by=? AND status='pending'
-                   ORDER BY requested_at LIMIT 1""",
-                (project["id"], action, payload_json, request_reason, actor["id"]),
-            ).fetchone()
+            existing = self._pending_request_by_intent(request)
             if existing:
-                return {"request": dict(existing)}
+                return {"request": existing}
             request_id, requested_at = new_id(), now_text()
             request["id"], request["requested_at"] = request_id, requested_at
-            self.db.execute(
-                "INSERT INTO owner_action_requests"
-                "(id,project_id,task_id,action,payload_json,reason,requested_by,requested_at,status)"
-                " VALUES(?,?,?,?,?,?,?,?,?)",
-                (request_id, project["id"], None, action, payload_json, request_reason,
-                 actor["id"], requested_at, "pending"),
-            )
+            self._insert_owner_request(request)
             self._project_event(
                 project["id"], actor["id"], "protected_action_requested",
                 {"request_id": request_id, "action": action, "payload": request_payload},
@@ -1234,10 +1218,41 @@ class AstraService:
                 )
         return {"request": request}
 
+    @staticmethod
+    def _request_intent_key(request: dict) -> str:
+        return owner_request_intent_key(
+            request["project_id"], request["task_id"], request["action"],
+            request["payload_json"], request["reason"], request["requested_by"],
+        )
+
+    def _pending_request_by_intent(self, request: dict) -> dict | None:
+        """The pending request an identical new one would duplicate, found by the unique
+        intent key (schema 15) rather than by comparing payload text per row. Callers
+        hold the write transaction, so the lookup and their INSERT cannot interleave with
+        another writer; the unique index refuses a duplicate even if they did."""
+        row = self.db.execute(
+            f"SELECT {OWNER_REQUEST_COLUMNS} FROM owner_action_requests"
+            " WHERE intent_key=? AND status='pending'",
+            (self._request_intent_key(request),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def _insert_owner_request(self, request: dict) -> None:
+        self.db.execute(
+            "INSERT INTO owner_action_requests"
+            "(id,project_id,task_id,action,payload_json,reason,requested_by,requested_at,status,"
+            "intent_key,expected_revision) VALUES(?,?,?,?,?,?,?,?,?,?,"
+            + V15_EXPECTED_REVISION_SQL.format(payload="?") + ")",
+            (request["id"], request["project_id"], request["task_id"], request["action"],
+             request["payload_json"], request["reason"], request["requested_by"],
+             request["requested_at"], request["status"], self._request_intent_key(request),
+             request["payload_json"], request["payload_json"]),
+        )
+
     def _owner_action_request(self, actor: dict, request_id: str) -> dict:
         self.require_owner(actor)
         row = row_dict(self.db.execute(
-            """SELECT r.*, p.name project_name, t.title task_title, u.display_name requested_by_name
+            f"""SELECT {OWNER_REQUEST_COLUMNS_R}, p.name project_name, t.title task_title, u.display_name requested_by_name
                FROM owner_action_requests r
                JOIN projects p ON p.id=r.project_id
                LEFT JOIN tasks t ON t.id=r.task_id
@@ -1311,23 +1326,18 @@ class AstraService:
                 "SELECT * FROM owner_action_requests WHERE id=? AND status='pending'",
                 (active_id,),
             ).fetchall()
-        if task_id is None:
-            rows = self.db.execute(
-                """SELECT * FROM owner_action_requests
-                   WHERE project_id=? AND task_id IS NULL AND action=? AND status='pending'""",
-                (project_id, action),
-            ).fetchall()
-        else:
-            rows = self.db.execute(
-                """SELECT * FROM owner_action_requests
-                   WHERE project_id=? AND task_id=? AND action=? AND status='pending'""",
-                (project_id, task_id, action),
-            ).fetchall()
-            if expected_revision is not None:
-                rows = [
-                    row for row in rows
-                    if json.loads(row["payload_json"]).get("expected_revision") == expected_revision
-                ]
+        # Scope, action and revision are indexed columns (schema 15); the intent test
+        # below is semantic (absent fields, sets of accepted values, residual work) and
+        # stays in Python.
+        query = (
+            "SELECT * FROM owner_action_requests"
+            " WHERE project_id=? AND task_id IS ? AND action=? AND status='pending'"
+        )
+        params: list = [project_id, task_id, action]
+        if task_id is not None and expected_revision is not None:
+            query += " AND expected_revision=?"
+            params.append(expected_revision)
+        rows = self.db.execute(query, params).fetchall()
         rows = [
             row for row in rows
             if row["id"] != active_id
@@ -1483,7 +1493,7 @@ class AstraService:
             where = " WHERE r.status=?"
             params.append(status)
         rows = self.db.execute(
-            """SELECT r.*, p.name project_name, t.title task_title, u.display_name requested_by_name
+            f"""SELECT {OWNER_REQUEST_COLUMNS_R}, p.name project_name, t.title task_title, u.display_name requested_by_name
                FROM owner_action_requests r
                JOIN projects p ON p.id=r.project_id
                LEFT JOIN tasks t ON t.id=r.task_id

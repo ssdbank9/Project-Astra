@@ -98,6 +98,15 @@ version keep the accepted row (the one `tasks.accepted_submission_id` or
 rows or renumber them to an unused version. Run any `DELETE` with
 `PRAGMA foreign_keys=ON` so a referenced row cannot be removed, then start Astra again.
 
+Schema 15 gives each Owner-action request an intent key: a hash of its item, action,
+details, reason and requester. At most one pending request may hold a given key, so an
+identical retry returns the existing request and the database itself refuses a second
+pending copy. A second Manager's equivalent request still gets its own row. If start-up
+stops with "Astra cannot upgrade this database to schema 15", the database is untouched;
+the message lists each group of identical pending requests by id. Back up
+`astra.sqlite3`, keep the earliest request of each group pending, set the others to
+`status='cancelled'`, then start Astra again.
+
 Database migrations are applied one SQL statement at a time inside a single
 `BEGIN IMMEDIATE` transaction per schema version. The schema changes and that step's
 `PRAGMA user_version` update therefore commit together or roll back together; a failed

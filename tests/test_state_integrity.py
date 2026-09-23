@@ -936,6 +936,33 @@ class AstraStateIntegrityTests(unittest.TestCase):
         self.assertEqual(len(self.service.list_owner_action_requests(self.owner)), 1)
         self.assertEqual(self._project_event_types(project["id"]).count("protected_action_requested"), 1)
 
+    def test_concurrent_identical_requests_leave_one_pending_row_per_intent_key(self):
+        """WNXSDA: four connections filing the same request at once leave one pending row,
+        keyed by its intent, and one event; a second Manager's equivalent request keeps a
+        row of its own (the key includes the requester)."""
+        project, manager = self._intent_fixture("Intent key race")
+        second = self.service.create_user(self.owner, "second-manager@example.org", "Second", "manager password safe")
+        self.service.grant_project_access(self.owner, project["id"], second["id"], "manager")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Governed"})
+        payload = {"status": "cancelled", "reason": "Manager recommendation", "expected_revision": task["revision"]}
+        request = lambda service: service.update_task(self._as(manager)(service), task["id"], dict(payload))
+
+        outcomes = self._race(request, request, request, request)
+
+        self.assertEqual([kind for kind, _ in outcomes], ["ok"] * 4, outcomes)
+        self.assertEqual(len({value["request"]["id"] for _, value in outcomes}), 1)
+        rows = self.db.execute(
+            "SELECT intent_key FROM owner_action_requests WHERE task_id=? AND status='pending'", (task["id"],)
+        ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertIsNotNone(rows[0]["intent_key"])
+        self.assertEqual(self._task_event_count(task["id"], "protected_action_requested"), 1)
+        self.assertNotIn("intent_key", outcomes[0][1]["request"], "lookup columns are not part of a request")
+
+        twin = self.service.update_task(second, task["id"], dict(payload))["request"]
+        self.assertNotEqual(twin["id"], outcomes[0][1]["request"]["id"])
+        self.assertEqual(len(self.service.list_owner_action_requests(self.owner)), 2)
+
     def test_non_owner_cannot_approve_or_reject_a_request(self):
         project, manager = self._intent_fixture("Non-owner decisions")
         viewer = self.service.create_user(self.owner, "viewer@example.org", "Viewer", "viewer password safe")
