@@ -1,7 +1,7 @@
 ---
 id: 01M37EBC38J3S424MAG239DNZT
 title: "Maintainability: replace the repeated migrate() version blocks with a step registry"
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -19,13 +19,17 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:32:34Z
-updated-at: 2026-09-23T16:53:56Z
+updated-at: 2026-09-23T17:05:30Z
 updated-by: Claude
 claimed-by: vm-17591
 claimed-at: 2026-09-23T16:33:48Z
-outcome-what: "migrate() in src/astra/db.py now runs one ordered MIGRATION_STEPS registry ((1,_migrate_v1)..(14,_migrate_v14)) in a single loop that opens BEGIN IMMEDIATE, runs the step, writes PRAGMA user_version and commits or rolls back. v1-v12 SQL moved verbatim into step functions; _migrate_v13/_migrate_v14 no longer open their own transaction or bump the version. Two tests added to tests/test_db.py."
-outcome-why: "Fourteen hand-copied control blocks could drift (a bump outside its transaction, a skipped version) and the version list could not be checked as data."
-outcome-resolves: "DoD1: the loop at db.py:96-99 is the only migration transaction and user_version writer; steps cannot bump or commit. DoD2: all existing tests unchanged, 287/287 green; old-vs-new equivalence over 15 start versions and 616 injected faults. DoD3: test_migration_step_registry_is_contiguous_from_one_to_schema_version."
+outcome-what: "Independent review approved"
+outcome-why: "DoD met, no medium or high findings"
+outcome-resolves: "review-verdict: Approve"
+review-summary: "migrate() in src/astra/db.py no longer has 12 copied 'if version < N' blocks plus two steps (v13, v14) that each opened their own transaction. It now has one MIGRATION_STEPS tuple, (1,_migrate_v1) through (14,_migrate_v14), and one loop (src/astra/db.py:96-100) that opens BEGIN IMMEDIATE, runs the step, writes PRAGMA user_version = N and commits, rolling back on any error. Step functions only run their SQL. The v14 duplicate-submission check still runs once before the loop and again at the start of the v14 step. v1-v12 SQL text is byte-identical to the old code. Two tests added to tests/test_db.py: a registry contiguity test and a step-only transaction test. No existing test changed."
+review-gaps: "All low severity. 1. Moving the user_version bump outside the transaction is not caught by any test on this branch; 67T315's per-step fault tests (local commit 5b16f81 on claude/wip-67T315, not on origin at review time) catch it at every step 1-12, merge cleanly and pass on top of this change. 67T315 must land for this to be regression-protected. 2. The docstring of test_migration_steps_leave_transaction_and_user_version_to_migrate overclaims: a step that commits partway then re-opens BEGIN IMMEDIATE passes it (two existing fault tests catch that), and it never calls migrate(). 3. Pre-existing: removing the in-step _refuse_duplicate_submission_versions re-probe from _migrate_v14 passes every test, on old and new code. 4. CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md section 7.3 item 1 (line ~573) and the list near line ~262 still describe migrate() as repetitive version blocks. 5. Proofs cite db.py:96-99; the loop runs to line 100."
+review-verdict: Approve — independent reviewer
+review-check: "1. cd /workspace/project-astra (or the worktree) and run: /workspace/project-astra/.venv/bin/python tests/run.py — expect 287 tests, OK (reviewer run: 287 in 290s). 2. cd tests && PYTHONPATH=../src /workspace/project-astra/.venv/bin/python -m unittest -v test_db — expect test_migration_step_registry_is_contiguous_from_one_to_schema_version and test_migration_steps_leave_transaction_and_user_version_to_migrate to pass. 3. Open src/astra/db.py around lines 96-100 and 566: see one loop and the MIGRATION_STEPS tuple, no per-version if-blocks. 4. Reviewer's old-vs-new equivalence harness (execute/commit/rollback trace proxy, start versions 0-14, faults at every Nth execute and commit, duplicate-submission cases): 784 cases, 0 mismatches; moving the bump outside the transaction produced 653 mismatches, so the harness can fail. 5. git diff --check is clean; the diff touches only src/astra/db.py, tests/test_db.py and the ticket file. There is no UI path."
 ---
 
 # Maintainability: replace the repeated migrate() version blocks with a step registry
