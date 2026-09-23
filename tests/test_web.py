@@ -337,15 +337,114 @@ class AstraWebTests(unittest.TestCase):
         task = service.create_task(owner, {"project_id": project["id"], "title": "Done", "owner_user_id": manager["id"]})
         submission = service.submit_task(manager, task["id"], "done")
         service.accept_submission(owner, submission["id"], "ok")
+        current = service.get_task(owner, task["id"])
         cookie, csrf = self._login_as("http-manager@example.org", "manager password safe")
         response, payload = self.request("POST", f"/api/tasks/{task['id']}", {
-            "status": "in_progress", "reason": "oops",
+            "status": "in_progress", "reason": "oops", "expected_revision": current["revision"],
         }, cookie=cookie, csrf=csrf)
         self.assertEqual(response.status, 202)
         self.assertEqual(payload["request"]["action"], "update_task_status")
         response, payload = self.request("GET", f"/api/tasks/{task['id']}", cookie=cookie)
         self.assertEqual(response.status, 200)
         self.assertEqual(payload["task"]["status"], "completed")
+
+    def test_stale_task_update_returns_http_409_without_overwriting(self):
+        cookie, csrf = self._owner_session()
+        _, project = self.request(
+            "POST", "/api/projects", {"name": "HTTP revisions"}, cookie=cookie, csrf=csrf
+        )
+        _, created = self.request(
+            "POST",
+            "/api/tasks",
+            {"project_id": project["project"]["id"], "title": "Original"},
+            cookie=cookie,
+            csrf=csrf,
+        )
+        task = created["task"]
+        response, updated = self.request(
+            "POST",
+            f"/api/tasks/{task['id']}",
+            {"title": "First writer", "expected_revision": task["revision"]},
+            cookie=cookie,
+            csrf=csrf,
+        )
+        self.assertEqual(response.status, 200)
+
+        response, conflict = self.request(
+            "POST",
+            f"/api/tasks/{task['id']}",
+            {"title": "Stale writer", "expected_revision": task["revision"]},
+            cookie=cookie,
+            csrf=csrf,
+        )
+
+        self.assertEqual(response.status, 409)
+        self.assertRegex(conflict["error"], "revision|conflict|stale")
+        _, detail = self.request("GET", f"/api/tasks/{task['id']}", cookie=cookie)
+        self.assertEqual(detail["task"]["title"], "First writer")
+        self.assertEqual(detail["task"]["revision"], updated["task"]["revision"])
+
+    def test_owner_can_approve_protected_request_over_http(self):
+        owner_cookie, owner_csrf = self._owner_session()
+        _, project = self.request(
+            "POST", "/api/projects", {"name": "HTTP decisions"}, cookie=owner_cookie, csrf=owner_csrf
+        )
+        project_id = project["project"]["id"]
+        _, manager = self.request(
+            "POST",
+            "/api/users",
+            {
+                "email": "decision-manager@example.org",
+                "display_name": "Decision Manager",
+                "password": "manager password safe",
+                "role": "member",
+            },
+            cookie=owner_cookie,
+            csrf=owner_csrf,
+        )
+        self.request(
+            "POST",
+            "/api/project-access",
+            {"project_id": project_id, "user_id": manager["user"]["id"], "role": "manager"},
+            cookie=owner_cookie,
+            csrf=owner_csrf,
+        )
+        manager_cookie, manager_csrf = self._login_as(
+            "decision-manager@example.org", "manager password safe"
+        )
+        _, created = self.request(
+            "POST",
+            "/api/tasks",
+            {"project_id": project_id, "title": "Governed"},
+            cookie=manager_cookie,
+            csrf=manager_csrf,
+        )
+        task = created["task"]
+        response, requested = self.request(
+            "POST",
+            f"/api/tasks/{task['id']}",
+            {
+                "status": "cancelled",
+                "reason": "Manager recommends cancellation",
+                "expected_revision": task["revision"],
+            },
+            cookie=manager_cookie,
+            csrf=manager_csrf,
+        )
+        self.assertEqual(response.status, 202)
+
+        response, decision = self.request(
+            "POST",
+            f"/api/owner-action-requests/{requested['request']['id']}/decision",
+            {"decision": "approved", "reason": "Owner agrees"},
+            cookie=owner_cookie,
+            csrf=owner_csrf,
+        )
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(decision["request"]["status"], "approved")
+        _, detail = self.request("GET", f"/api/tasks/{task['id']}", cookie=owner_cookie)
+        self.assertEqual(detail["task"]["status"], "cancelled")
 
     def test_stylesheet_declares_each_bare_class_once_and_the_import_dialog_uses_namespaced_classes(self):
         # Merged-state review MS-1..MS-6: the Gantt steps (D73AQW) and the import dialog (C9KPH6)
@@ -380,6 +479,9 @@ class AstraWebTests(unittest.TestCase):
         self.assertNotRegex(html, r'class="(step|steps|step-n|chip)[" ]')
         self.assertIn('<li class="wiz-step" data-step="upload"', html)
         script = (static / "app.js").read_text(encoding="utf-8")
+        self.assertIn('name="expected_revision"', script)
+        self.assertIn("body.expected_revision=Number(body.expected_revision)", script)
+        self.assertIn('data-request-decision="approved"', script)
         import_section = script[script.index("async function openImport"):]
         self.assertNotRegex(import_section, r'class="(step|steps|step-n|chip)[" ]')
         self.assertNotIn("#import-steps .step\"", import_section)
@@ -394,7 +496,7 @@ class AstraWebTests(unittest.TestCase):
             "project_id": project["project"]["id"], "title": "G",
         }, cookie=cookie, csrf=csrf)
         response, payload = self.request("POST", f"/api/tasks/{task['task']['id']}", {
-            "status": "completed", "reason": "shortcut",
+            "status": "completed", "reason": "shortcut", "expected_revision": task["task"]["revision"],
         }, cookie=cookie, csrf=csrf)
         self.assertEqual(response.status, 400)
         self.assertIn("dedicated", payload["error"])
@@ -582,7 +684,13 @@ class AstraWebTests(unittest.TestCase):
             "project_id": project["project"]["id"], "title": "Keep me",
         }, cookie=cookie, csrf=csrf)
         task_id = task["task"]["id"]
-        response, payload = self.request("POST", f"/api/tasks/{task_id}", {"title": "  "}, cookie=cookie, csrf=csrf)
+        response, payload = self.request(
+            "POST",
+            f"/api/tasks/{task_id}",
+            {"title": "  ", "expected_revision": task["task"]["revision"]},
+            cookie=cookie,
+            csrf=csrf,
+        )
         self.assertEqual(response.status, 400)
         self.assertIn("title", payload["error"])
         response, detail = self.request("GET", f"/api/tasks/{task_id}", cookie=cookie)

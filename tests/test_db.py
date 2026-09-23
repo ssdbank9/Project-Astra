@@ -18,6 +18,15 @@ def deny_create_table(name):
     return authorizer
 
 
+def deny_create_index(name):
+    """An authorizer that refuses CREATE INDEX <name>."""
+    def authorizer(action, arg1, arg2, db_name, trigger):
+        if action == sqlite3.SQLITE_CREATE_INDEX and arg1 == name:
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    return authorizer
+
+
 def new_task_columns(connection):
     names = [row[1] for row in connection.execute("PRAGMA table_info(tasks)").fetchall()]
     return [name for name in names if name in dict(db.V13_TASK_COLUMNS)]
@@ -31,11 +40,34 @@ def objects(connection):
     return [row[0] for row in rows]
 
 
+def application_schema_objects(connection):
+    rows = connection.execute(
+        "SELECT type,name FROM sqlite_master "
+        "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+    ).fetchall()
+    return [(row[0], row[1]) for row in rows]
+
+
+def table_columns(connection, table):
+    return [row[1] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()]
+
+
+def schema_signature(connection):
+    rows = connection.execute(
+        "SELECT type,name,tbl_name,sql FROM sqlite_master "
+        "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+    ).fetchall()
+    return [tuple(row) for row in rows]
+
+
 class MigrationTests(unittest.TestCase):
-    """Regression review MIGRATION-1 (2026-09-22): the v12 -> v13 step ran through
-    executescript(), which commits the surrounding BEGIN IMMEDIATE, so an interruption
-    between two of its statements left user_version at 12 with some columns present and
-    every later connect() died on 'duplicate column name: import_key'."""
+    """Regression review MIGRATION-1 (2026-09-22/23).
+
+    ``executescript`` commits the surrounding ``BEGIN IMMEDIATE`` before it runs. The
+    original v1-v12 path could therefore persist only the statements before a failure;
+    v13 had already been corrected after a reproduced partial-column failure. These
+    tests enforce the same atomic and retry-safe contract across every schema version.
+    """
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -67,6 +99,106 @@ class MigrationTests(unittest.TestCase):
         connection.rollback()
         self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 0)
         connection.close()
+
+    def test_atomic_statement_runner_handles_quoted_semicolons_and_rejects_incomplete_sql(self):
+        connection = self.raw()
+        try:
+            with db.transaction(connection):
+                db._execute_statements(
+                    connection,
+                    "CREATE TABLE parser_probe(value TEXT);"
+                    "INSERT INTO parser_probe(value) VALUES ('inside;value');",
+                )
+            self.assertEqual(
+                connection.execute("SELECT value FROM parser_probe").fetchone()[0],
+                "inside;value",
+            )
+
+            with self.assertRaisesRegex(ValueError, "incomplete"):
+                with db.transaction(connection):
+                    db._execute_statements(connection, "CREATE TABLE incomplete(")
+            names = {name for _, name in application_schema_objects(connection)}
+            self.assertNotIn("incomplete", names)
+        finally:
+            connection.close()
+
+    def test_failure_midway_through_initial_schema_rolls_back_every_object_and_retries(self):
+        connection = self.raw()
+        try:
+            connection.set_authorizer(deny_create_table("tasks"))
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 0)
+            self.assertEqual(
+                application_schema_objects(connection),
+                [],
+                "a failed initial migration must not leave its earlier tables or indexes behind",
+            )
+            self.assertFalse(connection.in_transaction)
+        finally:
+            connection.close()
+
+        reopened = db.connect(self.path)
+        self.assertEqual(reopened.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+        self.assertEqual(reopened.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        reopened.close()
+
+    def test_failure_after_legacy_alters_rolls_back_to_v4_then_matches_fresh_schema(self):
+        connection = self.raw()
+        try:
+            connection.set_authorizer(deny_create_table("task_schedule_proposals"))
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 4)
+            self.assertNotIn("baseline_start_date", table_columns(connection, "tasks"))
+            self.assertNotIn("baseline_due_date", table_columns(connection, "tasks"))
+            self.assertNotIn(
+                ("table", "task_schedule_proposals"), application_schema_objects(connection)
+            )
+            db.migrate(connection)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+
+            fresh_path = Path(self.temp.name) / "fresh.sqlite3"
+            fresh = db.connect(fresh_path)
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+                self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
+    def test_failure_after_v12_table_creation_rolls_back_table_and_index_then_retries(self):
+        connection = self.raw()
+        try:
+            connection.set_authorizer(deny_create_table("owner_action_requests"))
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 11)
+
+            connection.set_authorizer(deny_create_index("idx_owner_action_requests_status"))
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 11)
+            names = {name for _, name in application_schema_objects(connection)}
+            self.assertNotIn("owner_action_requests", names)
+            self.assertNotIn("idx_owner_action_requests_status", names)
+            self.assertNotIn("idx_owner_action_requests_requester", names)
+
+            db.migrate(connection)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+            names = {name for _, name in application_schema_objects(connection)}
+            self.assertIn("owner_action_requests", names)
+            self.assertIn("idx_owner_action_requests_status", names)
+            self.assertIn("idx_owner_action_requests_requester", names)
+        finally:
+            connection.close()
 
     def test_failure_after_the_first_statements_leaves_a_clean_v12_database_that_reopens(self):
         connection = self.interrupted_at_v13()

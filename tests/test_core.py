@@ -21,6 +21,11 @@ class AstraCoreTests(unittest.TestCase):
         self.db.close()
         self.temp.cleanup()
 
+    def update_task(self, actor, task_id, payload):
+        payload = dict(payload)
+        payload.setdefault("expected_revision", self.service.get_task(actor, task_id)["revision"])
+        return self.service.update_task(actor, task_id, payload)
+
     def test_password_hash_is_salted_and_verifiable(self):
         one = hash_password("correct horse battery")
         two = hash_password("correct horse battery")
@@ -34,7 +39,7 @@ class AstraCoreTests(unittest.TestCase):
             "project_id": project["id"], "title": "Approve revised plan",
             "start_date": "2026-09-14", "due_date": "2026-09-20", "criticality": "high",
         })
-        updated = self.service.update_task(self.owner, task["id"], {
+        updated = self.update_task(self.owner, task["id"], {
             "due_date": "2026-09-22", "reason": "Committee meeting moved",
         })
         self.assertEqual(updated["revision"], 2)
@@ -47,7 +52,7 @@ class AstraCoreTests(unittest.TestCase):
         project = self.service.create_project(self.owner, "School")
         task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Review design"})
         with self.assertRaisesRegex(ValueError, "reason"):
-            self.service.update_task(self.owner, task["id"], {"due_date": "2026-10-01"})
+            self.update_task(self.owner, task["id"], {"due_date": "2026-10-01"})
 
     def test_member_only_sees_granted_project(self):
         visible = self.service.create_project(self.owner, "Visible")
@@ -78,12 +83,12 @@ class AstraCoreTests(unittest.TestCase):
         task = self.service.create_task(manager, {
             "project_id": project["id"], "title": "Ordinary", "status": "draft",
         })
-        updated = self.service.update_task(manager, task["id"], {
+        updated = self.update_task(manager, task["id"], {
             "title": "Ordinary updated", "status": "in_progress", "reason": "Work started",
         })
         self.assertEqual((updated["title"], updated["status"]), ("Ordinary updated", "in_progress"))
 
-        outcome = self.service.update_task(manager, task["id"], {
+        outcome = self.update_task(manager, task["id"], {
             "status": "cancelled", "reason": "Manager recommends cancellation",
         })
 
@@ -108,7 +113,7 @@ class AstraCoreTests(unittest.TestCase):
         with self.assertRaises(Forbidden):
             self.service.create_task(chairman, {"project_id": project["id"], "title": "Not authorized"})
         with self.assertRaises(Forbidden):
-            self.service.update_task(chairman, task["id"], {"title": "Not authorized"})
+            self.update_task(chairman, task["id"], {"title": "Not authorized"})
 
     def test_due_date_cannot_precede_start(self):
         project = self.service.create_project(self.owner, "Dates")
@@ -169,7 +174,7 @@ class AstraCoreTests(unittest.TestCase):
         task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Keep me"})
         before_events = len(self.service.task_events(self.owner, task["id"]))
         with self.assertRaisesRegex(ValueError, "title"):
-            self.service.update_task(self.owner, task["id"], {"title": "   "})
+            self.update_task(self.owner, task["id"], {"title": "   "})
         reread = self.service.get_task(self.owner, task["id"])
         self.assertEqual(reread["title"], "Keep me")
         self.assertEqual(reread["revision"], 1)
@@ -199,7 +204,7 @@ class AstraCoreTests(unittest.TestCase):
         # Deactivated user cannot be assigned on update.
         self.db.execute("UPDATE users SET active=0 WHERE id=?", (member["id"],))
         with self.assertRaisesRegex(ValueError, "active"):
-            self.service.update_task(self.owner, task["id"], {"owner_user_id": member["id"]})
+            self.update_task(self.owner, task["id"], {"owner_user_id": member["id"]})
 
     def test_missing_project_on_create_is_not_found(self):
         with self.assertRaises(KeyError):
@@ -382,7 +387,7 @@ class AstraCoreTests(unittest.TestCase):
         task = self.service.create_task(self.owner, {
             "project_id": project["id"], "title": "T", "criticality": "low"})
         with self.assertRaisesRegex(ValueError, "confirm criticality"):
-            self.service.update_task(self.owner, task["id"], {"criticality": "critical", "reason": "x"})
+            self.update_task(self.owner, task["id"], {"criticality": "critical", "reason": "x"})
 
     def test_entities_seed_are_idempotent_and_owner_only(self):
         member = self.service.create_user(self.owner, "e@example.org", "E", "member password safe")
@@ -668,7 +673,7 @@ class AstraCoreTests(unittest.TestCase):
         submission = self.service.submit_task(self.owner, task["id"], "Owner submitted")
 
         with self.assertRaises(Forbidden):
-            self.service.update_task(viewer, task["id"], {"title": "Renamed by viewer"})
+            self.update_task(viewer, task["id"], {"title": "Renamed by viewer"})
         with self.assertRaises(Forbidden):
             self.service.accept_submission(viewer, submission["id"], "Viewer approves")
         with self.assertRaises(Forbidden):
@@ -726,7 +731,7 @@ class AstraCoreTests(unittest.TestCase):
                 submission = self.service.submit_task(manager, task["id"], "v1")
                 self.service.request_changes(self.owner, submission["id"], "not yet")
             else:
-                self.service.update_task(self.owner, task["id"], {"status": status, "reason": "x"})
+                self.update_task(self.owner, task["id"], {"status": status, "reason": "x"})
             return self.service.get_task(self.owner, task["id"])
 
         # Regression review TESTS-1 (2026-09-22): reopened and changes_requested are locked sources
@@ -737,7 +742,7 @@ class AstraCoreTests(unittest.TestCase):
                                ("reopened", "in_progress"), ("changes_requested", "in_progress")):
             with self.subTest(source=source, actor="manager"):
                 task = make(source)
-                outcome = self.service.update_task(manager, task["id"], {"status": target, "reason": "back to work"})
+                outcome = self.update_task(manager, task["id"], {"status": target, "reason": "back to work"})
                 self.assertEqual(outcome["request"]["action"], "update_task_status")
                 self.assertEqual(json_module.loads(outcome["request"]["payload_json"])["from_status"], source)
                 current = self.service.get_task(self.owner, task["id"])
@@ -746,11 +751,11 @@ class AstraCoreTests(unittest.TestCase):
             with self.subTest(source=source, actor="owner"):
                 task = make(source)
                 with self.assertRaisesRegex(ValueError, "reopen"):
-                    self.service.update_task(self.owner, task["id"], {"status": "in_progress", "reason": "shortcut"})
+                    self.update_task(self.owner, task["id"], {"status": "in_progress", "reason": "shortcut"})
                 self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], source)
         task = make("submitted")
         with self.assertRaisesRegex(ValueError, "accept"):
-            self.service.update_task(self.owner, task["id"], {"status": "in_progress", "reason": "undo"})
+            self.update_task(self.owner, task["id"], {"status": "in_progress", "reason": "undo"})
         self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], "submitted")
         # the recorded way back: reopen with a reason and a revised due date
         done = make("completed")
@@ -759,7 +764,7 @@ class AstraCoreTests(unittest.TestCase):
         self.assertIn("task_reopened", [e["event_type"] for e in self.service.task_events(self.owner, done["id"])])
         # on hold has no dedicated release action: the Owner's update with a reason is the recorded path out
         held = make("on_hold")
-        released = self.service.update_task(self.owner, held["id"], {"status": "in_progress", "reason": "checkpoint met"})
+        released = self.update_task(self.owner, held["id"], {"status": "in_progress", "reason": "checkpoint met"})
         self.assertEqual(released["status"], "in_progress")
 
     def test_update_task_cannot_shortcut_governed_status(self):
@@ -767,7 +772,7 @@ class AstraCoreTests(unittest.TestCase):
         task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "G"})
         for status in ("submitted", "completed", "on_hold", "reopened"):
             with self.assertRaisesRegex(ValueError, "dedicated"):
-                self.service.update_task(self.owner, task["id"], {"status": status, "reason": "x"})
+                self.update_task(self.owner, task["id"], {"status": status, "reason": "x"})
 
     def test_project_closure_authority_and_residual_snapshot(self):
         chairman = self.service.create_user(self.owner, "chair@example.org", "Chair", "chairman password", "chairman")
@@ -857,7 +862,7 @@ class AstraCoreTests(unittest.TestCase):
         c = self.service.create_task(self.owner, {"project_id": p["id"], "title": "C", "start_date": "2026-09-09", "due_date": "2026-09-12"})
         self.service.add_task_dependency(self.owner, a["id"], b["id"])
         self.service.add_task_dependency(self.owner, b["id"], c["id"])
-        self.service.update_task(self.owner, b["id"], {"status": "cancelled", "reason": "dropped"})
+        self.update_task(self.owner, b["id"], {"status": "cancelled", "reason": "dropped"})
         cp = {t["id"]: t["is_critical_path"] for t in self.service.list_tasks(self.owner, p["id"])}
         self.assertFalse(cp[a["id"]] or cp[b["id"]] or cp[c["id"]])
 
@@ -865,10 +870,10 @@ class AstraCoreTests(unittest.TestCase):
         p = self.service.create_project(self.owner, "Baseline")
         t = self.service.create_task(self.owner, {"project_id": p["id"], "title": "T"})
         self.assertIsNone(self.service.task_detail(self.owner, t["id"])["baseline"]["due_date"])
-        self.service.update_task(self.owner, t["id"], {"start_date": "2026-10-01", "due_date": "2026-10-05", "reason": "plan"})
+        self.update_task(self.owner, t["id"], {"start_date": "2026-10-01", "due_date": "2026-10-05", "reason": "plan"})
         base = self.service.task_detail(self.owner, t["id"])["baseline"]
         self.assertEqual((base["start_date"], base["due_date"]), ("2026-10-01", "2026-10-05"))
-        self.service.update_task(self.owner, t["id"], {"due_date": "2026-10-20", "reason": "slip"})
+        self.update_task(self.owner, t["id"], {"due_date": "2026-10-20", "reason": "slip"})
         detail = self.service.task_detail(self.owner, t["id"])
         self.assertEqual(detail["baseline"]["due_date"], "2026-10-05")  # baseline unchanged
         self.assertEqual(detail["due_date"], "2026-10-20")  # current changed
@@ -1454,7 +1459,7 @@ class AstraCoreTests(unittest.TestCase):
         task = self.service.create_task(self.owner, {
             "project_id": project["id"], "title": "Milestone", "due_date": "2026-04-01",
         })
-        self.service.update_task(self.owner, task["id"], {"due_date": "2026-04-15", "reason": "Client moved the date"})
+        self.update_task(self.owner, task["id"], {"due_date": "2026-04-15", "reason": "Client moved the date"})
         events = self.service.task_events(self.owner, task["id"])
         updated = [e for e in events if e["event_type"] == "task_updated"][-1]
         self.assertIn("2026-04-01", updated["before_json"])
