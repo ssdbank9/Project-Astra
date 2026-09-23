@@ -1,5 +1,334 @@
 # Astra adversarial review and remediation handoff — 2026-09-23
 
+## Current state after Claude remediation (2026-09-23)
+
+This section supersedes the figures in the sections below it. Those sections are
+Codex's original handoff, kept unchanged as history. Where they disagree with
+this section (schema v13, 220 tests, 7/7 and 8/8 focused counts, tickets in
+`review`, the Windows start sequence), this section is current.
+
+### Branch and range
+
+- Repository: `https://github.com/ssdbank9/Project-Astra`
+- Branch: `codex/migration-safety-remediation`, pushed. This section was written in the commit directly on top of `d688a59`;
+  `git log -1` shows the current head.
+- Base branch: `claude/excel-import`. Merge base: `5adec82`.
+- Codex's published work ends at `0ad122e`. Claude's work is `0ad122e..HEAD`.
+- Schema target is now **v14** (`SCHEMA_VERSION = 14` in `src/astra/db.py`).
+- Not deployed. Not approved for real users. No browser acceptance was done.
+
+Commits after `0ad122e`, newest first (`git log --oneline 0ad122e..HEAD`):
+
+- (this handoff commit, on top of `d688a59`) docs: durable remediation handoff after Claude review
+- `d688a59` chore: file follow-up tickets from 2026-09-23 review
+- `41797c8` chore(SRFCZD): review verdict, move to signoff
+- `41dd6e2` fix(SRFCZD): R6 refuse unapprovable terminal-to-terminal Manager requests; pin guards at the lock
+- `9357f10` chore(T8WHJR): record the independent review and move to signoff
+- `754cae7` fix(T8WHJR): close the review's upheld gaps in the closed-task rule
+- `fc2a35a` fix(T8WHJR): keep closed tasks immutable outside the governed reopen
+- `9fb4328` fix(SRFCZD): R5 close re-review gaps: residual status in close matching, guard race tests, flag-reset test, governed generic requests refused
+- `fc10595` chore(03G8EH): record the independent review and move to signoff
+- `dfccb39` fix(03G8EH): re-check submit permission under the lock; refuse v14 before any step
+- `4d18dcb` fix(03G8EH): serialize task submissions and refuse submits against a changed task
+- `8723263` fix(SRFCZD): race regressions for in-transaction guards; guard update_task approvals and unmark
+- `41deb62` fix(SRFCZD): refuse a close_project approval when the project's open work has changed
+- `061a5f5` fix(SRFCZD): record the Owner's decision note when approving a request
+- `85bcdcd` fix(SRFCZD): reconcile only pending Owner requests whose intent matches the direct action
+- `f005bd1` chore(SRFCZD, A836XC): reassign to Claude; A836XC to signoff, SRFCZD back to in-progress
+- `cba46d1` review(SRFCZD, A836XC): record independent review verdicts
+- `f54520b` chore: normalize remediation files back to LF line endings
+
+Key commits:
+
+- `f54520b` normalises the files Codex's web upload wrote with CRLF back to LF.
+  Because of it, a plain `git diff --stat 0ad122e..HEAD` shows the whole of
+  `service.py`, `app.js`, `web.py`, `CLAUDE.md` and this file as changed. Use
+  `--ignore-cr-at-eol` (below) to see the real change.
+- `cba46d1`, `f005bd1`: first independent verdicts; Aly reassigned SRFCZD and
+  A836XC to Claude; A836XC to signoff, SRFCZD back to in-progress.
+- SRFCZD rework: R1 `85bcdcd`, R2 `061a5f5`, R3 `41deb62`, R4 `8723263`,
+  R5 `9fb4328`, R6 `41dd6e2`, review verdict `41797c8`.
+- 03G8EH: `4d18dcb`, `dfccb39`, `fc10595` (schema v14, unique submission
+  version, refusal when duplicates already exist).
+- T8WHJR: `fc2a35a`, `754cae7`, `9357f10` (closed tasks immutable outside reopen).
+- Follow-up tickets: `d688a59`. This handoff: the commit that adds this section.
+
+### Files changed
+
+`git diff --stat --ignore-cr-at-eol 0ad122e..d688a59` (content changes; line-ending-only
+files such as `src/astra/web.py` and `src/astra/static/app.js` drop out). The
+handoff commit itself also changes this file, `CLAUDE.md` and `AGENTS.md`:
+
+```text
+ ...6MSYCG2SRFCZD-harden-task-state-integrity-and-idempotency.md |   51 +-
+ ...R2A836XC-make-legacy-sqlite-migrations-atomic-and-retry-s.md |   14 +-
+ ...MW03G8EH-serialize-task-submissions-and-refuse-submits-ag.md |   90 ++
+ ...TQT8WHJR-keep-completed-cancelled-and-abandoned-tasks-imm.md |   99 +++
+ ...PNDVS19Q-db-transaction-leaves-the-connection-inside-an-o.md |   46 +
+ ...SFG9G9PX-approving-one-of-two-identical-pending-owner-req.md |   46 +
+ ...18ARZWV7-hide-or-disable-task-edits-the-server-refuses-on.md |   47 +
+ ...XV0D9Q3X-owner-inbox-show-the-requested-status-and-reason.md |   44 +
+ ...TS1Z4PHZ-make-the-xlsx-test-fixture-deterministic-zip-tim.md |   45 +
+ ...GS67T315-fault-and-retry-tests-for-every-legacy-migration.md |   46 +
+ ...SSWNXSDA-maintainability-schema-level-idempotency-key-and.md |   45 +
+ ...S55EXEZPM-maintainability-pass-the-owner-decision-context.md |   44 +
+ ...1V9MK29X-maintainability-split-astraservice-update-task-i.md |   43 +
+ ...G239DNZT-maintainability-replace-the-repeated-migrate-ver.md |   43 +
+ README.md                                                       |   31 +-
+ docs/design/authorization-matrix.md                             |   18 +-
+ docs/design/excel-import.md                                     |   45 +-
+ src/astra/__main__.py                                           |   14 +-
+ src/astra/db.py                                                 |   92 +-
+ src/astra/importer.py                                           |   69 +-
+ src/astra/service.py                                            |  267 ++++--
+ tests/test_core.py                                              |   16 +-
+ tests/test_db.py                                                |  194 ++++
+ tests/test_import.py                                            |  143 +++
+ tests/test_state_integrity.py                                   | 1272 ++++++++++++++++++++++++++-
+ tests/test_web.py                                               |   81 ++
+ 26 files changed, 2856 insertions(+), 89 deletions(-)
+```
+
+### Defects addressed, per ticket, with the tests that prove them
+
+All test names below are in `tests/`.
+
+**SRFCZD — task state integrity and idempotency** (signoff)
+
+- Stale full-form edits overwrote newer revisions. Now `update_task` needs an
+  integer `expected_revision` and a conditional UPDATE; stale is 409 with no
+  change. Tests: `test_stale_task_update_is_rejected_without_state_or_event_change`,
+  `test_concurrent_task_updates_at_one_revision_have_one_winner_and_one_event`,
+  `test_task_update_refuses_when_task_is_cancelled_before_its_write`.
+- Completed, cancelled and abandoned tasks accepted ordinary edits. Now refused
+  until reopen. Test: `test_terminal_tasks_reject_ordinary_edits_until_reopened`.
+- Two synchronized acceptances both succeeded. Now one winner and one event.
+  Test: `test_concurrent_acceptance_has_one_winner_and_one_event`.
+- Identical protected requests were duplicated and had no decision path. Now they
+  dedupe and the Owner can approve, reject or cancel. Tests:
+  `test_equivalent_protected_retries_reuse_one_pending_request_and_event`,
+  `test_concurrent_equivalent_manager_requests_create_one_pending_request_and_event`,
+  `test_concurrent_equivalent_close_requests_create_one_pending_request_and_event`,
+  `test_owner_can_decide_requests_and_stale_approval_stays_pending`,
+  `test_owner_approval_dispatches_every_supported_protected_action`,
+  `test_non_owner_cannot_approve_or_reject_a_request`,
+  `test_concurrent_rejections_have_one_winner_and_one_event`;
+  HTTP `test_non_owner_decision_on_a_request_returns_403_and_leaves_it_pending`.
+- R1: a direct Owner action marked requests with a different intent as approved.
+  Now only same-intent requests resolve. Tests:
+  `test_direct_status_change_leaves_request_for_another_status_pending`,
+  `test_direct_reopen_resolves_only_matching_requests`,
+  `test_direct_schedule_decision_resolves_only_the_same_proposal`,
+  `test_direct_hold_resolves_only_the_same_checkpoint_and_hold_owner`,
+  `test_direct_cancel_leaves_another_managers_abandon_request_pending`,
+  `test_direct_close_resolves_only_the_same_residual_set_whatever_the_note`.
+- R2: approval stored the Manager's reason as the Owner's note. Test:
+  `test_owner_approval_records_owner_decision_note_not_manager_reason`.
+- R3/R5: close approval was not stale-checked and close matching ignored residual
+  status. Tests: `test_close_approval_refuses_when_open_work_changed_since_request`,
+  `test_close_approval_succeeds_when_open_work_is_unchanged`,
+  `test_direct_owner_close_with_changed_work_behaves_as_before`,
+  `test_direct_close_leaves_request_pending_when_a_residual_status_changed`,
+  `test_renamed_residual_work_still_resolves_or_approves_the_close_request`,
+  `test_stale_hold_approval_is_refused_and_request_stays_pending`.
+- R4/R5/R6: an approval racing a reject applied the action and returned 500.
+  Now 409 with nothing changed, for every governed action, with the reject
+  landing at the lock. Tests:
+  `test_each_action_approval_racing_a_reject_is_refused_without_changing_the_task`,
+  `test_status_approval_racing_a_reject_is_refused_without_changing_the_task`,
+  `test_close_approval_racing_a_reject_rolls_back_without_closing`,
+  `test_failed_approval_clears_the_active_request_for_the_next_action`.
+- Repeated final-result marking and concurrent unmark wrote duplicate events.
+  Tests: `test_repeated_final_result_marking_emits_only_real_state_changes`,
+  `test_concurrent_unmark_final_result_emits_one_event`.
+- R5/R6: a Manager could file requests the Owner could never approve (into
+  on_hold/completed/reopened, out of submitted, and terminal to
+  cancelled/abandoned/changes_requested). Now 400 with no request. Tests:
+  `test_manager_generic_update_refuses_governed_targets_and_leaving_review`,
+  `test_manager_generic_update_refuses_terminal_to_non_work_targets`; HTTP
+  `test_manager_terminal_to_terminal_update_is_400_without_a_request`.
+
+**A836XC — atomic, retry-safe legacy migrations** (signoff)
+
+- Steps v1-v12 used `executescript()`, which commits the surrounding
+  `BEGIN IMMEDIATE`; a mid-step failure left half-applied schema. Now each
+  statement runs with `execute()` inside the step's transaction. Tests in
+  `tests/test_db.py`: `test_user_version_pragma_is_transactional`,
+  `test_atomic_statement_runner_handles_quoted_semicolons_and_rejects_incomplete_sql`,
+  `test_failure_midway_through_initial_schema_rolls_back_every_object_and_retries`,
+  `test_failure_after_legacy_alters_rolls_back_to_v4_then_matches_fresh_schema`,
+  `test_failure_after_v12_table_creation_rolls_back_table_and_index_then_retries`,
+  `test_fresh_database_migrates_to_the_current_schema`.
+- Known limit: committed fault tests cover v1, v5 and v12 only (follow-up
+  `67T315`).
+
+**03G8EH — serialized task submissions** (signoff)
+
+- Two simultaneous submits could both win with the same version (handoff 7.2
+  below, now reproduced and fixed). `submit_task` re-reads and allocates the
+  version under the lock; schema v14 adds a unique `(task_id, version)` index and
+  refuses to upgrade when duplicates already exist. Tests:
+  `test_concurrent_submissions_have_one_winner_one_row_and_one_event`,
+  `test_submit_refuses_when_the_owner_cancels_before_its_write`,
+  `test_submit_refuses_when_the_task_is_submitted_and_accepted_before_its_write`,
+  `test_submit_refuses_when_the_task_is_reassigned_away_before_its_write`,
+  `test_submit_refuses_when_the_collaborator_is_removed_before_its_write`,
+  `test_submit_refuses_when_project_access_is_revoked_before_its_write`;
+  `tests/test_db.py`: `test_fresh_v14_database_refuses_a_second_submission_at_one_version`,
+  `test_v13_database_with_submissions_upgrades_to_v14_and_matches_fresh_schema`,
+  `test_v13_duplicate_submission_versions_refuse_the_upgrade_without_touching_data`,
+  `test_failure_creating_the_v14_index_rolls_back_to_v13_and_retries`,
+  `test_duplicates_in_an_older_database_refuse_before_any_step_runs`,
+  `test_serve_exits_with_the_refusal_message_instead_of_a_traceback`.
+
+**T8WHJR — closed tasks immutable outside reopen** (signoff)
+
+- Import, re-parenting, criticality, schedule proposals and approvals,
+  dependencies and reviewers still changed closed tasks, and the README claimed
+  otherwise. Now each is refused (400, or 409 when the task closes mid-write);
+  import rows for closed tasks are skipped with `W_CLOSED_TASK`; README rewritten.
+  Tests: `test_closed_task_refuses_structural_and_schedule_writes_until_reopened`,
+  `test_writes_refuse_when_the_task_closes_before_their_write`,
+  `test_schedule_approval_refuses_when_the_task_closes_before_its_write`,
+  `test_closed_task_writes_work_again_after_the_governed_reopen`,
+  `test_closed_task_may_be_a_predecessor_and_still_takes_evidence`,
+  `test_update_task_on_a_closed_task_with_no_change_writes_nothing`;
+  `tests/test_import.py`: `test_import_row_for_a_closed_task_is_skipped_for_either_role`,
+  `test_closed_row_neither_forms_false_cycles_nor_poisons_other_rows`,
+  `test_import_commit_refuses_when_the_task_closed_after_the_preview`.
+
+### Test results measured on 2026-09-23 at `41dd6e2`
+
+- Full suite `.venv/bin/python tests/run.py`: **Ran 269 tests, OK** (281.9 s).
+- `test_state_integrity`: 45/45 OK. `test_web`: 45/45 OK.
+- `node --check src/astra/static/app.js`: clean.
+- `.venv/bin/python -m compileall -q src tests`: clean.
+- `git diff --check origin/claude/excel-import...HEAD`: clean at `41dd6e2`. After
+  `d688a59` it reports only "new blank line at EOF" in the ten new ticket files:
+  that is the format `jaira create` writes (older backlog tickets such as
+  `3NT40T` have it too), and ticket files are not hand-edited. Source, tests and
+  docs are clean.
+- Mutation check: moving `_assert_active_request_revision` in `accept_submission`
+  to just before its `with transaction` makes
+  `test_each_action_approval_racing_a_reject_is_refused_without_changing_the_task`
+  fail; restored afterwards.
+- Known flake: `test_import.test_commit_refuses_a_plan_that_changed_since_the_preview`
+  fails about 1 run in 10 (fixture zip timestamps; follow-up `1Z4PHZ`). It
+  passed in the run above.
+
+### Jaira state
+
+| Ticket | Title | Lane |
+| --- | --- | --- |
+| `SRFCZD` | Harden task state integrity and idempotency | signoff (waiting for Aly) |
+| `A836XC` | Make legacy SQLite migrations atomic and retry-safe | signoff (waiting for Aly) |
+| `03G8EH` | Serialize task submissions and refuse submits against a changed task | signoff (waiting for Aly) |
+| `T8WHJR` | Keep completed, cancelled and abandoned tasks immutable outside reopen | signoff (waiting for Aly) |
+
+Follow-up tickets filed from this review (backlog, assignee Claude, tag `astra`,
+not started):
+
+| Ticket | Title | Kind |
+| --- | --- | --- |
+| `DVS19Q` | db.transaction() leaves the connection inside an open transaction when COMMIT fails | confirmed defect (MIG-7), reproduced |
+| `G9G9PX` | Approving one of two identical pending Owner requests leaves the other pending | confirmed defect (SEM-3), reproduced |
+| `ARZWV7` | Hide or disable task edits the server refuses on closed and submitted tasks | UI follow-up |
+| `0D9Q3X` | Owner inbox: show the requested status and reason, and reload the task after a 409 | UI follow-up (includes SVC-5) |
+| `67T315` | Fault and retry tests for every legacy migration step v1-v12 | test gap (A836XC gap 1) |
+| `1Z4PHZ` | Make the xlsx test fixture deterministic (zip timestamps flake an import test) | test flake (IMP-8), cause confirmed |
+| `WNXSDA` | Maintainability: schema-level idempotency key and indexed lookup for pending Owner requests | maintainability |
+| `EXEZPM` | Maintainability: pass the Owner decision context explicitly instead of _active_owner_request_id | maintainability |
+| `9MK29X` | Maintainability: split AstraService.update_task into policy, validation and persistence helpers | maintainability |
+| `39DNZT` | Maintainability: replace the repeated migrate() version blocks with a step registry | maintainability |
+
+Related ticket not on this branch: `T81ZV6` on `claude/review-report-2026-09-22`
+(migration atomicity, user_version re-read under the lock, concurrent-migration
+test). Its atomicity part is done here by A836XC; reconcile it when that branch
+is merged.
+
+### Remaining gaps and unverified areas
+
+Confirmed gaps (each has a follow-up ticket above):
+
+- `db.transaction()` leaves the transaction open when COMMIT itself fails.
+- Approving one of two identical pending requests leaves the other pending (SEM-3).
+- The task dialog still offers edits and statuses the server refuses on closed
+  and submitted tasks; the Owner inbox does not show the requested status or the
+  reason; a 409 does not reload the task.
+- Migration fault tests cover v1, v5 and v12 only.
+- Import test fixture is time-dependent (one flaky test).
+- Maintainability: no schema-level idempotency key; Python-side JSON filtering of
+  requests; mutable `_active_owner_request_id`; long `update_task`; repeated
+  `migrate()` blocks.
+
+Not verified at all:
+
+- No live browser acceptance (the checklist in section 10 below still applies).
+- No deployment, HTTPS or security hardening, backup and restore, load testing,
+  monitoring, multi-user or multi-process operation, password recovery, or
+  disaster recovery.
+- No private-source ingestion, notifications, real-file publication, or external AI.
+
+### Decisions Aly made in this run
+
+- SRFCZD and A836XC were reassigned to Claude.
+- Closed tasks are immutable except attachments and final-result marking; any
+  other change goes through the governed reopen.
+- Import rows that target a closed task are skipped with a warning.
+- Pushing reviewed ticket fixes to this branch was approved.
+
+### Decisions Aly still has to make
+
+1. Signoff on each of SRFCZD, A836XC, 03G8EH and T8WHJR: accept, or send back.
+2. Whether and when to merge this branch.
+3. Merge order: PRs #3, #2 and #4 on the base side (`claude/excel-import`) come
+   first, then this branch.
+
+### How the next agent continues
+
+```bash
+cd /workspace/project-astra            # or your clone
+git fetch origin
+git switch codex/migration-safety-remediation
+git status --short --branch            # expect clean, up to date with origin
+git log --oneline -5
+.venv/bin/python tests/run.py          # expect 269 tests OK (about 5 minutes)
+jaira validate --json
+jaira resume
+jaira list --actionable --json
+```
+
+On Windows use `.venv\Scripts\python.exe tests\run.py`.
+
+Do not:
+
+- move any ticket out of `human` or `signoff`, or mark anything done;
+- force-push, rebase published commits, reset, clean or discard work;
+- run `jaira init` or use `--force`; hand-edit `.jaira/tickets/`;
+- deploy, or claim production readiness or browser acceptance;
+- set `JAIRA_USER` to Aly.
+
+Every Jaira write prints `gitref: expected 'acknowledgments', received 'packfile'`.
+That is the refs/jaira push failing; it is known and harmless because ticket
+files ride in normal commits.
+
+Pick up the follow-up tickets in this order (highest severity first):
+
+1. `DVS19Q` — a failed COMMIT leaves the connection holding the write lock.
+2. `G9G9PX` — stale duplicate requests stay in the Owner inbox.
+3. `ARZWV7` — UI offers edits the server now refuses.
+4. `0D9Q3X` — Owner decides blind; no reload after 409.
+5. `67T315` — migration regressions in v2-v4 and v6-v11 would pass the suite.
+6. `1Z4PHZ` — one import test flakes about 1 run in 10.
+7. `WNXSDA`, `EXEZPM`, `9MK29X`, then `39DNZT` (after `67T315`, so its tests
+   guard the refactor). All four are maintainability, not defects.
+8. The older `3NT40T` (Excel import hardening follow-ups, todo) is also open.
+
+---
+
+*Everything below is Codex's original handoff (history).*
+
+
 Prepared for Aly Jafferani and the next Claude Code review session.
 
 This is the current implementation handoff for the adversarial review and the

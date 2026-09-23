@@ -11,8 +11,11 @@
   the package with `python -m pip install -e .` if the environment is absent.
 - Never commit credentials, `.env` files, private keys, a live SQLite database,
   virtual environments, caches, or local browser artifacts.
-- `main` is the clean imported baseline. Continue the transferred authorization
-  work from `hs3jry-handoff` unless Aly directs a different branch.
+- `main` is the clean imported baseline. Current work is on
+  `codex/migration-safety-remediation`; read
+  `CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md` before continuing. The older
+  `hs3jry-handoff` branch is already contained in it. Use another branch only if
+  Aly directs it.
 
 <!-- jaira:start -->
 ## Task tracking: jaira

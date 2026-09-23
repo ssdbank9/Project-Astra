@@ -3,8 +3,9 @@
 > **Current remediation handoff:** Read
 > [`CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md`](CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md)
 > before reviewing or changing the state-integrity and migration-safety branch.
-> It contains the current branch, commits, 220-test evidence, combined
-> adversarial findings, remaining risks, and Jaira review procedure.
+> Its top section, "Current state after Claude remediation (2026-09-23)", has
+> the current branch, commits, 269-test evidence, ticket states and follow-ups;
+> the sections below it are Codex's original findings, kept as history.
 
 - Treat this standalone repository as the Git source of truth. Work on a named
   branch, keep commits scoped, and preserve unrelated work.
@@ -16,8 +17,11 @@
   the package with `python -m pip install -e .` if the environment is absent.
 - Never commit credentials, `.env` files, private keys, a live SQLite database,
   virtual environments, caches, or local browser artifacts.
-- `main` is the clean imported baseline. Continue the transferred authorization
-  work from `hs3jry-handoff` unless Aly directs a different branch.
+- `main` is the clean imported baseline. Current work is on
+  `codex/migration-safety-remediation`; read
+  `CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md` before continuing. The older
+  `hs3jry-handoff` branch is already contained in it. Use another branch only if
+  Aly directs it.
 
 <!-- jaira:start -->
 ## Task tracking: jaira
