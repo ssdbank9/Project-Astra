@@ -1,7 +1,7 @@
 ---
 id: 01M37E4QWARNQTZ58YGS67T315
 title: Fault and retry tests for every legacy migration step v1-v12
-status: backlog
+status: review
 ready: true
 creator: Claude
 assignee: Claude
@@ -20,18 +20,27 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:28:57Z
-updated-at: 2026-09-23T15:29:40Z
+updated-at: 2026-09-23T16:56:21Z
 updated-by: Claude
+claimed-by: vm-22489
+claimed-at: 2026-09-23T16:46:25Z
+outcome-what: "Added tests/test_db.py test_every_legacy_step_rolls_back_a_mid_step_failure_and_retries_to_the_fresh_schema: for each legacy step v1-v12 (24 subTests) it builds a database at N-1, injects a fault after the step's first statement or at its PRAGMA user_version = N, asserts user_version N-1, an unchanged sqlite_master and no open transaction, then retries to v14 with a catalog equal to a fresh database. Helpers: full_catalog, deny_version_bump, stop_before_step, first_statement_then_fail. Test-only; src/ unchanged."
+outcome-why: "A836XC made steps v1-v12 atomic but only v1, v5 and v12 had committed fault tests. Restoring executescript() in 9 of the steps, or moving any step's version bump outside its transaction, left the suite green (21 of 24 such mutants passed)."
+outcome-resolves: "DoD 1-2: the new test. DoD 3: 24 mutants (executescript() per step, bump dedented per step) all fail at exactly their step, against 3/24 for the pre-ticket file; matrix in the notes. DoD 4: full suite 286 tests OK, git diff --check clean. No real defect found."
 ---
 
 # Fault and retry tests for every legacy migration step v1-v12
 
 ## Definition of Done
 
-- [ ] tests/test_db.py has a parameterised test that, for each version N in 1-12, starts from a database at N-1, injects a failure after the step's first statement, and asserts user_version is still N-1 and sqlite_master is unchanged
-- [ ] The same test re-opens and migrates again and asserts the final user_version is SCHEMA_VERSION and the catalog equals a fresh database's
-- [ ] Mutation check recorded in the ticket: executescript() restored in any one step, or that step's user_version bump moved outside its transaction, makes the test fail
-- [ ] Full suite green and git diff --check clean
+- [x] tests/test_db.py has a parameterised test that, for each version N in 1-12, starts from a database at N-1, injects a failure after the step's first statement, and asserts user_version is still N-1 and sqlite_master is unchanged
+  proof: tests/test_db.py test_every_legacy_step_rolls_back_a_mid_step_failure_and_retries_to_the_fresh_schema: subTest step=1..12, fault 'after the first statement' (first_statement_then_fail) and 'at the user_version bump' (deny_version_bump); start db built by stop_before_step(N); asserts user_version N-1, full sqlite_master unchanged, not in_transaction
+- [x] The same test re-opens and migrates again and asserts the final user_version is SCHEMA_VERSION and the catalog equals a fresh database's
+  proof: same test: db.migrate() retry on the same connection, asserts user_version == db.SCHEMA_VERSION, full_catalog == fresh db.connect() catalog, integrity_check ok
+- [x] Mutation check recorded in the ticket: executescript() restored in any one step, or that step's user_version bump moved outside its transaction, makes the test fail
+  proof: 24 mutants (executescript() in step N, bump N dedented out of transaction, N=1..12): new test fails at exactly step N for all 24; pre-ticket tests/test_db.py caught 3/24 (exec v1,v5,v12). Matrix in jaira note
+- [x] Full suite green and git diff --check clean
+  proof: tests/run.py: Ran 286 tests, OK (exit 0); test_db 16 tests OK; node --check app.js ok; compileall ok; git diff --check origin/codex/migration-safety-remediation clean
 
 ## Options
 
@@ -42,5 +51,21 @@ updated-by: Claude
 
 <Steps, in order — filled in by the pre-process step, or by you.>
 
-## Progress
+- [x] helpers: deny_version_bump(N) authorizer and first-statement-then-fail patch of db._execute_statements
+- [x] database at N-1: fresh file migrated under stop_before_step(N), which refuses every write after the N-1 bump (does not rely on step N being atomic)
+- [x] subTest loop N=1..12 x two faults: assert version N-1, catalog unchanged, not in_transaction; retry; assert v14 and catalog == fresh
+- [x] mutation check: executescript() in one step, bump moved outside its transaction; record failing output
+- [x] focused tests, full suite, node --check, compileall, git diff --check
 
+## Progress
+- **2026-09-23 16:47 · Claude** — Brainstorm. What the code shows: src/astra/db.py migrate() runs steps v1-v12 each as 'with transaction(connection): _execute_statements(...); PRAGMA user_version = N'. tests/test_db.py fault-tests only v1 (deny CREATE TABLE tasks), v5 (deny task_schedule_proposals) and v12 (deny owner_action_requests / its index). v2-v4 and v6-v11 have no fault test, and no test fails if a bump moves out of its transaction.
+Option A: one hand-written test per version with a step-specific authorizer. Explicit, but 12 near-copies, and v7/v11 are ALTER-only so an authorizer cannot pick one column out.
+Option B: one subTest loop over 1-12 with two generic faults: (1) patch db._execute_statements so step N runs only its first statement then raises; (2) an authorizer that denies 'PRAGMA user_version = N' (SQLite passes the value as arg2, checked), i.e. failure after every statement of the step. The same bump-denying authorizer also builds the N-1 database. Generic, no per-step knowledge, catches both mutations named in DoD 3.
+Option C: kill a subprocess mid-step. Closest to a real crash, but slow and timing-dependent; A836XC already did this by hand.
+Choice: B. Fault 2 alone catches executescript() restored and the bump moved outside the transaction; fault 1 is the DoD's literal 'after the first statement'. T81ZV6 items (re-read inside lock, concurrent migrators, half-applied old databases) stay out.
+- **2026-09-23 16:53 · Claude** — Implementation notes (67T315).
+Dead end 1: building the N-1 start database by denying 'PRAGMA user_version = N' relies on the atomicity under test. Under a mutant step N commits its DDL during setup, and the test then errors with 'table X already exists' instead of failing on the assertion.
+Dead end 2: denying the BEGIN of step N via the authorizer does not work. 'BEGIN IMMEDIATE' is the same SQL string every step, so sqlite3's statement cache reuses the prepared statement and the authorizer is never asked. Steps 7, 8 and 12 went through unrefused.
+Used instead: stop_before_step(N) denies every CREATE/ALTER/INSERT/UPDATE/DELETE once 'user_version = N-1' has been authorized. Each bump string is unique per connection, so it is always prepared fresh and the authorizer sees it.
+Mutation matrix, run against copies of src/ (not committed): executescript() restored in step N, and 'PRAGMA user_version = N' dedented out of its with-transaction block, for N=1..12, 24 mutants in all. New test: 24/24 fail, each at exactly step=N. Pre-ticket tests/test_db.py: 3/24 fail (executescript in v1, v5, v12); the other 21, including all 12 bump moves, stay green.
+Not done, out of plan scope: A836XC gap 4 (four older tests in tests/test_db.py close SQLite handles without try/finally). The new test closes its connections in finally. Left for a separate change so this diff stays test-additive.

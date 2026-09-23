@@ -63,6 +63,71 @@ def schema_signature(connection):
     return [tuple(row) for row in rows]
 
 
+def full_catalog(connection):
+    """Every sqlite_master row, SQLite's own automatic indexes included."""
+    rows = connection.execute(
+        "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name"
+    ).fetchall()
+    return [tuple(row) for row in rows]
+
+
+LEGACY_STEPS = range(1, 13)   # v1-v12: the steps written inline in db.migrate()
+
+
+class InjectedFault(Exception):
+    """Raised by a test to abort a migration step part-way through."""
+
+
+def deny_version_bump(version):
+    """An authorizer that refuses ``PRAGMA user_version = <version>``.
+
+    Every legacy step ends with that statement, so this fails step ``version`` after
+    all of its other statements have run, and leaves every earlier step committed.
+    """
+    def authorizer(action, arg1, arg2, db_name, trigger):
+        if action == sqlite3.SQLITE_PRAGMA and arg1 == "user_version" and arg2 == str(version):
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    return authorizer
+
+
+SCHEMA_WRITE_ACTIONS = frozenset({
+    sqlite3.SQLITE_CREATE_TABLE, sqlite3.SQLITE_CREATE_INDEX, sqlite3.SQLITE_ALTER_TABLE,
+    sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE,
+})
+
+
+def stop_before_step(version):
+    """An authorizer that lets steps 1..version-1 commit, then refuses every write, so
+    the database stops at version-1 without any statement of step ``version`` running.
+
+    Building the starting database this way does not rely on the atomicity under test.
+    It keys on writes rather than on the step's BEGIN: ``BEGIN IMMEDIATE`` is the same
+    SQL every step, so sqlite3's statement cache reuses it without asking the authorizer.
+    """
+    previous_bump_seen = version == 1
+
+    def authorizer(action, arg1, arg2, db_name, trigger):
+        nonlocal previous_bump_seen
+        if action == sqlite3.SQLITE_PRAGMA and arg1 == "user_version" and arg2 == str(version - 1):
+            previous_bump_seen = True
+        elif previous_bump_seen and action in SCHEMA_WRITE_ACTIONS:
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    return authorizer
+
+
+def first_statement_then_fail(connection, script):
+    """Stand-in for ``db._execute_statements``: run the script's first statement, then fail."""
+    buffer = ""
+    for character in script:
+        buffer += character
+        if character == ";" and sqlite3.complete_statement(buffer):
+            break
+    connection.execute(buffer.strip())
+    raise InjectedFault("injected after the first statement of the step")
+
+
 class MigrationTests(unittest.TestCase):
     """Regression review MIGRATION-1 (2026-09-22/23).
 
@@ -272,6 +337,67 @@ class MigrationTests(unittest.TestCase):
             self.assertIn("idx_owner_action_requests_requester", names)
         finally:
             connection.close()
+
+    def test_every_legacy_step_rolls_back_a_mid_step_failure_and_retries_to_the_fresh_schema(self):
+        """67T315: each of v1-v12 is one transaction together with its user_version bump.
+
+        For every step N, from a database at N-1: fail after the step's first statement,
+        and separately fail at its ``PRAGMA user_version = N``, after all of its other
+        statements. Either way user_version must still be N-1 and the catalog must be
+        exactly as before; the retry must reach SCHEMA_VERSION with a fresh catalog.
+        Putting ``executescript()`` back into a step, or moving its bump outside the
+        ``transaction()`` block, commits part of the step and fails here.
+        """
+        fresh = db.connect(Path(self.temp.name) / "fresh.sqlite3")
+        try:
+            fresh_catalog = full_catalog(fresh)
+        finally:
+            fresh.close()
+
+        def inject_after_first_statement(connection, version):
+            with patch.object(db, "_execute_statements", first_statement_then_fail):
+                db.migrate(connection)
+
+        def inject_at_version_bump(connection, version):
+            connection.set_authorizer(deny_version_bump(version))
+            try:
+                db.migrate(connection)
+            finally:
+                connection.set_authorizer(None)
+
+        faults = {
+            "after the first statement": (inject_after_first_statement, InjectedFault),
+            "at the user_version bump": (inject_at_version_bump, sqlite3.DatabaseError),
+        }
+        for version in LEGACY_STEPS:
+            for fault_name, (inject, expected) in faults.items():
+                with self.subTest(step=version, fault=fault_name):
+                    path = Path(self.temp.name) / f"v{version}-{fault_name.replace(' ', '-')}.sqlite3"
+                    connection = sqlite3.connect(path, timeout=30, isolation_level=None)
+                    try:
+                        connection.execute("PRAGMA foreign_keys = ON")
+
+                        if version > 1:   # build the database at version - 1
+                            connection.set_authorizer(stop_before_step(version))
+                            with self.assertRaises(sqlite3.DatabaseError):
+                                db.migrate(connection)
+                            connection.set_authorizer(None)
+                        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], version - 1)
+                        before = full_catalog(connection)
+
+                        with self.assertRaises(expected):
+                            inject(connection, version)
+
+                        self.assertFalse(connection.in_transaction)
+                        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], version - 1)
+                        self.assertEqual(full_catalog(connection), before, f"step {version} left part of itself committed")
+
+                        db.migrate(connection)
+                        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+                        self.assertEqual(full_catalog(connection), fresh_catalog)
+                        self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+                    finally:
+                        connection.close()
 
     def test_failure_after_the_first_statements_leaves_a_clean_v12_database_that_reopens(self):
         connection = self.interrupted_at_v13()
