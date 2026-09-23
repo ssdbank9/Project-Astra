@@ -1,7 +1,7 @@
 ---
 id: 01M37E9T2RBY6Q48K41V9MK29X
 title: "Maintainability: split AstraService.update_task into policy, validation and persistence helpers"
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -19,13 +19,17 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:31:43Z
-updated-at: 2026-09-23T18:30:15Z
+updated-at: 2026-09-23T18:40:40Z
 updated-by: Claude
 claimed-by: vm-18061
 claimed-at: 2026-09-23T18:14:41Z
-outcome-what: "Split AstraService.update_task (src/astra/service.py) into _authorize_task_update, _validate_task_update, _route_protected_status_update and _write_task_update, called in the original order; added tests/test_update_task_contract.py (19 characterization tests) pinning exact messages, exception types, check order, request payloads, events, and the in-transaction request and revision re-checks."
-outcome-why: "update_task had grown to ~115 lines mixing policy, validation, routing and the guarded write; each remediation round added an order-sensitive branch. Named steps make the order readable and the contract tests stop a future edit from silently moving a check."
-outcome-resolves: "DoD1: same check order and messages, proven by the 19 contract tests passing on both old and new code and an old-vs-new fuzz of 2600 update_task calls with 0 differences. DoD2: no existing test file changed; full suite 335 OK = 316 baseline + 19 new. Mutations: request re-check moved outside the transaction is caught by the new approval test (no pre-existing test caught it); dropping the revision predicate is caught by two existing race tests and one new test."
+outcome-what: "Independent review recorded: approve, no behaviour change, five low gaps plus no live browser acceptance"
+outcome-why: "The review lane requires a second model's judgement before a person signs off"
+outcome-resolves: "Review of the update_task split for 9MK29X"
+review-summary: "Independent reviewer recommends approve. The change splits AstraService.update_task (src/astra/service.py) into four private helpers called in the original order: _authorize_task_update, _validate_task_update, _route_protected_status_update, _write_task_update. It adds 19 characterization tests in tests/test_update_task_contract.py. No behaviour change found: line-by-line comparison, the 19 new tests pass on the OLD code, and an old-vs-new differential fuzz (seeds 3 and 17, 4861 trace lines) showed 0 differences. The single transaction, the in-transaction request re-check, the revision predicate, messages, exception types and events are unchanged. Full suite 335 tests OK (316 baseline + 19). The new approval test closes a real gap: moving the request re-check outside the transaction was previously undetected and now fails."
+review-gaps: "All low severity. 1) Mutation M4 survives: moving _resolve_pending_requests out of the write transaction in _write_task_update (runs after commit) leaves all tests green; the gap predates this change, but the outcome-why claim that the contract tests stop a check being moved silently is only partly true. 2) CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md:261 and :589 (item 5) still list the long update_task as an open maintainability risk. 3) The 2600-call old-vs-new fuzz cited in outcome-resolves and the DoD1 proof is not committed, so it cannot be re-run from the repo; the reviewer's own fuzz rarely reached the Manager-request and locked-source branches. 4) Helpers pass an untyped 10-key dict; a misspelt key fails only at runtime as KeyError (style). 5) test_unknown_assignee_is_refused checks only ValueError, not the message 'Assigned owner is not a known user.'. 6) No live human browser acceptance was done; evidence is automated tests, fuzz and code reading only."
+review-verdict: Approve — independent reviewer
+review-check: "1. cd to the repo root on branch codex/migration-safety-remediation. 2. Run: cd tests && PYTHONPATH=../src ../.venv/bin/python -m unittest -v test_update_task_contract  -> expect 19 tests, OK. 3. Run from repo root: .venv/bin/python tests/run.py  -> expect 335 tests, OK, exit 0 (about 5 minutes). 4. Open src/astra/service.py and find update_task: it should only call _authorize_task_update, _validate_task_update, _route_protected_status_update, _write_task_update in that order. 5. Optional mutation check: in _write_task_update move the pending-request re-check outside the 'with transaction' block and re-run step 2 -> test_approval_refused_when_its_request_is_decided_under_the_write should fail. Reviewer results: 19/19 new tests also pass on the old code; differential fuzz 0 differences; mutations M1, M2, M3 caught, M4 (reconciliation after commit) not caught."
 ---
 
 # Maintainability: split AstraService.update_task into policy, validation and persistence helpers
