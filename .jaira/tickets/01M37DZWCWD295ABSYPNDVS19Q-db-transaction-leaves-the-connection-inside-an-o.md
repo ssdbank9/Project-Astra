@@ -1,7 +1,7 @@
 ---
 id: 01M37DZWCWD295ABSYPNDVS19Q
 title: db.transaction() leaves the connection inside an open transaction when COMMIT fails
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -21,13 +21,17 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:26:18Z
-updated-at: 2026-09-23T15:47:53Z
+updated-at: 2026-09-23T15:55:33Z
 updated-by: Claude
 claimed-by: vm-28526
 claimed-at: 2026-09-23T15:40:32Z
 outcome-what: "db.transaction() now rolls back (suppressing a secondary sqlite3.Error) and re-raises when connection.commit() fails; regression test with a deferred FK violation; README migration note extended"
 outcome-why: "A failed COMMIT left the connection in an open transaction holding the write lock, so the next transaction() raised 'cannot start a transaction within a transaction'"
 outcome-resolves: "DoD 1: src/astra/db.py transaction(); DoD 2: tests/test_db.py test_failed_commit_rolls_back_and_leaves_the_connection_reusable, failed before fix; DoD 3: 270 tests OK, diff --check clean"
+review-summary: "Independent reviewer approves. db.transaction() now wraps connection.commit(): on failure it rolls back (suppressing a secondary sqlite3.Error) and re-raises the COMMIT error, so the connection is no longer left in_transaction. New test test_db.MigrationTests.test_failed_commit_rolls_back_and_leaves_the_connection_reusable forces COMMIT to fail with a deferred FK violation and asserts IntegrityError, in_transaction False, no row saved, next transaction() works. Scope: src/astra/db.py, one test, one README paragraph, ticket file. No authorization, web.py, service.py, UI or error-mapping changes."
+review-gaps: "(low) No test makes rollback() raise, so removing the suppress(sqlite3.Error) wrapper at src/astra/db.py:55-56 goes unnoticed; code is correct, proof missing. (low) README.md line 98 not rewrapped (128 chars). (low) Docs name SQLITE_BUSY as rolled back but do not note the trade-off: SQLite would keep the transaction open for a retry; acceptable since no caller retries and busy_timeout is 30 s. (info) KeyboardInterrupt/BaseException in the with-block still skips rollback; pre-existing, out of scope, noted on ticket. No live human browser acceptance (none needed: no UI change)."
+review-verdict: Approve — independent reviewer
+review-check: "(1) Old db.py from origin/codex/migration-safety-remediation in a scratch copy: new test FAILS with 'True is not false' on assertFalse(connection.in_transaction); new code passes. (2) Mutations in scratch: rollback->pass, dropped re-raise, commit->rollback each make the test fail; removing suppress() not caught. (3) tests/run.py on git archive HEAD export: Ran 270 tests in 298.6 s, OK. (4) git diff --check origin/codex/migration-safety-remediation...HEAD clean. Reproduce: cd tests && PYTHONPATH=../src /workspace/project-astra/.venv/bin/python -m unittest -v test_db.MigrationTests.test_failed_commit_rolls_back_and_leaves_the_connection_reusable -> ok; full suite /workspace/project-astra/.venv/bin/python tests/run.py -> 270 OK."
 ---
 
 # db.transaction() leaves the connection inside an open transaction when COMMIT fails
