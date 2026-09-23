@@ -1044,6 +1044,57 @@ class AstraStateIntegrityTests(unittest.TestCase):
         with self.assertRaises(service_module.Forbidden):   # a fresh attempt is refused outright
             self.service.submit_task(member, task["id"], "retry")
 
+    # Review SVC-1: removing a collaborator or revoking project access does not bump
+    # tasks.revision, so the permission itself must be re-checked under the lock.
+    def _member(self, project, email):
+        member = self.service.create_user(self.owner, email, "Member", "member password safe")
+        self.service.grant_project_access(self.owner, project["id"], member["id"], "member")
+        return member
+
+    def _assert_not_submitted(self, task):
+        current = self.service.get_task(self.owner, task["id"])
+        self.assertEqual((current["status"], current["revision"]), (task["status"], task["revision"]))
+        self.assertEqual(self._submission_rows(task["id"]), [])
+        self.assertEqual(self._task_event_count(task["id"], "task_submitted"), 0)
+
+    def test_submit_refuses_when_the_collaborator_is_removed_before_its_write(self):
+        project = self.service.create_project(self.owner, "Collaborator removed mid-submit")
+        collaborator = self._member(project, "collaborator@example.org")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Shared work"})
+        self.service.add_task_reviewer(self.owner, task["id"], collaborator["id"], "collaborator")
+        task = self.service.get_task(self.owner, task["id"])
+
+        def remove(service):
+            service.remove_task_reviewer(self.owner, task["id"], collaborator["id"], "collaborator")
+
+        hook, interleaved = self._interleave_before_submit_write(remove)
+        with patch.object(service_module, "transaction", hook):
+            with self.assertRaises(service_module.Conflict):
+                self.service.submit_task(collaborator, task["id"], "no longer a collaborator")
+
+        self.assertEqual(interleaved, [True])
+        self._assert_not_submitted(task)
+        with self.assertRaises(service_module.Forbidden):
+            self.service.submit_task(collaborator, task["id"], "retry")
+
+    def test_submit_refuses_when_project_access_is_revoked_before_its_write(self):
+        project = self.service.create_project(self.owner, "Access revoked mid-submit")
+        member = self._member(project, "revoked@example.org")
+        task = self.service.create_task(
+            self.owner, {"project_id": project["id"], "title": "Owned work", "owner_user_id": member["id"]}
+        )
+
+        def revoke(service):
+            service.revoke_project_access(self.owner, project["id"], member["id"])
+
+        hook, interleaved = self._interleave_before_submit_write(revoke)
+        with patch.object(service_module, "transaction", hook):
+            with self.assertRaises(service_module.Conflict):   # not a 403 after a committed write
+                self.service.submit_task(member, task["id"], "access gone")
+
+        self.assertEqual(interleaved, [True])
+        self._assert_not_submitted(task)
+
 
 if __name__ == "__main__":
     unittest.main()

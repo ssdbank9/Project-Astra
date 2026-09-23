@@ -75,6 +75,10 @@ def migrate(connection: sqlite3.Connection) -> None:
     version = connection.execute("PRAGMA user_version").fetchone()[0]
     if version > SCHEMA_VERSION:
         raise RuntimeError("Database was created by a newer Astra version.")
+    if version < 14:
+        # Before any step commits: a database that v14 would refuse is refused now, at
+        # the version it started at, so the refusal really changes nothing.
+        _refuse_duplicate_submission_versions(connection)
     if version < 1:
         with transaction(connection):
             _execute_statements(connection,
@@ -467,9 +471,58 @@ def _migrate_v13(connection: sqlite3.Connection) -> None:
 V14_SUBMISSION_VERSION_INDEX = "idx_submissions_task_version"
 
 V14_DUPLICATE_SUBMISSION_VERSIONS = """
-    SELECT task_id, version, COUNT(*) AS copies FROM task_submissions
+    SELECT task_id, version FROM task_submissions
     GROUP BY task_id, version HAVING COUNT(*) > 1 ORDER BY task_id, version
 """
+
+
+def _table_exists(connection: sqlite3.Connection, name: str) -> bool:
+    return connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
+
+
+def _refuse_duplicate_submission_versions(connection: sqlite3.Connection) -> None:
+    """Raise SchemaMigrationRefused if task_submissions (present from v3) holds more
+    than one row for a (task_id, version). Lists submission ids and statuses only:
+    notes and titles are user content and stay out of logs."""
+    if not _table_exists(connection, "task_submissions"):
+        return
+    pairs = connection.execute(V14_DUPLICATE_SUBMISSION_VERSIONS).fetchall()
+    if not pairs:
+        return
+    has_final_results = _table_exists(connection, "final_results")
+    described = []
+    for task_id, version in pairs[:10]:
+        rows = connection.execute(
+            "SELECT id, status FROM task_submissions WHERE task_id=? AND version=? ORDER BY submitted_at, id",
+            (task_id, version),
+        ).fetchall()
+        parts = []
+        for submission_id, status in rows:
+            references = []
+            if connection.execute(
+                "SELECT 1 FROM tasks WHERE accepted_submission_id=?", (submission_id,)
+            ).fetchone():
+                references.append("tasks.accepted_submission_id")
+            if has_final_results and connection.execute(
+                "SELECT 1 FROM final_results WHERE submission_id=?", (submission_id,)
+            ).fetchone():
+                references.append("final_results")
+            referenced = f", referenced by {' and '.join(references)}" if references else ""
+            parts.append(f"submission {submission_id} ({status}{referenced})")
+        described.append(f"task {task_id} version {version}: {', '.join(parts)}")
+    more = f"; and {len(pairs) - 10} more" if len(pairs) > 10 else ""
+    raise SchemaMigrationRefused(
+        "Astra cannot upgrade this database to schema 14: task_submissions has "
+        f"{len(pairs)} task version(s) with more than one submission, left by an earlier "
+        "concurrent-submission defect. Nothing was changed. Affected: "
+        f"{'; '.join(described)}{more}. To resolve: back up the database; for each task "
+        "version keep the accepted row (the one tasks.accepted_submission_id or "
+        "final_results refers to) and delete the others or renumber them to an unused "
+        "version; run any DELETE with PRAGMA foreign_keys=ON so a referenced row cannot "
+        "be removed; then start Astra again."
+    )
 
 
 def _migrate_v14(connection: sqlite3.Connection) -> None:
@@ -479,24 +532,14 @@ def _migrate_v14(connection: sqlite3.Connection) -> None:
     ``MAX(version)`` and insert two rows at one version. The service now allocates the
     version under ``BEGIN IMMEDIATE``; this unique index makes the database refuse a
     duplicate too. A database that already holds duplicates is refused rather than
-    repaired: which of two pending submissions is the real one is an Owner decision, so
-    nothing is deleted or renumbered here. The step rolls back, user_version stays 13,
-    and the error lists the affected pairs.
+    repaired: which of two submissions is the real one is an Owner decision, so nothing
+    is deleted or renumbered here. ``migrate()`` runs the same probe before its first
+    step, so a database starting below v13 is refused at its starting version instead of
+    being left at v13; the probe is repeated here, under the step's write lock, in case
+    a duplicate was written in between. Either way nothing is committed.
     """
     with transaction(connection):
-        duplicates = connection.execute(V14_DUPLICATE_SUBMISSION_VERSIONS).fetchall()
-        if duplicates:
-            listed = "; ".join(
-                f"task {row[0]} version {row[1]} ({row[2]} rows)" for row in duplicates[:10]
-            )
-            more = f"; and {len(duplicates) - 10} more" if len(duplicates) > 10 else ""
-            raise SchemaMigrationRefused(
-                "Astra cannot upgrade this database to schema 14: task_submissions holds "
-                f"{len(duplicates)} duplicate (task_id, version) pair(s): {listed}{more}. "
-                "They come from the concurrent-submission defect fixed in 03G8EH. Nothing was "
-                "changed. Back up the database, keep one row per pair (or renumber the extra "
-                "rows to unused versions), then start Astra again."
-            )
+        _refuse_duplicate_submission_versions(connection)
         connection.execute(
             f"CREATE UNIQUE INDEX IF NOT EXISTS {V14_SUBMISSION_VERSION_INDEX}"
             " ON task_submissions(task_id, version)"

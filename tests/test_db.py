@@ -1,7 +1,9 @@
+import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from astra import db
 from astra.service import AstraService
@@ -318,11 +320,26 @@ class MigrationTests(unittest.TestCase):
         try:
             task_id = self.submitted_task(connection)
             self.duplicate_submission(connection, task_id)
+            accepted_id = connection.execute(
+                "SELECT id FROM task_submissions WHERE task_id=? AND id<>'duplicate-row'", (task_id,)
+            ).fetchone()[0]
+            connection.execute("UPDATE task_submissions SET status='accepted' WHERE id=?", (accepted_id,))
+            connection.execute("UPDATE tasks SET accepted_submission_id=? WHERE id=?", (accepted_id, task_id))
             before = self.submission_rows(connection)
             self.assertEqual(len(before), 2)
 
-            with self.assertRaisesRegex(db.SchemaMigrationRefused, rf"schema 14.*task {task_id} version 1 \(2 rows\)"):
+            with self.assertRaises(db.SchemaMigrationRefused) as refused:
                 db.migrate(connection)
+            message = str(refused.exception)
+            self.assertIn("schema 14", message)
+            self.assertIn(f"task {task_id} version 1:", message)
+            self.assertIn(f"submission {accepted_id} (accepted, referenced by tasks.accepted_submission_id)", message)
+            self.assertIn("submission duplicate-row (submitted)", message)
+            self.assertIn("keep the accepted row", message)
+            self.assertIn("PRAGMA foreign_keys=ON", message)
+            self.assertNotIn("03G8EH", message)
+            self.assertNotIn("first", message, "notes must not be echoed")
+            self.assertNotIn("Deliverable", message, "titles must not be echoed")
 
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 13)
             self.assertEqual(self.submission_rows(connection), before, "no submission may be deleted")
@@ -365,6 +382,56 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(self.submission_rows(connection), before)
         finally:
             connection.close()
+
+
+    def test_duplicates_in_an_older_database_refuse_before_any_step_runs(self):
+        # Stop at v9 (v10 creates final_results), then add a pre-fix duplicate pair.
+        connection = self.raw()
+        try:
+            connection.set_authorizer(deny_create_table("final_results"))
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 9)
+            connection.execute("PRAGMA foreign_keys = OFF")
+            for row_id in ("pair-a", "pair-b"):
+                connection.execute(
+                    "INSERT INTO task_submissions(id,task_id,version,submitted_by,submitted_at,note,status)"
+                    " VALUES(?,'task-1',1,'user-1','2026-01-01T00:00:00Z','private note','submitted')",
+                    (row_id,),
+                )
+            connection.execute("PRAGMA foreign_keys = ON")
+            schema_before = schema_signature(connection)
+            rows_before = self.submission_rows(connection)
+
+            with self.assertRaises(db.SchemaMigrationRefused) as refused:
+                db.migrate(connection)
+
+            message = str(refused.exception)
+            self.assertIn("Nothing was changed", message)
+            self.assertIn("task task-1 version 1: submission pair-a (submitted), submission pair-b (submitted)", message)
+            self.assertNotIn("private note", message)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 9)
+            self.assertEqual(schema_signature(connection), schema_before, "no later step may have committed")
+            self.assertEqual(self.submission_rows(connection), rows_before)
+            self.assertFalse(connection.in_transaction)
+        finally:
+            connection.close()
+
+    def test_serve_exits_with_the_refusal_message_instead_of_a_traceback(self):
+        connection = self.at_v13()
+        try:
+            task_id = self.submitted_task(connection)
+            self.duplicate_submission(connection, task_id)
+        finally:
+            connection.close()
+        from astra import __main__ as entry
+        with patch.dict(os.environ, {"ASTRA_HOME": self.temp.name}):
+            with patch.object(entry, "serve", side_effect=lambda host, port: db.connect()):
+                with self.assertRaises(SystemExit) as stopped:
+                    entry.main(["serve", "--port", "0"])
+        self.assertIsInstance(stopped.exception.code, str)
+        self.assertIn("cannot upgrade this database to schema 14", stopped.exception.code)
 
 
 if __name__ == "__main__":

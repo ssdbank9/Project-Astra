@@ -1425,14 +1425,21 @@ class AstraService:
             result.append(request)
         return result
 
+    def _may_submit(self, actor: dict, task) -> bool:
+        """Project Manager (or Owner), the Task Owner, or a task collaborator. The caller
+        has already established that the actor can view the task's project."""
+        return bool(
+            self.can_manage_project(actor, task["project_id"])
+            or actor["id"] == task["owner_user_id"]
+            or self.db.execute(
+                "SELECT 1 FROM task_reviewers WHERE task_id=? AND user_id=? AND role='collaborator'",
+                (task["id"], actor["id"]),
+            ).fetchone()
+        )
+
     def submit_task(self, actor: dict, task_id: str, note: str = "") -> dict:
         task = self.get_task(actor, task_id)
-        collaborator = self.db.execute(
-            "SELECT 1 FROM task_reviewers WHERE task_id=? AND user_id=? AND role='collaborator'",
-            (task_id, actor["id"]),
-        ).fetchone()
-        if not (self.can_manage_project(actor, task["project_id"])
-                or actor["id"] == task.get("owner_user_id") or collaborator):
+        if not self._may_submit(actor, task):
             raise Forbidden("You are not authorized to submit this task.")
         if task["status"] in UNSUBMITTABLE_STATUSES:
             raise ValueError(f"A {task['status']} task cannot be submitted; reopen it first if needed.")
@@ -1444,22 +1451,26 @@ class AstraService:
             # Re-read under the write lock (03G8EH). The permission and status checks
             # above ran before BEGIN IMMEDIATE, so a concurrent submit, an Owner cancel
             # or acceptance, or a reassignment may have landed since; only a task still
-            # at the revision those checks saw may be submitted.
+            # at the revision those checks saw may be submitted. Removing a collaborator
+            # or revoking project access does not bump the revision, so the permission
+            # is evaluated again here too.
             current = self.db.execute(
-                "SELECT status, revision FROM tasks WHERE id=?", (task_id,)
+                "SELECT id, project_id, owner_user_id, status, revision FROM tasks WHERE id=?", (task_id,)
             ).fetchone()
             if current is None or current["revision"] != expected_revision:
                 raise Conflict("Submission conflict: the task changed before it could be submitted; reload it and try again.")
             if current["status"] in UNSUBMITTABLE_STATUSES:
                 raise Conflict(f"Submission conflict: the task is now {current['status']}.")
+            if not (self.can_view_project(actor, current["project_id"]) and self._may_submit(actor, current)):
+                raise Conflict("Submission conflict: your access to this task changed before it could be submitted.")
             version = self.db.execute(
                 "SELECT COALESCE(MAX(version),0) m FROM task_submissions WHERE task_id=?", (task_id,)
             ).fetchone()["m"] + 1
+            blocked = sorted(UNSUBMITTABLE_STATUSES)
             cursor = self.db.execute(
                 "UPDATE tasks SET status='submitted', updated_at=?, revision=revision+1"
-                " WHERE id=? AND revision=?"
-                " AND status NOT IN ('submitted','completed','cancelled','abandoned')",
-                (timestamp, task_id, expected_revision),
+                f" WHERE id=? AND revision=? AND status NOT IN ({','.join('?' * len(blocked))})",
+                (timestamp, task_id, expected_revision, *blocked),
             )
             if cursor.rowcount != 1:
                 raise Conflict("Submission conflict: the task changed before it could be submitted; reload it and try again.")

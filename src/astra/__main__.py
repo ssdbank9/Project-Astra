@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import getpass
 
-from .db import connect, database_path
+from .db import SchemaMigrationRefused, connect, database_path
 from .service import AstraService
 from .web import serve
 
@@ -18,6 +18,18 @@ def main(argv=None):
     run.add_argument("--host", default="127.0.0.1")
     run.add_argument("--port", default=8765, type=int)
     args = parser.parse_args(argv)
+    try:
+        _run(args)
+    except SchemaMigrationRefused as exc:
+        # The database cannot be upgraded as it stands; the message says what to fix.
+        raise SystemExit(str(exc)) from None
+    except RuntimeError as exc:
+        if "newer Astra version" not in str(exc):
+            raise
+        raise SystemExit(f"{exc} Upgrade Astra before opening {database_path()}.") from None
+
+
+def _run(args):
     if args.command == "init-owner":
         password = getpass.getpass("New owner password: ")
         confirmation = getpass.getpass("Confirm password: ")

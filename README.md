@@ -65,10 +65,21 @@ transactionally single-winner, and retrying an identical protected request or fi
 mark does not create duplicate queue rows or audit events. Submitting work is also
 single-winner: the version is allocated under the write lock, and a submit whose task
 was changed in the meantime (a second submit, an Owner cancel or acceptance, a
-reassignment) returns HTTP 409 instead of overwriting it. Schema 14 makes
-`(task_id, version)` unique on `task_submissions`; a database that already holds
-duplicate submission versions refuses that upgrade, lists the pairs, and changes nothing
-until they are resolved.
+reassignment, or the submitter losing collaborator or project access) returns HTTP 409
+instead of overwriting it. Schema 14 makes `(task_id, version)` unique on
+`task_submissions`. A database that already holds duplicate submission versions is
+refused before any migration step runs, whatever version it starts at, so it stays
+exactly as it was until the duplicates are resolved.
+
+If `astra serve` (or `init-owner`) stops at start-up with "Astra cannot upgrade this
+database to schema 14", the server has not started and the database is untouched. The
+message lists each affected task version with its submission ids and statuses; it
+comes from an earlier defect in which two simultaneous submissions could both get the
+same version number. To resolve it, back up `astra.sqlite3`, then for each listed task
+version keep the accepted row (the one `tasks.accepted_submission_id` or
+`final_results` refers to, marked "referenced by" in the message) and delete the other
+rows or renumber them to an unused version. Run any `DELETE` with
+`PRAGMA foreign_keys=ON` so a referenced row cannot be removed, then start Astra again.
 
 Database migrations are applied one SQL statement at a time inside a single
 `BEGIN IMMEDIATE` transaction per schema version. The schema changes and that step's
