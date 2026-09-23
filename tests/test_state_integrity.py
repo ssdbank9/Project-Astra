@@ -1279,6 +1279,53 @@ class AstraStateIntegrityTests(unittest.TestCase):
                 self.assertEqual(self._request_status(request["id"]), "rejected")
                 self.assertEqual(self._approved_event_count(request["id"], task_id=task_id), 0)
 
+    # G9G9PX (SEM-3): approving one of two identical pending requests also resolves the
+    # twin, with the same intent test a direct Owner action uses; a request with a
+    # different intent stays pending, and the twin's event names the approval.
+    def test_approval_resolves_same_intent_twin_and_leaves_other_intent_pending(self):
+        project, manager = self._intent_fixture("Twin requests")
+        second = self.service.create_user(self.owner, "twin-second@example.org", "Manager Two", "manager password safe")
+        self.service.grant_project_access(self.owner, project["id"], second["id"], "manager")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Twin"})
+        other_task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Other task"})
+
+        def request(user, task_row, status, reason):
+            return self.service.update_task(
+                user, task_row["id"],
+                {"status": status, "reason": reason, "expected_revision": task_row["revision"]},
+            )["request"]
+
+        first = request(manager, task, "cancelled", "Scope dropped")
+        twin = request(second, task, "cancelled", "No longer needed")
+        different = request(second, task, "abandoned", "Abandon instead")
+        other = request(manager, other_task, "cancelled", "Scope dropped")
+        self.assertEqual(len({first["id"], twin["id"], different["id"], other["id"]}), 4)
+
+        decided = self.service.decide_owner_action_request(self.owner, first["id"], "approved", "OWNER NOTE")
+
+        self.assertEqual(decided["request"]["status"], "approved")
+        self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], "cancelled")
+        approved_events = [
+            json.loads(event["after_json"]) for event in self.service.task_events(self.owner, task["id"])
+            if event["event_type"] == "protected_action_approved"
+        ]
+        self.assertEqual(self._request_status(first["id"]), "approved")
+        self.assertEqual(self._request_status(twin["id"]), "approved")
+        self.assertEqual(sorted(event["request_id"] for event in approved_events), sorted([first["id"], twin["id"]]))
+        self._assert_untouched(different, task_id=task["id"])
+        self._assert_untouched(other, task_id=other_task["id"])
+        pending = [
+            row["id"] for row in self.service.list_owner_action_requests(self.owner)
+            if row["task_id"] == task["id"] and row["status"] == "pending"
+        ]
+        self.assertEqual(pending, [different["id"]])
+        by_request = {event["request_id"]: event for event in approved_events}
+        self.assertEqual(by_request[twin["id"]]["approved_request_id"], first["id"])
+        self.assertEqual(by_request[twin["id"]]["resolution"], "same_intent_as_approved_request")
+        self.assertNotIn("approved_request_id", by_request[first["id"]])
+        twin_row = self.service._owner_action_request(self.owner, twin["id"])
+        self.assertEqual(twin_row["decision_reason"], "OWNER NOTE")
+
     # SRFCZD R5 (RT-2): an approval whose dispatched action fails must not leave the
     # service instance in approval mode for the next, unrelated Owner action.
     def test_failed_approval_clears_the_active_request_for_the_next_action(self):

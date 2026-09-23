@@ -50,6 +50,11 @@ reconciles the matching pending request in the same transaction. A direct Owner
 action resolves only pending requests with the same intent (for example the same
 target status, submission, proposal, hold checkpoint and owner, or closure
 residual set of task ids and statuses); every other request stays pending and untouched for an explicit decision.
+Approving a request applies the same test to the other pending requests on that task
+(or project) and action filed at the same revision: an identical twin, for example a
+second Manager's request to cancel the same task, is approved in the same transaction,
+and its `protected_action_approved` detail records `approved_request_id` and
+`resolution: same_intent_as_approved_request`; a request with a different intent stays pending.
 On approval the Owner's decision note (null when none is given) is recorded as the
 request's decision reason and on `protected_action_approved`, whose detail keeps the
 requester's reason as `request_reason`; the governed action keeps the requester's reason.

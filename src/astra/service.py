@@ -1274,44 +1274,48 @@ class AstraService:
         expected_revision: int | None = None,
         decision_reason: str = "",
     ) -> None:
-        """Resolve the active approval, or the equivalent requests a direct Owner action executed.
+        """Resolve the active approval and the equivalent requests the executed action satisfied.
 
-        Without an active approval only pending requests whose intent fields (see
-        OWNER_REQUEST_INTENT_FIELDS) match ``intent`` are resolved; any other request
-        stays pending and untouched. Callers invoke this inside the action's
+        Only pending requests whose intent fields (see OWNER_REQUEST_INTENT_FIELDS)
+        match ``intent`` are resolved; any other request stays pending and untouched.
+        An approval resolves its own request first, then (G9G9PX, SEM-3) every other
+        request this same test matches, exactly as a direct Owner action would; their
+        events name the approved request. Callers invoke this inside the action's
         transaction, so the governed state and its queue record cannot commit
         independently. An approved request records the Owner's own decision note,
         never the Manager's request reason that the governed action itself carries.
         """
         active_id = getattr(self, "_active_owner_request_id", None)
+        active_rows = []
         if active_id:
             decision_reason = getattr(self, "_active_owner_decision_reason", "")
-            rows = self.db.execute(
+            active_rows = self.db.execute(
                 "SELECT * FROM owner_action_requests WHERE id=? AND status='pending'",
                 (active_id,),
             ).fetchall()
+        if task_id is None:
+            rows = self.db.execute(
+                """SELECT * FROM owner_action_requests
+                   WHERE project_id=? AND task_id IS NULL AND action=? AND status='pending'""",
+                (project_id, action),
+            ).fetchall()
         else:
-            if task_id is None:
-                rows = self.db.execute(
-                    """SELECT * FROM owner_action_requests
-                       WHERE project_id=? AND task_id IS NULL AND action=? AND status='pending'""",
-                    (project_id, action),
-                ).fetchall()
-            else:
-                rows = self.db.execute(
-                    """SELECT * FROM owner_action_requests
-                       WHERE project_id=? AND task_id=? AND action=? AND status='pending'""",
-                    (project_id, task_id, action),
-                ).fetchall()
-                if expected_revision is not None:
-                    rows = [
-                        row for row in rows
-                        if json.loads(row["payload_json"]).get("expected_revision") == expected_revision
-                    ]
-            rows = [
-                row for row in rows
-                if self._request_intent_matches(action, json.loads(row["payload_json"]), intent)
-            ]
+            rows = self.db.execute(
+                """SELECT * FROM owner_action_requests
+                   WHERE project_id=? AND task_id=? AND action=? AND status='pending'""",
+                (project_id, task_id, action),
+            ).fetchall()
+            if expected_revision is not None:
+                rows = [
+                    row for row in rows
+                    if json.loads(row["payload_json"]).get("expected_revision") == expected_revision
+                ]
+        rows = [
+            row for row in rows
+            if row["id"] != active_id
+            and self._request_intent_matches(action, json.loads(row["payload_json"]), intent)
+        ]
+        rows = list(active_rows) + rows
         timestamp = now_text()
         decision_reason = str(decision_reason or "").strip() or None
         for row in rows:
@@ -1325,6 +1329,9 @@ class AstraService:
                 continue
             detail = {"request_id": row["id"], "action": action, "status": "approved",
                       "request_reason": row["reason"]}
+            if active_id and row["id"] != active_id:
+                detail["approved_request_id"] = active_id
+                detail["resolution"] = "same_intent_as_approved_request"
             if row["task_id"]:
                 self._event(
                     row["task_id"], actor["id"], "protected_action_approved",
