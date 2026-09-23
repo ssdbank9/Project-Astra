@@ -1233,10 +1233,12 @@ class AstraService:
         OWNER_REQUEST_INTENT_FIELDS) match ``intent`` are resolved; any other request
         stays pending and untouched. Callers invoke this inside the action's
         transaction, so the governed state and its queue record cannot commit
-        independently.
+        independently. An approved request records the Owner's own decision note,
+        never the Manager's request reason that the governed action itself carries.
         """
         active_id = getattr(self, "_active_owner_request_id", None)
         if active_id:
+            decision_reason = getattr(self, "_active_owner_decision_reason", "")
             rows = self.db.execute(
                 "SELECT * FROM owner_action_requests WHERE id=? AND status='pending'",
                 (active_id,),
@@ -1264,26 +1266,26 @@ class AstraService:
                 if self._request_intent_matches(action, json.loads(row["payload_json"]), intent)
             ]
         timestamp = now_text()
+        decision_reason = str(decision_reason or "").strip() or None
         for row in rows:
             cursor = self.db.execute(
                 """UPDATE owner_action_requests
                    SET status='approved', decided_by=?, decided_at=?, decision_reason=?
                    WHERE id=? AND status='pending'""",
-                (actor["id"], timestamp, str(decision_reason or "").strip() or None, row["id"]),
+                (actor["id"], timestamp, decision_reason, row["id"]),
             )
             if cursor.rowcount != 1:
                 continue
-            detail = {"request_id": row["id"], "action": action, "status": "approved"}
+            detail = {"request_id": row["id"], "action": action, "status": "approved",
+                      "request_reason": row["reason"]}
             if row["task_id"]:
                 self._event(
                     row["task_id"], actor["id"], "protected_action_approved",
-                    {"request_id": row["id"], "status": "pending"}, detail,
-                    str(decision_reason or "").strip() or None,
+                    {"request_id": row["id"], "status": "pending"}, detail, decision_reason,
                 )
             else:
                 self._project_event(
-                    row["project_id"], actor["id"], "protected_action_approved", detail,
-                    str(decision_reason or "").strip() or None,
+                    row["project_id"], actor["id"], "protected_action_approved", detail, decision_reason,
                 )
 
     def _assert_active_request_revision(self, task: dict) -> None:
@@ -1347,10 +1349,12 @@ class AstraService:
                     f"current revision is {task['revision']}."
                 )
         self._active_owner_request_id = request_id
+        self._active_owner_decision_reason = reason
         try:
             result = self._execute_owner_action_request(actor, request, payload, reason)
         finally:
             self._active_owner_request_id = None
+            self._active_owner_decision_reason = ""
         decided = self._owner_action_request(actor, request_id)
         if decided["status"] != "approved":
             raise RuntimeError("Approved action completed without resolving its Owner request.")

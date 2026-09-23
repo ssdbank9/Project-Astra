@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import tempfile
 import unittest
@@ -342,6 +343,79 @@ class AstraStateIntegrityTests(unittest.TestCase):
         requested = self.service.close_project(manager, close_project["id"], "finished")
         self.service.decide_owner_action_request(self.owner, requested["request"]["id"], "approved")
         self.assertEqual(self.service.get_project(self.owner, close_project["id"])["status"], "closed")
+
+    # SRFCZD R2: approving a request records the Owner's decision note as the
+    # request's decision reason and on protected_action_approved; the governed
+    # action itself still carries the Manager's reason, which is why it was asked.
+    def test_owner_approval_records_owner_decision_note_not_manager_reason(self):
+        project, manager = self._intent_fixture("Decision note")
+
+        def request_status(task):
+            return self.service.update_task(
+                manager, task["id"],
+                {"status": "cancelled", "reason": "manager reason", "expected_revision": task["revision"]},
+            )["request"]
+
+        def request_hold(task):
+            return self.service.set_on_hold(
+                manager, task["id"], "manager reason", "2027-04-01", manager["id"]
+            )["request"]
+
+        def request_reopen(task):
+            return self.service.reopen_task(manager, task["id"], "manager reason", "2027-03-01")["request"]
+
+        cases = (
+            ("update_task_status", request_status, "task_updated", False),
+            ("set_on_hold", request_hold, "task_on_hold", False),
+            ("reopen_task", request_reopen, "task_reopened", True),
+        )
+        for action, make_request, action_event, needs_completed in cases:
+            for owner_note, expected in (("OWNER NOTE", "OWNER NOTE"), ("", None), ("   ", None)):
+                with self.subTest(action=action, owner_note=owner_note):
+                    title = f"{action} {owner_note!r}"
+                    if needs_completed:
+                        task = self._completed_task(project, manager, title)
+                    else:
+                        task = self.service.create_task(
+                            self.owner,
+                            {"project_id": project["id"], "title": title, "owner_user_id": manager["id"]},
+                        )
+                    request = make_request(task)
+                    decided = self.service.decide_owner_action_request(
+                        self.owner, request["id"], "approved", owner_note
+                    )["request"]
+                    self.assertEqual(decided["status"], "approved")
+                    self.assertEqual(decided["reason"], "manager reason")
+                    self.assertEqual(decided["decision_reason"], expected)
+                    events = self.service.task_events(self.owner, task["id"])
+                    approved = [
+                        event for event in events
+                        if event["event_type"] == "protected_action_approved"
+                        and request["id"] in (event["after_json"] or "")
+                    ]
+                    self.assertEqual(len(approved), 1)
+                    self.assertEqual(approved[0]["reason"], expected)
+                    detail = json.loads(approved[0]["after_json"])
+                    self.assertEqual(detail["request_reason"], "manager reason")
+                    governed = [event for event in events if event["event_type"] == action_event]
+                    self.assertEqual(governed[-1]["reason"], "manager reason")
+
+        # Schedule approval keeps its existing proposal decision reason (the Manager's
+        # recommendation when given); the request row still records the Owner's note.
+        task = self.service.create_task(
+            self.owner,
+            {"project_id": project["id"], "title": "Schedule note", "owner_user_id": manager["id"],
+             "due_date": "2027-01-01"},
+        )
+        proposal = self.service.propose_schedule(manager, task["id"], None, "2027-02-01", "later")
+        request = self.service.approve_schedule_proposal(manager, proposal["id"], "manager reason")["request"]
+        decided = self.service.decide_owner_action_request(
+            self.owner, request["id"], "approved", "OWNER NOTE"
+        )["request"]
+        self.assertEqual(decided["decision_reason"], "OWNER NOTE")
+        self.assertEqual(
+            self.service.get_schedule_proposal(self.owner, proposal["id"])["decision_reason"], "manager reason"
+        )
 
     def test_repeated_final_result_marking_emits_only_real_state_changes(self):
         project = self.service.create_project(self.owner, "Final results")

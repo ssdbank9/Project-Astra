@@ -443,6 +443,9 @@ class AstraWebTests(unittest.TestCase):
 
         self.assertEqual(response.status, 200)
         self.assertEqual(decision["request"]["status"], "approved")
+        # SRFCZD R2: the Owner's posted note is the recorded decision reason.
+        self.assertEqual(decision["request"]["decision_reason"], "Owner agrees")
+        self.assertEqual(decision["request"]["reason"], "Manager recommends cancellation")
         _, detail = self.request("GET", f"/api/tasks/{task['id']}", cookie=owner_cookie)
         self.assertEqual(detail["task"]["status"], "cancelled")
 

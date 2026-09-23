@@ -15,7 +15,7 @@ related: []
 commits:
   - c109687a639bee150a18a72a729bd1d9393fe94a
 created-at: 2026-09-22T17:58:32Z
-updated-at: 2026-09-23T12:17:56Z
+updated-at: 2026-09-23T12:33:51Z
 claimed-by: vm-3302
 claimed-at: 2026-09-23T12:11:07Z
 updated-by: Claude
@@ -69,7 +69,8 @@ review-check: "1. cd to the repo and run: .venv/bin/python tests/run.py ; expect
   proof: Focused state-integrity suite 7/7; full tests/run.py 216/216 in 220.615s; node --check src/astra/static/app.js and git diff --check passed; exact changed-file diff reviewed.
 - [x] R1 intent-matching reconciliation
   proof: src/astra/service.py OWNER_REQUEST_INTENT_FIELDS + _request_intent_matches; 6 tests in tests/test_state_integrity.py (test_direct_*) failed 12 subcases before the fix and pass after; removing the intent filter fails 11 of them
-- [ ] R2 record the Owner decision note on approval
+- [x] R2 record the Owner decision note on approval
+  proof: src/astra/service.py decide_owner_action_request passes the Owner note to _resolve_pending_requests for the active request; tests/test_state_integrity.py::test_owner_approval_records_owner_decision_note_not_manager_reason (update_task_status, set_on_hold, reopen_task x note/empty/blank + schedule) and tests/test_web.py::test_owner_can_approve_protected_request_over_http failed 11 before and pass after; reverting the fix fails 11; full suite 227/227
 - [ ] R3 stale-check close_project approvals
 - [ ] R4 two-connection race regressions for update_task's revision predicate and the in-transaction request guards
 
@@ -79,3 +80,4 @@ review-check: "1. cd to the repo and run: .venv/bin/python tests/run.py ; expect
 - **2026-09-23 12:07 · Claude** — Review 2026-09-23 (Claude): sent back. Main defect: request reconciliation approves non-matching pending requests (see review-gaps 1). Fix plan: match on the executed intent (status/from_status, proposal_id, checkpoint, hold owner, close payload); non-matching stale requests are left pending or marked superseded, never approved; record the Owner's decision note; stale-check close_project; add two-connection race regressions for update_task's revision predicate and the in-transaction request guards. The move back to in-progress waits on Aly allowing reassignment (not_owner gate).
 - **2026-09-23 12:11 · Claude** — Moved back to in-progress 2026-09-23 after independent review (see review-gaps). Reassigned to Claude with Aly's approval in Slack (12:10 UTC). Rework is one bounded change at a time: 1) intent-matching reconciliation, 2) record the Owner decision note, 3) close_project stale check, 4) race regressions for the untested in-transaction guards.
 - **2026-09-23 12:17 · Claude** — R1 done: direct Owner actions now resolve only pending requests whose intent matches (OWNER_REQUEST_INTENT_FIELDS in service.py). Non-matching requests stay pending: owner_action_requests.status has a CHECK that excludes 'superseded', so no migration. A later approval of a stale one gets 409. Reopen compares new_due_date; hold compares checkpoint and owner; close compares exceptional and residual set, not the note. 6 new tests; they failed 12/13 before the fix.
+- **2026-09-23 12:33 · Claude** — R2 done: on approval the request row's decision_reason and the protected_action_approved event reason are now the Owner's decision note; before, every dispatched action (status, changes, reopen, hold, schedule reject, accept, close) wrote the Manager's request reason there. decision_reason is nullable, so an empty or blank Owner note is stored as NULL, never the Manager's text. The approved event detail now also carries request_reason (the requester's text), so the audit shows both. The governed action keeps the Manager's reason. Schedule approval unchanged: the proposal's own decision_reason is still the Manager's recommendation when one was given, with the Owner note only as fallback; the request row gets the Owner note.

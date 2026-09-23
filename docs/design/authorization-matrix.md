@@ -46,6 +46,9 @@ reconciles the matching pending request in the same transaction. A direct Owner
 action resolves only pending requests with the same intent (for example the same
 target status, submission, proposal, hold checkpoint and owner, or closure
 residual set); every other request stays pending and untouched for an explicit decision.
+On approval the Owner's decision note (empty when none is given) is recorded as the
+request's decision reason and on `protected_action_approved`, whose detail keeps the
+requester's reason as `request_reason`; the governed action keeps the requester's reason.
 
 An unauthorized Viewer/member or read-only Chairman attempt is rejected, audited,
 and notified to the Owner when it targets a visible record. A blocked attachment
