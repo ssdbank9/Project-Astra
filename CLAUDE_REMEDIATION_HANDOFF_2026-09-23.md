@@ -2,24 +2,199 @@
 
 ## Current state after Claude remediation (2026-09-23)
 
-This section supersedes the figures in the sections below it. Those sections are
-Codex's original handoff, kept unchanged as history. Where they disagree with
-this section (schema v13, 220 tests, 7/7 and 8/8 focused counts, tickets in
-`review`, the Windows start sequence), this section is current.
+This section supersedes every figure below it. The sections after the `---`
+line are Codex's original handoff, kept as history; where they disagree with
+this section (schema v13 or v14, 220 or 269 tests, 7/7 and 8/8 focused counts,
+tickets in `review`, open follow-ups, the Windows start sequence), this section
+is current. Short "(superseded, see top)" markers flag the history lines that
+are no longer true.
 
-### Branch and range
+### Branch, head and merge position
 
 - Repository: `https://github.com/ssdbank9/Project-Astra`
-- Branch: `codex/migration-safety-remediation`, pushed. This section was written in the commit directly on top of `d688a59`;
-  `git log -1` shows the current head.
-- Base branch: `claude/excel-import`. Merge base: `5adec82`.
-- Codex's published work ends at `0ad122e`. Claude's work is `0ad122e..HEAD`.
-- Schema target is now **v14** (`SCHEMA_VERSION = 14` in `src/astra/db.py`).
-- Not deployed. Not approved for real users. No browser acceptance was done.
+- Branch: `codex/migration-safety-remediation`, pushed. This section was
+  refreshed in the commit directly on top of `4178278`; `git log -1` shows the
+  current head.
+- Base branch: `claude/excel-import` (PR #4). Merge base: `5adec82`.
+- Codex's published work ends at `0ad122e`. Claude's work is `0ad122e..HEAD`
+  (45 commits before this refresh). The first run ended at `7334bff`; the eleven
+  follow-up tickets are `7334bff..4178278`.
+- Schema target is **v15** (`SCHEMA_VERSION = 15` in `src/astra/db.py`).
+- Not deployed. Not approved for real users. No live human browser acceptance.
 
-Commits after `0ad122e`, newest first (`git log --oneline 0ad122e..HEAD`):
+Pull requests on `main` (checked on GitHub 2026-09-23):
 
-- (this handoff commit, on top of `d688a59`) docs: durable remediation handoff after Claude review
+- PR #3 (`claude/hs3jry-followup-tickets`, tickets WT5TCK and 0RSY5C) merged
+  into `main` as `c5ac1c0`.
+- PR #2 (`claude/gantt-steps`, Gantt steps D73AQW) merged into `main` as
+  `c841526`.
+- PR #4 (`claude/excel-import` into `main`, draft, head `5adec82`) is held open
+  by Aly for more work.
+- This branch is built on `claude/excel-import`, so it cannot reach `main`
+  until PR #4 lands. Merge order: PR #4, then this branch.
+
+### Test results measured on 2026-09-23 at `4178278`
+
+- Full suite `.venv/bin/python tests/run.py`: **Ran 335 tests, OK** (305.2 s,
+  Linux container).
+- `node --check src/astra/static/app.js`: clean.
+- `.venv/bin/python -m compileall -q src tests`: clean.
+- No known flaky test. The import flake
+  (`test_commit_refuses_a_plan_that_changed_since_the_preview`) was fixed by
+  `1Z4PHZ`.
+
+### Tickets and lanes
+
+All fifteen remediation tickets are in `signoff`, waiting for Aly. None is done.
+
+Follow-up tickets (filed `d688a59`, worked `7334bff..4178278`):
+
+| Ticket | What changed | Commits | Lane |
+| --- | --- | --- | --- |
+| `DVS19Q` | `db.transaction()` rolls back and re-raises when COMMIT fails, so the connection is reusable | `65035c5`, review `8c6721d` | signoff |
+| `G9G9PX` | Approving a request also resolves same-intent twin requests at the same revision (SEM-3) | `a09a1b5`, review `9770421` | signoff |
+| `ARZWV7` | Task dialog offers only the edits the server accepts on closed and submitted tasks | `fa82cc7`, `e2648af`, review `0c567e1` | signoff |
+| `0D9Q3X` | Owner inbox shows the requested status change and reason; task and inbox reload after a 409 | `50c7d25`, `57e7fd0`, review `d016da3` | signoff |
+| `1Z4PHZ` | xlsx test fixture is byte-deterministic; the import flake is gone | `6c2efb0`, review `01975de` | signoff |
+| `67T315` | Fault-and-retry test for every legacy migration step v1-v12 (24 subtests) | `a7f045c`, `bb16341`, `52fc4fe`, review `21e2215` | signoff |
+| `39DNZT` | `migrate()` runs one ordered `MIGRATION_STEPS` registry instead of repeated version blocks | `7c0fb9e`, review `8ef8fd8` | signoff |
+| `EXEZPM` | Owner decision context passed as an explicit `OwnerDecision`; `_active_owner_request_id` removed | `d8811fc`, review `4f41795` | signoff |
+| `WNXSDA` | Schema v15 `intent_key` with a unique index on pending Owner requests; dedupe is one indexed lookup | `b037e18`, `837de3f`, review `7855260` | signoff |
+| `9MK29X` | `update_task` split into authorize, validate, route and write helpers; 19 contract tests | `0cc6d92`, review `4178278` | signoff |
+| `5GK6SB` | Submitted-task hint names the viewer's own buttons and sits under Status; one closed-status list | `831b568`, review `87430f1` | signoff |
+
+First-run tickets (before `7334bff`), still in signoff:
+
+| Ticket | What changed | Commits | Lane |
+| --- | --- | --- | --- |
+| `SRFCZD` | Task state integrity and idempotency | R1-R6 `85bcdcd`..`41dd6e2`, review `41797c8` | signoff |
+| `A836XC` | Atomic, retry-safe legacy migrations v1-v12 | Codex range to `0ad122e`, review `cba46d1`, `f005bd1` | signoff |
+| `03G8EH` | Serialized task submissions, schema v14 unique submission version | `4d18dcb`, `dfccb39`, review `fc10595` | signoff |
+| `T8WHJR` | Closed tasks immutable outside the governed reopen | `fc2a35a`, `754cae7`, review `9357f10` | signoff |
+
+Every ticket's review verdict is "Approve" from an independent reviewer; each
+ticket's `review-gaps` field has the full detail behind the summary below.
+
+Related ticket not on this branch: `T81ZV6` on `claude/review-report-2026-09-22`
+(migration atomicity, user_version re-read under the lock, concurrent-migration
+test). Its atomicity part is done here by A836XC; reconcile it when that branch
+is merged. The older `3NT40T` (Excel import hardening follow-ups) is in `todo`.
+
+### Decisions for Aly at signoff
+
+1. `WNXSDA` DoD 2 was narrowed by Claude (`837de3f`). The original text said no
+   per-row JSON filtering would remain in `_resolve_pending_requests`. The
+   semantic reconciliation test (`_request_intent_matches`,
+   `src/astra/service.py`) stays in Python by design, after an SQL pre-filter on
+   scope, action and revision: an exact key would change which requests an
+   Owner action resolves. Accept the narrowed wording, or send it back.
+2. `5GK6SB` DoD 4 is met under one reading. With the fixed test driver, the
+   unlink wiring tests fail against ARZWV7's first, buggy round (`fa82cc7`,
+   `TypeError`), not against pre-ARZWV7 code, where Remove already worked.
+   Accept that reading, or send it back.
+3. Optional follow-ups the reviews named but nobody filed: the 409 reload for
+   the criticality, schedule, parent, dependency and reviewer forms
+   (`0D9Q3X` gap 4); four `tests/test_db.py` tests that leave SQLite handles
+   open on failure (A836XC gap 4, deliberately left by `67T315`).
+4. Signoff on each of the fifteen tickets, then the merge of PR #4, then this
+   branch.
+
+### Remaining low gaps (consolidated)
+
+None is medium or higher. Details are in each ticket's `review-gaps`.
+
+- Surviving mutants, code correct but untested: rollback-suppress in
+  `db.transaction()`; G9G9PX's `expected_revision` twin filter; EXEZPM's reopen
+  twin decision; `_resolve_pending_requests` moved after commit in
+  `_write_task_update`; WNXSDA's in-step v15 probe and `status='pending'` in the
+  intent lookup; the in-step v14 re-probe; `ZIP_DEFLATED` in the fixture;
+  escaping of the server reason in the 409 note; hint moved inside the Status
+  label.
+- A 409 reloads only the Edit form, lifecycle forms and inbox decisions; the
+  criticality, schedule, parent, dependency and reviewer forms still show the
+  raw 409.
+- Inbox details: focus falls to `<body>` after Open task, save, close; a
+  close-project conflict shows two instructions; README says every request has
+  an Open task link (project requests do not); twin requests cannot be told
+  apart in the stale message.
+- The client still mirrors server status lists (for example `BACK_TO_WORK`
+  versus `MANAGER_ORDINARY_STATUSES`), and the Edit status select shows raw
+  values while the Manager request select shows labels.
+- Migration limits that predate this work: `migrate()` reads `user_version`
+  outside the lock, so two processes migrating one old file at once can fail
+  with "already exists"; files half-applied by the old `executescript` code
+  stay stuck; v15 relies on SQLite JSON1 without saying so.
+- `owner_decision` is a public keyword on the eight governed actions; an
+  in-process caller could resolve a request with it (HTTP cannot). A docstring
+  note is suggested. `BaseException` in a `transaction()` block still skips
+  rollback.
+- Submission guard compares against the revision the service loaded, since the
+  submit body carries no `expected_revision`; a sequential double submit gets
+  400 rather than 409; `idx_submissions_task` is redundant.
+- Test and doc hygiene: `test_closed_statuses_are_listed_once` matches source
+  text; the fixture test patches `time.time` process-wide; the 9MK29X
+  differential fuzz is not committed; 67T315's outcome text names a stale
+  helper; one 39DNZT test docstring overclaims; README line 98 is 128 chars.
+
+### Not verified at all
+
+- No live human browser acceptance. UI evidence is automated tests plus scripted
+  Chromium runs on synthetic data; the checklist in section 10 below still
+  applies.
+- No deployment, HTTPS or security hardening, backup and restore, load testing,
+  monitoring, multi-user or multi-process operation, password recovery, or
+  disaster recovery.
+- No private-source ingestion, notifications, real-file publication, or external AI.
+
+### Decisions Aly made in this run
+
+- SRFCZD and A836XC were reassigned to Claude.
+- Closed tasks are immutable except attachments and final-result marking; any
+  other change goes through the governed reopen.
+- Import rows that target a closed task are skipped with a warning.
+- Pushing reviewed ticket fixes to this branch was approved.
+- The ten follow-up tickets were worked (Aly: "we should fix them"); `5GK6SB`
+  came out of the ARZWV7 review.
+- PR #3 and PR #2 were merged into `main`; PR #4 is held open for more work.
+
+### How the next agent continues
+
+```bash
+cd /workspace/project-astra            # or your clone
+git fetch origin
+git switch codex/migration-safety-remediation
+git status --short --branch            # expect clean, up to date with origin
+git log --oneline -5
+.venv/bin/python tests/run.py          # expect 335 tests OK (about 5 minutes)
+jaira validate --json
+jaira resume
+jaira list --actionable --json
+```
+
+On Windows use `.venv\Scripts\python.exe tests\run.py`.
+
+Do not:
+
+- move any ticket out of `human` or `signoff`, or mark anything done;
+- force-push, rebase published commits, reset, clean or discard work;
+- run `jaira init` or use `--force`; hand-edit `.jaira/tickets/`;
+- deploy, or claim production readiness or browser acceptance;
+- set `JAIRA_USER` to Aly.
+
+Every Jaira write prints `gitref: expected 'acknowledgments', received 'packfile'`.
+That is the refs/jaira push failing; it is known and harmless because ticket
+files ride in normal commits.
+
+Nothing on this branch is waiting for an agent. The next step is Aly's signoff
+on the fifteen tickets, then PR #4, then this branch.
+
+### First run (to `7334bff`): commits, files and per-ticket tests
+
+Kept as the record of the first run. Counts and lanes in this subsection are as
+of `7334bff`; the figures above are current.
+Commits of the first run, newest first (`git log --oneline 0ad122e..7334bff`):
+
+- `7334bff` docs: durable remediation handoff after Claude review
 - `d688a59` chore: file follow-up tickets from 2026-09-23 review
 - `41797c8` chore(SRFCZD): review verdict, move to signoff
 - `41dd6e2` fix(SRFCZD): R6 refuse unapprovable terminal-to-terminal Manager requests; pin guards at the lock
@@ -51,9 +226,9 @@ Key commits:
 - 03G8EH: `4d18dcb`, `dfccb39`, `fc10595` (schema v14, unique submission
   version, refusal when duplicates already exist).
 - T8WHJR: `fc2a35a`, `754cae7`, `9357f10` (closed tasks immutable outside reopen).
-- Follow-up tickets: `d688a59`. This handoff: the commit that adds this section.
+- Follow-up tickets: `d688a59`. First-run handoff: `7334bff`.
 
-### Files changed
+#### Files changed in the first run
 
 `git diff --stat --ignore-cr-at-eol 0ad122e..d688a59` (content changes; line-ending-only
 files such as `src/astra/web.py` and `src/astra/static/app.js` drop out). The
@@ -89,7 +264,7 @@ handoff commit itself also changes this file, `CLAUDE.md` and `AGENTS.md`:
  26 files changed, 2856 insertions(+), 89 deletions(-)
 ```
 
-### Defects addressed, per ticket, with the tests that prove them
+#### First-run defects addressed, per ticket, with the tests that prove them
 
 All test names below are in `tests/`.
 
@@ -159,8 +334,8 @@ All test names below are in `tests/`.
   `test_failure_after_legacy_alters_rolls_back_to_v4_then_matches_fresh_schema`,
   `test_failure_after_v12_table_creation_rolls_back_table_and_index_then_retries`,
   `test_fresh_database_migrates_to_the_current_schema`.
-- Known limit: committed fault tests cover v1, v5 and v12 only (follow-up
-  `67T315`).
+- Known limit at the time: committed fault tests covered v1, v5 and v12 only
+  (superseded, see top: `67T315` now covers every step v1-v12).
 
 **03G8EH — serialized task submissions** (signoff)
 
@@ -197,132 +372,9 @@ All test names below are in `tests/`.
   `test_closed_row_neither_forms_false_cycles_nor_poisons_other_rows`,
   `test_import_commit_refuses_when_the_task_closed_after_the_preview`.
 
-### Test results measured on 2026-09-23 at `41dd6e2`
-
-- Full suite `.venv/bin/python tests/run.py`: **Ran 269 tests, OK** (281.9 s).
-- `test_state_integrity`: 45/45 OK. `test_web`: 45/45 OK.
-- `node --check src/astra/static/app.js`: clean.
-- `.venv/bin/python -m compileall -q src tests`: clean.
-- `git diff --check origin/claude/excel-import...HEAD`: clean at `41dd6e2`. After
-  `d688a59` it reports only "new blank line at EOF" in the ten new ticket files:
-  that is the format `jaira create` writes (older backlog tickets such as
-  `3NT40T` have it too), and ticket files are not hand-edited. Source, tests and
-  docs are clean.
-- Mutation check: moving `_assert_active_request_revision` in `accept_submission`
-  to just before its `with transaction` makes
-  `test_each_action_approval_racing_a_reject_is_refused_without_changing_the_task`
-  fail; restored afterwards.
-- Known flake: `test_import.test_commit_refuses_a_plan_that_changed_since_the_preview`
-  fails about 1 run in 10 (fixture zip timestamps; follow-up `1Z4PHZ`). It
-  passed in the run above.
-
-### Jaira state
-
-| Ticket | Title | Lane |
-| --- | --- | --- |
-| `SRFCZD` | Harden task state integrity and idempotency | signoff (waiting for Aly) |
-| `A836XC` | Make legacy SQLite migrations atomic and retry-safe | signoff (waiting for Aly) |
-| `03G8EH` | Serialize task submissions and refuse submits against a changed task | signoff (waiting for Aly) |
-| `T8WHJR` | Keep completed, cancelled and abandoned tasks immutable outside reopen | signoff (waiting for Aly) |
-
-Follow-up tickets filed from this review (backlog, assignee Claude, tag `astra`,
-not started):
-
-| Ticket | Title | Kind |
-| --- | --- | --- |
-| `DVS19Q` | db.transaction() leaves the connection inside an open transaction when COMMIT fails | confirmed defect (MIG-7), reproduced |
-| `G9G9PX` | Approving one of two identical pending Owner requests leaves the other pending | confirmed defect (SEM-3), reproduced |
-| `ARZWV7` | Hide or disable task edits the server refuses on closed and submitted tasks | UI follow-up |
-| `0D9Q3X` | Owner inbox: show the requested status and reason, and reload the task after a 409 | UI follow-up (includes SVC-5) |
-| `67T315` | Fault and retry tests for every legacy migration step v1-v12 | test gap (A836XC gap 1) |
-| `1Z4PHZ` | Make the xlsx test fixture deterministic (zip timestamps flake an import test) | test flake (IMP-8), cause confirmed |
-| `WNXSDA` | Maintainability: schema-level idempotency key and indexed lookup for pending Owner requests | maintainability |
-| `EXEZPM` | Maintainability: pass the Owner decision context explicitly instead of _active_owner_request_id | maintainability |
-| `9MK29X` | Maintainability: split AstraService.update_task into policy, validation and persistence helpers | maintainability |
-| `39DNZT` | Maintainability: replace the repeated migrate() version blocks with a step registry | maintainability |
-
-Related ticket not on this branch: `T81ZV6` on `claude/review-report-2026-09-22`
-(migration atomicity, user_version re-read under the lock, concurrent-migration
-test). Its atomicity part is done here by A836XC; reconcile it when that branch
-is merged.
-
-### Remaining gaps and unverified areas
-
-Confirmed gaps (each has a follow-up ticket above):
-
-- `db.transaction()` leaves the transaction open when COMMIT itself fails.
-- Approving one of two identical pending requests leaves the other pending (SEM-3).
-- The task dialog still offers edits and statuses the server refuses on closed
-  and submitted tasks; the Owner inbox does not show the requested status or the
-  reason; a 409 does not reload the task.
-- Migration fault tests cover v1, v5 and v12 only.
-- Import test fixture is time-dependent (one flaky test).
-- Maintainability: no schema-level idempotency key; Python-side JSON filtering of
-  requests; mutable `_active_owner_request_id`; long `update_task`; repeated
-  `migrate()` blocks.
-
-Not verified at all:
-
-- No live browser acceptance (the checklist in section 10 below still applies).
-- No deployment, HTTPS or security hardening, backup and restore, load testing,
-  monitoring, multi-user or multi-process operation, password recovery, or
-  disaster recovery.
-- No private-source ingestion, notifications, real-file publication, or external AI.
-
-### Decisions Aly made in this run
-
-- SRFCZD and A836XC were reassigned to Claude.
-- Closed tasks are immutable except attachments and final-result marking; any
-  other change goes through the governed reopen.
-- Import rows that target a closed task are skipped with a warning.
-- Pushing reviewed ticket fixes to this branch was approved.
-
-### Decisions Aly still has to make
-
-1. Signoff on each of SRFCZD, A836XC, 03G8EH and T8WHJR: accept, or send back.
-2. Whether and when to merge this branch.
-3. Merge order: PRs #3, #2 and #4 on the base side (`claude/excel-import`) come
-   first, then this branch.
-
-### How the next agent continues
-
-```bash
-cd /workspace/project-astra            # or your clone
-git fetch origin
-git switch codex/migration-safety-remediation
-git status --short --branch            # expect clean, up to date with origin
-git log --oneline -5
-.venv/bin/python tests/run.py          # expect 269 tests OK (about 5 minutes)
-jaira validate --json
-jaira resume
-jaira list --actionable --json
-```
-
-On Windows use `.venv\Scripts\python.exe tests\run.py`.
-
-Do not:
-
-- move any ticket out of `human` or `signoff`, or mark anything done;
-- force-push, rebase published commits, reset, clean or discard work;
-- run `jaira init` or use `--force`; hand-edit `.jaira/tickets/`;
-- deploy, or claim production readiness or browser acceptance;
-- set `JAIRA_USER` to Aly.
-
-Every Jaira write prints `gitref: expected 'acknowledgments', received 'packfile'`.
-That is the refs/jaira push failing; it is known and harmless because ticket
-files ride in normal commits.
-
-Pick up the follow-up tickets in this order (highest severity first):
-
-1. `DVS19Q` — a failed COMMIT leaves the connection holding the write lock.
-2. `G9G9PX` — stale duplicate requests stay in the Owner inbox.
-3. `ARZWV7` — UI offers edits the server now refuses.
-4. `0D9Q3X` — Owner decides blind; no reload after 409.
-5. `67T315` — migration regressions in v2-v4 and v6-v11 would pass the suite.
-6. `1Z4PHZ` — one import test flakes about 1 run in 10.
-7. `WNXSDA`, `EXEZPM`, `9MK29X`, then `39DNZT` (after `67T315`, so its tests
-   guard the refactor). All four are maintainability, not defects.
-8. The older `3NT40T` (Excel import hardening follow-ups, todo) is also open.
+First-run full suite at `41dd6e2`: 269 tests OK, with the import test then
+flaky about 1 run in 10 (superseded, see top: 335 tests OK, flake fixed by
+`1Z4PHZ`).
 
 ---
 
@@ -337,6 +389,8 @@ handoffs; where a branch, commit, test count, ticket state, or remediation fact
 conflicts with an older handoff, this document is newer.
 
 ## 1. Executive status
+
+(superseded, see top: schema v15, 335 tests OK, all tickets in `signoff`.)
 
 - GitHub repository: `https://github.com/ssdbank9/Project-Astra`
 - Branch to review: `codex/migration-safety-remediation`
@@ -451,7 +505,7 @@ pre-fix risk.
 | High | Repeated equivalent protected-action attempts could create duplicate Owner requests and duplicate notifications/events. | Equivalent JSON payloads were not canonically matched within the serialized write. | Protected payloads are canonicalized, searched, and inserted inside one immediate transaction. Matching pending requests are reused. `test_equivalent_protected_retries_reuse_one_pending_request_and_event` covers the retry. | Fixed; automated proof present. |
 | High | Owner requests were visible but did not have a complete approve/reject/cancel execution path or reliable reconciliation after the direct action occurred. | Queue visibility existed, while request decision and stale-state handling were incomplete. | Added Owner decision service/HTTP paths and UI controls. Approval dispatches each supported protected action; direct equivalent actions resolve matching pending requests; stale approval remains pending rather than applying against changed state. Covered by `test_owner_can_decide_requests_and_stale_approval_stays_pending` and `test_owner_approval_dispatches_every_supported_protected_action`. | Fixed for the implemented action set; see the terminal-status UX qualification below. |
 | Medium | Re-marking the same attachment as the final result could emit duplicate audit events despite no state change. | The event was not conditioned tightly enough on an actual insert/change. | Final-result event emission now occurs only when the final-result row is newly inserted. `test_repeated_final_result_marking_emits_only_real_state_changes` proves idempotency. | Fixed; automated proof present. |
-| Critical | Legacy migrations used `sqlite3.executescript` inside an outer transaction. Python's driver commits before `executescript`, so a mid-migration failure could persist partial DDL while `user_version` remained old. | Fault injection reproduced schema objects/ALTER effects surviving a failed migration. This makes retry behavior dependent on accidental partial state. | Every v1-v12 script is split only at complete SQLite statements and executed with `connection.execute` inside the existing `BEGIN IMMEDIATE`; DDL and `PRAGMA user_version` now commit or roll back together. Fault-injection tests cover v1, v5, and v12, followed by successful retries. | Fixed; automated proof present. |
+| Critical | Legacy migrations used `sqlite3.executescript` inside an outer transaction. Python's driver commits before `executescript`, so a mid-migration failure could persist partial DDL while `user_version` remained old. | Fault injection reproduced schema objects/ALTER effects surviving a failed migration. This makes retry behavior dependent on accidental partial state. | Every v1-v12 script is split only at complete SQLite statements and executed with `connection.execute` inside the existing `BEGIN IMMEDIATE`; DDL and `PRAGMA user_version` now commit or roll back together. Fault-injection tests cover v1, v5, and v12, followed by successful retries. (superseded, see top: `67T315` covers every step v1-v12.) | Fixed; automated proof present. |
 
 ### 4.2 Why Claude's earlier review had merit
 
@@ -522,6 +576,8 @@ atomicity gaps. The useful combined conclusion is therefore:
 
 ## 6. Regression and verification record
 
+(superseded, see top: 335 tests OK at `4178278`.)
+
 The latest completed verification before this handoff reported:
 
 | Check | Result |
@@ -556,6 +612,8 @@ from a terminal state.
 
 ### 7.2 Unverified adjacent concurrency risk: task submission versions
 
+(superseded, see top: reproduced and fixed by `03G8EH`, schema v14.)
+
 `AstraService.submit_task` calculates the next submission version using a
 `MAX(version) + 1` pattern and performs task-state work nearby. This path was
 observed during review but was not reproduced as a defect and was outside the
@@ -570,23 +628,26 @@ if the product permits both. Do not label this fixed without that proof.
 
 These are not demonstrated correctness failures in the remediated paths:
 
-1. `migrate()` remains a long sequence of repetitive version blocks. It is now
+1. (superseded, see top: done by `39DNZT`.) `migrate()` remains a long sequence of repetitive version blocks. It is now
    transactionally safe, but a declarative migration registry could reduce
    duplication and make fault-injection coverage easier. Refactor only with
    catalog-equivalence tests intact.
-2. Owner request reconciliation uses a service-instance
+2. (superseded, see top: `_active_owner_request_id` removed by `EXEZPM`.)
+   Owner request reconciliation uses a service-instance
    `_active_owner_request_id` context. It is safe in the current HTTP design,
    where a fresh `AstraService` is created per request, but it is brittle if the
    service is later reused by background workers or multiple commands. Passing
    an explicit request-decision context through the call stack would be clearer.
-3. `_resolve_pending_requests` filters candidates in Python and repeatedly
+3. (superseded, see top: `WNXSDA` pre-filters in SQL; the semantic intent
+   test stays in Python by design.) `_resolve_pending_requests` filters candidates in Python and repeatedly
    parses `payload_json`. The current volume is expected to be low, but a durable
    idempotency fingerprint and indexed lookup would scale better.
-4. Correctness of equivalent pending-request dedupe currently relies on
+4. (superseded, see top: `WNXSDA` schema v15 unique pending `intent_key`.)
+   Correctness of equivalent pending-request dedupe currently relies on
    `BEGIN IMMEDIATE` serializing lookup and insert. A schema-level idempotency
    key with a unique partial index for pending requests would provide a second
    enforcement layer and clearer operational diagnostics.
-5. `update_task` combines payload merge, lifecycle policy, field validation,
+5. (superseded, see top: split by `9MK29X`.) `update_task` combines payload merge, lifecycle policy, field validation,
    schedule checks, authorization, persistence, and event creation in one large
    method. Extracting small policy/normalization helpers would reduce future
    regression risk, but should not be mixed into the current correctness review.
@@ -607,6 +668,8 @@ These are not demonstrated correctness failures in the remediated paths:
   notification was authorized or performed.
 
 ## 8. Jaira state and review protocol
+
+(superseded, see top: every ticket has passed `review` and sits in `signoff`.)
 
 The tickets are intentionally in `review`, which requires an independent model
 review. Do not accept the implementer's outcome text as the verdict; inspect the
@@ -697,6 +760,8 @@ convert source inspection into a browser-acceptance claim.
 - Do not claim production readiness from these 220 local tests.
 
 ## 12. Handoff completion criteria
+
+(superseded, see top: the current baseline is 335 tests.)
 
 This remediation handoff is complete when Claude can:
 
