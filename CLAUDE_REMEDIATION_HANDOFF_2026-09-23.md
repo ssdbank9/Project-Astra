@@ -11,8 +11,9 @@ conflicts with an older handoff, this document is newer.
 
 - GitHub repository: `https://github.com/ssdbank9/Project-Astra`
 - Branch to review: `codex/migration-safety-remediation`
+- Remote branch URL: `https://github.com/ssdbank9/Project-Astra/tree/codex/migration-safety-remediation`
 - Branch point: `5adec82` from `origin/claude/excel-import`
-- Current handoff branch code head before this document: `7936824`
+- Remote review range: `origin/claude/excel-import...origin/codex/migration-safety-remediation`
 - Application status: local development only; not deployed or approved for real users
 - Database target schema: v13
 - Full automated suite at the latest verification: **220/220 passed**
@@ -52,8 +53,8 @@ jaira show A836XC --for-lane review --json
 .\.venv\Scripts\python.exe -m unittest -v tests.test_state_integrity
 .\.venv\Scripts\python.exe -m unittest -v tests.test_db
 node --check src\astra\static\app.js
-git diff --check 5adec82..3fd31ec
-git diff --stat 5adec82..3fd31ec
+git diff --check origin/claude/excel-import...HEAD
+git diff --stat origin/claude/excel-import...HEAD
 ```
 
 On Linux/macOS, replace the Python executable with `.venv/bin/python` and use
@@ -61,24 +62,35 @@ forward slashes in paths. Do not use system Python on Aly's Windows checkout;
 the project venv contains `tzdata`, and system Python can create a false due-state
 failure.
 
-Review the implementation diff in two packages:
+Review the implementation in two bounded path groups. The README is shared by
+both packages, so inspect its relevant hunks in each pass:
 
 ```powershell
-git diff 5adec82..c109687
-git diff dfdbc4f..3fd31ec
+git diff origin/claude/excel-import...HEAD -- README.md docs/design/authorization-matrix.md src/astra/service.py src/astra/static/app.js src/astra/web.py tests/test_core.py tests/test_state_integrity.py tests/test_web.py .jaira/tickets/01M3549XTPENM6MSYCG2SRFCZD-harden-task-state-integrity-and-idempotency.md
+git diff origin/claude/excel-import...HEAD -- README.md src/astra/db.py tests/test_db.py .jaira/tickets/01M3675JP3ADPB1KQ5R2A836XC-make-legacy-sqlite-migrations-atomic-and-retry-s.md
 ```
 
-The two `Record ... review handoff` commits contain Jaira ticket state/evidence;
-the two implementation commits contain the code and regression changes.
+## 3. Remote publication and local provenance
 
-## 3. Commit chain and scope
+The remote branch is the source Claude should review. It was created from
+`origin/claude/excel-import` and published through Aly's authenticated GitHub
+browser session because Windows Git Credential Manager returned
+`SEC_E_NO_CREDENTIALS` for command-line push and fetch. GitHub therefore records
+grouped web-upload commits rather than the original local implementation commit
+IDs. The final source, tests, documentation, handoff, and two Jaira ticket files
+were all published to the named branch.
 
-| Commit | Scope |
+Use the remote branch comparison above. Do not require the local-only commit IDs
+to resolve in a fresh clone. They remain useful provenance on Aly's remediation
+worktree:
+
+| Local-only commit | Scope |
 | --- | --- |
 | `c109687` | Harden task writes, lifecycle decisions, Owner requests, and final-result idempotency; add regressions and update contracts. |
 | `dfdbc4f` | Record the state-integrity package and Jaira review handoff. |
 | `3fd31ec` | Make v1-v12 SQLite migrations atomic/retry-safe; add rollback/retry/schema-equivalence regressions. |
 | `7936824` | Record the migration package and Jaira review handoff. |
+| `f3bda40` | Add this consolidated Claude handoff and link it from `CLAUDE.md`. |
 
 No existing Claude Excel-import changes were rewritten or discarded. The branch
 was created on top of `5adec82`, preserving the imported-data hardening already
@@ -121,7 +133,7 @@ atomicity gaps. The useful combined conclusion is therefore:
 
 ## 5. What changed by file
 
-### State-integrity package (`c109687`)
+### State-integrity package
 
 - `src/astra/service.py`
   - Requires and validates `expected_revision` for task edits.
@@ -150,7 +162,7 @@ atomicity gaps. The useful combined conclusion is therefore:
 - `.jaira/tickets/...SRFCZD...md`
   - Records goal, plan, DoD evidence, outcome, and current `review` lane.
 
-### Migration-safety package (`3fd31ec`)
+### Migration-safety package
 
 - `src/astra/db.py`
   - Adds `_execute_statements`, which uses `sqlite3.complete_statement` and
@@ -272,11 +284,12 @@ For each ticket:
 5. If the package is sound, move it only to the next human-controlled lane.
 6. Never move a ticket out of `human` or `signoff`; Aly makes that decision.
 
-The Jaira review preview may print a commit as `(not available locally)` even
-when normal Git can show it. That occurred in this sandbox because the Jaira
-adapter did not inherit Git's safe-directory override. Confirm commits with
-`git show c109687` and `git show 3fd31ec`; treat the preview wording as an
-environment/tooling artifact unless ordinary Git also cannot resolve them.
+The Jaira ticket outcome fields preserve the original local implementation
+commit provenance. In a fresh clone of the web-published branch those local-only
+commit IDs may appear as `(not available locally)`. This is expected: judge the
+actual remote branch diff and the ticket's goal/DoD evidence, not availability
+of the transport-time local SHA. If the branch files or tests disagree with a
+ticket claim, the branch and reproduced behavior control the verdict.
 
 The final `jaira validate --json` checked 35 tickets and reported no errors,
 departed tickets, or stranded tickets. It did report 19 pre-existing
