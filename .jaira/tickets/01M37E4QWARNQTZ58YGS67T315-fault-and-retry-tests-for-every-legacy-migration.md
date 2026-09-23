@@ -1,7 +1,7 @@
 ---
 id: 01M37E4QWARNQTZ58YGS67T315
 title: Fault and retry tests for every legacy migration step v1-v12
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -20,13 +20,17 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:28:57Z
-updated-at: 2026-09-23T17:16:59Z
+updated-at: 2026-09-23T17:30:53Z
 updated-by: Claude
 claimed-by: vm-22489
 claimed-at: 2026-09-23T16:46:25Z
 outcome-what: "Added tests/test_db.py test_every_legacy_step_rolls_back_a_mid_step_failure_and_retries_to_the_fresh_schema: for each legacy step v1-v12 (24 subTests) it builds a database at N-1, injects a fault after the step's first statement or at its PRAGMA user_version = N, asserts user_version N-1, an unchanged sqlite_master and no open transaction, then retries to v14 with a catalog equal to a fresh database. Helpers: full_catalog, deny_version_bump, stop_before_step, first_statement_then_fail. Test-only; src/ unchanged."
 outcome-why: "A836XC made steps v1-v12 atomic but only v1, v5 and v12 had committed fault tests. Restoring executescript() in 9 of the steps, or moving any step's version bump outside its transaction, left the suite green (21 of 24 such mutants passed)."
 outcome-resolves: "DoD 1-2: the new test. DoD 3: 24 mutants (executescript() per step, bump dedented per step) all fail at exactly their step, against 3/24 for the pre-ticket file; matrix in the notes. DoD 4: full suite 286 tests OK, git diff --check clean. No real defect found."
+review-summary: "Adds one test to tests/test_db.py that walks every legacy migration step v1-v12 as 24 subTests. For each step it builds a database at N-1 (stopped with a trace callback plus a write-refusing authorizer, so setup does not depend on the atomicity under test), injects a fault after the step's first statement and a fault refusing its PRAGMA user_version = N, and asserts user_version and the full sqlite_master catalog are unchanged with no open transaction. It then reopens through db.connect() in WAL and checks the database reaches SCHEMA_VERSION with a catalog identical to a fresh one and integrity_check ok. Catches every per-step executescript and moved-bump mutant on both the inline db.py and origin's 39DNZT step-registry db.py; the pre-ticket file caught 3 of 24. No false positives. No medium or higher findings."
+review-gaps: "All low. (1) CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md lines 162, 258 and the table row at 454 still say migration fault tests cover v1, v5 and v12 only; update when this lands. (2) outcome-what names the helper stop_before_step; shipped code uses the stopped_before_step(connection, version) context manager, and outcome-what omits round-1 changes (open_without_migrating, the WAL assertion, retry through db.connect(path)). Diff is right; the written account is stale. (3) Branch was not rebased onto origin's 39DNZT registry refactor (7c0fb9e, 8ef8fd8); reviewer verified merge-tree clean, test_db 18 OK, full suite 288 OK on the merged tree. Rebase before push. (4) Ticket context asked to fix four tests in tests/test_db.py that leave SQLite handles open on assertion failure (A836XC gap 4) with addCleanup; not done, deliberately, and no follow-up ticket exists. (5) Informational: SCHEMA_WRITE_ACTIONS omits DROP_*, CREATE_TRIGGER, CREATE_VIEW (no legacy step uses them; would fail loudly), and the after-first-statement fault alone does not distinguish executescript mutants; the bump fault pins the step."
+review-verdict: Approve — independent reviewer
+review-check: "Run in git-archive scratch copies; worktree untouched. git diff origin/codex/migration-safety-remediation...HEAD: only tests/test_db.py (+153, additive) and the ticket file; git diff --check clean. HEAD test_db: 16 OK, new test 20/20 repeated runs. HEAD tests/run.py: 286 OK, exit 0. Mutations on inline db.py (36): executescript in step N fails at exactly N (N=1..12, both faults); bump dedented out of transaction fails at exactly N; bump moved to top of transaction passes (no false positive). Pre-ticket test_db (01975de) catches 3/24. Merged with 39DNZT: merge-tree clean, test_db 18 OK, tests/run.py 288 OK; registry mutants (executescript in _migrate_vN, commit before bump, bump outside transaction, rollback removed from transaction()) all caught."
 ---
 
 # Fault and retry tests for every legacy migration step v1-v12
