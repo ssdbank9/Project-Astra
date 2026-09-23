@@ -1,7 +1,7 @@
 ---
 id: 01M37N65449YCBP5FX335GK6SB
 title: Polish closed/submitted task hints from ARZWV7 review
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -21,13 +21,17 @@ related: []
 follows: 01M37E16BEYFDWD0DP18ARZWV7
 commits: []
 created-at: 2026-09-23T17:32:03Z
-updated-at: 2026-09-23T17:42:42Z
+updated-at: 2026-09-23T17:52:18Z
 updated-by: Claude
 claimed-by: vm-8047
 claimed-at: 2026-09-23T17:32:33Z
-outcome-what: "Submitted-task hint names the viewer's own decision buttons (shared decisionLabels helper) and sits in the Status grid cell; buildLifecycle and render() reuse CLOSED_STATUSES; WIRING_DRIVER matches the named data-* attribute, with an open-task unlink scenario"
-outcome-why: Manager was told to use buttons they do not have; the hint was detached from the field it describes; a duplicated closed list could drift; the test driver could click the wrong Remove and pass or fail for the wrong reason
-outcome-resolves: The four low findings from the ARZWV7 independent review
+outcome-what: "Independent review approved with five low findings"
+outcome-why: Review lane outputs recorded; a person accepts in signoff
+outcome-resolves: Review of 5GK6SB
+review-summary: "Independent reviewer read the diff (commit e06df13; touches only src/astra/static/app.js, tests/test_web.py and the ticket). (1) A new decisionLabels(canDecide) helper supplies both decision-button labels; buildLifecycle and the locked-Status hint both use it, so a Manager's hint names 'Request Owner acceptance' and 'Request Owner to return changes' and an Owner's names 'Accept & complete' and 'Request changes'. (2) On a submitted task the Status label and #status-locked-hint share one grid cell, so the hint sits directly under the select; aria-disabled and aria-describedby are kept. (3) buildLifecycle's 'terminal' list and a second copy in render() now use CLOSED_STATUSES. (4) WIRING_DRIVER matches only the named data-* attribute (converted to its dataset key); a new open-task scenario checks ['data-remove-pred','t1'] sends t1->t2. No server or authorization change."
+review-gaps: "All low. (1) DoD 4 literally says the affected unlink tests 'still fail against pre-ARZWV7 app.js'; with the fixed driver they PASS against fa82cc7^ and fail only against ARZWV7 round-1 app.js (fa82cc7) with 'TypeError: Cannot set properties of null (setting textContent)'. Under the old driver they failed on fa82cc7^ only because the click hit the wrong Remove (t0->t1). Disclosed and sound, but a person should accept that reading. (2) No test catches #status-locked-hint being moved inside the Status <label> (which would join the select's accessible name); that mutation passed all 31 StatusGate/Wiring tests. (3) test_closed_statuses_are_listed_once checks exact source text, so it is brittle to spacing/rename. (4) The Manager hint reads clunkily because button names are not quoted. (5) render() at app.js:22 also switched to CLOSED_STATUSES (disclosed, same finding); the taller Status cell leaves empty space under Start date (cosmetic)."
+review-verdict: Approve — independent reviewer
+review-check: "1. cd /workspace/project-astra && /workspace/project-astra/.venv/bin/python tests/run.py  -> Ran 305 tests, OK (review run). 2. cd tests && PYTHONPATH=../src /workspace/project-astra/.venv/bin/python -m unittest -v test_web  -> 76 OK; look for test_submitted_hint_names_the_buttons_this_viewer_has, test_submitted_hint_sits_under_the_status_field, test_closed_statuses_are_listed_once, test_dependency_controls_on_an_open_task_still_work. 3. node --check src/astra/static/app.js -> no output. 4. Reviewer put the pre-change app.js back with the new tests: 6 failures, each for the intended reason (closed-list count 3 != 1; owner/manager hint text missing; hint after start_date). 5. Old WIRING_DRIVER with new app: unlink-successor-open fails (sent t0->t1). 6. Mutations: Owner labels for everyone, swapped Manager labels, dropped aria-describedby, closed literal back in render() were all caught; hint moved inside <label> was NOT caught. 7. Look at ui-shots/polish-after-{manager,owner}-submitted-{edit,lifecycle}.png: the hint sits under the Status select before Due date and names the same buttons shown under Lifecycle."
 ---
 
 # Polish closed/submitted task hints from ARZWV7 review
