@@ -1,7 +1,7 @@
 ---
 id: 01M37E0G4VCVXKJPKSSFG9G9PX
 title: Approving one of two identical pending Owner requests leaves the other pending
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -21,13 +21,22 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:26:38Z
-updated-at: 2026-09-23T16:12:16Z
+updated-at: 2026-09-23T16:22:50Z
 updated-by: Claude
 claimed-by: vm-5858
 claimed-at: 2026-09-23T16:01:57Z
-outcome-what: "Approving an Owner request now also approves every other pending request on the same task/project and action, filed at the same revision, whose intent matches per OWNER_REQUEST_INTENT_FIELDS; the twin's protected_action_approved detail records approved_request_id and resolution=same_intent_as_approved_request"
-outcome-why: "Approval mode ignored the intent and revision the callers already passed, so an identical twin stayed pending with a stale revision and could only 409; reusing the direct-action filter gives both paths one reconciliation rule"
-outcome-resolves: "SEM-3: no stale duplicate left in the Owner inbox after an approval; different-intent requests stay pending"
+outcome-what: "Independent review approved the SEM-3 twin-request reconciliation; review fields recorded"
+outcome-why: "Reviewer found the DoD met with only low-severity gaps; a person must accept it in signoff"
+outcome-resolves: "SEM-3 review complete"
+review-summary: "Before this change, approving an Owner request resolved only that one request. Now _resolve_pending_requests (src/astra/service.py) also approves every other pending request on the same task (or project) and action, filed at the same expected_revision, that passes the existing _request_intent_matches test - the same filter a direct Owner action already uses. It runs inside the action's own transaction, so a failed action rolls the twins back too. Each twin gets the Owner's decision note and a protected_action_approved event recording approved_request_id and resolution=same_intent_as_approved_request. Different-intent requests and requests on other tasks stay pending. One new regression test (test_approval_resolves_same_intent_twin_and_leaves_other_intent_pending) fails on the old code and passes now; docs/design/authorization-matrix.md gained one paragraph."
+review-gaps: |-
+  Low 1: nothing tests the expected_revision filter; replacing it with 'if True' still passes test_state_integrity and test_core. Suggested test: twin at revision N, bump task to N+1, file and approve at N+1, assert the N twin stays pending.
+  Low 2: a twin filed at an older revision is still left in the Owner inbox after an approval; approving it later gives a controlled 409 revision conflict, so the Owner rejects it by hand. The goal 'no stale duplicate left in the Owner inbox' holds only for same-revision twins.
+  Low 3: approving a reopen_task request now also approves pending update_task_status requests whose target is in REOPEN_EQUIVALENT_STATUSES (second reconciliation call in reopen_task, service.py ~1692). This matches a direct reopen but docs/design/authorization-matrix.md does not mention the cross-action case.
+  Low 4: test helper _approved_event_count (tests/test_state_integrity.py:522) matches the request id anywhere in event detail, so it double-counts once twins carry approved_request_id. Project-level twins (close_project) have no regression test; checked by hand only.
+  No live human browser acceptance of the Owner inbox was performed.
+review-verdict: Approve — independent reviewer
+review-check: "1. cd /workspace/project-astra (branch codex/migration-safety-remediation)  2. cd tests && PYTHONPATH=../src ../.venv/bin/python -m unittest -v test_state_integrity.AstraStateIntegrityTests.test_approval_resolves_same_intent_twin_and_leaves_other_intent_pending  - it reports ok  3. Optional regression proof: in a scratch copy of the tree, replace src/astra/service.py with 'git show 8c6721d:src/astra/service.py' and run the same test - it FAILS with twin 'pending' != 'approved'  4. From the repo root run .venv/bin/python tests/run.py - it ends with OK (271 tests at review time, about 5 minutes)  5. git diff --check 8c6721d..a09a1b5 prints nothing  6. By hand: start the app on 127.0.0.1, have two Managers file the same status-change request on one task at the same revision, approve one as Owner - both leave the Owner inbox; a request with a different target status stays pending."
 ---
 
 # Approving one of two identical pending Owner requests leaves the other pending
