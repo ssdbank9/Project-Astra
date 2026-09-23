@@ -3,9 +3,12 @@ import inspect
 import json
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 import threading
 import unittest
+from html.parser import HTMLParser
 from importlib.resources import files
 from pathlib import Path
 
@@ -1101,6 +1104,187 @@ class AstraStaticAssetTests(unittest.TestCase):
         self.assertIn("--step-1-edge", self.contract)
         for phrase in ("steps", "tooltip", "chevron", "Schedule table", "phone width"):
             self.assertIn(phrase, self.readme)
+
+
+# ARZWV7: renderDetail is run under node against a permissive DOM stub, so these tests read the
+# markup the dialog really renders. The server stays the authority; this pins the UX only.
+DETAIL_DRIVER = r"""
+const fs=require("fs");
+const src=fs.readFileSync(process.argv[2],"utf8");
+const cases=JSON.parse(fs.readFileSync(0,"utf8"));
+const store={};
+function el(key){
+  const t={innerHTML:"",textContent:"",value:"",style:{},dataset:{},options:[],open:false};
+  return new Proxy(t,{get(o,k){
+    if(k===Symbol.toPrimitive)return()=>"";
+    if(k in o)return o[k];
+    if(k==="querySelectorAll")return()=>[];
+    if(k==="querySelector")return s=>document.querySelector(s);
+    if(k==="classList")return{add(){},remove(){},toggle(){},contains(){return false}};
+    return function(){return el()};
+  },set(o,k,v){o[k]=v;return true}});
+}
+globalThis.document={querySelector(s){return store[s]||(store[s]=el(s))},querySelectorAll(){return[]},
+  getElementById(s){return document.querySelector("#"+s)},createElement(){return el()},addEventListener(){},body:el(),documentElement:el()};
+globalThis.window=globalThis;globalThis.addEventListener=()=>{};
+globalThis.localStorage={getItem(){return null},setItem(){}};
+globalThis.fetch=()=>new Promise(()=>{});
+globalThis.Option=function(t,v){return{text:t,value:v}};
+globalThis.location={hash:"",search:""};globalThis.history={replaceState(){}};
+const driver=`;globalThis.__render=(task)=>{renderDetail(task,[]);return document.querySelector("#detail-body").innerHTML};`;
+(0,eval)(src+driver);
+const out={};
+for(const [name,task] of Object.entries(cases))out[name]=globalThis.__render(task);
+process.stdout.write(JSON.stringify(out));
+"""
+
+OWNER_PERMS = {"can_edit_ordinary": True, "can_request_protected": False,
+               "can_decide_protected": True, "can_manage_files": True, "can_read_files": True}
+MANAGER_PERMS = {"can_edit_ordinary": True, "can_request_protected": True,
+                 "can_decide_protected": False, "can_manage_files": False, "can_read_files": True}
+
+
+def _detail_task(status, permissions):
+    submission_status = "submitted" if status == "submitted" else "accepted"
+    return {
+        "id": "t1", "title": "Synthetic task", "project_id": "p1", "project_name": "P", "status": status,
+        "revision": 3, "criticality": "high", "due_state": "closed", "start_date": "2026-09-01",
+        "due_date": "2026-10-10", "progress": None, "description": "", "owner_user_id": None,
+        "permissions": permissions, "baseline": {}, "subtasks": [], "final_results": [],
+        "dependencies": [
+            {"direction": "incoming", "predecessor_title": "Before", "successor_title": "Synthetic task",
+             "predecessor_task_id": "t0", "successor_task_id": "t1", "blocking": False},
+            {"direction": "outgoing", "predecessor_title": "Synthetic task", "successor_title": "After",
+             "predecessor_task_id": "t1", "successor_task_id": "t2", "blocking": False},
+        ],
+        "reviewers": [{"display_name": "Reviewer", "role": "approver", "user_id": "u2"}],
+        "attachments": [{"id": "a1", "display_name": "Report", "path": "C:\\x\\report.pdf", "exists": True,
+                         "added_at": "2026-09-01T00:00:00Z", "added_by_name": "Owner"}],
+        "submissions": [{"id": "s1", "version": 1, "status": submission_status, "submitted_by_name": "Owner"}],
+        "schedule_proposals": [{"id": "sp1", "status": "pending", "start_date": "2026-09-02",
+                                "due_date": "2026-10-11", "reason": "slip", "proposed_by_name": "Owner"}],
+    }
+
+
+class _StatusSelect(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.in_select, self.disabled, self.options, self.found = False, None, [], False
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "select" and a.get("name") == "status":
+            self.in_select, self.found, self.disabled = True, True, "disabled" in a
+        elif tag == "option" and self.in_select:
+            self.options.append(a.get("value"))
+            self._pending = a.get("value") is None
+
+    def handle_data(self, data):
+        if self.in_select and getattr(self, "_pending", False):
+            self.options[-1] = data.strip()
+            self._pending = False
+
+    def handle_endtag(self, tag):
+        if tag == "select":
+            self.in_select = False
+
+
+def _status_select(markup):
+    parser = _StatusSelect()
+    parser.feed(markup)
+    return parser
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to render app.js")
+class AstraDetailDialogStatusGateTests(unittest.TestCase):
+    """ARZWV7: the task dialog offers only edits the server accepts for the task's status."""
+
+    @classmethod
+    def setUpClass(cls):
+        cases = {}
+        for status in ("completed", "cancelled", "abandoned", "submitted", "in_progress"):
+            cases[f"owner-{status}"] = _detail_task(status, OWNER_PERMS)
+            cases[f"manager-{status}"] = _detail_task(status, MANAGER_PERMS)
+        with tempfile.TemporaryDirectory() as tmp:
+            driver = Path(tmp) / "driver.js"
+            driver.write_text(DETAIL_DRIVER, encoding="utf-8")
+            result = subprocess.run(
+                ["node", str(driver), str(REPO / "src" / "astra" / "static" / "app.js")],
+                input=json.dumps(cases), capture_output=True, text=True, timeout=60,
+            )
+        if result.returncode != 0:
+            raise AssertionError(result.stderr)
+        cls.html = json.loads(result.stdout)
+
+    def test_closed_task_hides_refused_forms_and_says_reopen_first(self):
+        for who in ("owner", "manager"):
+            for status in ("completed", "cancelled", "abandoned"):
+                with self.subTest(who=who, status=status):
+                    html = self.html[f"{who}-{status}"]
+                    self.assertIn("Reopen this task to change it", html)
+                    self.assertIn('class="state-note"', html)
+                    for refused in ('id="crit-form"', 'id="parent-form"', 'id="sched-form"', "data-approve-sched",
+                                    'id="add-reviewer-button"', "data-remove-reviewer-user", 'id="add-dep-select"',
+                                    'data-remove-pred="t0"', 'name="title"', 'name="due_date" type="date" value'):
+                        self.assertNotIn(refused, html, refused)
+                    # Still allowed on a closed task: reject a proposal, unlink a successor, read lists.
+                    self.assertIn("data-reject-sched", html)
+                    self.assertIn('data-remove-pred="t1"', html)
+                    self.assertIn("Reviewer · approver", html)
+                    self.assertIn("Current: <strong>high</strong>", html)
+                    self.assertIn('data-life="reopen"', html)
+                    self.assertIn('data-goto-reopen', html)
+
+    def test_closed_task_keeps_attachments_and_final_result_marking_for_the_owner(self):
+        for status in ("completed", "cancelled", "abandoned"):
+            with self.subTest(status=status):
+                html = self.html[f"owner-{status}"]
+                self.assertIn('id="attachment-form"', html)
+                self.assertIn('data-mark-fr-att="a1"', html)
+                self.assertIn('data-remove-attachment="a1"', html)
+                self.assertIn('>Reopen</button>', html)
+        self.assertIn('data-mark-fr-sub="s1"', self.html["owner-completed"])
+        self.assertIn("Request Owner reopening", self.html["manager-cancelled"])
+
+    def test_owner_on_a_closed_task_gets_no_status_select(self):
+        for status in ("completed", "cancelled", "abandoned"):
+            with self.subTest(status=status):
+                self.assertFalse(_status_select(self.html[f"owner-{status}"]).found)
+
+    def test_manager_on_a_closed_task_may_only_request_ordinary_work(self):
+        for status in ("completed", "cancelled", "abandoned"):
+            with self.subTest(status=status):
+                select = _status_select(self.html[f"manager-{status}"])
+                self.assertTrue(select.found)
+                self.assertFalse(select.disabled)
+                self.assertEqual([o for o in select.options if o], ["draft", "assigned", "in_progress", "delayed"])
+                for never in ("cancelled", "abandoned", "changes_requested", "completed", "reopened", "on_hold"):
+                    self.assertNotIn(never, select.options)
+
+    def test_submitted_task_locks_status_and_points_to_the_decision(self):
+        for who in ("owner", "manager"):
+            with self.subTest(who=who):
+                html = self.html[f"{who}-submitted"]
+                select = _status_select(html)
+                self.assertTrue(select.found)
+                self.assertTrue(select.disabled)
+                self.assertEqual(select.options, ["submitted"])
+                self.assertIn('aria-describedby="status-locked-hint"', html)
+                self.assertIn('id="status-locked-hint"', html)
+                self.assertIn("Accept or Request changes", html)
+                self.assertIn('name="title"', html)  # the other fields still save on a submitted task
+                self.assertIn('data-life="accept"', html)
+
+    def test_open_task_is_unchanged(self):
+        html = self.html["owner-in_progress"]
+        select = _status_select(html)
+        self.assertEqual(select.options, ["draft", "assigned", "in_progress", "changes_requested",
+                                          "delayed", "cancelled", "abandoned"])
+        self.assertFalse(select.disabled)
+        self.assertNotIn('class="state-note"', html)
+        for form in ('id="crit-form"', 'id="parent-form"', 'id="sched-form"', 'id="add-reviewer-button"',
+                     'id="add-dep-select"', 'id="detail-edit"'):
+            self.assertIn(form, html)
 
 
 if __name__ == "__main__":

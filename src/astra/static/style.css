@@ -162,6 +162,11 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .schedule li { padding: 7px 0; border-bottom: 1px solid #edf0f4; font-size: .86rem; }
 .schedule form { background: #f7f9fb; border: 1px solid #e6ebf1; border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
 .sched-reject-reason { padding: 4px 8px; font-size: .8rem; }
+/* ARZWV7: a closed task says once why its edit forms are gone; a locked field says why it is locked. */
+.state-note { background: #f7f9fb; border: 1px solid #e6ebf1; border-left: 4px solid var(--gray); border-radius: 8px; padding: 10px 12px; margin: 12px 0; font-size: .88rem; color: #3a465b; }
+.state-note p { margin: 0 0 4px; }
+.field-hint { color: #667085; font-size: .8rem; margin: 2px 0 8px; }
+#detail-body select:disabled { background: #f3f5f8; color: #667085; cursor: not-allowed; }
 .lifecycle form label { margin: 4px 0; }
 .reviewers .add-reviewer { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .filing-entities { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 4px; margin: 8px 0; }

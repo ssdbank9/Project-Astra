@@ -534,6 +534,9 @@ document.querySelector("#task-form").addEventListener("submit",async e=>{e.preve
 const STATUSES=["draft","assigned","in_progress","submitted","changes_requested","completed","on_hold","delayed","cancelled","abandoned","reopened"];
 const CRITICALITIES=[["","Unrated"],["critical","Critical"],["high","High"],["normal","Normal"],["low","Low"]];
 const GOVERNED=["submitted","completed","on_hold","reopened"];
+// ARZWV7: a closed task is a fixed record; a Manager may only ask to move it back into ordinary work
+// (service.py REOPEN_ONLY_STATUSES / REOPEN_EQUIVALENT_STATUSES). UI hints only — the server decides.
+const BACK_TO_WORK=["draft","assigned","in_progress","delayed"];
 const EVENT_LABELS={import_committed:"Import committed",task_created:"Task created",task_updated:"Task updated",dependency_added:"Dependency added",dependency_removed:"Dependency removed",task_submitted:"Work submitted",submission_accepted:"Submission accepted",changes_requested:"Changes requested",task_reopened:"Task reopened",task_on_hold:"Put on hold",criticality_changed:"Criticality changed",parent_changed:"Parent changed",schedule_proposed:"Schedule change proposed",schedule_revised:"Schedule revised",schedule_proposal_rejected:"Schedule proposal rejected",attachment_added:"Attachment linked",attachment_removed:"Attachment link removed"};
 const DIFF_FIELDS=[["title","Title"],["status","Status"],["criticality","Criticality"],["start_date","Start date"],["due_date","Due date"],["progress","Progress"],["description","Description"]];
 let detailTaskId=null;
@@ -565,7 +568,10 @@ async function openDetail(taskId){
 function fact(label,value){return `<div class="fact"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`}
 
 function renderDetail(task,events){
-  const editable=STATUSES.filter(s=>!GOVERNED.includes(s));
+  const perms=task.permissions||{};
+  const closed=CLOSED_STATUSES.includes(task.status),submitted=task.status==="submitted";
+  const canReopen=closed&&(perms.can_decide_protected||perms.can_request_protected);
+  const editable=submitted?[task.status]:STATUSES.filter(s=>!GOVERNED.includes(s));
   if(!editable.includes(task.status))editable.unshift(task.status);
   const opts=editable.map(s=>`<option${s===task.status?" selected":""}>${escapeHtml(s)}</option>`).join("");
   const crit=CRITICALITIES.map(([v,l])=>`<option value="${v}"${v===(task.criticality||"")?" selected":""}>${escapeHtml(l)}</option>`).join("");
@@ -579,6 +585,8 @@ function renderDetail(task,events){
   const deps=(task.dependencies||[]).map(dep=>{
     const other=dep.direction==="incoming"?dep.predecessor_title:dep.successor_title;
     const flag=dep.blocking?' <span class="blocked-text">(blocking)</span>':"";
+    // A closed task cannot lose a predecessor (it is the successor); it may still stop blocking another task.
+    if(closed&&dep.direction==="incoming")return `<li>Depends on: <strong>${escapeHtml(other)}</strong>${flag}</li>`;
     return `<li>${dep.direction==="incoming"?"Depends on":"Blocks"}: <strong>${escapeHtml(other)}</strong>${flag}
       <span class="dep-remove"><input class="dep-reason" placeholder="Reason to remove" aria-label="Reason to remove dependency">
       <button type="button" class="link" data-remove-pred="${escapeHtml(dep.predecessor_task_id)}" data-remove-succ="${escapeHtml(dep.successor_task_id)}">Remove</button></span></li>`;
@@ -587,21 +595,59 @@ function renderDetail(task,events){
   const addOptions=candidates.map(t=>`<option value="${escapeHtml(t.id)}">${escapeHtml(t.title)}</option>`).join("");
   const timeline=events.slice().reverse().map(renderEvent).join("")||"<li>No history.</li>";
   const lifecycle=buildLifecycle(task);
-  const reviewers=buildReviewers(task);
+  const reviewers=buildReviewers(task,closed);
   const attachments=buildAttachments(task);
-  const subtasks=buildSubtasks(task);
-  const schedule=buildSchedule(task);
-  const critForm=`<div class="crit-confirm"><h3>Criticality</h3>
+  const subtasks=buildSubtasks(task,closed);
+  const schedule=buildSchedule(task,closed);
+  const critForm=closed?`<div class="crit-confirm"><h3>Criticality</h3><p>Current: <strong>${escapeHtml(task.criticality||"Unrated")}</strong></p></div>`:`<div class="crit-confirm"><h3>Criticality</h3>
     <p>Current: <strong>${escapeHtml(task.criticality||"Unrated")}</strong> — changes are confirmed with a reason and recorded.</p>
     <form id="crit-form"><label>Set level<select name="criticality">${crit}</select></label>
       <label>Reason (evidence for this level)<input name="reason" required></label>
       <div class="actions"><button>Confirm criticality</button></div><div class="error" id="crit-error"></div></form></div>`;
+  const closedNote=closed?`<div class="state-note" role="note"><p><strong>${escapeHtml(statusLabel(task.status))}.</strong> Reopen this task to change it.${perms.can_manage_files?" Attachments and final results can still be added.":""}</p>
+    ${canReopen?`<button type="button" class="link" data-goto-reopen>${perms.can_decide_protected?"Go to Reopen":"Go to Request reopening"}</button>`:`<p>Ask the App Owner to reopen it.</p>`}</div>`:"";
+  const statusHint=submitted?`<p class="field-hint" id="status-locked-hint">Status is locked while this work is in review. ${perms.can_decide_protected||perms.can_request_protected?"Use Accept or Request changes under Lifecycle.":"The App Owner will Accept or Request changes."}</p>`:"";
+  const statusField=`<label>Status<select name="status"${submitted?' disabled aria-describedby="status-locked-hint"':""}>${opts}</select></label>`;
+  const backToWork=BACK_TO_WORK.map(s=>`<option value="${s}">${escapeHtml(statusLabel(s))}</option>`).join("");
+  const editForm=closed?(perms.can_edit_ordinary&&!perms.can_decide_protected?`<form id="detail-edit">
+      <h3>Request a status change</h3>
+      <p class="field-hint">Only a move back into work can be requested. The App Owner decides.</p>
+      <input name="expected_revision" type="hidden" value="${task.revision}">
+      <div class="grid">
+        <label>Status<select name="status" required><option value="">Choose a status…</option>${backToWork}</select></label>
+        <label>Reason<input name="reason" required></label>
+      </div>
+      <div class="actions"><button>Request Owner change</button></div>
+      <div class="error" id="detail-edit-error"></div>
+    </form>`:""):`<form id="detail-edit">
+      <h3>Edit</h3>
+      <input name="expected_revision" type="hidden" value="${task.revision}">
+      <label>Title<input name="title" value="${escapeHtml(task.title)}" required></label>
+      <label>Owner<select name="owner_user_id"><option value="">Unassigned</option></select></label>
+      <div class="grid">
+        ${statusField}
+        <label>Start date<input name="start_date" type="date" value="${escapeHtml(task.start_date||"")}"></label>
+        <label>Due date<input name="due_date" type="date" value="${escapeHtml(task.due_date||"")}"></label>
+        <label>Progress<input name="progress" type="number" min="0" max="100" value="${task.progress==null?"":task.progress}"></label>
+      </div>
+      ${statusHint}
+      <label>Description<textarea name="description">${escapeHtml(task.description||"")}</textarea></label>
+      <label>Reason (required for status or schedule changes)<input name="reason"></label>
+      <div class="actions"><button value="save">Save changes</button></div>
+      <div class="error" id="detail-edit-error"></div>
+    </form>`;
+  const addDep=closed?"":`<div class="add-dep">
+        <select id="add-dep-select" aria-label="Predecessor task"><option value="">Add a predecessor…</option>${addOptions}</select>
+        <button type="button" id="add-dep-button">Add predecessor</button>
+        <div class="error" id="add-dep-error"></div>
+      </div>`;
   // D73AQW: a step opened from the Gantt can return to its parent task.
   const parentLink=task.parent_task_id?`<p class="parent-link"><button type="button" class="link" data-detail="${escapeHtml(task.parent_task_id)}">◂ Parent: ${escapeHtml(task.parent_title||"parent task")}</button></p>`:"";
   document.querySelector("#detail-body").innerHTML=`
     ${parentLink}
     <h2>${escapeHtml(task.title)}</h2>
     <div class="facts">${facts}</div>
+    ${closedNote}
     <p class="desc">${escapeHtml(task.description||"No description.")}</p>
     ${buildImportedFields(task)}
     <p><button type="button" class="link" id="save-task-template">Save this task (and its subtasks) as a template</button></p>
@@ -611,34 +657,16 @@ function renderDetail(task,events){
     ${lifecycle}
     ${reviewers}
     ${attachments}
-    <form id="detail-edit">
-      <h3>Edit</h3>
-      <input name="expected_revision" type="hidden" value="${task.revision}">
-      <label>Title<input name="title" value="${escapeHtml(task.title)}" required></label>
-      <label>Owner<select name="owner_user_id"><option value="">Unassigned</option></select></label>
-      <div class="grid">
-        <label>Status<select name="status">${opts}</select></label>
-        <label>Start date<input name="start_date" type="date" value="${escapeHtml(task.start_date||"")}"></label>
-        <label>Due date<input name="due_date" type="date" value="${escapeHtml(task.due_date||"")}"></label>
-        <label>Progress<input name="progress" type="number" min="0" max="100" value="${task.progress==null?"":task.progress}"></label>
-      </div>
-      <label>Description<textarea name="description">${escapeHtml(task.description||"")}</textarea></label>
-      <label>Reason (required for status or schedule changes)<input name="reason"></label>
-      <div class="actions"><button value="save">Save changes</button></div>
-      <div class="error" id="detail-edit-error"></div>
-    </form>
+    ${editForm}
     <div class="deps">
       <h3>Dependencies</h3>
       <ul>${deps}</ul>
-      <div class="add-dep">
-        <select id="add-dep-select"><option value="">Add a predecessor…</option>${addOptions}</select>
-        <button type="button" id="add-dep-button">Add predecessor</button>
-        <div class="error" id="add-dep-error"></div>
-      </div>
+      ${addDep}
     </div>
     <div class="history"><h3>History</h3><ul>${timeline}</ul></div>`;
-  document.querySelector("#detail-edit").addEventListener("submit",submitDetailEdit);
-  document.querySelector("#add-dep-button").addEventListener("click",addDependency);
+  document.querySelector("#detail-edit")?.addEventListener("submit",submitDetailEdit);
+  document.querySelector("#add-dep-button")?.addEventListener("click",addDependency);
+  document.querySelector("#detail-body [data-goto-reopen]")?.addEventListener("click",()=>{const f=document.querySelector("#reopen-form");if(!f)return;f.scrollIntoView({behavior:"smooth",block:"center"});f.querySelector("input")?.focus({preventScroll:true})});
   document.querySelector("#detail-body").querySelectorAll("[data-remove-pred]").forEach(b=>b.addEventListener("click",removeDependency));
   fillAssignees(task.project_id,document.querySelector('#detail-edit select[name="owner_user_id"]'),task.owner_user_id);
   wireLifecycle(task);
@@ -648,22 +676,22 @@ function renderDetail(task,events){
   document.querySelectorAll("#detail-body [data-mark-fr-sub]").forEach(b=>b.addEventListener("click",()=>markFinalResult(task.id,"submission",b.dataset.markFrSub)));
   document.querySelectorAll("#detail-body [data-mark-fr-att]").forEach(b=>b.addEventListener("click",()=>markFinalResult(task.id,"attachment",b.dataset.markFrAtt)));
   document.querySelectorAll("#detail-body [data-unmark-fr]").forEach(b=>b.addEventListener("click",()=>unmarkFinalResult(task.id,b.dataset.unmarkFr)));
-  document.querySelector("#crit-form").addEventListener("submit",submitCriticality);
-  document.querySelector("#parent-form").addEventListener("submit",submitParent);
+  document.querySelector("#crit-form")?.addEventListener("submit",submitCriticality);
+  document.querySelector("#parent-form")?.addEventListener("submit",submitParent);
   document.querySelectorAll("#detail-body .subtasks [data-detail], #detail-body .parent-link [data-detail]").forEach(b=>b.addEventListener("click",()=>openDetail(b.dataset.detail)));
-  document.querySelector("#sched-form").addEventListener("submit",submitSchedule);
+  document.querySelector("#sched-form")?.addEventListener("submit",submitSchedule);
   document.querySelectorAll("#detail-body [data-approve-sched]").forEach(b=>b.addEventListener("click",()=>decideSchedule(b.dataset.approveSched,"approve")));
   document.querySelectorAll("#detail-body [data-reject-sched]").forEach(b=>b.addEventListener("click",()=>decideSchedule(b.dataset.rejectSched,"reject",b)));
 }
 
-function buildSchedule(task){
+function buildSchedule(task,closed){
   const b=task.baseline||{};
   const props=task.schedule_proposals||[];
   const pending=props.filter(p=>p.status==="pending");
   const history=props.filter(p=>p.status!=="pending");
   const canDecide=task.permissions?.can_decide_protected,canRequest=task.permissions?.can_request_protected;
   const pendingRows=pending.map(p=>{const controls=canDecide||canRequest
-    ?`<span class="dep-remove"><button type="button" class="link" data-approve-sched="${escapeHtml(p.id)}">${canDecide?"Approve":"Request Owner approval"}</button>
+    ?`<span class="dep-remove">${closed?"":`<button type="button" class="link" data-approve-sched="${escapeHtml(p.id)}">${canDecide?"Approve":"Request Owner approval"}</button>`}
       <input class="sched-reject-reason" placeholder="Reason to reject" aria-label="Reason to reject">
       <button type="button" class="link" data-reject-sched="${escapeHtml(p.id)}">${canDecide?"Reject":"Request Owner rejection"}</button></span>`
     :`<span class="blocked-text">Owner decision required</span>`;
@@ -677,10 +705,10 @@ function buildSchedule(task){
     </div>
     <h4 class="sched-h">Pending proposals</h4>
     <ul>${pendingRows}</ul>
-    <form id="sched-form"><h4 class="sched-h">Propose a schedule change</h4>
+    ${closed?`<div class="error" id="sched-error"></div>`:`<form id="sched-form"><h4 class="sched-h">Propose a schedule change</h4>
       <div class="grid"><label>New start<input name="start_date" type="date"></label><label>New due<input name="due_date" type="date"></label></div>
       <label>Reason<input name="reason" required></label>
-      <div class="actions"><button>Propose</button></div><div class="error" id="sched-error"></div></form>
+      <div class="actions"><button>Propose</button></div><div class="error" id="sched-error"></div></form>`}
     ${history.length?`<h4 class="sched-h">History</h4><ul>${historyRows}</ul>`:""}</div>`;
 }
 
@@ -704,7 +732,7 @@ async function decideSchedule(id,action,btn){
   }catch(x){if(err)err.textContent=x.message}
 }
 
-function buildSubtasks(task){
+function buildSubtasks(task,closed){
   const rollup=task.subtask_rollup||{total:0,completed:0};
   // D73AQW: same order, index and swatch as the Gantt segments, so dialog and bar agree.
   const rows=stepOrder(task.subtasks||[]).map((s,i)=>{const n=i+1;return `<li><i class="sw step-c${stepHue(n)}${n>STEP_HUES?" wrap":""}" aria-hidden="true">${n}</i> <button type="button" class="link" data-detail="${escapeHtml(s.id)}">Step ${n} · ${escapeHtml(s.title)}</button> · ${escapeHtml(statusLabel(s.status))} · ${escapeHtml(s.owner_name||"Unassigned")} · ${escapeHtml(s.start_date||"—")} → ${escapeHtml(s.due_date||"—")}${s.criticality?` · ${escapeHtml(s.criticality)}`:""}</li>`}).join("")||"<li>No subtasks.</li>";
@@ -713,8 +741,8 @@ function buildSubtasks(task){
   return `<div class="subtasks"><h3>Subtasks</h3>
     <p>Roll-up: <strong>${rollup.completed} of ${rollup.total}</strong> subtasks completed — separate from this task's own declared progress (${task.progress==null?"unset":task.progress+"%"}).</p>
     <ul>${rows}</ul>
-    <form id="parent-form"><label>Parent task<select name="parent_task_id"><option value="">No parent</option>${parentOptions}</select></label>
-      <div class="actions"><button>Set parent</button></div><div class="error" id="parent-error"></div></form></div>`;
+    ${closed?"":`<form id="parent-form"><label>Parent task<select name="parent_task_id"><option value="">No parent</option>${parentOptions}</select></label>
+      <div class="actions"><button>Set parent</button></div><div class="error" id="parent-error"></div></form>`}</div>`;
 }
 
 async function submitParent(e){
@@ -757,8 +785,8 @@ function buildLifecycle(task){
       actions+=`<form data-life="changes" data-sid="${escapeHtml(pending.id)}"><label>Reason for changes<input name="reason" required></label><div class="actions"><button>${canDecide?"Request changes":"Request Owner to return changes"}</button></div></form>`;
     }else actions+=`<p class="blocked-text">Only the App Owner can decide this submission.</p>`;
   }
-  if(task.status==="completed"&&(canDecide||canRequest)){
-    actions+=`<form data-life="reopen"><label>Reason to reopen<input name="reason" required></label><label>Revised due date<input name="new_due_date" type="date" required></label><div class="actions"><button>${canDecide?"Reopen":"Request Owner reopening"}</button></div></form>`;
+  if(terminal&&(canDecide||canRequest)){
+    actions+=`<form data-life="reopen" id="reopen-form"><label>Reason to reopen<input name="reason" required></label><label>Revised due date<input name="new_due_date" type="date" required></label><div class="actions"><button>${canDecide?"Reopen":"Request Owner reopening"}</button></div></form>`;
   }
   if(!terminal&&task.status!=="on_hold"&&(canDecide||canRequest)){
     actions+=`<form data-life="hold"><label>On-hold reason<input name="reason" required></label><label>Follow-up checkpoint<input name="checkpoint_date" type="date" required></label><label>Responsible owner<select name="owner_user_id"><option value="">Unassigned</option></select></label><div class="actions"><button>${canDecide?"Put on hold":"Request Owner hold"}</button></div></form>`;
@@ -769,9 +797,10 @@ function buildLifecycle(task){
     <div class="error" id="lifecycle-error"></div></div>`;
 }
 
-function buildReviewers(task){
+function buildReviewers(task,closed){
   const rows=(task.reviewers||[]).map(r=>`<li>${escapeHtml(r.display_name)} · ${escapeHtml(r.role)}
-    <button type="button" class="link" data-remove-reviewer-user="${escapeHtml(r.user_id)}" data-remove-reviewer-role="${escapeHtml(r.role)}">Remove</button></li>`).join("")||"<li>No reviewers or approvers.</li>";
+    ${closed?"":`<button type="button" class="link" data-remove-reviewer-user="${escapeHtml(r.user_id)}" data-remove-reviewer-role="${escapeHtml(r.role)}">Remove</button>`}</li>`).join("")||"<li>No reviewers or approvers.</li>";
+  if(closed)return `<div class="reviewers"><h3>Reviewers &amp; approvers</h3><ul>${rows}</ul></div>`;
   return `<div class="reviewers"><h3>Reviewers &amp; approvers</h3><ul>${rows}</ul>
     <div class="add-reviewer">
       <select id="reviewer-user"><option value="">Choose a person…</option></select>
@@ -850,7 +879,7 @@ async function wireAttachments(task){
 
 function wireReviewers(task){
   fillAssignees(task.project_id,document.querySelector("#reviewer-user"));
-  document.querySelector("#add-reviewer-button").addEventListener("click",async()=>{
+  document.querySelector("#add-reviewer-button")?.addEventListener("click",async()=>{
     const err=document.querySelector("#reviewer-error");err.textContent="";
     const user_id=document.querySelector("#reviewer-user").value,role=document.querySelector("#reviewer-role").value;
     try{await api("/api/task-reviewers",{method:"POST",body:JSON.stringify({task_id:task.id,user_id,role})});await openDetail(task.id)}

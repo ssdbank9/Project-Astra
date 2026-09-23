@@ -66,7 +66,12 @@ closes while such a write (or a Manager's request for one) is in flight is refus
 and an import row for a closed task is skipped with `W_CLOSED_TASK`. Attachment links and
 final-result marking stay available on closed tasks, and a closed task may still be added
 as a predecessor of an open one, or have an open task moved under or out of it as a
-subtask, since the closed task's own row does not change; task titles cannot be blanked; task
+subtask, since the closed task's own row does not change. The task dialog follows these
+rules (ARZWV7): on a closed task it drops the forms the server refuses and says "Reopen this
+task to change it", with a link to the reopen form (offered on completed, cancelled and
+abandoned tasks); a Manager there can only request a move back into draft, assigned, in
+progress or delayed; on a submitted task the Status field is locked and points to Accept or
+Request changes. This is guidance only; the server stays the authority. Task titles cannot be blanked; task
 assignees must be active and authorized on the task's project; and operations against a
 non-existent project return a controlled 404 rather than a 500. Submission acceptance is
 transactionally single-winner, and retrying an identical protected request or final-result
