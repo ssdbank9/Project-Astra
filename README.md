@@ -60,7 +60,8 @@ This first vertical slice provides:
 Integrity rules enforced at the service boundary: ordinary task updates must carry the
 task's current `expected_revision` and stale writes return HTTP 409 without changing state
 or audit history (the browser then reloads the task, or the inbox for an Owner decision, and
-says it changed since it was opened, so nobody keeps editing a stale revision); completed, cancelled, and abandoned tasks are fixed records until the
+says it changed since it was opened, with the server's reason under that line, so nobody keeps
+editing a stale revision; an inbox request that can no longer be approved says to reject or cancel it); completed, cancelled, and abandoned tasks are fixed records until the
 dedicated reopen action records a reason and a revised timeline: field edits (including a
 reason-only save), re-parenting the task, confirming its criticality, proposing or approving
 a schedule change for it, adding or removing its predecessors, and adding or removing its

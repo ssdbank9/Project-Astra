@@ -151,6 +151,9 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .people-list li { padding: 8px 0; border-bottom: 1px solid #edf0f4; font-size: .86rem; }
 /* 0D9Q3X: an Owner request says what it would change and why, in body weight under its bold title. */
 .owner-request .request-detail p { margin: 4px 0; font-weight: 400; color: #3a465b; }
+.owner-request .request-detail p.muted { color: #667085; }
+/* A conflict note: the plain line in the error colour, then the server's own reason, quieter, under it. */
+.error .conflict-detail { display: block; margin-top: 2px; color: #667085; font-size: .8rem; }
 .owner-request small { font-weight: 400; color: #667085; }
 #inbox-body > .error:empty { min-height: 0; margin-top: 0; }
 #detail-conflict { margin: 0 0 8px; }

@@ -1176,6 +1176,11 @@ INBOX_REQUESTS = [
      "project_name": "P", "requested_by_name": "Mia Manager", "requested_at": "2026-09-23T10:00:00Z",
      "reason": "", "payload": {"status": "abandoned", "expected_revision": 1}},
 ]
+CLOSE_REQUEST = [
+    {"id": "r3", "action": "close_project", "task_id": None, "task_title": None, "project_name": "Harbour works",
+     "requested_by_name": "Mia Manager", "requested_at": "2026-09-23T10:00:00Z", "reason": "All delivered",
+     "payload": {"exceptional": False}},
+]
 
 
 # ARZWV7 round 2: a stricter stub that runs the dialog's real click/submit wiring. An id selector
@@ -1193,9 +1198,13 @@ function el(init){
   t.addEventListener=(k,f)=>{(t._l[k]=t._l[k]||[]).push(f)};
   t.classList={add(){},remove(){},toggle(){},contains(){return false}};
   t.querySelector=s=>document.querySelector(s);t.querySelectorAll=s=>document.querySelectorAll(s);
+  t.insertAdjacentHTML=(pos,h)=>{t.innerHTML=pos==="afterbegin"?h+t.innerHTML:t.innerHTML+h};
   return new Proxy(t,{get(o,k){if(k===Symbol.toPrimitive)return()=>"";if(k in o)return o[k];return function(){return el()}},
     set(o,k,v){o[k]=v;if(k==="innerHTML"&&o.isBody){dyn={};nodes={}}return true}});
 }
+// 0D9Q3X: a message written as markup reads back as text, with its detail line after a newline.
+globalThis.htmlText=h=>String(h||"").replace(/<small[^>]*>/g,"\n").replace(/<[^>]+>/g,"")
+  .replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,"&");
 function bodyHtml(){return ["#detail-body","#inbox-body"].map(k=>store[k]?store[k].innerHTML:"").join("")}
 globalThis.bodyHtml=bodyHtml;
 globalThis.__resetBodies=()=>{for(const k of ["#detail-body","#inbox-body"])if(store[k])store[k].innerHTML=""};
@@ -1225,24 +1234,39 @@ globalThis.fetch=()=>new Promise(()=>{});
 globalThis.Option=function(t,v){return{text:t,value:v}};
 globalThis.FormData=function(form){return form.__entries||[]};
 globalThis.location={hash:"",search:""};globalThis.history={replaceState(){}};
-const harness=`;globalThis.__run=async(sc)=>{
+const harness=`;const realApi=api;
+// 0D9Q3X: the real api() with a fake fetch, so the HTTP status it puts on a thrown error is pinned.
+globalThis.__probeApi=async(status,body)=>{
+  const savedFetch=globalThis.fetch;globalThis.fetch=async()=>({ok:status<400,status,json:async()=>body});
+  try{return {ok:true,data:await realApi("/api/x",{method:"POST",body:"{}"})}}
+  catch(e){return {ok:false,status:e.status??null,message:e.message}}
+  finally{globalThis.fetch=savedFetch}};
+globalThis.__run=async(sc)=>{
+  if(sc.probe)return globalThis.__probeApi(sc.probe.status,sc.probe.body);
   const calls=[];
   __resetBodies();
   api=async(path,opts)=>{
     const method=opts&&opts.method;
     if(!method||method==="GET"){if(path.startsWith("/api/owner-action-requests"))calls.push({reloadInbox:true});
-      return {notifications:[],unread:0,requests:sc.requests||[]}}
+      return {notifications:[],unread:0,requests:sc.requestsAfter||sc.requests||[]}}
     calls.push({path,method,body:opts&&opts.body?JSON.parse(opts.body):null});
     if(sc.fail){const e=new Error(sc.fail);if(sc.status)e.status=sc.status;throw e}return {}};
   // 0D9Q3X: the reload re-renders, so a message written to the pre-reload node is lost here as in a browser.
-  load=async()=>{calls.push({load:true})};openDetail=async()=>{calls.push({reload:true});renderDetail(sc.task,[])};
+  load=async()=>{calls.push({load:true})};openDetail=async()=>{calls.push({reload:true});
+    if(sc.reloadFails){document.querySelector("#detail-body").innerHTML='<p class="error">Task not found.</p>';return null}
+    renderDetail(sc.taskAfter||sc.task,[]);return sc.taskAfter||sc.task};
   globalThis.prompt=()=>sc.prompt??"";globalThis.alert=m=>{calls.push({alert:m})};
   globalThis.__reason=sc.reason||"";
-  if(sc.requests){state.user={global_role:"owner"};renderInbox([],sc.requests)}
+  if(sc.requests){state.user={global_role:"owner"};state.loads=1;renderInbox([],sc.requests)}
   else{detailTaskId=sc.task.id;renderDetail(sc.task,[])}
   const pick=sc.click||sc.submitAt;
   const target=pick?document.querySelectorAll("["+pick[0]+"]").find(n=>Object.values(n.dataset).includes(pick[1]))
     :document.querySelector(sc.submit||sc.button);
+  if(sc.closeDetail){ // Close on a task opened from the inbox; loadsSince says whether anything was saved meanwhile
+    const inbox=document.querySelector("#inbox-dialog");inbox.open=true;state.loads+=sc.closeDetail.loadsSince;calls.length=0;
+    const handlers=document.querySelector("#detail-dialog")._l.close||[];await Promise.all(handlers.map(f=>f()));
+    inbox.open=false;return {calls,threw:null,handlers:handlers.length,messages:{}};
+  }
   if(!target)return {missing:true};
   await new Promise(r=>setTimeout(r,0));calls.length=0;
   if(sc.entries)target.__entries=sc.entries;
@@ -1250,7 +1274,7 @@ const harness=`;globalThis.__run=async(sc)=>{
   let threw=null;
   try{await Promise.all(handlers.map(f=>f({target,preventDefault(){}})))}catch(e){threw=String(e)}
   const messages={};
-  for(const m of bodyHtml().matchAll(/id="([\\w-]*error)"/g)){const n=document.querySelector("#"+m[1]);if(n&&n.textContent)messages[m[1]]=n.textContent}
+  for(const m of bodyHtml().matchAll(/id="([\\w-]*(?:error|conflict))"/g)){const n=document.querySelector("#"+m[1]);const t=n&&(n.textContent||htmlText(n.innerHTML));if(t)messages[m[1]]=t}
   return {calls,threw,handlers:handlers.length,messages,html:sc.requests?bodyHtml():undefined};
 };`;
 (0,eval)(src+harness);
@@ -1431,6 +1455,25 @@ class AstraDetailDialogWiringTests(unittest.TestCase):
                                         "fail": "Task revision conflict: request expected 1, current revision is 2."},
             "inbox-decision-refused": {"requests": INBOX_REQUESTS, "click": ["data-request-decision", "approved"],
                                        "prompt": "ok", "status": 400, "fail": "Owner cannot do that."},
+            # 0D9Q3X round 2: the plain line names what to do; the server's reason follows it.
+            "inbox-decision-conflict-gone": {"requests": INBOX_REQUESTS, "requestsAfter": INBOX_REQUESTS[1:],
+                                             "click": ["data-request-decision", "approved"], "prompt": "ok",
+                                             "status": 409,
+                                             "fail": "Owner-action request conflict: this request has already been decided."},
+            "inbox-close-project-conflict": {"requests": CLOSE_REQUEST, "click": ["data-request-decision", "approved"],
+                                             "prompt": "ok", "status": 409,
+                                             "fail": "Project closure conflict: the project's open work changed since "
+                                                     "this close was requested; review and decide again."},
+            "submit-conflict-now-closed": {"task": owner_open, "taskAfter": _detail_task("cancelled", OWNER_PERMS),
+                                           "submitAt": ["data-life", "submit"], "status": 409,
+                                           "fail": "Task revision conflict.", "entries": [["note", "done"]]},
+            "save-conflict-reload-fails": {"task": owner_open, "submit": "#detail-edit", "status": 409,
+                                           "reloadFails": True, "fail": "Submission conflict: your access changed.",
+                                           "entries": [["expected_revision", "3"], ["title", "Renamed"]]},
+            "api-409": {"probe": {"status": 409, "body": {"error": "Task revision conflict."}}},
+            "api-ok": {"probe": {"status": 200, "body": {"task": {"id": "t1"}}}},
+            "close-task-after-save": {"requests": INBOX_REQUESTS, "closeDetail": {"loadsSince": 1}},
+            "close-task-unchanged": {"requests": INBOX_REQUESTS, "closeDetail": {"loadsSince": 0}},
         }
         with tempfile.TemporaryDirectory() as tmp:
             driver = Path(tmp) / "wiring.js"
@@ -1495,6 +1538,57 @@ class AstraDetailDialogWiringTests(unittest.TestCase):
         self.assertIn({"reload": True}, run["calls"])
         self.assertIn(CONFLICT_TEXT, run["messages"].get("lifecycle-error", ""))
 
+    def test_a_conflict_keeps_the_servers_reason_under_the_plain_line(self):
+        self.assertIn(".error .conflict-detail { display: block;", (STATIC / "style.css").read_text(encoding="utf-8"))
+        message = self._ran("save-conflict")["messages"]["detail-edit-error"]
+        self.assertEqual(message.split("\n"), [
+            "This task changed since you opened it, so nothing was saved. It now shows the latest version; "
+            "check it and try again.",
+            "Task revision conflict: expected 3, current revision is 4."])
+
+    def test_a_conflict_that_leaves_the_task_read_only_does_not_say_try_again(self):
+        message = self._ran("submit-conflict-now-closed")["messages"].get("lifecycle-error", "")
+        self.assertIn("It is now Cancelled; this is the latest version.", message)
+        self.assertNotIn("try again", message)
+        self.assertIn("Task revision conflict.", message)
+
+    def test_a_conflict_whose_reload_fails_does_not_claim_the_latest_is_shown(self):
+        run = self._ran("save-conflict-reload-fails")
+        message = run["messages"].get("detail-conflict", "")
+        self.assertIn("It could not be reloaded.", message)
+        self.assertNotIn("latest version", message)
+        self.assertIn("Submission conflict: your access changed.", message)
+
+    def test_a_stale_request_still_listed_says_reject_or_cancel_it(self):
+        message = self._ran("inbox-decision-conflict")["messages"]["inbox-error"]
+        first, detail = message.split("\n")
+        self.assertIn("Status change · Vendor shortlist", first)
+        self.assertIn("can no longer be approved", first)
+        self.assertIn("Reject or cancel it.", first)
+        self.assertEqual(detail, "Task revision conflict: request expected 1, current revision is 2.")
+
+    def test_a_request_decided_elsewhere_says_nothing_was_decided(self):
+        message = self._ran("inbox-decision-conflict-gone")["messages"]["inbox-error"]
+        self.assertIn("nothing was decided", message)
+        self.assertNotIn("Reject or cancel", message)
+        self.assertIn("this request has already been decided", message)
+
+    def test_a_project_close_conflict_keeps_its_reason_and_does_not_mention_a_task(self):
+        run = self._ran("inbox-close-project-conflict")
+        message = run["messages"]["inbox-error"]
+        self.assertIn("Close project · Harbour works", message)
+        self.assertIn("the project's open work changed since this close was requested", message)
+        self.assertNotIn("task", message.split("\n")[0].lower())
+        self.assertNotIn("data-detail=", run["html"])  # no Open task link on a project request
+
+    def test_api_puts_the_http_status_on_a_thrown_error(self):
+        self.assertEqual(self.out["api-409"], {"ok": False, "status": 409, "message": "Task revision conflict."})
+        self.assertEqual(self.out["api-ok"], {"ok": True, "data": {"task": {"id": "t1"}}})
+
+    def test_closing_a_task_opened_from_the_inbox_refreshes_the_inbox_only_after_a_save(self):
+        self.assertIn({"reloadInbox": True}, self._ran("close-task-after-save")["calls"])
+        self.assertNotIn({"reloadInbox": True}, self._ran("close-task-unchanged")["calls"])
+
     def test_any_other_refusal_keeps_the_form_and_the_servers_message(self):
         run = self._ran("save-refused")
         self.assertNotIn({"reload": True}, run["calls"])
@@ -1506,13 +1600,17 @@ class AstraDetailDialogWiringTests(unittest.TestCase):
         self.assertIn({"load": True}, run["calls"])
         self.assertIn({"reloadInbox": True}, run["calls"])
         self.assertFalse([c for c in run["calls"] if "alert" in c])
-        self.assertIn("changed since you opened it", run["messages"].get("inbox-error", ""))
+        self.assertIn("can no longer be approved", run["messages"].get("inbox-error", ""))
 
     def test_a_refused_inbox_decision_shows_the_reason_inline(self):
         run = self._ran("inbox-decision-refused")
         self.assertNotIn({"reloadInbox": True}, run["calls"])
         self.assertFalse([c for c in run["calls"] if "alert" in c])
         self.assertEqual(run["messages"].get("inbox-error"), "Owner cannot do that.")
+
+    def test_no_reason_given_is_muted_inside_a_request(self):
+        css = (STATIC / "style.css").read_text(encoding="utf-8")
+        self.assertIn(".owner-request .request-detail p.muted { color: #667085; }", css)
 
     def test_inbox_request_shows_target_status_from_status_and_reason_escaped(self):
         html = self._ran("inbox-decision-refused")["html"]
