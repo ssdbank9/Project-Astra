@@ -21,7 +21,8 @@ This first vertical slice provides:
 - a governed work lifecycle: submissions are recorded and only the App Owner decides the
   protected actions — accept, request changes, reopen, hold, close, and schedule proposal
   decisions; an eligible project manager or designated approver may request them, which
-  records an Owner request without changing live state; an accepted version is immutable
+  records one idempotent Owner request without changing live state; the Owner can approve,
+  reject, or cancel that request from **Inbox — Needs action**; an accepted version is immutable
   and can only be superseded after an explicit reopen with a revised timeline; on-hold work
   requires a reason plus a mandatory follow-up checkpoint; and project closure is a separate
   App Owner-only event, with exceptional closure preserving a residual-work snapshot rather
@@ -54,9 +55,21 @@ This first vertical slice provides:
   transactional commit that creates or updates tasks by Import Key, never deletes, records
   audit events and stores a downloadable report (see `docs/design/excel-import.md`).
 
-Integrity rules enforced at the service boundary: task titles cannot be blanked on
-update, task assignees must be active and authorized on the task's project, and
-operations against a non-existent project return a controlled 404 rather than a 500.
+Integrity rules enforced at the service boundary: ordinary task updates must carry the
+task's current `expected_revision` and stale writes return HTTP 409 without changing state
+or audit history; completed, cancelled, and abandoned tasks are immutable until the
+dedicated reopen action records a revised timeline; task titles cannot be blanked; task
+assignees must be active and authorized on the task's project; and operations against a
+non-existent project return a controlled 404 rather than a 500. Submission acceptance is
+transactionally single-winner, and retrying an identical protected request or final-result
+mark does not create duplicate queue rows or audit events.
+
+Database migrations are applied one SQL statement at a time inside a single
+`BEGIN IMMEDIATE` transaction per schema version. The schema changes and that step's
+`PRAGMA user_version` update therefore commit together or roll back together; a failed
+or interrupted step can be retried without retaining only its earlier tables, indexes,
+or columns. Regression tests exercise fresh creation, legacy upgrades, injected DDL
+failures, retry, and equivalence between upgraded and freshly created schemas.
 
 Sign-in protection: repeated failed logins for an email are throttled (5 failures in
 15 minutes returns HTTP 429 until the window passes); a successful login clears that

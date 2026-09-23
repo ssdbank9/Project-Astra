@@ -1,5 +1,11 @@
 # Astra repository working instructions
 
+> **Current remediation handoff:** Read
+> [`CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md`](CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md)
+> before reviewing or changing the state-integrity and migration-safety branch.
+> It contains the current branch, commits, 220-test evidence, combined
+> adversarial findings, remaining risks, and Jaira review procedure.
+
 - Treat this standalone repository as the Git source of truth. Work on a named
   branch, keep commits scoped, and preserve unrelated work.
 - Read `CLAUDE_CODE_HANDOFF_2026-09-21.md` and
