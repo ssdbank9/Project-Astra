@@ -1326,9 +1326,12 @@ class AstraService:
                 "SELECT * FROM owner_action_requests WHERE id=? AND status='pending'",
                 (active_id,),
             ).fetchall()
-        # Scope, action and revision are indexed columns (schema 15); the intent test
-        # below is semantic (absent fields, sets of accepted values, residual work) and
-        # stays in Python.
+        # Scope, action and revision are indexed columns (schema 15). The intent test
+        # below stays in Python by design: it is semantic, not an exact match (fields
+        # absent from older payloads are skipped, a frozenset intent accepts any member,
+        # residual_work items without a status match any status, and it spans
+        # requesters), so an exact key such as intent_key would change which requests
+        # an Owner action resolves.
         query = (
             "SELECT * FROM owner_action_requests"
             " WHERE project_id=? AND task_id IS ? AND action=? AND status='pending'"
