@@ -1,7 +1,7 @@
 ---
 id: 01M2JXM4NWFWH5J0BYJ35WZ4A8
 title: Project schedule dates with change history
-status: review
+status: signoff
 ready: true
 creator: Aly Jafferani
 assignee: Claude
@@ -23,7 +23,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T16:15:27Z
-updated-at: 2026-09-24T06:27:06Z
+updated-at: 2026-09-24T06:33:24Z
 claimed-by: vm-21109
 claimed-at: 2026-09-24T06:15:34Z
 updated-by: Claude
@@ -31,62 +31,10 @@ question: "Confirm: is project schedule editing in the People/admin config panel
 outcome-what: "Rework after review send-back: added GET /api/projects/{id}/events (reuses service.project_events, gated by can_view_project) and a Project history dialog (toolbar button when one project is selected) that lists project events newest first, rendering schedule changes as Start/Target old -> new with actor and reason; moved the old-date read inside the write transaction in set_project_schedule; added 6 tests (3 core, 1 HTTP, 2 static UI) and tightened test_project_schedule_over_http to read the audit row back; README documents the feature."
 outcome-why: "Review verdict 'send back' (gaps 1-4): nothing failed if the authorization check was deleted or before/after swapped, the HTTP test never read the audit row, and no user could see a project date change. Gap 5 (stale 'before' under concurrent edits) was cheap to close. Aly approved reassignment and the fix (Slack ts 1790228901.999149)."
 outcome-resolves: "DoD 1: editable dates, reason required, one project_events row with actor/before/after/reason (pinned by test_project_schedule_audit_row_records_actor_before_after_and_reason), history visible via GET /api/projects/{id}/events and the Project history dialog, task date log cited and tested. DoD 2: auth + audit-content tests at service and HTTP level; fault injection (guard removed, before/after swapped) now fails them. DoD 3: members incl. viewers read history (200), non-members 403; before/after screenshots taken on 127.0.0.1. Full suite 357 OK, node --check, compileall, git diff --check clean."
-review-summary: |-
-  What shipped (read from the code, since there is no diff):
-  (1) Migration v11 (src/astra/db.py _migrate_v11) adds nullable projects.start_date and projects.target_date.
-  (2) AstraService.set_project_schedule (src/astra/service.py:418):
-  - checks can_manage_project, so only the owner or a project manager can change dates;
-  - parses dates with date.fromisoformat and rejects a target earlier than the start;
-  - rejects a no-op change and requires a non-blank reason;
-  - in one BEGIN IMMEDIATE transaction, updates both columns and writes a project_events row. That row has event_type project_schedule_changed, actor_user_id = the actor, reason, and detail_json {before:{start,target}, after:{start,target}}.
-  (3) POST /api/projects/{id}/schedule (src/astra/web.py:237) calls it. Errors map to 403 (Forbidden), 400 (ValueError) and 404 (KeyError).
-  (4) UI: start/target date inputs and a reason field in the People/admin project block (app.js:1119-1137).
-  (5) Gantt start/target markers (app.js:131-151): dashed lines plus escaped labels, scaled into the date range, prefixed with the project name when several projects are shown.
-  (6) Tests:
-  - test_core: test_project_schedule_change_is_logged, test_project_schedule_requires_reason, test_project_target_cannot_precede_start, test_task_date_change_is_logged_with_before_and_after, test_list_projects_exposes_schedule_dates_for_gantt_markers;
-  - test_web: test_project_schedule_over_http.
-  Task date logging already existed (update_task writes task_updated with before/after JSON and a reason) and is now covered by a test.
-  What I checked myself:
-  - Full suite at 1c45904: 335 tests OK.
-  - A probe script confirmed: a viewer or non-member gets Forbidden; a manager can set dates and the row records that manager's id, the reason and the right before/after; a bad date or an unknown project fails in a controlled way.
-review-gaps: |-
-  1. MEDIUM. Nothing in the suite covers authorization. I deleted the can_manage_project check from set_project_schedule in a scratch copy and all 335 tests still passed. The code gates correctly today (probe: viewer and outsider get Forbidden), but no test stops a regression on this mutating endpoint.
-  2. MEDIUM. The tests do not check the audit row's content. test_project_schedule_change_is_logged only checks that "2026-06-30" appears somewhere in detail_json, and that there are two events. Swapping before and after in the code passed every schedule test. Nothing asserts actor_user_id; the actor-is-None mutation was caught only by the NOT NULL constraint. The DoD asks that the audit row capture actor + old + new + reason, and asks for tests of it.
-  3. MEDIUM. The HTTP test does not check the audit row. test_project_schedule_over_http checks the 200 response and the 400 when the reason is missing, but never reads the project_events row. The DoD says the HTTP tests cover the change "+ its audit row".
-  4. MEDIUM. "The change is visible in the project's history" holds only at the service layer. AstraService.project_events() exists, but no HTTP route serves it (web.py has /api/tasks/{id}/events only) and no UI shows it. No user can see a project date change after it is made. app.js:1364 also tells users "Every change is ... in the project activity", and that view does not exist.
-  5. LOW. set_project_schedule reads the old values through get_project before BEGIN IMMEDIATE. Two concurrent edits can both record the same "before". The saved dates end up correct, but the audit trail can misstate one transition.
-  6. LOW. The outcome fields describe only the Gantt-marker follow-up, not the core schedule and audit work. The markers have no automated rendering test (the implementer noted "visual pass pending") and I did not open a browser either.
-  7. INFO. Closed projects accept schedule changes. This matches the budget and primary-entity setters and is not in the DoD.
-review-verdict: |-
-  Send back.
-  The behaviour is correct:
-  - the dates are editable;
-  - a reason is required;
-  - one project_events row records the actor, before, after and reason, in one transaction;
-  - authorization is enforced;
-  - errors are controlled;
-  - the task date log is cited and tested;
-  - the suite is green (335).
-  The DoD is not fully met on two points:
-  - The required tests do not pin the audit row or access control. Swapping before/after survives the schedule tests, and removing the auth check survives the whole suite. The HTTP test never checks the audit row.
-  - The "visible in the project's history" item has no user-facing surface.
-  To fix:
-  (a) In test_project_schedule_change_is_logged, assert actor_user_id, the reason, and parsed before/after on both changes.
-  (b) Add a test that a viewer and a non-member get Forbidden (service) and 403 (HTTP), and that a manager succeeds.
-  (c) In test_project_schedule_over_http, read the project_events row back and check it.
-  (d) Either add GET /api/projects/{id}/events (gated by can_view_project through project_events) and a small history list in the UI, or have Aly confirm in writing that service-level history meets "visible".
-  Optionally, move the old-value read inside the transaction.
-  I am confident in the gaps above. The marker rendering was not checked visually.
-review-check: |-
-  1. cd /workspace/project-astra
-  2. .venv/bin/python -m unittest -k schedule tests.test_core tests.test_web. Expect: 13 tests, OK.
-  3. .venv/bin/python -m astra (or however you normally start Astra), log in as the owner and open People. Pick a project and set Project start 2026-03-01 and Project target 2026-06-30.
-  4. Click "Save project dates" with the Reason box empty. Expect the red message "A reason is required to change the project schedule."
-  5. Type a reason and save again. Expect "Saved and logged.".
-  6. Open the Gantt for that project. Expect dashed Start and Target lines with labels at those dates.
-  7. Look for somewhere in the app that shows the project's change history. Expect: there is none (this is gap 4).
-  8. To see the log row, run: sqlite3 <your astra db> "select event_type, actor_user_id, reason, detail_json from project_events where event_type='project_schedule_changed' order by occurred_at desc limit 1;". Expect your user id, your reason, and before/after JSON.
-  9. To confirm gap 1: in a scratch copy, delete the two can_manage_project lines at the top of set_project_schedule in src/astra/service.py, then run tests/run.py. Expect all tests still pass.
+review-summary: "Adds GET /api/projects/{id}/events (web.py, reusing service.project_events, gated by can_view_project) and a Project history toolbar button and dialog, shown when one project is selected, listing project events newest first with actor, reason and Start/Target old-to-new. The old-date read now happens inside the write transaction. Six tests pin authorization for the change (403 for viewers and non-members) and the history read (403 for non-members), and the full audit row (actor, before, after, reason) at service and HTTP level. Full suite 357 OK; 7 of 8 injected faults caught."
+review-gaps: "(1) Low: GET /api/projects/{id}/events returns every project event kind to anyone who can view the project, including pending close_project owner-request payloads and reasons, protected_action_blocked payloads, and import_committed metadata that list_owner_action_requests and list_imports keep from viewers. Task history already has the same exposure. Aly to decide: accept, or filter non-managers to project_schedule_changed and project_closed. (2) Low: PROJECT_EVENT_LABELS in app.js lacks protected_action_requested (raw type shown); dialog intro says only date changes are logged but the list shows other kinds. (3) Low: at 1280px the toolbar does not wrap, so the Project history button is off-screen and its label clips; toolbar before/after screenshots do not show the button (pre-existing layout issue). (4) Low: UI tests only check strings in app.js; removing .reverse() (newest-first order) is not caught. (5) Info: branch conflicted with origin in tests/test_web.py; rebase needed. (6) Cosmetic: three blank lines before class AstraProjectHistoryUiTests."
+review-verdict: Approve — independent reviewer
+review-check: "Full suite tests/run.py: 357 tests OK (187s), merge-base 351. No test removed, loosened or skipped. node --check app.js and git diff --check clean. New tests on old src: 4 of 9 fail as expected. Mutations M1-M7 (guard removed, before/after swapped, get_project gate removed, guard weakened to can_view_project, no reason stored, web ignores user, reason optional) all caught; M8 (drop .reverse()) not caught. Auth probe: viewer 200, outsider 403, anonymous 401/403. Screenshots scratchpad/ui-shots/5WZ4A8-*.png present. git merge-tree vs origin showed a tests/test_web.py conflict."
 ---
 
 # Project schedule dates with change history
@@ -124,3 +72,4 @@ review-check: |-
 - **2026-09-24 05:33 · Claude** — Independent review verdict: send back. Recorded by Claude in review-summary/gaps/verdict/check. Why: no test covers authorization or the audit row contents; project history is not visible via HTTP or UI. Left in review because the assignee is Aly Jafferani; moving it to in-progress needs Aly to move it or approve reassignment. Any rework commit must name 5WZ4A8.
 - **2026-09-24 06:15 · Claude** — Reassigned to Claude with Aly Jafferani's approval (Slack thread 1790160392.461299, message ts 1790228901.999149, 2026-09-24 05:48 UTC: 'Yes please fix them'). Reworking review-gaps 1-4 (and 5/6 where cheap).
 - **2026-09-24 06:22 · Claude** — Rework findings the repo does not say: (1) Fault injection confirmed the new tests bite: deleting the can_manage_project guard in set_project_schedule now fails test_project_schedule_change_requires_manage_access + test_project_schedule_and_history_authorization_over_http; swapping before/after fails test_project_schedule_audit_row_records_actor_before_after_and_reason (outputs kept in session scratchpad 5wz-mutA/B.txt). (2) GET /api/projects/{id}/events reuses service.project_events, which gates via get_project -> can_view_project (owner, chairman, any member incl. viewer). It returns ALL project_events kinds, not only schedule changes: project_closed, import_committed, protected_action_blocked/approved/rejected/cancelled. That is deliberate (it is the project's history; the import-done copy in app.js already promised 'project activity') but a viewer can therefore see blocked-attempt rows for the project; flag to Aly if that is unwanted. (3) The CSP (web.py style-src 'self') blocks inline style= attributes, so the many style="color:#667085;font-size:12px" hints in app.js render unstyled — use existing classes (.muted) instead; I did. Pre-existing, not fixed here. (4) The toolbar does not wrap at 1280px, so the right-hand buttons (incl. Project history) are squeezed/off-screen until scrolled — pre-existing layout issue, not fixed. (5) Dev servers on 8791/8792 collided with other tracks' servers; use a high random port for screenshots. (6) Gap 5 fixed: old dates are now read inside BEGIN IMMEDIATE; the no-op and reason checks moved inside and roll back.
+- **2026-09-24 06:33 · Claude** — Second independent review: approve with low findings; moved to signoff. The first round's send-back review fields were overwritten, not appended; they remain in git history at 5ea33b9 and in the 05:33 note. Open decision for Aly at signoff: GET /api/projects/{id}/events shows all project event kinds (owner-request payloads/reasons, import metadata) to viewers; accept, or filter non-managers to project_schedule_changed and project_closed.
