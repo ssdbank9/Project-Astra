@@ -53,6 +53,10 @@ This first vertical slice provides:
   a `+N` disclosure for steps not drawn at this scale, an "n steps need dates" chip, a dashed
   extension where a step runs past its parent's dates, and a Schedule table twin with the
   same rows as text, which is the default at phone width;
+- a final-results repository: the App Owner marks an accepted submission or an attachment
+  by hand (acceptance alone adds nothing), and the Final results dialog filters by project,
+  entity, type, marked date (from/to, whole days in UTC, both ends inclusive) and a search,
+  with Export CSV using the same filters;
 - scoped search and CSV/JSON export of the current dashboard view and of final results: rows
   are limited to the projects the user may see, the CSV starts with its header row, the
   download filename carries the as-of time and the active filters

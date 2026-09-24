@@ -1610,6 +1610,55 @@ class AstraCoreTests(unittest.TestCase):
         only_attachments = self.service.list_final_results(self.owner, {"type": "attachment"})
         self.assertEqual([r["source_type"] for r in only_attachments], ["attachment"])
 
+    def _final_results_fixture(self):
+        # CS93C6 review gap 3: two projects in different entities, one mark each, on known dates.
+        self.service.seed_default_entities(self.owner)
+        ents = {e["name"]: e["id"] for e in self.service.list_entities(self.owner)}
+        alpha = self.service.create_project(self.owner, "Alpha programme")
+        beta = self.service.create_project(self.owner, "Beta survey")
+        self.service.set_project_entities(self.owner, alpha["id"], [ents["RDI Pakistan"]])
+        self.service.set_project_entities(self.owner, beta["id"], [ents["RDI - Global"]])
+        report = self._accepted_task(alpha["id"], "Annual report")
+        dataset = self._accepted_task(beta["id"], "Clean dataset")
+        early = self.service.mark_final_result(self.owner, report["id"], "submission", report["submission_id"])
+        late = self.service.mark_final_result(self.owner, dataset["id"], "submission", dataset["submission_id"])
+        # marked_at is a UTC isoformat with microseconds; pin both to known instants.
+        self.db.execute("UPDATE final_results SET marked_at=? WHERE id=?", ("2026-03-10T08:00:00.000000+00:00", early["id"]))
+        self.db.execute("UPDATE final_results SET marked_at=? WHERE id=?", ("2026-03-20T23:59:59.900000+00:00", late["id"]))
+        self.db.commit()
+        return alpha, beta, ents
+
+    def _fr_titles(self, filters):
+        return sorted(r["task_title"] for r in self.service.list_final_results(self.owner, filters))
+
+    def test_final_results_filter_by_project_and_entity(self):
+        alpha, beta, ents = self._final_results_fixture()
+        self.assertEqual(self._fr_titles({}), ["Annual report", "Clean dataset"])
+        self.assertEqual(self._fr_titles({"project_id": alpha["id"]}), ["Annual report"])
+        self.assertEqual(self._fr_titles({"project_id": beta["id"]}), ["Clean dataset"])
+        self.assertEqual(self._fr_titles({"entity_id": ents["RDI Pakistan"]}), ["Annual report"])
+        self.assertEqual(self._fr_titles({"entity_id": ents["RDI - Global"]}), ["Clean dataset"])
+        self.assertEqual(self._fr_titles({"entity_id": ents["RDI - Global"], "project_id": alpha["id"]}), [])
+
+    def test_final_results_filter_by_marked_date_range(self):
+        self._final_results_fixture()
+        self.assertEqual(self._fr_titles({"from": "2026-03-10"}), ["Annual report", "Clean dataset"])
+        self.assertEqual(self._fr_titles({"from": "2026-03-11"}), ["Clean dataset"])
+        self.assertEqual(self._fr_titles({"to": "2026-03-10"}), ["Annual report"])
+        self.assertEqual(self._fr_titles({"to": "2026-03-09"}), [])
+        # 'to' includes the whole day, including its last fraction of a second.
+        self.assertEqual(self._fr_titles({"from": "2026-03-20", "to": "2026-03-20"}), ["Clean dataset"])
+        self.assertEqual(self._fr_titles({"from": "2026-03-21"}), [])
+        with self.assertRaises(ValueError):
+            self.service.list_final_results(self.owner, {"from": "10/03/2026"})
+
+    def test_final_results_search_matches_title_task_and_project(self):
+        self._final_results_fixture()
+        self.assertEqual(self._fr_titles({"q": "annual"}), ["Annual report"])
+        self.assertEqual(self._fr_titles({"q": "Beta"}), ["Clean dataset"])
+        self.assertEqual(self._fr_titles({"q": "  dataset  "}), ["Clean dataset"])
+        self.assertEqual(self._fr_titles({"q": "nothing like this"}), [])
+
     def test_project_schedule_change_is_logged(self):
         project = self.service.create_project(self.owner, "Scheduled")
         updated = self.service.set_project_schedule(

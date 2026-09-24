@@ -449,12 +449,14 @@ function renderFinalResults(results,filters){
       <select id="fr-project"><option value="">All projects</option>${projOpts}</select>
       <select id="fr-entity"><option value="">All entities</option>${entOpts}</select>
       <select id="fr-type"><option value="">All types</option><option value="submission"${filters.type==="submission"?" selected":""}>Submissions</option><option value="attachment"${filters.type==="attachment"?" selected":""}>Attachments</option></select>
+      <label class="inline">Marked from<input id="fr-from" type="date" value="${escapeHtml(filters.from||"")}"></label>
+      <label class="inline">to<input id="fr-to" type="date" value="${escapeHtml(filters.to||"")}"></label>
       <input id="fr-q" placeholder="Search title" value="${escapeHtml(filters.q||"")}">
       <button type="button" id="fr-apply">Filter</button>
       <button type="button" id="fr-export" class="quiet">Export CSV</button>
     </div>
     <table class="fr-table"><thead><tr><th>Result</th><th>Type</th><th>Task / project</th><th>Marked</th></tr></thead><tbody>${rows}</tbody></table>`;
-  const collect=()=>({project_id:document.querySelector("#fr-project").value,entity_id:document.querySelector("#fr-entity").value,type:document.querySelector("#fr-type").value,q:document.querySelector("#fr-q").value});
+  const collect=()=>({project_id:document.querySelector("#fr-project").value,entity_id:document.querySelector("#fr-entity").value,type:document.querySelector("#fr-type").value,from:document.querySelector("#fr-from").value,to:document.querySelector("#fr-to").value,q:document.querySelector("#fr-q").value});
   document.querySelector("#fr-apply").onclick=()=>openFinalResults(collect());
   document.querySelector("#fr-export").onclick=()=>{const f=collect();const p=new URLSearchParams();for(const k in f){if(f[k])p.set(k,f[k])}p.set("format","csv");const a=document.createElement("a");a.href="/api/final-results?"+p.toString();a.download="";document.body.appendChild(a);a.click();a.remove()};
   document.querySelectorAll("#final-results-body [data-detail]").forEach(b=>b.addEventListener("click",()=>{document.querySelector("#final-results-dialog").close();openDetail(b.dataset.detail)}));

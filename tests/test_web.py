@@ -1098,6 +1098,71 @@ class AstraWebTests(unittest.TestCase):
         response, after = self.request("GET", "/api/final-results", cookie=cookie)
         self.assertEqual(len(after["results"]), 1)  # only the manually-marked submission remains
 
+    def _mark_final_attachment(self, cookie, csrf, project_id, title, marked_at):
+        _, task = self.request("POST", "/api/tasks", {"project_id": project_id, "title": title}, cookie=cookie, csrf=csrf)
+        task_id = task["task"]["id"]
+        _, attachment = self.request("POST", f"/api/tasks/{task_id}/attachments", {"path": f"/out/{title}.pdf"}, cookie=cookie, csrf=csrf)
+        response, marked = self.request("POST", "/api/final-results", {
+            "task_id": task_id, "source_type": "attachment", "source_id": attachment["attachment"]["id"],
+        }, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 201)
+        # marked_at is stamped with "now"; pin it to a known instant for the date filters.
+        self.server.service.db.execute("UPDATE final_results SET marked_at=? WHERE id=?", (marked_at, marked["result"]["id"]))
+        self.server.service.db.commit()
+
+    def test_final_results_filters_and_csv_export_over_http(self):
+        # CS93C6 review gaps 2-3: the date filter (and the others) narrow both the JSON list and
+        # the CSV export; the CSV is header-first, names its filters, and is scoped to the caller.
+        cookie, csrf = self._owner_session()
+        _, alpha = self.request("POST", "/api/projects", {"name": "FR Alpha"}, cookie=cookie, csrf=csrf)
+        _, beta = self.request("POST", "/api/projects", {"name": "FR Beta"}, cookie=cookie, csrf=csrf)
+        alpha_id, beta_id = alpha["project"]["id"], beta["project"]["id"]
+        self._mark_final_attachment(cookie, csrf, alpha_id, "March memo", "2026-03-05T10:00:00.000000+00:00")
+        self._mark_final_attachment(cookie, csrf, alpha_id, "April memo", "2026-04-30T23:59:59.999999+00:00")
+        self._mark_final_attachment(cookie, csrf, beta_id, "Hidden brief", "2026-04-10T09:00:00.000000+00:00")
+
+        def titles(query):
+            response, body = self.request("GET", "/api/final-results" + query, cookie=cookie)
+            self.assertEqual(response.status, 200, query)
+            return sorted(r["task_title"] for r in body["results"])
+
+        self.assertEqual(titles(""), ["April memo", "Hidden brief", "March memo"])
+        self.assertEqual(titles("?from=2026-04-01"), ["April memo", "Hidden brief"])
+        self.assertEqual(titles("?to=2026-03-31"), ["March memo"])
+        self.assertEqual(titles("?from=2026-04-30&to=2026-04-30"), ["April memo"])
+        self.assertEqual(titles(f"?project_id={alpha_id}&from=2026-04-01"), ["April memo"])
+        self.assertEqual(titles("?q=brief"), ["Hidden brief"])
+        response, error = self.request("GET", "/api/final-results?from=not-a-date", cookie=cookie)
+        self.assertEqual(response.status, 400)
+
+        response, body = self._get_raw(f"/api/final-results?format=csv&project_id={alpha_id}&from=2026-04-01&to=2026-04-30", cookie)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("Content-Type"), "text/csv; charset=utf-8")
+        reader = csv.reader(io.StringIO(body))
+        self.assertEqual(next(reader), ["title", "source_type", "task_title", "project_name", "entities",
+                                        "attachment_path", "submission_version", "marked_by_name", "marked_at"])
+        rows = list(reader)
+        self.assertEqual([(row[2], row[3], row[1]) for row in rows], [("April memo", "FR Alpha", "attachment")])
+        filename = response.getheader("Content-Disposition").split('filename="', 1)[1].rstrip('"')
+        self.assertTrue(filename.startswith("astra-final-results-"), filename)
+        for part in (f"__project={alpha_id}", "__from=2026-04-01", "__to=2026-04-30"):
+            self.assertIn(part, filename)
+
+        # A member of Alpha only: neither the list nor the CSV carries Beta's result.
+        _, member = self.request("POST", "/api/users", {
+            "email": "fr-member@example.org", "display_name": "FR Member", "password": "member password safe", "role": "member",
+        }, cookie=cookie, csrf=csrf)
+        self.request("POST", "/api/project-access", {
+            "project_id": alpha_id, "user_id": member["user"]["id"], "role": "viewer",
+        }, cookie=cookie, csrf=csrf)
+        member_cookie, _ = self._login_as("fr-member@example.org", "member password safe")
+        response, listed = self.request("GET", "/api/final-results?from=2026-04-01", cookie=member_cookie)
+        self.assertEqual([r["task_title"] for r in listed["results"]], ["April memo"])
+        response, body = self._get_raw("/api/final-results?format=csv", member_cookie)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(sorted(row["task_title"] for row in csv.DictReader(io.StringIO(body))), ["April memo", "March memo"])
+        self.assertNotIn("Hidden brief", body)
+
     def test_project_schedule_over_http(self):
         cookie, csrf = self._owner_session()
         _, project = self.request("POST", "/api/projects", {"name": "Timed"}, cookie=cookie, csrf=csrf)
@@ -1828,6 +1893,75 @@ class AstraDetailDialogWiringTests(unittest.TestCase):
         self.assertNotIn("<b>the site</b>", html)
         self.assertIn("No reason given.", html)
         self.assertIn('data-detail="t9"', html)  # Open task, to check it before deciding
+
+
+FINAL_RESULTS_DRIVER = r"""
+const fs=require("fs");
+const src=fs.readFileSync(process.argv[2],"utf8");
+const store={};globalThis.__anchors=[];
+function el(init){
+  const t={innerHTML:"",textContent:"",value:"",style:{},dataset:{},open:false,hidden:false,_l:{},...(init||{})};
+  t.addEventListener=(k,f)=>{(t._l[k]=t._l[k]||[]).push(f)};
+  t.classList={add(){},remove(){},toggle(){},contains(){return false}};
+  t.showModal=()=>{t.open=true};t.close=()=>{t.open=false};
+  return new Proxy(t,{get(o,k){if(k===Symbol.toPrimitive)return()=>"";if(k in o)return o[k];return function(){return el()}}});
+}
+globalThis.document={querySelector(s){return store[s]||(store[s]=el())},querySelectorAll(){return[]},
+  getElementById(s){return document.querySelector("#"+s)},
+  createElement(){const a=el();globalThis.__anchors.push(a);return a},addEventListener(){},body:el(),documentElement:el()};
+globalThis.window=globalThis;globalThis.addEventListener=()=>{};
+globalThis.localStorage={getItem(){return null},setItem(){}};
+globalThis.fetch=()=>new Promise(()=>{});
+globalThis.location={hash:"",search:""};globalThis.history={replaceState(){}};
+const harness=`;globalThis.__run=async(sc)=>{
+  const calls=[];api=async(path)=>{calls.push(path);return {results:[]}};
+  renderFinalResults([],sc.initial||{});
+  const html=document.querySelector("#final-results-body").innerHTML;
+  for(const [id,v] of Object.entries(sc.values||{}))document.querySelector("#"+id).value=v;
+  await document.querySelector("#fr-apply").onclick();
+  const afterApply=document.querySelector("#final-results-body").innerHTML;
+  document.querySelector("#fr-export").onclick();
+  return {html,afterApply,calls,exportHref:__anchors.length?__anchors[__anchors.length-1].href:null};
+};`;
+(0,eval)(src+harness);
+(async()=>{const sc=JSON.parse(fs.readFileSync(0,"utf8"));process.stdout.write(JSON.stringify(await globalThis.__run(sc)))})()
+  .catch(e=>{console.error(e);process.exit(1)});
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")
+class AstraFinalResultsDialogTests(unittest.TestCase):
+    """CS93C6 review gap 2: the Final results dialog filters by marked date, and Export CSV
+    carries the same date range as the list."""
+
+    def _run(self, scenario):
+        with tempfile.TemporaryDirectory() as tmp:
+            driver = Path(tmp) / "final_results.js"
+            driver.write_text(FINAL_RESULTS_DRIVER, encoding="utf-8")
+            result = subprocess.run(["node", str(driver), str(REPO / "src" / "astra" / "static" / "app.js")],
+                                    input=json.dumps(scenario), capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise AssertionError(result.stderr)
+        return json.loads(result.stdout)
+
+    def test_date_range_is_sent_by_filter_and_by_export(self):
+        out = self._run({"values": {"fr-project": "", "fr-entity": "", "fr-type": "attachment",
+                                    "fr-from": "2026-04-01", "fr-to": "2026-04-30", "fr-q": ""}})
+        self.assertRegex(out["html"], r'<input id="fr-from" type="date"')
+        self.assertRegex(out["html"], r'<input id="fr-to" type="date"')
+        self.assertIn("Marked from", out["html"])
+        self.assertEqual(out["calls"], ["/api/final-results?type=attachment&from=2026-04-01&to=2026-04-30"])
+        self.assertEqual(out["exportHref"], "/api/final-results?type=attachment&from=2026-04-01&to=2026-04-30&format=csv")
+
+    def test_applied_dates_stay_in_the_inputs_after_filtering(self):
+        out = self._run({"initial": {"from": "2026-04-01", "to": "2026-04-30"},
+                         "values": {"fr-project": "", "fr-entity": "", "fr-type": "",
+                                    "fr-from": "2026-05-01", "fr-to": "", "fr-q": ""}})
+        self.assertIn('id="fr-from" type="date" value="2026-04-01"', out["html"])
+        self.assertIn('id="fr-to" type="date" value="2026-04-30"', out["html"])
+        self.assertEqual(out["calls"], ["/api/final-results?from=2026-05-01"])
+        self.assertIn('id="fr-from" type="date" value="2026-05-01"', out["afterApply"])
+        self.assertIn('id="fr-to" type="date" value=""', out["afterApply"])
 
 
 if __name__ == "__main__":

@@ -124,6 +124,8 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .dep-remove { display: inline-flex; gap: 6px; margin-left: 10px; }
 .dep-remove input { padding: 4px 8px; font-size: .8rem; }
 .add-dep { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.add-dep label.inline { flex-direction: row; align-items: center; gap: 6px; margin: 0; white-space: nowrap; }
+.add-dep label.inline input { width: auto; }
 .att-path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .78rem; background: #f2f4f7; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
 .fr-tag { color: var(--teal); font-weight: 700; font-size: .78rem; }
 .fr-table { width: 100%; border-collapse: collapse; margin-top: 10px; }

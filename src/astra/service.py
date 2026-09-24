@@ -2426,8 +2426,10 @@ class AstraService:
             clauses.append("fr.marked_at>=?")
             params.append(self._date(filters["from"]))
         if filters.get("to"):
-            clauses.append("fr.marked_at<=?")
-            params.append(self._date(filters["to"]) + "T23:59:59")
+            # 'to' is inclusive of the whole day: marked_at carries microseconds, so compare
+            # against the start of the next day rather than '<day>T23:59:59'.
+            clauses.append("fr.marked_at<?")
+            params.append((date.fromisoformat(self._date(filters["to"])) + timedelta(days=1)).isoformat())
         if filters.get("entity_id"):
             clauses.append("EXISTS(SELECT 1 FROM project_entities pe WHERE pe.project_id=t.project_id AND pe.entity_id=?)")
             params.append(filters["entity_id"])
