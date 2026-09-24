@@ -25,13 +25,12 @@ context: |-
 definition-of-done: "Owner Items 5-16 on 6G89SJ are each met or explicitly deferred by Aly on this ticket: HTTPS-link and managed-upload types, one storage interface with OCI and private-folder backends, 25 MB default and 250 MB hard cap enforced while streaming, dangerous-type denylist, authorized streamed downloads audited on success and denial, Owner-only audited permanent direct links; no local path is shown in hosted mode; unit and HTTP tests cover authorization, CSRF and each rejection; existing tests green."
 tags:
   - astra
-  - asana
 blocked-by: []
 related:
   - 01M2JNPRGYD7TGGSHZV16G89SJ
 commits: []
 created-at: 2026-09-24T16:27:54Z
-updated-at: 2026-09-24T16:29:17Z
+updated-at: 2026-09-24T16:42:16Z
 updated-by: Claude
 ---
 
