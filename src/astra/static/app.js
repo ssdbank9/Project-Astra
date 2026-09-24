@@ -1079,7 +1079,7 @@ async function openPeople(){
 }
 
 // GTEYTG: every owner has role "owner"; only the primary owner may give or remove owner access.
-const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change"};
+const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project"};
 function renderPeople(users,memberships,ownerEvents){
   const primary=!!state.user.is_primary_owner;
   const rows=users.map(u=>{
@@ -1091,7 +1091,7 @@ function renderPeople(users,memberships,ownerEvents){
     return `<li><strong>${escapeHtml(u.display_name)}</strong> · ${escapeHtml(u.email)} · ${role}${u.active?"":' · <em>inactive</em>'} ${toggle} ${ownerAction}</li>`;
   }).join("");
   const ownerEventRow=e=>`<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(OWNER_EVENT_LABELS[e.event_type]||e.event_type)}: <strong>${escapeHtml(e.target_name)}</strong> by ${escapeHtml(e.actor_name)}${e.reason?` · ${escapeHtml(e.reason)}`:""}</li>`;
-  const blocked=e=>e.event_type==="owner_change_blocked";
+  const blocked=e=>e.event_type==="owner_change_blocked"||e.event_type==="import_blocked";
   const ownerHistory=(ownerEvents||[]).filter(e=>!blocked(e)).slice(0,20).map(ownerEventRow).join("")||"<li>No owner access changes yet.</li>";
   const blockedHistory=(ownerEvents||[]).filter(blocked).slice(0,10).map(ownerEventRow).join("")||"<li>None.</li>";
   // Only the primary may change an owner's project access, so others are not offered it.

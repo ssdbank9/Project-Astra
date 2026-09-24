@@ -16,8 +16,8 @@ This first vertical slice provides:
   alone may make an active user a secondary owner, or remove that access, with a reason
   (`POST`/`DELETE /api/users/{id}/secondary-owner`). A secondary owner has every other
   Owner power but cannot change the owner access, active status or project access of any
-  owner, their own included (403, recorded once per actor, target and action in 10 minutes,
-  and notified to the primary). To deactivate a secondary owner the primary first removes
+  owner, their own included (403, every attempt recorded and notified to the primary,
+  subject to the blocked-attempt notice cap below). To deactivate a secondary owner the primary first removes
   their secondary owner access. Removing access restores the user's earlier role, signs
   them out and keeps their project roles. The People screen shows the latest 20 grants and
   removals under **Owner access history** and the latest 10 blocked attempts separately, so
@@ -70,7 +70,11 @@ This first vertical slice provides:
 - parent/subtask hierarchy with a completed/total roll-up shown separately from a task's own
   declared progress, cycle-safe re-parenting, and clickable subtasks;
 - a durable in-app notification inbox: every owner gets an idempotent record of every task change
-  made by someone else (in-app only; marking read never deletes or approves anything);
+  made by someone else (in-app only; marking read never deletes or approves anything); a
+  blocked attachment removal, a final-result unmark and an attachment removal are also sent
+  to the owner who did them, so a single-owner install hears of them; blocked-attempt notices
+  are capped at 5 per recipient and per person in any 10 minutes (every attempt is still
+  audited, including an import refused for lack of a target project);
 - portfolio and per-project Gantt views with overdue and upcoming highlighting;
 - task steps (subtasks) drawn as numbered, colour-coded segments inside the parent's Gantt
   bar: a shared tooltip on hover and keyboard focus, a chevron that expands the step rows,

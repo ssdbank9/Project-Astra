@@ -1148,3 +1148,78 @@ class PrimaryOwnerMigrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class NotificationActorMigrationTests(unittest.TestCase):
+    """KBWY86: schema 17 records who caused each notification (nullable, no backfill),
+    indexed for the per-recipient, per-actor cap on blocked-attempt notices."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "astra.sqlite3"
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def at_v16(self):
+        """A complete v16 database: v17's index is refused, so the v17 step rolls back."""
+        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.set_authorizer(deny_create_index(db.V17_NOTIFICATION_ACTOR_INDEX))
+        with self.assertRaises(sqlite3.DatabaseError):
+            db.migrate(connection)
+        connection.set_authorizer(None)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 16)
+        return connection
+
+    def actor_index(self, connection):
+        return [r["name"] for r in connection.execute(
+            f"PRAGMA index_info({db.V17_NOTIFICATION_ACTOR_INDEX})").fetchall()]
+
+    def test_fresh_database_has_the_notification_actor_and_its_index(self):
+        connection = db.connect(self.path)
+        try:
+            self.assertEqual(db.SCHEMA_VERSION, 17)
+            self.assertIn("actor_user_id", table_columns(connection, "notifications"))
+            self.assertEqual(self.actor_index(connection), ["user_id", "actor_user_id", "created_at"])
+        finally:
+            connection.close()
+
+    def test_v16_notifications_upgrade_with_a_null_actor_and_match_fresh_schema(self):
+        connection = self.at_v16()
+        try:
+            self.assertNotIn("actor_user_id", table_columns(connection, "notifications"))
+            connection.execute(
+                "INSERT INTO users(id,email,display_name,password_hash,global_role,created_at,is_primary_owner)"
+                " VALUES('owner-1','o@example.org','Owner','x','owner','2026-01-01T00:00:00Z',1)")
+            connection.execute(
+                "INSERT INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at)"
+                " VALUES('n1','owner-1','e1',NULL,'owner_change_blocked','old notice','2026-01-01T00:00:00Z')")
+            db.migrate(connection)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+            row = dict(connection.execute("SELECT * FROM notifications WHERE id='n1'").fetchone())
+            self.assertEqual((row["summary"], row["actor_user_id"]), ("old notice", None))
+            fresh = db.connect(Path(self.temp.name) / "fresh.sqlite3")
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
+    def test_failure_in_the_v17_step_rolls_back_then_retries(self):
+        connection = self.at_v16()
+        try:
+            catalog_before = full_catalog(connection)
+            connection.set_authorizer(deny_create_index(db.V17_NOTIFICATION_ACTOR_INDEX))
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(full_catalog(connection), catalog_before)
+            self.assertNotIn("actor_user_id", table_columns(connection, "notifications"))
+            self.assertFalse(connection.in_transaction)
+            db.migrate(connection)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 17)
+            self.assertEqual(self.actor_index(connection), ["user_id", "actor_user_id", "created_at"])
+        finally:
+            connection.close()

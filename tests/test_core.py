@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from astra.auth import hash_password, verify_password
 from astra.db import connect
-from astra.service import AstraService, Conflict, Forbidden, validate_attachment_path
+from astra.service import BLOCKED_NOTICE_CAP, AstraService, Conflict, Forbidden, validate_attachment_path
 
 from link_roots import allow_attachment_roots, link
 
@@ -1475,11 +1475,13 @@ class AstraCoreTests(unittest.TestCase):
         kinds = [e["event_type"] for e in self.service.task_events(self.owner, task["id"])]
         self.assertNotIn("attachment_removed", kinds)
         self.assertNotIn("final_result_unmarked", kinds)
-        # The other owner is told; the acting owner is not self-notified.
+        # The other owner is told, and (KBWY86, Owner Item 2) so is the acting owner.
         fresh = [n for n in self.service.list_notifications(deputy) if n["id"] not in before]
         self.assertEqual([n["kind"] for n in fresh], ["attachment_removal_blocked"])
-        self.assertNotIn("attachment_removal_blocked",
-                         [n["kind"] for n in self.service.list_notifications(self.owner)])
+        own = [n for n in self.service.list_notifications(self.owner) if n["kind"] == "attachment_removal_blocked"]
+        self.assertEqual(len(own), 1)
+        self.assertIn("memo.pdf", own[0]["summary"])
+        self.assertIn("by Owner", own[0]["summary"])
         # After an explicit, audited unmark the link can be removed.
         self.service.unmark_final_result(self.owner, result["id"])
         self.service.remove_task_attachment(self.owner, task["id"], attachment["id"])
@@ -1487,6 +1489,92 @@ class AstraCoreTests(unittest.TestCase):
         self.assertIn("final_result_unmarked", kinds)
         self.assertIn("attachment_removed", kinds)
         self.assertEqual(self.service.list_task_attachments(self.owner, task["id"]), [])
+
+    def test_single_owner_is_notified_of_own_blocked_removal_unmark_and_removal(self):
+        # KBWY86 (Owner Item 2 on 6G89SJ): with one owner nobody else exists to be told.
+        project = self.service.create_project(self.owner, "Solo")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Solo memo"})
+        attachment = self.service.add_task_attachment(self.owner, task["id"], link("solo", "memo.pdf"))
+        result = self.service.mark_final_result(self.owner, task["id"], "attachment", attachment["id"])
+        with self.assertRaises(Conflict):
+            self.service.remove_task_attachment(self.owner, task["id"], attachment["id"])
+        self.service.unmark_final_result(self.owner, result["id"])
+        self.service.remove_task_attachment(self.owner, task["id"], attachment["id"])
+        notices = {n["kind"]: n for n in self.service.list_notifications(self.owner)}
+        for kind in ("attachment_removal_blocked", "final_result_unmarked", "attachment_removed"):
+            with self.subTest(kind=kind):
+                self.assertIn(kind, notices)
+                self.assertIn("memo.pdf", notices[kind]["summary"])
+                self.assertIn("Solo memo", notices[kind]["summary"])
+                self.assertIn("by Owner", notices[kind]["summary"])
+                self.assertEqual(notices[kind]["actor_user_id"], self.owner["id"])
+        # Other owner actions are still not self-notified (Z24KVH).
+        for kind in ("attachment_added", "final_result_marked", "task_created"):
+            self.assertNotIn(kind, notices)
+
+    def _viewer_on_attachment(self, email):
+        viewer = self.service.create_user(self.owner, email, email.split("@")[0].title(), "viewer password safe", "member")
+        project = self.service.create_project(self.owner, f"Capped {email}")
+        self.service.grant_project_access(self.owner, project["id"], viewer["id"], "viewer")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Capped task"})
+        attachment = self.service.add_task_attachment(self.owner, task["id"], link("cap", "memo.pdf"))
+        return viewer, task, attachment
+
+    def _blocked_notices(self, recipient, actor):
+        return [n for n in self.service.list_notifications(recipient)
+                if n["actor_user_id"] == actor["id"] and n["kind"].endswith("_blocked")]
+
+    def test_blocked_notices_are_capped_per_actor_and_every_attempt_is_audited(self):
+        viewer, task, attachment = self._viewer_on_attachment("flood@example.org")
+        for attempt in range(7):  # pooled across kinds: removals and adds count together
+            with self.assertRaises(Forbidden):
+                if attempt % 2:
+                    self.service.add_task_attachment(viewer, task["id"], link("cap", f"x{attempt}.pdf"))
+                else:
+                    self.service.remove_task_attachment(viewer, task["id"], attachment["id"])
+        audited = [e for e in self.service.task_events(self.owner, task["id"])
+                   if e["event_type"] in ("attachment_removal_blocked", "attachment_add_blocked")]
+        self.assertEqual(len(audited), 7)
+        self.assertEqual(len(self._blocked_notices(self.owner, viewer)), BLOCKED_NOTICE_CAP)
+        # Once the window has passed, notices resume.
+        self.db.execute("UPDATE notifications SET created_at='2000-01-01T00:00:00+00:00' WHERE user_id=?",
+                        (self.owner["id"],))
+        with self.assertRaises(Forbidden):
+            self.service.remove_task_attachment(viewer, task["id"], attachment["id"])
+        self.assertEqual(len(self._blocked_notices(self.owner, viewer)), BLOCKED_NOTICE_CAP + 1)
+
+    def test_blocked_notice_cap_is_per_actor(self):
+        first, task, attachment = self._viewer_on_attachment("first-flood@example.org")
+        second = self.service.create_user(self.owner, "second-flood@example.org", "Second", "viewer password safe")
+        self.service.grant_project_access(self.owner, task["project_id"], second["id"], "viewer")
+        for _ in range(BLOCKED_NOTICE_CAP + 2):
+            with self.assertRaises(Forbidden):
+                self.service.remove_task_attachment(first, task["id"], attachment["id"])
+        with self.assertRaises(Forbidden):
+            self.service.remove_task_attachment(second, task["id"], attachment["id"])
+        self.assertEqual(len(self._blocked_notices(self.owner, first)), BLOCKED_NOTICE_CAP)
+        self.assertEqual(len(self._blocked_notices(self.owner, second)), 1)
+
+    def test_owner_self_notices_are_capped_too_and_ordinary_notices_are_not(self):
+        project = self.service.create_project(self.owner, "Self cap")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Kept memo"})
+        attachment = self.service.add_task_attachment(self.owner, task["id"], link("self", "memo.pdf"))
+        self.service.mark_final_result(self.owner, task["id"], "attachment", attachment["id"])
+        for _ in range(BLOCKED_NOTICE_CAP + 2):
+            with self.assertRaises(Conflict):
+                self.service.remove_task_attachment(self.owner, task["id"], attachment["id"])
+        blocked = [e for e in self.service.task_events(self.owner, task["id"])
+                   if e["event_type"] == "attachment_removal_blocked"]
+        self.assertEqual(len(blocked), BLOCKED_NOTICE_CAP + 2)
+        self.assertEqual(len(self._blocked_notices(self.owner, self.owner)), BLOCKED_NOTICE_CAP)
+        # Ordinary (not blocked) notices have no cap.
+        manager = self.service.create_user(self.owner, "busy@example.org", "Busy", "manager password safe")
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        for n in range(BLOCKED_NOTICE_CAP + 2):
+            self.update_task(manager, task["id"], {"description": f"edit {n}"})
+        updates = [n for n in self.service.list_notifications(self.owner)
+                   if n["actor_user_id"] == manager["id"] and n["kind"] == "task_updated"]
+        self.assertEqual(len(updates), BLOCKED_NOTICE_CAP + 2)
 
     def test_template_apply_skips_attachment_links_that_fail_validation(self):
         project, _, fieldwork = self._seed_template_project()
@@ -2369,21 +2457,26 @@ class SecondaryOwnerTests(unittest.TestCase):
                 self.assertEqual(blocked[-1]["actor_user_id"], first["id"])
         self.assertEqual([tuple(r) for r in self.db.execute("SELECT * FROM users ORDER BY id")], users_before)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM memberships").fetchone()[0], 0)
-        self.assertEqual(self.notified(self.primary).count("owner_change_blocked"), len(attempts))
+        # Every attempt is audited; the primary's notices stop at the per-actor cap (KBWY86).
+        self.assertEqual(len(attempts), 8)
+        self.assertEqual(self.notified(self.primary).count("owner_change_blocked"), BLOCKED_NOTICE_CAP)
         # The secondary still manages ordinary users.
         self.assertEqual(self.service.set_user_active(first, third["id"], False)["active"], 0)
         self.service.grant_project_access(first, project["id"], third["id"], "member")
 
-    def test_repeated_blocked_attempts_record_one_row_and_one_notice(self):
+    def test_repeated_blocked_owner_changes_are_all_audited_and_notices_capped(self):
+        # KBWY86: the old same-key dedupe also dropped the audit row; now every repeat is audited.
         first, second = self.secondary("first"), self.secondary("second")
         for _ in range(3):
             with self.assertRaises(Forbidden):
                 self.service.set_user_active(first, second["id"], False)
-        self.assertEqual(len(self.user_events("owner_change_blocked")), 1)
-        self.assertEqual(self.notified(self.primary).count("owner_change_blocked"), 1)
-        with self.assertRaises(Forbidden):   # a different action is a new record
-            self.service.revoke_secondary_owner(first, second["id"], "demote")
-        self.assertEqual(len(self.user_events("owner_change_blocked")), 2)
+        self.assertEqual(len(self.user_events("owner_change_blocked")), 3)
+        self.assertEqual(self.notified(self.primary).count("owner_change_blocked"), 3)
+        for _ in range(3):
+            with self.assertRaises(Forbidden):
+                self.service.revoke_secondary_owner(first, second["id"], "demote")
+        self.assertEqual(len(self.user_events("owner_change_blocked")), 6)
+        self.assertEqual(self.notified(self.primary).count("owner_change_blocked"), BLOCKED_NOTICE_CAP)
         # Blocked rows never push grants out of the owner-access history.
         self.db.executemany(
             "INSERT INTO user_events(id,target_user_id,event_type,actor_user_id,occurred_at,reason,detail_json)"

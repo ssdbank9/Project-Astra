@@ -69,6 +69,19 @@ REOPEN_EQUIVALENT_STATUSES = frozenset(MANAGER_ORDINARY_STATUSES | {"reopened"})
 
 LOGIN_WINDOW_SECONDS = 900
 LOGIN_MAX_FAILURES = 5
+# KBWY86 (Aly, Slack ts 1790268694.030539): one person's blocked attempts reach each
+# recipient at most BLOCKED_NOTICE_CAP times per rolling window, pooled across these kinds
+# and targets. Past the cap only the notice is skipped; the audit row is always written.
+BLOCKED_NOTICE_WINDOW_SECONDS = 600
+BLOCKED_NOTICE_CAP = 5
+BLOCKED_NOTICE_KINDS = frozenset({
+    "attachment_add_blocked", "attachment_removal_blocked", "final_result_mark_blocked",
+    "final_result_unmark_blocked", "protected_action_blocked", "owner_change_blocked",
+})
+# Owner decision Item 2 on 6G89SJ: the App Owner hears of every attachment removal outcome,
+# including their own, so a single-owner install is told too. Other owner actions are
+# still not self-notified (Z24KVH).
+SELF_NOTICE_KINDS = frozenset({"attachment_removal_blocked", "final_result_unmarked", "attachment_removed"})
 
 # Approved baseline entities from the handoff (Section 4). Seeded only on explicit
 # owner request; never injected automatically.
@@ -221,21 +234,40 @@ class AstraService:
         self.db = connection
 
     def _notify(self, user_id: str, event_id: str, task_id: str | None, kind: str, summary: str,
-                created_at: str | None = None) -> None:
+                created_at: str | None = None, actor_id: str | None = None) -> None:
+        # KBWY86: a blocked-attempt notice past the per-actor cap is skipped (the caller has
+        # already written the audit row).
+        if actor_id and kind in BLOCKED_NOTICE_KINDS and self._blocked_notices_capped(user_id, actor_id):
+            return
         # INSERT OR IGNORE with the unique (user_id, event_id) index makes retries idempotent.
         self.db.execute(
-            "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at)"
-            " VALUES(?,?,?,?,?,?,?)",
-            (new_id(), user_id, event_id, task_id, kind, summary, created_at or now_text()),
+            "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at,actor_user_id)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (new_id(), user_id, event_id, task_id, kind, summary, created_at or now_text(), actor_id),
         )
+
+    def _blocked_notices_capped(self, user_id: str, actor_id: str) -> bool:
+        """True when this recipient already has the cap of blocked-attempt notices caused by
+        this actor inside the rolling window (same count-in-window shape as the login throttle)."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=BLOCKED_NOTICE_WINDOW_SECONDS)).isoformat()
+        kinds = sorted(BLOCKED_NOTICE_KINDS)
+        count = self.db.execute(
+            "SELECT COUNT(*) c FROM notifications WHERE user_id=? AND actor_user_id=? AND created_at>=?"
+            f" AND kind IN ({','.join('?' * len(kinds))})",
+            (user_id, actor_id, cutoff, *kinds),
+        ).fetchone()["c"]
+        return count >= BLOCKED_NOTICE_CAP
 
     def _notify_owners(self, actor_id: str, event_id: str, task_id: str | None, kind: str, summary: str,
                        created_at: str | None = None) -> None:
-        """GTEYTG: an owner notice goes to every active owner except the one who acted."""
-        for row in self.db.execute(
-            "SELECT id FROM users WHERE global_role='owner' AND active=1 AND id<>?", (actor_id,)
-        ).fetchall():
-            self._notify(row["id"], event_id, task_id, kind, summary, created_at)
+        """GTEYTG: an owner notice goes to every active owner except the one who acted;
+        for SELF_NOTICE_KINDS (KBWY86) the acting owner is told as well."""
+        query = "SELECT id FROM users WHERE global_role='owner' AND active=1"
+        params: tuple = ()
+        if kind not in SELF_NOTICE_KINDS:
+            query, params = query + " AND id<>?", (actor_id,)
+        for row in self.db.execute(query, params).fetchall():
+            self._notify(row["id"], event_id, task_id, kind, summary, created_at, actor_id)
 
     def owner_exists(self) -> bool:
         return bool(self.db.execute("SELECT 1 FROM users WHERE global_role='owner'").fetchone())
@@ -346,23 +378,17 @@ class AstraService:
 
     def _owner_change_blocked(self, actor: dict, target_id: str | None, action: str) -> None:
         """Record and refuse an owner-access change the actor may not make. Called with no
-        transaction open, so the audit row and the primary's notice are kept. A repeat of
-        the same actor, target and action within 10 minutes is refused without a new row
-        or notice, so retries cannot flood the audit. An unknown target records nothing."""
+        transaction open, so the audit row and the primary's notice are kept. Every attempt
+        is audited (KBWY86); repeated notices are limited by the blocked-notice cap instead.
+        An unknown target records nothing."""
         known = target_id and self.db.execute("SELECT 1 FROM users WHERE id=?", (target_id,)).fetchone()
-        detail = {"action": action}
-        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
-        repeat = known and self.db.execute(
-            "SELECT 1 FROM user_events WHERE event_type='owner_change_blocked' AND actor_user_id=?"
-            " AND target_user_id=? AND detail_json=? AND occurred_at>=?",
-            (actor["id"], target_id, json.dumps(detail, sort_keys=True), cutoff),
-        ).fetchone()
-        if known and not repeat:
-            event_id = self._insert_user_event(target_id, "owner_change_blocked", actor["id"], None, detail)
+        if known:
+            event_id = self._insert_user_event(target_id, "owner_change_blocked", actor["id"], None, {"action": action})
             primary = self.db.execute("SELECT id FROM users WHERE is_primary_owner=1").fetchone()
             if primary and primary["id"] != actor["id"]:
                 self._notify(primary["id"], event_id, None, "owner_change_blocked",
-                             f"blocked {action} attempt by {actor.get('display_name', actor['id'])}")
+                             f"blocked {action} attempt by {actor.get('display_name', actor['id'])}",
+                             actor_id=actor["id"])
         raise Forbidden("Only the primary owner can change another owner's access.")
 
     def _guarded_user_change(self, actor: dict, user_id: str, action: str, write) -> None:
@@ -381,7 +407,8 @@ class AstraService:
 
     def _record_user_event(self, target: dict, actor: dict, kind: str, reason: str, detail: dict) -> None:
         event_id = self._insert_user_event(target["id"], kind, actor["id"], reason, detail)
-        self._notify(target["id"], event_id, None, kind, f"{kind.replace('_', ' ')} by {actor['display_name']}")
+        self._notify(target["id"], event_id, None, kind, f"{kind.replace('_', ' ')} by {actor['display_name']}",
+                     actor_id=actor["id"])
 
     def grant_secondary_owner(self, actor: dict, user_id: str, reason: str) -> dict:
         if not self._is_primary_owner(actor):
@@ -436,11 +463,13 @@ class AstraService:
 
     def list_user_events(self, actor: dict) -> list[dict]:
         """Newest first: the latest 200 grants and removals, then the latest 50 blocked
-        attempts. Separate limits, so blocked attempts never push a grant out of view."""
+        attempts (owner changes, and imports with no target project, KBWY86). Separate
+        limits, so blocked attempts never push a grant out of view."""
         self.require_owner(actor)
         query = """SELECT e.*, t.display_name target_name, a.display_name actor_name FROM user_events e
                JOIN users t ON t.id=e.target_user_id JOIN users a ON a.id=e.actor_user_id
-               WHERE (e.event_type='owner_change_blocked')=? ORDER BY e.occurred_at DESC, e.id DESC LIMIT ?"""
+               WHERE (e.event_type IN ('owner_change_blocked','import_blocked'))=?
+               ORDER BY e.occurred_at DESC, e.id DESC LIMIT ?"""
         rows = self.db.execute(query, (0, 200)).fetchall() + self.db.execute(query, (1, 50)).fetchall()
         return [dict(row) for row in rows]
 
@@ -3267,14 +3296,23 @@ class AstraService:
              json.dumps(after, default=str, sort_keys=True) if after else None),
         )
         if notify:
-            self._notify_owner(event_id, task_id, actor_id, kind)
+            subject = None
+            if kind in SELF_NOTICE_KINDS:  # name the attachment or final result (Item 2)
+                detail = after or before or {}
+                subject = detail.get("display_name") or detail.get("title")
+            self._notify_owner(event_id, task_id, actor_id, kind, subject)
 
-    def _notify_owner(self, event_id: str, task_id: str, actor_id: str, kind: str) -> None:
+    def _notify_owner(self, event_id: str, task_id: str, actor_id: str, kind: str, subject: str | None = None) -> None:
         # Durable record for the owners of every task change made by someone else.
-        # An owner's own actions are already visible to them, so they are not self-notified.
+        # An owner's own actions are already visible to them, so they are not self-notified,
+        # except SELF_NOTICE_KINDS (see _notify_owners), whose notice names the item and actor.
         row = self.db.execute("SELECT title FROM tasks WHERE id=?", (task_id,)).fetchone()
         title = row["title"] if row else task_id
-        self._notify_owners(actor_id, event_id, task_id, kind, f"{kind.replace('_', ' ')}: {title}")
+        summary = f"{kind.replace('_', ' ')}: {title}"
+        if kind in SELF_NOTICE_KINDS:
+            who = self.db.execute("SELECT display_name FROM users WHERE id=?", (actor_id,)).fetchone()
+            summary += (f" · {subject}" if subject else "") + f" · by {who['display_name'] if who else actor_id}"
+        self._notify_owners(actor_id, event_id, task_id, kind, summary)
 
     def list_notifications(self, actor: dict, unread_only: bool = False) -> list[dict]:
         query = ("SELECT n.*, t.title task_title FROM notifications n LEFT JOIN tasks t ON t.id=n.task_id"
@@ -3584,8 +3622,8 @@ class AstraService:
     def _audit_import_blocked(self, blocked: ImportBlocked) -> None:
         """Audit a blocked import attempt and notify the Owner. Runs in autocommit, after any
         rollback, so the record is kept whatever else the request had started. Without a
-        target project only the Owner notification is written (there is no project to
-        audit against)."""
+        target project there is no project to audit against, so the attempt is recorded as
+        an ``import_blocked`` user event about the actor themselves (KBWY86)."""
         actor, project, action = blocked.actor, blocked.project, blocked.action
         event_id = new_id()
         occurred_at = now_text()
@@ -3595,6 +3633,9 @@ class AstraService:
                 project["id"], actor["id"], "protected_action_blocked",
                 {"event_id": event_id, "action": action, "payload": {}}, "Actor cannot import into this project",
             )
+        else:
+            event_id = self._insert_user_event(actor["id"], "import_blocked", actor["id"],
+                                               "Actor cannot import without a target project", {"action": action})
         self._notify_owners(actor["id"], event_id, None, "protected_action_blocked",
                             f"blocked {action.replace('_', ' ')} attempt: {label}", occurred_at)
 

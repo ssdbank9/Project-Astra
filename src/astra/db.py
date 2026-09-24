@@ -8,7 +8,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 
 class SchemaMigrationRefused(RuntimeError):
@@ -733,6 +733,22 @@ def _migrate_v16(connection: sqlite3.Connection) -> None:
     """)
 
 
+V17_NOTIFICATION_ACTOR_INDEX = "idx_notifications_actor"
+
+
+def _migrate_v17(connection: sqlite3.Connection) -> None:
+    """v16 -> v17: who caused each notification (ticket KBWY86).
+
+    ``actor_user_id`` lets the service cap blocked-attempt notices per recipient and actor
+    in a rolling window. It is nullable and not backfilled: older notices keep NULL and
+    fall outside any window.
+    """
+    _execute_statements(connection, f"""
+        ALTER TABLE notifications ADD COLUMN actor_user_id TEXT REFERENCES users(id);
+        CREATE INDEX {V17_NOTIFICATION_ACTOR_INDEX} ON notifications(user_id, actor_user_id, created_at);
+    """)
+
+
 # The ordered schema history: (version, step). migrate() runs every step whose version
 # is above the database's user_version, each in its own transaction with its bump.
 # Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
@@ -753,4 +769,5 @@ MIGRATION_STEPS = (
     (14, _migrate_v14),
     (15, _migrate_v15),
     (16, _migrate_v16),
+    (17, _migrate_v17),
 )

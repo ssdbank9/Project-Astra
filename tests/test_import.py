@@ -983,6 +983,15 @@ class ImportServiceTests(unittest.TestCase):
         events = self.service.project_events(self.owner, self.project["id"])
         self.assertTrue(all(e["event_type"] == "protected_action_blocked" for e in events))
         self.assertEqual(len(events), 4)
+        # KBWY86: the two attempts with no target project are audited too, about the actor.
+        no_project = [dict(r) for r in self.db.execute(
+            "SELECT * FROM user_events WHERE event_type='import_blocked' ORDER BY occurred_at, id")]
+        self.assertEqual([(r["actor_user_id"], r["target_user_id"]) for r in no_project],
+                         [(self.chair["id"], self.chair["id"])] * 2)
+        self.assertEqual({json.loads(r["detail_json"])["action"] for r in no_project},
+                         {"import_preview", "import_commit"})
+        listed = [e for e in self.service.list_user_events(self.owner) if e["event_type"] == "import_blocked"]
+        self.assertEqual(len(listed), 2)
         result = self.commit(self.owner, self.rows())
         with self.assertRaises(Forbidden):
             self.service.import_report(self.viewer, result["import_id"])
