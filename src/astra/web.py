@@ -336,6 +336,13 @@ class AstraHandler(BaseHTTPRequestHandler):
             if path.startswith("/api/users/") and path.endswith("/secondary-owner") and path.count("/") == 4:
                 granted = self.service.grant_secondary_owner(user, path.split("/")[3], payload.get("reason", ""))
                 return self._json({"user": granted}, HTTPStatus.CREATED)
+            if path.startswith("/api/users/") and path.endswith("/password") and path.count("/") == 4:
+                raw = self._cookie_value(SESSION_COOKIE)
+                updated = self.service.reset_user_password(
+                    user, path.split("/")[3], str(payload.get("password", "")),
+                    keep_session=token_digest(raw) if raw else None,
+                )
+                return self._json({"user": updated})
             if path.startswith("/api/users/") and path.endswith("/active"):
                 user_id = path.split("/")[3]
                 updated = self.service.set_user_active(user, user_id, bool(payload.get("active")))
@@ -529,15 +536,11 @@ class AstraHandler(BaseHTTPRequestHandler):
     def _login(self, payload: dict):
         email = str(payload.get("email", "")).strip().casefold()
         ip = self.client_address[0] if self.client_address else ""
-        if self.service.login_is_throttled(email):
-            return self._json(
-                {"error": "Too many failed sign-in attempts. Please wait and try again."},
-                HTTPStatus.TOO_MANY_REQUESTS,
-            )
+        # 3M2AYA (Aly, 2026-09-24): no lockout; a wrong password or unknown email just says so.
         row = self.db.execute("SELECT * FROM users WHERE email=? AND active=1", (email,)).fetchone()
         if not row or not verify_password(str(payload.get("password", "")), row["password_hash"]):
             self.service.record_login_attempt(email, ip, False)
-            return self._json({"error": "Invalid email or password."}, HTTPStatus.UNAUTHORIZED)
+            return self._json({"error": "Incorrect email or password."}, HTTPStatus.UNAUTHORIZED)
         self.service.record_login_attempt(email, ip, True)
         self.service.cleanup_expired_sessions()
         raw, csrf = new_token(), new_token()

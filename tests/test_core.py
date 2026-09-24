@@ -13,8 +13,8 @@ from unittest.mock import patch
 
 from astra.auth import hash_password, verify_password
 from astra.db import connect
-from astra.service import (BLOCKED_NOTICE_CAP, BLOCKED_NOTICE_WINDOW_SECONDS, LOGIN_MAX_FAILURES, AstraService, Conflict,
-                           Forbidden, now_text, validate_attachment_path)
+from astra.service import (BLOCKED_NOTICE_CAP, BLOCKED_NOTICE_WINDOW_SECONDS, AstraService, Conflict, Forbidden,
+                           now_text, validate_attachment_path)
 
 from link_roots import allow_attachment_roots, link
 
@@ -564,14 +564,28 @@ class AstraCoreTests(unittest.TestCase):
         with self.assertRaises(Forbidden):
             self.service.mark_notification_read(manager, note["id"])
 
-    def test_login_throttle_counts_failures_and_success_clears_them(self):
-        for _ in range(4):
+    def test_login_attempts_are_history_only_and_pruned_after_90_days(self):
+        # 3M2AYA (Aly, 2026-09-24): no lockout; attempts are kept as history.
+        self.assertFalse(hasattr(self.service, "login_is_throttled"))
+        self.db.execute("INSERT INTO login_attempts VALUES('old','owner@example.org','1.2.3.4',?,0)",
+                        ((datetime.now(timezone.utc) - timedelta(days=91)).isoformat(),))
+        self.db.execute("INSERT INTO login_attempts VALUES('recent','owner@example.org','1.2.3.4',?,0)",
+                        ((datetime.now(timezone.utc) - timedelta(days=89)).isoformat(),))
+        for _ in range(25):
             self.service.record_login_attempt("owner@example.org", "127.0.0.1", False)
-        self.assertFalse(self.service.login_is_throttled("owner@example.org"))
-        self.service.record_login_attempt("owner@example.org", "127.0.0.1", False)
-        self.assertTrue(self.service.login_is_throttled("owner@example.org"))
-        self.service.record_login_attempt("owner@example.org", "127.0.0.1", True)
-        self.assertFalse(self.service.login_is_throttled("owner@example.org"))
+        ids = {r[0] for r in self.db.execute("SELECT id FROM login_attempts")}
+        self.assertNotIn("old", ids)
+        self.assertIn("recent", ids)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM login_attempts WHERE success=0").fetchone()[0], 26)
+
+    def test_passwords_need_eight_characters(self):
+        from astra.auth import MIN_PASSWORD_LENGTH
+        self.assertEqual(MIN_PASSWORD_LENGTH, 8)
+        with self.assertRaisesRegex(ValueError, "at least 8 characters"):
+            self.service.create_user(self.owner, "seven@example.org", "Seven", "1234567")
+        user = self.service.create_user(self.owner, "eight@example.org", "Eight", "12345678")
+        stored = self.db.execute("SELECT password_hash FROM users WHERE id=?", (user["id"],)).fetchone()[0]
+        self.assertTrue(verify_password("12345678", stored))
 
     def test_cleanup_expired_sessions_removes_only_expired(self):
         from astra.service import now_text
@@ -2958,15 +2972,15 @@ class ServerCommandTests(unittest.TestCase):
     def test_reset_password_for_any_active_user(self):
         member = self.user("member")
         self.session(member, "member-1")
-        for _ in range(LOGIN_MAX_FAILURES):
+        for _ in range(5):
             self.service.record_login_attempt(member["email"], "10.0.0.1", False)
-        self.assertTrue(self.service.login_is_throttled(member["email"]))
         self.service.reset_password("Member@Example.org", "a brand new passphrase", self.VIA)
         stored = self.db.execute("SELECT password_hash FROM users WHERE id=?", (member["id"],)).fetchone()[0]
         self.assertTrue(verify_password("a brand new passphrase", stored))
         self.assertFalse(verify_password("member password safe", stored))
         self.assertEqual(self.sessions(member), 0)
-        self.assertFalse(self.service.login_is_throttled(member["email"]))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM login_attempts WHERE email=? AND success=0",
+                                         (member["email"],)).fetchone()[0], 0)
         [event] = self.events("password_reset")
         self.assertEqual((event["target_user_id"], event["actor_user_id"]), (member["id"], member["id"]))
         self.assertEqual(json.loads(event["detail_json"])["via"], "cli")
@@ -2979,6 +2993,105 @@ class ServerCommandTests(unittest.TestCase):
         self.assertIn("password_reset", self.kinds(self.primary))
         self.assertIn("password_reset", self.kinds(deputy))
 
+    # 3M2AYA (Aly, Slack ts 1790279285.796099): in-app resets by owners.
+    def hash_of(self, user):
+        return self.db.execute("SELECT password_hash FROM users WHERE id=?", (user["id"],)).fetchone()[0]
+
+    def test_an_owner_resets_a_members_password_in_the_app(self):
+        deputy, member = self.secondary("deputy"), self.user("member")
+        self.session(member, "member-a")
+        self.session(member, "member-b")
+        self.service.record_login_attempt(member["email"], "10.0.0.1", False)
+        self.service.reset_user_password(deputy, member["id"], "8charsOK")
+        self.assertTrue(verify_password("8charsOK", self.hash_of(member)))
+        self.assertEqual(self.sessions(member), 0)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM login_attempts WHERE email=? AND success=0",
+                                         (member["email"],)).fetchone()[0], 0)
+        [event] = self.events("password_reset")
+        self.assertEqual((event["target_user_id"], event["actor_user_id"], event["reason"]),
+                         (member["id"], deputy["id"], "in app"))
+        self.assertEqual(json.loads(event["detail_json"]), {"via": "in app", "sessions_revoked": 2})
+        [notice] = [n for n in self.service.list_notifications(member) if n["kind"] == "password_reset"]
+        self.assertEqual(notice["summary"], "password reset for Member by Deputy")
+        # A member's reset is not an owner notice.
+        self.assertNotIn("password_reset", self.kinds(self.primary))
+        self.assertNotIn("password_reset", self.kinds(deputy))
+        self.assertNotIn("8charsOK", json.dumps([dict(r) for r in self.db.execute("SELECT * FROM user_events")]))
+
+    def test_a_secondary_resets_another_secondary_and_their_own_password(self):
+        deputy, other = self.secondary("deputy"), self.secondary("other")
+        self.service.reset_user_password(deputy, other["id"], "other new pass")
+        self.assertTrue(verify_password("other new pass", self.hash_of(other)))
+        self.assertIn("password_reset", self.kinds(other))
+        self.assertIn("password_reset", self.kinds(self.primary))  # an owner's reset tells the other owners
+        self.assertNotIn("password_reset", self.kinds(deputy))  # not the actor
+        self.session(deputy, "deputy-current")
+        self.session(deputy, "deputy-other-device")
+        self.service.reset_user_password(deputy, deputy["id"], "deputy new pass", keep_session="deputy-current")
+        self.assertTrue(verify_password("deputy new pass", self.hash_of(deputy)))
+        self.assertEqual([r[0] for r in self.db.execute("SELECT token_hash FROM sessions WHERE user_id=?",
+                                                        (deputy["id"],))], ["deputy-current"])
+
+    def test_a_secondary_cannot_reset_the_primarys_password(self):
+        deputy = self.secondary("deputy")
+        before = self.hash_of(self.primary)
+        self.session(self.primary, "primary-1")
+        with self.assertRaisesRegex(Forbidden, "Only the primary owner can change the primary owner's password."):
+            self.service.reset_user_password(deputy, self.primary["id"], "hijacked pass")
+        self.assertEqual(self.hash_of(self.primary), before)
+        self.assertEqual(self.sessions(self.primary), 1)
+        self.assertEqual(self.events("password_reset"), [])
+        [blocked] = self.events("owner_change_blocked")
+        self.assertEqual((blocked["target_user_id"], blocked["actor_user_id"]), (self.primary["id"], deputy["id"]))
+        self.assertEqual(json.loads(blocked["detail_json"]), {"action": "reset the primary owner's password"})
+        self.assertIn("owner_change_blocked", self.kinds(self.primary))
+
+    def test_the_primary_resets_a_secondary_and_their_own_password(self):
+        deputy = self.secondary("deputy")
+        self.session(deputy, "deputy-1")
+        self.service.reset_user_password(self.primary, deputy["id"], "deputy reset")
+        self.assertTrue(verify_password("deputy reset", self.hash_of(deputy)))
+        self.assertEqual(self.sessions(deputy), 0)
+        self.session(self.primary, "primary-current")
+        self.service.reset_user_password(self.primary, self.primary["id"], "primary reset", keep_session="primary-current")
+        self.assertTrue(verify_password("primary reset", self.hash_of(self.primary)))
+        self.assertEqual(self.sessions(self.primary), 1)
+        self.assertIn("password_reset", self.kinds(deputy))
+
+    def test_a_stale_ex_primary_cannot_reset_the_new_primarys_password(self):
+        deputy = self.secondary("deputy")
+        stale = dict(self.primary)
+        self.service.transfer_primary_owner(deputy["email"], self.VIA)
+        before = self.hash_of(deputy)
+        with self.assertRaises(Forbidden):
+            self.service.reset_user_password(stale, deputy["id"], "takeover pass")
+        self.assertEqual(self.hash_of(deputy), before)
+        self.assertEqual([e["actor_user_id"] for e in self.events("owner_change_blocked")], [self.primary["id"]])
+        # The ex-primary is still a secondary owner and may reset their own password.
+        self.service.reset_user_password(stale, self.primary["id"], "still mine ok")
+
+    def test_non_owners_and_inactive_targets_are_refused(self):
+        member, chair = self.user("member"), self.user("chair", "chairman")
+        manager = self.user("manager")
+        project = self.service.create_project(self.primary, "Managed")
+        self.service.grant_project_access(self.primary, project["id"], manager["id"], "manager")
+        before = self.state()
+        for actor in (member, chair, manager):
+            with self.subTest(actor=actor["email"]):
+                with self.assertRaises(Forbidden):
+                    self.service.reset_user_password(actor, member["id"], "attempted pass")
+        self.assertEqual(self.state(), before)
+        gone = self.user("gone")
+        self.service.set_user_active(self.primary, gone["id"], False)
+        before = self.state()
+        with self.assertRaisesRegex(ValueError, "inactive"):
+            self.service.reset_user_password(self.primary, gone["id"], "attempted pass")
+        with self.assertRaisesRegex(ValueError, "at least 8 characters"):
+            self.service.reset_user_password(self.primary, member["id"], "1234567")
+        with self.assertRaises(KeyError):
+            self.service.reset_user_password(self.primary, "no-such-user", "attempted pass")
+        self.assertEqual(self.state(), before)
+
     def test_reset_password_refusals_change_nothing(self):
         member = self.user("member")
         self.service.set_user_active(self.primary, member["id"], False)
@@ -2986,7 +3099,7 @@ class ServerCommandTests(unittest.TestCase):
         for email, password, message in (
             ("nobody@example.org", "long enough password", "No user has the email"),
             (member["email"], "long enough password", "inactive"),
-            (self.primary["email"], "short", "at least 12 characters"),
+            (self.primary["email"], "seven77", "at least 8 characters"),
         ):
             with self.subTest(email=email):
                 with self.assertRaisesRegex(ValueError, message):
@@ -3072,8 +3185,8 @@ class ServerCommandCliTests(unittest.TestCase):
                 self.assertNotIn("Traceback", code)
         before = self.password_hash("deputy@example.org")
         code, _, _ = self.run_cli(["reset-password", "--email", "deputy@example.org", "--yes"],
-                                  passwords=["short", "short"])
-        self.assertEqual(code, "Password must contain at least 12 characters.")
+                                  passwords=["seven77", "seven77"])
+        self.assertEqual(code, "Password must contain at least 8 characters.")
         self.assertEqual(self.password_hash("deputy@example.org"), before)
 
     def test_recovery_commands_refuse_a_missing_database_without_creating_one(self):

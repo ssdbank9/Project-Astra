@@ -256,6 +256,8 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .import-body h3:focus { outline: none; }
 #import-dialog button:disabled { opacity: .55; cursor: not-allowed; }
 .import-body .error.is-info { color: var(--teal); }
+#people-body .error.is-info { color: var(--teal); }
+#people-body .form-hint { color: #667085; font-size: 12px; margin: 0 0 8px; }
 @media (max-width: 760px) {
   .import-options, .add-col { grid-template-columns: 1fr; }
   .col-list li { grid-template-columns: 1fr 1fr; }

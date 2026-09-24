@@ -67,8 +67,9 @@ OWNER_REQUEST_COLUMNS_R = ",".join(f"r.{field}" for field in OWNER_REQUEST_FIELD
 # back into work, but never one to cancel, abandon, hold or otherwise govern it.
 REOPEN_EQUIVALENT_STATUSES = frozenset(MANAGER_ORDINARY_STATUSES | {"reopened"})
 
-LOGIN_WINDOW_SECONDS = 900
-LOGIN_MAX_FAILURES = 5
+# 3M2AYA (Aly, 2026-09-24): failed sign-ins never lock anyone out; they are kept as
+# history only, for this many days.
+LOGIN_HISTORY_DAYS = 90
 # KBWY86 (Aly, Slack ts 1790268694.030539): one person's blocked attempts reach each
 # recipient at most BLOCKED_NOTICE_CAP times per rolling window, pooled across these kinds
 # and targets. owner_change_blocked has its own bucket, so cheaper attempts cannot use up
@@ -282,20 +283,14 @@ class AstraService:
     def owner_exists(self) -> bool:
         return bool(self.db.execute("SELECT 1 FROM users WHERE global_role='owner'").fetchone())
 
-    def login_is_throttled(self, email: str) -> bool:
-        """True when this email has reached the failed-attempt cap inside the window."""
-        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=LOGIN_WINDOW_SECONDS)).isoformat()
-        count = self.db.execute(
-            "SELECT COUNT(*) c FROM login_attempts WHERE email=? AND success=0 AND attempted_at>=?",
-            (email, cutoff),
-        ).fetchone()["c"]
-        return count >= LOGIN_MAX_FAILURES
-
     def record_login_attempt(self, email: str, ip: str, success: bool) -> None:
+        """History only: no number of failures ever blocks a sign-in (3M2AYA)."""
         self.db.execute(
             "INSERT INTO login_attempts VALUES(?,?,?,?,?)",
             (new_id(), email, ip or "", now_text(), 1 if success else 0),
         )
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=LOGIN_HISTORY_DAYS)).isoformat()
+        self.db.execute("DELETE FROM login_attempts WHERE attempted_at<?", (cutoff,))
         if success:
             self.db.execute("DELETE FROM login_attempts WHERE email=? AND success=0", (email,))
 
@@ -386,7 +381,8 @@ class AstraService:
         )
         return event_id
 
-    def _owner_change_blocked(self, actor: dict, target_id: str | None, action: str) -> None:
+    def _owner_change_blocked(self, actor: dict, target_id: str | None, action: str,
+                              message: str = "Only the primary owner can change another owner's access.") -> None:
         """Record and refuse an owner-access change the actor may not make. Called with no
         transaction open, so the audit row and the primary's notice are kept. Every attempt
         is audited (KBWY86); repeated notices are limited by the blocked-notice cap instead.
@@ -399,7 +395,7 @@ class AstraService:
                 self._notify(primary["id"], event_id, None, "owner_change_blocked",
                              f"blocked {action} attempt by {actor.get('display_name', actor['id'])}",
                              actor_id=actor["id"])
-        raise Forbidden("Only the primary owner can change another owner's access.")
+        raise Forbidden(message)
 
     def _require_primary_now(self, actor: dict) -> None:
         """Inside a write transaction: the actor must still be the active primary owner. The
@@ -563,19 +559,57 @@ class AstraService:
 
     def reset_password(self, email: str, password: str, via: dict) -> dict:
         """Set a new password, sign the user out everywhere and clear their failed sign-ins."""
-        password_hash = hash_password(password)  # refuses fewer than 12 characters, before any write
+        password_hash = hash_password(password)  # refuses fewer than 8 characters, before any write
         with transaction(self.db):
             user = self.check_password_reset(email)
-            self.db.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash, user["id"]))
-            sessions = self.revoke_user_sessions(user["id"])
-            self.db.execute("DELETE FROM login_attempts WHERE email=? AND success=0", (user["email"],))
-            event_id = self._insert_user_event(user["id"], "password_reset", user["id"], "server command",
-                                               {**via, "sessions_revoked": sessions})
-            summary = f"password reset for {user['display_name']} via server command"
-            self._notify(user["id"], event_id, None, "password_reset", summary, actor_id=user["id"])
-            if user["global_role"] == "owner":
-                self._notify_owners(user["id"], event_id, None, "password_reset", summary)
+            self._apply_password_reset(user, password_hash, user["id"], "server command", via,
+                                       f"password reset for {user['display_name']} via server command")
         return self.get_user(user["id"])
+
+    def _apply_password_reset(self, user: dict, password_hash: str, actor_id: str, reason: str, via: dict,
+                              summary: str, keep_session: str | None = None) -> None:
+        """Inside a write transaction: set the hash, sign the user out (except ``keep_session``,
+        the token hash of the actor's own session when they reset their own password), clear
+        their failed sign-ins, audit a password_reset user event and notify the user, plus the
+        other owners when the user is an owner. The password itself is never stored or logged."""
+        self.db.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash, user["id"]))
+        sessions = self.db.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?",
+                                   (user["id"], keep_session or "")).rowcount
+        self.db.execute("DELETE FROM login_attempts WHERE email=? AND success=0", (user["email"],))
+        event_id = self._insert_user_event(user["id"], "password_reset", actor_id, reason,
+                                           {**via, "sessions_revoked": sessions})
+        if user["id"] != actor_id or reason == "server command":
+            self._notify(user["id"], event_id, None, "password_reset", summary, actor_id=actor_id)
+        if user["global_role"] == "owner":
+            self._notify_owners(actor_id, event_id, None, "password_reset", summary)
+
+    def reset_user_password(self, actor: dict, user_id: str, password: str, keep_session: str | None = None) -> dict:
+        """3M2AYA (Aly, 2026-09-24): an active owner resets a password in the app. The primary
+        may reset anyone's; a secondary owner anyone's except the primary's (refused and
+        audited like other blocked owner changes). ``keep_session`` keeps the actor's current
+        session when they reset their own password."""
+        self.require_owner(actor)
+        password_hash = hash_password(password)  # refuses fewer than 8 characters, before any write
+        try:
+            with transaction(self.db):
+                # Re-read both under the write lock: a transfer or a role change may have landed.
+                if not self.db.execute("SELECT 1 FROM users WHERE id=? AND global_role='owner' AND active=1",
+                                       (actor["id"],)).fetchone():
+                    raise Forbidden("Owner access required.")
+                target = self.get_user(user_id)
+                if not target["active"]:
+                    raise ValueError(f"{target['email']} is inactive; reactivate them before resetting the password.")
+                if target["is_primary_owner"]:
+                    self._require_primary_now(actor)
+                self._apply_password_reset(
+                    target, password_hash, actor["id"], "in app", {"via": "in app"},
+                    f"password reset for {target['display_name']} by {self._actor_name(actor)}",
+                    keep_session if target["id"] == actor["id"] else None,
+                )
+        except _OwnerTargetBlocked:
+            self._owner_change_blocked(actor, user_id, "reset the primary owner's password",
+                                       "Only the primary owner can change the primary owner's password.")
+        return self.get_user(user_id)
 
     def list_user_events(self, actor: dict) -> list[dict]:
         """Newest first: the latest 200 grants and removals, then the latest 50 blocked owner

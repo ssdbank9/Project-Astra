@@ -1080,7 +1080,9 @@ async function openPeople(){
 
 // GTEYTG: every owner has role "owner"; only the primary owner may give or remove owner access.
 const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset"};
-const SERVER_COMMAND_EVENTS=new Set(["primary_owner_transferred","password_reset"]);
+// PDDS2D/3M2AYA: a password reset is either a server command or done in the app by an owner.
+const viaServerCommand=e=>(e.event_type==="primary_owner_transferred"||e.event_type==="password_reset")&&e.reason==="server command";
+const MIN_PASSWORD=8;
 function renderPeople(users,memberships,ownerEvents){
   const primary=!!state.user.is_primary_owner;
   const rows=users.map(u=>{
@@ -1089,13 +1091,15 @@ function renderPeople(users,memberships,ownerEvents){
     const toggle=isOwner?"":`<button type="button" class="link" data-toggle="${id}" data-active="${u.active?1:0}">${u.active?"Deactivate":"Reactivate"}</button>`;
     const ownerAction=!primary||u.is_primary_owner?"":isOwner?`<button type="button" class="link" data-owner-revoke="${id}">Remove secondary owner</button>`
       :u.active?`<button type="button" class="link" data-owner-grant="${id}">Make secondary owner</button>`:"";
-    return `<li><strong>${escapeHtml(u.display_name)}</strong> · ${escapeHtml(u.email)} · ${role}${u.active?"":' · <em>inactive</em>'} ${toggle} ${ownerAction}</li>`;
+    const reset=canResetPassword(u,primary)?`<button type="button" class="link" data-reset-password="${id}">Reset password</button>`:"";
+    return `<li><strong>${escapeHtml(u.display_name)}</strong> · ${escapeHtml(u.email)} · ${role}${u.active?"":' · <em>inactive</em>'} ${toggle} ${ownerAction} ${reset}</li>`;
   }).join("");
-  const ownerEventRow=e=>`<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(OWNER_EVENT_LABELS[e.event_type]||e.event_type)}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`}${SERVER_COMMAND_EVENTS.has(e.event_type)?" via server command":` by ${escapeHtml(e.actor_name)}`}${e.reason&&!SERVER_COMMAND_EVENTS.has(e.event_type)?` · ${escapeHtml(e.reason)}`:""}</li>`;
+  const ownerEventRow=e=>`<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(OWNER_EVENT_LABELS[e.event_type]||e.event_type)}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`}${viaServerCommand(e)?" via server command":` by ${escapeHtml(e.actor_name)}`}${e.reason&&!viaServerCommand(e)?` · ${escapeHtml(e.reason)}`:""}</li>`;
   const blocked=e=>e.event_type==="owner_change_blocked"||e.event_type==="import_blocked";
   const ownerHistory=(ownerEvents||[]).filter(e=>!blocked(e)).slice(0,20).map(ownerEventRow).join("")||"<li>No owner access changes yet.</li>";
   const blockedList=type=>(ownerEvents||[]).filter(e=>e.event_type===type).slice(0,10).map(ownerEventRow).join("")||"<li>None.</li>";
   const blockedHistory=blockedList("owner_change_blocked"),blockedImports=blockedList("import_blocked");
+  const resetOptions=users.filter(u=>canResetPassword(u,primary)).map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.display_name)} · ${escapeHtml(u.email)}</option>`).join("");
   // Only the primary may change an owner's project access, so others are not offered it.
   const ownerIds=new Set(users.filter(u=>u.global_role==="owner").map(u=>u.id));
   const userOptions=users.filter(u=>u.active&&(primary||!ownerIds.has(u.id))).map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.display_name)}</option>`).join("");
@@ -1112,9 +1116,17 @@ function renderPeople(users,memberships,ownerEvents){
     <form id="add-user-form"><h3>Add a user</h3>
       <label>Email<input name="email" type="email" required></label>
       <label>Display name<input name="display_name" required></label>
-      <label>Temporary password (min 12 chars)<input name="password" type="password" minlength="12" required></label>
+      <label>Temporary password (min ${MIN_PASSWORD} characters)<input name="password" type="password" minlength="${MIN_PASSWORD}" autocomplete="new-password" required></label>
       <label>Role<select name="role"><option value="member">Member</option><option value="chairman">Chairman</option></select></label>
       <div class="actions"><button value="add">Create user</button></div><div class="error" id="add-user-error"></div></form>
+    <form id="reset-password-form"><h3>Reset a password</h3>
+      <p class="form-hint">For someone who has forgotten theirs. They are signed out everywhere else and sign in with the new password.</p>
+      <label>User<select name="user_id" id="reset-password-user" required><option value="">Choose a user…</option>${resetOptions}</select></label>
+      <div class="grid">
+        <label>New password (min ${MIN_PASSWORD} characters)<input name="password" type="password" minlength="${MIN_PASSWORD}" autocomplete="new-password" required></label>
+        <label>Confirm new password<input name="confirm" type="password" minlength="${MIN_PASSWORD}" autocomplete="new-password" required></label>
+      </div>
+      <div class="actions"><button value="reset">Reset password</button></div><div class="error" id="reset-password-error" role="status"></div></form>
     <form id="grant-form"><h3>Grant project access</h3>
       <div class="grid">
         <label>User<select name="user_id" required>${userOptions}</select></label>
@@ -1139,6 +1151,8 @@ function renderPeople(users,memberships,ownerEvents){
       <div id="calendar-body"></div>
       <div class="error" id="calendar-error"></div></form>`;
   document.querySelector("#add-user-form").addEventListener("submit",submitAddUser);
+  document.querySelector("#reset-password-form").addEventListener("submit",submitResetPassword);
+  document.querySelectorAll("#people-body [data-reset-password]").forEach(b=>b.addEventListener("click",()=>chooseResetUser(b.dataset.resetPassword)));
   document.querySelector("#grant-form").addEventListener("submit",submitGrant);
   document.querySelectorAll("#people-body [data-toggle]").forEach(b=>b.addEventListener("click",toggleUserActive));
   document.querySelectorAll("#people-body [data-owner-grant],#people-body [data-owner-revoke]").forEach(b=>b.addEventListener("click",changeOwnerAccess));
@@ -1265,6 +1279,27 @@ async function submitAddUser(e){
   e.preventDefault();const err=document.querySelector("#add-user-error");err.textContent="";
   try{await api("/api/users",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();await openPeople()}
   catch(x){err.textContent=x.message}
+}
+// 3M2AYA: any owner resets an active user's password; only the primary resets the primary's.
+function canResetPassword(u,viewerIsPrimary){return !!u.active&&(!u.is_primary_owner||viewerIsPrimary)}
+function chooseResetUser(userId){
+  const form=document.querySelector("#reset-password-form");
+  form.querySelector("#reset-password-user").value=userId;
+  document.querySelector("#reset-password-error").textContent="";
+  form.scrollIntoView({block:"nearest"});form.querySelector('input[name="password"]').focus();
+}
+async function submitResetPassword(e){
+  e.preventDefault();const form=e.target,out=document.querySelector("#reset-password-error");
+  out.textContent="";out.classList.remove("is-info");
+  const data=Object.fromEntries(new FormData(form));
+  if(!data.user_id){out.textContent="Choose a user.";return}
+  if(data.password.length<MIN_PASSWORD){out.textContent=`Use at least ${MIN_PASSWORD} characters.`;return}
+  if(data.password!==data.confirm){out.textContent="The two passwords do not match.";return}
+  const name=form.querySelector("#reset-password-user").selectedOptions[0]?.textContent||"the user";
+  try{
+    await api(`/api/users/${data.user_id}/password`,{method:"POST",body:JSON.stringify({password:data.password})});
+    form.reset();out.classList.add("is-info");out.textContent=`Password reset for ${name}. Give them the new password; they are signed out everywhere else.`;
+  }catch(x){out.textContent=x.message}
 }
 async function submitGrant(e){
   e.preventDefault();const err=document.querySelector("#grant-error");err.textContent="";

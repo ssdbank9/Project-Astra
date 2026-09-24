@@ -911,17 +911,64 @@ class AstraWebTests(unittest.TestCase):
         _, inbox2 = self.request("GET", "/api/notifications", cookie=cookie)
         self.assertEqual(inbox2["unread"], 0)
 
-    def test_login_is_throttled_after_repeated_failures(self):
-        for _ in range(5):
-            response, _ = self.request("POST", "/api/login", {
+    def test_repeated_failures_never_lock_anyone_out(self):
+        # 3M2AYA (Aly, Slack ts 1790279102.044719): just say the password is incorrect.
+        for _ in range(21):
+            response, payload = self.request("POST", "/api/login", {
                 "email": "owner@example.org", "password": "wrong password guess",
             })
             self.assertEqual(response.status, 401)
+            self.assertEqual(payload["error"], "Incorrect email or password.")
+        response, payload = self.request("POST", "/api/login", {
+            "email": "nobody@example.org", "password": "anything at all",
+        })
+        self.assertEqual((response.status, payload["error"]), (401, "Incorrect email or password."))
         response, payload = self.request("POST", "/api/login", {
             "email": "owner@example.org", "password": "correct horse battery",
         })
-        self.assertEqual(response.status, 429)
-        self.assertIn("Too many", payload["error"])
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["user"]["email"], "owner@example.org")
+
+    def test_owner_resets_a_password_over_http(self):
+        owner_cookie, owner_csrf = self._owner_session()
+        _, created = self.request("POST", "/api/users", {
+            "email": "forgot@example.org", "display_name": "Forgot", "password": "old password",
+            "role": "member"}, cookie=owner_cookie, csrf=owner_csrf)
+        user_id = created["user"]["id"]
+        response, member_login = self.request("POST", "/api/login", {"email": "forgot@example.org",
+                                                                     "password": "old password"})
+        member_cookie = response.getheader("Set-Cookie").split(";", 1)[0]
+        for csrf in (None, "wrong-token"):
+            response, _ = self.request("POST", f"/api/users/{user_id}/password", {"password": "new pass 8"},
+                                       cookie=owner_cookie, csrf=csrf)
+            self.assertEqual(response.status, 403)
+        response, payload = self.request("POST", f"/api/users/{user_id}/password", {"password": "1234567"},
+                                         cookie=owner_cookie, csrf=owner_csrf)
+        self.assertEqual((response.status, payload["error"]), (400, "Password must contain at least 8 characters."))
+        response, payload = self.request("POST", f"/api/users/{user_id}/password", {"password": "new pass 8"},
+                                         cookie=member_cookie, csrf=member_login["csrf"])
+        self.assertEqual(response.status, 403)  # a member cannot reset anyone
+        response, payload = self.request("POST", f"/api/users/{user_id}/password", {"password": "new pass 8"},
+                                         cookie=owner_cookie, csrf=owner_csrf)
+        self.assertEqual(response.status, 200)
+        self.assertNotIn("password", json.dumps(payload).replace("password_", ""))
+        response, _ = self.request("GET", "/api/tasks", cookie=member_cookie)
+        self.assertEqual(response.status, 403)  # the member's session was revoked
+        response, _ = self.request("POST", "/api/login", {"email": "forgot@example.org", "password": "new pass 8"})
+        self.assertEqual(response.status, 200)
+        response, _ = self.request("POST", "/api/users/no-such-user/password",
+                                   {"password": "new pass 8"}, cookie=owner_cookie, csrf=owner_csrf)
+        self.assertEqual(response.status, 404)
+        # Resetting your own password keeps the session you are using.
+        _, me = self.request("GET", "/api/me", cookie=owner_cookie)
+        response, _ = self.request("POST", f"/api/users/{me['user']['id']}/password", {"password": "owner new 8"},
+                                   cookie=owner_cookie, csrf=owner_csrf)
+        self.assertEqual(response.status, 200)
+        response, _ = self.request("GET", "/api/tasks", cookie=owner_cookie)
+        self.assertEqual(response.status, 200)
+        _, audit = self.request("GET", "/api/user-events", cookie=owner_cookie)
+        resets = [e for e in audit["events"] if e["event_type"] == "password_reset"]
+        self.assertEqual([e["reason"] for e in resets], ["in app", "in app"])
 
     def test_logout_all_revokes_other_sessions(self):
         cookie1, csrf1 = self._owner_session()
@@ -1747,7 +1794,8 @@ class AstraStaticAssetTests(unittest.TestCase):
             self.assertIn(phrase, self.readme)
         # PDDS2D: server-command events are labelled on the People screen.
         for phrase in ('primary_owner_transferred:"Primary owner transferred"', 'password_reset:"Password reset"',
-                       '" via server command"'):
+                       '" via server command"', 'data-reset-password=', 'id="reset-password-form"',
+                       'const MIN_PASSWORD=8;', 'minlength="${MIN_PASSWORD}"'):
             self.assertIn(phrase, self.js)
 
 
