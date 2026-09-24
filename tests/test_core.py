@@ -1575,11 +1575,11 @@ class AstraCoreTests(unittest.TestCase):
             self.db.execute("UPDATE notifications SET created_at=? WHERE user_id=? AND actor_user_id=?",
                             (stamp, self.owner["id"], viewer["id"]))
 
-        age_viewer_notices(BLOCKED_NOTICE_WINDOW_SECONDS - 1)  # still inside the window: capped
+        age_viewer_notices(BLOCKED_NOTICE_WINDOW_SECONDS - 30)  # still inside the window: capped
         with self.assertRaises(Forbidden):
             self.service.remove_task_attachment(viewer, task["id"], attachment["id"])
         self.assertEqual(len(self._blocked_notices(self.owner, viewer)), BLOCKED_NOTICE_CAP)
-        age_viewer_notices(BLOCKED_NOTICE_WINDOW_SECONDS + 1)  # just outside: notices resume
+        age_viewer_notices(BLOCKED_NOTICE_WINDOW_SECONDS + 30)  # just outside: notices resume
         with self.assertRaises(Forbidden):
             self.service.remove_task_attachment(viewer, task["id"], attachment["id"])
         self.assertEqual(len(self._blocked_notices(self.owner, viewer)), BLOCKED_NOTICE_CAP + 1)
@@ -1590,7 +1590,7 @@ class AstraCoreTests(unittest.TestCase):
             with self.assertRaises(Forbidden):
                 self.service.remove_task_attachment(viewer, task["id"], attachment["id"])
         notices = sorted(self._blocked_notices(self.owner, viewer), key=lambda n: n["created_at"])
-        suffix = "Further blocked attempts by Fifth in the next 10 minutes are recorded in history only."
+        suffix = " · Further blocked attempts of this kind by Fifth are recorded in history only for now."
         self.assertEqual([suffix in n["summary"] for n in notices], [False] * (BLOCKED_NOTICE_CAP - 1) + [True])
 
     def test_owner_self_notices_are_capped_too_and_ordinary_notices_are_not(self):
@@ -2549,6 +2549,13 @@ class SecondaryOwnerTests(unittest.TestCase):
         self.assertEqual(len(self.user_events("owner_change_blocked")), 7)
         self.assertEqual(self.notified(self.primary).count("owner_change_blocked"), BLOCKED_NOTICE_CAP)
         self.assertEqual(self.notified(self.primary).count("attachment_add_blocked"), BLOCKED_NOTICE_CAP)
+        # Each bucket's 5th notice names its own bucket.
+        owner_changes = sorted((n for n in self.service.list_notifications(self.primary)
+                                if n["kind"] == "owner_change_blocked"), key=lambda n: n["created_at"])
+        line = " · Further blocked owner-access attempts by Prober are recorded in history only for now."
+        self.assertEqual([line in n["summary"] for n in owner_changes], [False] * (BLOCKED_NOTICE_CAP - 1) + [True])
+        adds = [n["summary"] for n in self.service.list_notifications(self.primary) if n["kind"] == "attachment_add_blocked"]
+        self.assertEqual(sum("attempts of this kind by Prober" in s for s in adds), 1)
 
     def test_blocked_imports_do_not_push_owner_changes_out_of_the_history(self):
         # Review 5 gap 2: each blocked kind has its own limit in list_user_events.

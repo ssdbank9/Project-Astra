@@ -76,7 +76,7 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   cloud container on 2026-09-24, about 7 minutes).
 - Later on 2026-09-24 (6G89SJ, KBWY86): schema v17 (`SCHEMA_VERSION = 17`; step
   `_migrate_v17` adds the nullable `notifications.actor_user_id` and
-  `idx_notifications_actor`). Tests with KBWY86: `Ran 416 tests`, `OK`.
+  `idx_notifications_actor`). Tests with KBWY86: `Ran 421 tests`, `OK`.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 

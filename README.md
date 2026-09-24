@@ -75,8 +75,8 @@ This first vertical slice provides:
   blocked attachment removal, a final-result unmark and an attachment removal are also sent
   to the owner who did them, so a single-owner install hears of them; blocked-attempt notices
   are capped at 5 per recipient and per person in any 10 minutes, with blocked owner-access
-  attempts counted separately, and the 5th notice says further attempts are in history only
-  (every attempt is still audited, including an import refused for lack of a target project);
+  attempts counted separately, and the 5th notice in each says further attempts of that
+  kind are in history only for now (every attempt is still audited, including an import refused for lack of a target project);
 - portfolio and per-project Gantt views with overdue and upcoming highlighting;
 - task steps (subtasks) drawn as numbered, colour-coded segments inside the parent's Gantt
   bar: a shared tooltip on hover and keyboard focus, a chevron that expands the step rows,

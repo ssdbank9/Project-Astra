@@ -245,8 +245,9 @@ class AstraService:
                 return
             if sent == BLOCKED_NOTICE_CAP - 1:
                 who = self.db.execute("SELECT display_name FROM users WHERE id=?", (actor_id,)).fetchone()
-                summary += (f" Further blocked attempts by {who['display_name'] if who else actor_id} in the next"
-                            f" {BLOCKED_NOTICE_WINDOW_SECONDS // 60} minutes are recorded in history only.")
+                what = "owner-access attempts" if kind == "owner_change_blocked" else "attempts of this kind"
+                summary += (f" · Further blocked {what} by {who['display_name'] if who else actor_id}"
+                            " are recorded in history only for now.")
         # INSERT OR IGNORE with the unique (user_id, event_id) index makes retries idempotent.
         self.db.execute(
             "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at,actor_user_id)"
