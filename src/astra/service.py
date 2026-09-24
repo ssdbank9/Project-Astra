@@ -471,6 +471,94 @@ class AstraService:
                                     {"restored_role": restored, "sessions_revoked": sessions})
         return self.get_user(user_id)
 
+    # --- Server commands (PDDS2D, Aly 2026-09-24): run by whoever operates the server ---
+    # There is no signed-in actor: the operator can already write the database file, so
+    # these add correctness and an audit row, not power. user_events.actor_user_id is
+    # NOT NULL, so the target user is recorded as the actor and ``via`` (how and where the
+    # command ran) goes in the detail; the People screen shows "via server command".
+
+    def user_by_email(self, email: str) -> dict | None:
+        return row_dict(self.db.execute(
+            f"SELECT {USER_COLUMNS} FROM users WHERE email=?", (normalize_email(email),)
+        ).fetchone())
+
+    def current_primary_owner(self) -> dict | None:
+        return row_dict(self.db.execute(
+            f"SELECT {USER_COLUMNS} FROM users WHERE is_primary_owner=1"
+        ).fetchone())
+
+    def check_primary_transfer(self, to_email: str) -> tuple[dict, dict]:
+        """(current primary, target) for a transfer, or ValueError saying why not."""
+        primary = self.current_primary_owner()
+        if not primary:
+            raise ValueError("There is no primary owner; create one with 'astra init-owner'.")
+        target = self.user_by_email(to_email)
+        if not target:
+            raise ValueError(f"No user has the email {normalize_email(to_email)}.")
+        if target["is_primary_owner"]:
+            raise ValueError(f"{target['email']} is already the primary owner.")
+        if not target["active"]:
+            raise ValueError(f"{target['email']} is inactive; only an active secondary owner can become primary.")
+        if target["global_role"] != "owner":
+            raise ValueError(f"{target['email']} is not an owner; the primary owner must make them a "
+                             "secondary owner first.")
+        return primary, target
+
+    def transfer_primary_owner(self, to_email: str, via: dict) -> dict:
+        """Move the primary flag to an active secondary owner in one transaction. The old
+        primary stays a secondary owner and is signed out everywhere."""
+        with transaction(self.db):
+            old, new = self.check_primary_transfer(to_email)
+            # Clear first: the partial unique index allows only one primary row at a time.
+            if self.db.execute("UPDATE users SET is_primary_owner=0 WHERE id=? AND is_primary_owner=1",
+                               (old["id"],)).rowcount != 1:
+                raise Conflict("The primary owner changed; run the command again.")
+            if self.db.execute(
+                "UPDATE users SET is_primary_owner=1 WHERE id=? AND global_role='owner' AND active=1"
+                " AND is_primary_owner=0", (new["id"],),
+            ).rowcount != 1:
+                raise Conflict("The target user changed; run the command again.")
+            sessions = self.revoke_user_sessions(old["id"])
+            event_id = self._insert_user_event(
+                new["id"], "primary_owner_transferred", new["id"], "server command",
+                {**via, "from_user_id": old["id"], "to_user_id": new["id"], "sessions_revoked": sessions})
+            summary = (f"primary owner transferred to {new['display_name']} from {old['display_name']}"
+                       " via server command")
+            self._notify(new["id"], event_id, None, "primary_owner_transferred", summary, actor_id=new["id"])
+            self._notify_owners(new["id"], event_id, None, "primary_owner_transferred", summary)
+        return self.get_user(new["id"])
+
+    @staticmethod
+    def can_reset_password(user: dict) -> bool:
+        """Who a server-command reset may target. Aly's default (2026-09-24): any active
+        user. Narrow it here, e.g. to owners only, if that changes."""
+        return bool(user.get("active"))
+
+    def check_password_reset(self, email: str) -> dict:
+        """The user a reset would change, or ValueError saying why not."""
+        user = self.user_by_email(email)
+        if not user:
+            raise ValueError(f"No user has the email {normalize_email(email)}.")
+        if not self.can_reset_password(user):
+            raise ValueError(f"{user['email']} is inactive; reactivate them before resetting the password.")
+        return user
+
+    def reset_password(self, email: str, password: str, via: dict) -> dict:
+        """Set a new password, sign the user out everywhere and clear their failed sign-ins."""
+        password_hash = hash_password(password)  # refuses fewer than 12 characters, before any write
+        with transaction(self.db):
+            user = self.check_password_reset(email)
+            self.db.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash, user["id"]))
+            sessions = self.revoke_user_sessions(user["id"])
+            self.db.execute("DELETE FROM login_attempts WHERE email=? AND success=0", (user["email"],))
+            event_id = self._insert_user_event(user["id"], "password_reset", user["id"], "server command",
+                                               {**via, "sessions_revoked": sessions})
+            summary = f"password reset for {user['display_name']} via server command"
+            self._notify(user["id"], event_id, None, "password_reset", summary, actor_id=user["id"])
+            if user["global_role"] == "owner":
+                self._notify_owners(user["id"], event_id, None, "password_reset", summary)
+        return self.get_user(user["id"])
+
     def list_user_events(self, actor: dict) -> list[dict]:
         """Newest first: the latest 200 grants and removals, then the latest 50 blocked owner
         changes, then the latest 50 imports blocked for lack of a target project (KBWY86).

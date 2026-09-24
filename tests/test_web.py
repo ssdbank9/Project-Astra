@@ -1153,6 +1153,33 @@ class AstraWebTests(unittest.TestCase):
         response, detail = self.request("GET", f"/api/tasks/{task_id}", cookie=cookie)
         self.assertEqual([a["id"] for a in detail["task"]["attachments"]], [attachment_id])
 
+    def test_server_command_transfer_applies_on_the_next_request(self):
+        # PDDS2D: after 'astra transfer-primary' the old primary's sessions are gone, the new
+        # primary can grant owner access, and the People screen data lists the event.
+        owner_cookie, owner_csrf = self._owner_session()
+        _, deputy = self.request("POST", "/api/users", {
+            "email": "deputy@example.org", "display_name": "Deputy", "password": "deputy password safe",
+            "role": "member"}, cookie=owner_cookie, csrf=owner_csrf)
+        response, _ = self.request("POST", f"/api/users/{deputy['user']['id']}/secondary-owner", {"reason": "cover"},
+                                   cookie=owner_cookie, csrf=owner_csrf)
+        self.assertIn(response.status, (200, 201))
+        self.server.service.transfer_primary_owner("deputy@example.org", {"via": "cli", "os_user": "op", "host": "h"})
+        response, payload = self.request("GET", "/api/tasks", cookie=owner_cookie)
+        self.assertEqual(response.status, 403)  # the old primary's session no longer exists
+        self.assertEqual(payload["error"], "Session expired.")
+        response, login = self.request("POST", "/api/login", {"email": "deputy@example.org",
+                                                              "password": "deputy password safe"})
+        deputy_cookie, deputy_csrf = response.getheader("Set-Cookie").split(";", 1)[0], login["csrf"]
+        self.assertEqual(login["user"]["is_primary_owner"], 1)
+        _, member = self.request("POST", "/api/users", {
+            "email": "next@example.org", "display_name": "Next", "password": "next password safe",
+            "role": "member"}, cookie=deputy_cookie, csrf=deputy_csrf)
+        response, _ = self.request("POST", f"/api/users/{member['user']['id']}/secondary-owner", {"reason": "help"},
+                                   cookie=deputy_cookie, csrf=deputy_csrf)
+        self.assertIn(response.status, (200, 201))
+        response, audit = self.request("GET", "/api/user-events", cookie=deputy_cookie)
+        self.assertIn("primary_owner_transferred", {e["event_type"] for e in audit["events"]})
+
     def test_project_template_roundtrip_over_http(self):
         cookie, csrf = self._owner_session()
         _, project = self.request("POST", "/api/projects", {"name": "Template source"}, cookie=cookie, csrf=csrf)
@@ -1718,6 +1745,10 @@ class AstraStaticAssetTests(unittest.TestCase):
         self.assertIn("--step-1-edge", self.contract)
         for phrase in ("steps", "tooltip", "chevron", "Schedule table", "phone width"):
             self.assertIn(phrase, self.readme)
+        # PDDS2D: server-command events are labelled on the People screen.
+        for phrase in ('primary_owner_transferred:"Primary owner transferred"', 'password_reset:"Password reset"',
+                       '" via server command"'):
+            self.assertIn(phrase, self.js)
 
 
 # ARZWV7: renderDetail is run under node against a permissive DOM stub, so these tests read the

@@ -1,3 +1,4 @@
+import io
 import json
 import ntpath
 import os
@@ -12,8 +13,8 @@ from unittest.mock import patch
 
 from astra.auth import hash_password, verify_password
 from astra.db import connect
-from astra.service import (BLOCKED_NOTICE_CAP, BLOCKED_NOTICE_WINDOW_SECONDS, AstraService, Conflict, Forbidden,
-                           now_text, validate_attachment_path)
+from astra.service import (BLOCKED_NOTICE_CAP, BLOCKED_NOTICE_WINDOW_SECONDS, LOGIN_MAX_FAILURES, AstraService, Conflict,
+                           Forbidden, now_text, validate_attachment_path)
 
 from link_roots import allow_attachment_roots, link
 
@@ -2691,6 +2692,258 @@ class SecondaryOwnerTests(unittest.TestCase):
         created = self.service.create_project_from_template(secondary, template["id"], "Deputy's copy")
         [task] = self.service.list_tasks(secondary, created["id"])
         self.assertEqual(task["owner_user_id"], secondary["id"])
+
+
+
+class ServerCommandTests(unittest.TestCase):
+    """PDDS2D (Aly, Slack ts 1790272579.421269): server commands transfer the primary owner
+    and reset a password, audited as user events 'via server command'."""
+
+    VIA = {"via": "cli", "os_user": "operator", "host": "astra-host"}
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp.name) / "astra.sqlite3"
+        self.db = connect(self.db_path)
+        self.service = AstraService(self.db)
+        self.primary = self.service.create_initial_owner("owner@example.org", "Primary", "correct horse battery")
+
+    def tearDown(self):
+        self.db.close()
+        self.temp.cleanup()
+
+    def user(self, key, role="member"):
+        return self.service.create_user(self.primary, f"{key}@example.org", key.title(), f"{key} password safe", role)
+
+    def secondary(self, key):
+        return self.service.grant_secondary_owner(self.primary, self.user(key)["id"], f"cover for {key}")
+
+    def session(self, user, token):
+        self.db.execute("INSERT INTO sessions VALUES(?,?,?,?,?)",
+                        (token, user["id"], token, now_text(), "2999-01-01T00:00:00+00:00"))
+
+    def sessions(self, user):
+        return self.db.execute("SELECT COUNT(*) FROM sessions WHERE user_id=?", (user["id"],)).fetchone()[0]
+
+    def events(self, kind):
+        return [dict(r) for r in self.db.execute("SELECT * FROM user_events WHERE event_type=?", (kind,))]
+
+    def kinds(self, user):
+        return [n["kind"] for n in self.service.list_notifications(user)]
+
+    def state(self):
+        return ([tuple(r) for r in self.db.execute("SELECT * FROM users ORDER BY id")],
+                self.db.execute("SELECT COUNT(*) FROM user_events").fetchone()[0],
+                self.db.execute("SELECT COUNT(*) FROM notifications").fetchone()[0],
+                self.db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0])
+
+    def test_transfer_moves_the_primary_flag_and_keeps_the_old_primary_as_secondary(self):
+        deputy, other = self.secondary("deputy"), self.secondary("other")
+        self.session(self.primary, "old-primary-1")
+        self.session(self.primary, "old-primary-2")
+        self.session(deputy, "deputy-1")
+        new = self.service.transfer_primary_owner("DEPUTY@example.org", self.VIA)
+        self.assertEqual(new["is_primary_owner"], 1)
+        old = self.service.get_user(self.primary["id"])
+        self.assertEqual((old["global_role"], old["is_primary_owner"], old["active"]), ("owner", 0, 1))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM users WHERE is_primary_owner=1").fetchone()[0], 1)
+        # The old primary is signed out everywhere; the new primary keeps their sessions.
+        self.assertEqual((self.sessions(self.primary), self.sessions(deputy)), (0, 1))
+        [event] = self.events("primary_owner_transferred")
+        self.assertEqual((event["target_user_id"], event["actor_user_id"]), (deputy["id"], deputy["id"]))
+        detail = json.loads(event["detail_json"])
+        self.assertEqual({k: detail[k] for k in ("via", "os_user", "host", "from_user_id", "to_user_id")},
+                         {**self.VIA, "from_user_id": self.primary["id"], "to_user_id": deputy["id"]})
+        self.assertEqual(detail["sessions_revoked"], 2)
+        for user in (self.primary, deputy, other):
+            with self.subTest(user=user["email"]):
+                self.assertIn("primary_owner_transferred", self.kinds(user))
+        # Powers follow the flag: the new primary grants, the old primary is refused and audited.
+        member = self.user("member")
+        with self.assertRaises(Forbidden):
+            self.service.grant_secondary_owner(old, member["id"], "try")
+        self.assertEqual(len(self.events("owner_change_blocked")), 1)
+        self.assertEqual(self.service.grant_secondary_owner(new, member["id"], "ok")["global_role"], "owner")
+        # The new primary can later remove the old primary's owner access; they become a member.
+        self.assertEqual(self.service.revoke_secondary_owner(new, old["id"], "handover done")["global_role"], "member")
+        listed = {e["event_type"] for e in self.service.list_user_events(new)}
+        self.assertIn("primary_owner_transferred", listed)
+
+    def test_transfer_refusals_change_nothing(self):
+        member, chair = self.user("member"), self.user("chair", "chairman")
+        gone = self.secondary("gone")
+        self.service.revoke_secondary_owner(self.primary, gone["id"], "leaving")
+        self.service.set_user_active(self.primary, gone["id"], False)
+        inactive_owner = self.secondary("sleepy")
+        self.db.execute("UPDATE users SET active=0 WHERE id=?", (inactive_owner["id"],))
+        cases = {"nobody@example.org": "No user has the email", "owner@example.org": "already the primary owner",
+                 member["email"]: "not an owner", chair["email"]: "not an owner", gone["email"]: "inactive",
+                 inactive_owner["email"]: "inactive", "not an email": "valid email"}
+        before = self.state()
+        for email, message in cases.items():
+            with self.subTest(email=email):
+                with self.assertRaisesRegex(ValueError, message):
+                    self.service.transfer_primary_owner(email, self.VIA)
+                self.assertEqual(self.state(), before)
+        self.db.execute("UPDATE users SET is_primary_owner=0")
+        with self.assertRaisesRegex(ValueError, "no primary owner"):
+            self.service.transfer_primary_owner(member["email"], self.VIA)
+
+    def test_a_failure_part_way_through_a_transfer_changes_nothing(self):
+        deputy = self.secondary("deputy")
+        self.session(self.primary, "old-primary")
+        before = self.state()
+        with patch.object(AstraService, "_insert_user_event", side_effect=sqlite3.OperationalError("disk full")):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.service.transfer_primary_owner(deputy["email"], self.VIA)
+        self.assertEqual(self.state(), before)
+        self.assertFalse(self.db.in_transaction)
+        self.assertEqual(self.service.current_primary_owner()["id"], self.primary["id"])
+        # The unique index still refuses two primaries whatever the service does.
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE users SET is_primary_owner=1 WHERE id=?", (deputy["id"],))
+
+    def test_reset_password_for_any_active_user(self):
+        member = self.user("member")
+        self.session(member, "member-1")
+        for _ in range(LOGIN_MAX_FAILURES):
+            self.service.record_login_attempt(member["email"], "10.0.0.1", False)
+        self.assertTrue(self.service.login_is_throttled(member["email"]))
+        self.service.reset_password("Member@Example.org", "a brand new passphrase", self.VIA)
+        stored = self.db.execute("SELECT password_hash FROM users WHERE id=?", (member["id"],)).fetchone()[0]
+        self.assertTrue(verify_password("a brand new passphrase", stored))
+        self.assertFalse(verify_password("member password safe", stored))
+        self.assertEqual(self.sessions(member), 0)
+        self.assertFalse(self.service.login_is_throttled(member["email"]))
+        [event] = self.events("password_reset")
+        self.assertEqual((event["target_user_id"], event["actor_user_id"]), (member["id"], member["id"]))
+        self.assertEqual(json.loads(event["detail_json"])["via"], "cli")
+        self.assertIn("password_reset", self.kinds(member))
+        self.assertNotIn("password_reset", self.kinds(self.primary))  # a member's reset is not an owner notice
+
+    def test_reset_password_of_an_owner_tells_the_other_owners(self):
+        deputy = self.secondary("deputy")
+        self.service.reset_password(self.primary["email"], "a brand new passphrase", self.VIA)
+        self.assertIn("password_reset", self.kinds(self.primary))
+        self.assertIn("password_reset", self.kinds(deputy))
+
+    def test_reset_password_refusals_change_nothing(self):
+        member = self.user("member")
+        self.service.set_user_active(self.primary, member["id"], False)
+        before = self.state()
+        for email, password, message in (
+            ("nobody@example.org", "long enough password", "No user has the email"),
+            (member["email"], "long enough password", "inactive"),
+            (self.primary["email"], "short", "at least 12 characters"),
+        ):
+            with self.subTest(email=email):
+                with self.assertRaisesRegex(ValueError, message):
+                    self.service.reset_password(email, password, self.VIA)
+                self.assertEqual(self.state(), before)
+        self.assertTrue(AstraService.can_reset_password({"active": 1, "global_role": "member"}))
+        self.assertFalse(AstraService.can_reset_password({"active": 0, "global_role": "owner"}))
+
+
+class ServerCommandCliTests(unittest.TestCase):
+    """PDDS2D: the astra transfer-primary and reset-password commands."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        patcher = patch.dict(os.environ, {"ASTRA_HOME": self.temp.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        from astra import __main__ as entry
+        from astra.db import database_path
+        self.entry = entry
+        db = connect(database_path())
+        try:
+            service = AstraService(db)
+            primary = service.create_initial_owner("owner@example.org", "Primary", "correct horse battery")
+            deputy = service.create_user(primary, "deputy@example.org", "Deputy", "deputy password safe")
+            service.grant_secondary_owner(primary, deputy["id"], "cover")
+        finally:
+            db.close()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def run_cli(self, argv, typed="", passwords=()):
+        answers = iter(passwords)
+        with patch("builtins.input", return_value=typed) as asked, \
+                patch.object(self.entry.getpass, "getpass", side_effect=lambda prompt="": next(answers)), \
+                patch("sys.stdout", new_callable=io.StringIO) as out:
+            try:
+                self.entry.main(argv)
+                code = 0
+            except SystemExit as stopped:
+                code = stopped.code
+        return code, out.getvalue(), asked
+
+    def read(self, query, *params):
+        from astra.db import database_path
+        db = connect(database_path())
+        try:
+            return [tuple(r) for r in db.execute(query, params).fetchall()]
+        finally:
+            db.close()
+
+    def primary_email(self):
+        return self.read("SELECT email FROM users WHERE is_primary_owner=1")[0][0]
+
+    def password_hash(self, email):
+        return self.read("SELECT password_hash FROM users WHERE email=?", email)[0][0]
+
+    def test_transfer_primary_needs_the_typed_email_unless_yes(self):
+        code, _, _ = self.run_cli(["transfer-primary", "--to", "deputy@example.org"], typed="wrong@example.org")
+        self.assertEqual(code, "Confirmation did not match; nothing was changed.")
+        self.assertEqual(self.primary_email(), "owner@example.org")
+        code, out, asked = self.run_cli(["transfer-primary", "--to", "deputy@example.org"], typed=" Deputy@Example.org ")
+        self.assertEqual(code, 0)
+        asked.assert_called_once()
+        self.assertIn("Primary owner is now deputy@example.org", out)
+        self.assertEqual(self.primary_email(), "deputy@example.org")
+        code, _, asked = self.run_cli(["transfer-primary", "--to", "owner@example.org", "--yes"])
+        self.assertEqual(code, 0)
+        asked.assert_not_called()
+        self.assertEqual(self.primary_email(), "owner@example.org")
+
+    def test_refusals_exit_with_one_line_and_no_traceback(self):
+        for argv, message in ((["transfer-primary", "--to", "nobody@example.org", "--yes"], "No user has the email"),
+                              (["transfer-primary", "--to", "owner@example.org", "--yes"], "already the primary"),
+                              (["reset-password", "--email", "nobody@example.org", "--yes"], "No user has the email"),
+                              (["init-owner", "--email", "second@example.org"], "An owner account already exists.")):
+            with self.subTest(argv=argv):
+                code, _, _ = self.run_cli(argv, passwords=["long enough password"] * 2)
+                self.assertIsInstance(code, str)  # SystemExit(str): exit status 1, message on stderr
+                self.assertIn(message, code)
+                self.assertNotIn("Traceback", code)
+        before = self.password_hash("deputy@example.org")
+        code, _, _ = self.run_cli(["reset-password", "--email", "deputy@example.org", "--yes"],
+                                  passwords=["short", "short"])
+        self.assertEqual(code, "Password must contain at least 12 characters.")
+        self.assertEqual(self.password_hash("deputy@example.org"), before)
+
+    def test_reset_password_reads_the_password_twice_from_the_terminal_only(self):
+        before = self.password_hash("deputy@example.org")
+        code, _, _ = self.run_cli(["reset-password", "--email", "deputy@example.org"], typed="deputy@example.org",
+                                  passwords=["first passphrase!", "different one!!"])
+        self.assertEqual(code, "Passwords did not match.")
+        self.assertEqual(self.password_hash("deputy@example.org"), before)
+        code, _, _ = self.run_cli(["reset-password", "--email", "deputy@example.org"], typed="someone else",
+                                  passwords=["a brand new passphrase"] * 2)
+        self.assertEqual(code, "Confirmation did not match; nothing was changed.")
+        self.assertEqual(self.password_hash("deputy@example.org"), before)
+        code, out, _ = self.run_cli(["reset-password", "--email", "deputy@example.org"], typed="deputy@example.org",
+                                    passwords=["a brand new passphrase"] * 2)
+        self.assertEqual(code, 0)
+        self.assertIn("Password reset for deputy@example.org.", out)
+        self.assertTrue(verify_password("a brand new passphrase", self.password_hash("deputy@example.org")))
+        [(detail,)] = self.read("SELECT detail_json FROM user_events WHERE event_type='password_reset'")
+        self.assertEqual(json.loads(detail)["via"], "cli")
+        # There is no way to pass a password on the command line.
+        with patch("sys.stderr", new_callable=io.StringIO):
+            code, _, _ = self.run_cli(["reset-password", "--email", "deputy@example.org", "--password", "x" * 20])
+        self.assertEqual(code, 2)
 
 
 if __name__ == "__main__":

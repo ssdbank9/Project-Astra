@@ -1079,7 +1079,8 @@ async function openPeople(){
 }
 
 // GTEYTG: every owner has role "owner"; only the primary owner may give or remove owner access.
-const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project"};
+const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset"};
+const SERVER_COMMAND_EVENTS=new Set(["primary_owner_transferred","password_reset"]);
 function renderPeople(users,memberships,ownerEvents){
   const primary=!!state.user.is_primary_owner;
   const rows=users.map(u=>{
@@ -1090,7 +1091,7 @@ function renderPeople(users,memberships,ownerEvents){
       :u.active?`<button type="button" class="link" data-owner-grant="${id}">Make secondary owner</button>`:"";
     return `<li><strong>${escapeHtml(u.display_name)}</strong> · ${escapeHtml(u.email)} · ${role}${u.active?"":' · <em>inactive</em>'} ${toggle} ${ownerAction}</li>`;
   }).join("");
-  const ownerEventRow=e=>`<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(OWNER_EVENT_LABELS[e.event_type]||e.event_type)}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`} by ${escapeHtml(e.actor_name)}${e.reason?` · ${escapeHtml(e.reason)}`:""}</li>`;
+  const ownerEventRow=e=>`<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(OWNER_EVENT_LABELS[e.event_type]||e.event_type)}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`}${SERVER_COMMAND_EVENTS.has(e.event_type)?" via server command":` by ${escapeHtml(e.actor_name)}`}${e.reason&&!SERVER_COMMAND_EVENTS.has(e.event_type)?` · ${escapeHtml(e.reason)}`:""}</li>`;
   const blocked=e=>e.event_type==="owner_change_blocked"||e.event_type==="import_blocked";
   const ownerHistory=(ownerEvents||[]).filter(e=>!blocked(e)).slice(0,20).map(ownerEventRow).join("")||"<li>No owner access changes yet.</li>";
   const blockedList=type=>(ownerEvents||[]).filter(e=>e.event_type===type).slice(0,10).map(ownerEventRow).join("")||"<li>None.</li>";

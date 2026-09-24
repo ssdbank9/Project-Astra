@@ -66,9 +66,9 @@ Locks so far:
 Before that range, `1c45904` (author ssdbank9, on Aly's machine, 2026-09-24) accepted the
 fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
 
-- Schema v16 (`src/astra/db.py:11`, `SCHEMA_VERSION = 16`; step `_migrate_v16` around
-  line 708). It adds `users.is_primary_owner` (a CHECK that a primary is an owner, and a
-  partial unique index so there is one primary) and the `user_events` audit table. The
+- Schema v16 at `6e52df8` (history: the current schema is v17, see below; step
+  `_migrate_v16` in `src/astra/db.py`). It adds `users.is_primary_owner` (a CHECK that a
+  primary is an owner, and a partial unique index so there is one primary) and the `user_events` audit table. The
   migration marks the single existing owner primary, is a no-op with zero owners, and
   refuses a database with two or more owners before changing anything
   (`_refuse_multiple_owners`, `db.py:688`).
@@ -76,7 +76,9 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   cloud container on 2026-09-24, about 7 minutes).
 - Later on 2026-09-24 (6G89SJ, KBWY86): schema v17 (`SCHEMA_VERSION = 17`; step
   `_migrate_v17` adds the nullable `notifications.actor_user_id` and
-  `idx_notifications_actor`). Tests with KBWY86: `Ran 421 tests`, `OK`.
+  `idx_notifications_actor`). Tests with KBWY86: `Ran 421 tests`, `OK`. With PDDS2D
+  (server commands `transfer-primary` and `reset-password`, no schema change):
+  `Ran 431 tests`, `OK`.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 

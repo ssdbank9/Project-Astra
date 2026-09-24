@@ -189,6 +189,26 @@ python -m venv .venv
 The owner password is requested without echo. Application data defaults to
 `%LOCALAPPDATA%\AstraProjectTracker`; override it for testing with `ASTRA_HOME`.
 
+Recovery commands for whoever runs the server (PDDS2D). Each prints the database it will
+change and asks you to type the target's email to confirm (`--yes` skips that, for
+scripts); it exits 0 when done, 1 when refused or aborted and 2 for a usage error:
+
+```powershell
+.venv\Scripts\astra transfer-primary --to deputy@example.org
+.venv\Scripts\astra reset-password --email someone@example.org
+```
+
+`transfer-primary` makes an active secondary owner the primary owner; the old primary
+stays a secondary owner and is signed out everywhere. `reset-password` works for any
+active user: the new password (12+ characters) is typed twice and is never taken from the
+command line or the environment; the user is signed out everywhere and their failed
+sign-ins are cleared. Both are recorded in the owner-access history as "via server
+command" and notify the owners (and, for a reset, the user). For another data folder set
+`$env:ASTRA_HOME = "D:\Astra Data"` first. On Linux (for example the planned Oracle
+Cloud VM) always set `ASTRA_HOME`, because the default is a Windows folder:
+`ASTRA_HOME=/srv/astra .venv/bin/astra reset-password --email someone@example.org`,
+run as the user the server runs as.
+
 Attachment links are off until the installation names the folders they may point into:
 set `ASTRA_ATTACHMENT_ROOTS` to one or more absolute folders separated by `;` (for example
 `$env:ASTRA_ATTACHMENT_ROOTS = "D:\Shared\Astra"`) before `astra serve`. Only paths inside
