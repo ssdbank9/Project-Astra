@@ -1222,6 +1222,56 @@ class AstraWebTests(unittest.TestCase):
         }, cookie=cookie, csrf=csrf)
         self.assertEqual(response.status, 400)
         self.assertIn("reason", payload["error"])
+        # 5WZ4A8 review gap 3: the change is readable back over HTTP with its audit fields.
+        response, history = self.request("GET", f"/api/projects/{pid}/events", cookie=cookie)
+        self.assertEqual(response.status, 200)
+        rows = [e for e in history["events"] if e["event_type"] == "project_schedule_changed"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["reason"], "Kickoff scheduled")
+        self.assertEqual(rows[0]["actor_name"], "Owner")
+        self.assertEqual(json.loads(rows[0]["detail_json"]), {
+            "before": {"start_date": None, "target_date": None},
+            "after": {"start_date": "2026-02-01", "target_date": "2026-05-01"},
+        })
+
+    def test_project_schedule_and_history_authorization_over_http(self):
+        # 5WZ4A8 review gaps 1 and 4: a viewer and a non-member get 403 on the change;
+        # the viewer may read the history, the non-member may not; a manager may change dates.
+        owner_cookie, owner_csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "Guarded HTTP"}, cookie=owner_cookie, csrf=owner_csrf)
+        pid = project["project"]["id"]
+        users = {}
+        for key, role in (("viewer", "viewer"), ("outsider", None), ("manager", "manager")):
+            _, created = self.request("POST", "/api/users", {
+                "email": f"{key}-sched@example.org", "display_name": key.title(),
+                "password": f"{key} password safe", "role": "member",
+            }, cookie=owner_cookie, csrf=owner_csrf)
+            users[key] = created["user"]["id"]
+            if role:
+                self.request("POST", "/api/project-access", {
+                    "project_id": pid, "user_id": created["user"]["id"], "role": role,
+                }, cookie=owner_cookie, csrf=owner_csrf)
+        change = {"start_date": "2026-02-01", "target_date": "2026-05-01", "reason": "Try"}
+        sessions = {key: self._login_as(f"{key}-sched@example.org", f"{key} password safe") for key in users}
+        for key in ("viewer", "outsider"):
+            cookie, csrf = sessions[key]
+            with self.subTest(actor=key):
+                response, _ = self.request("POST", f"/api/projects/{pid}/schedule", change, cookie=cookie, csrf=csrf)
+                self.assertEqual(response.status, 403)
+        _, history = self.request("GET", f"/api/projects/{pid}/events", cookie=owner_cookie)
+        self.assertEqual([e for e in history["events"] if e["event_type"] == "project_schedule_changed"], [])
+        cookie, csrf = sessions["manager"]
+        response, updated = self.request("POST", f"/api/projects/{pid}/schedule", change, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(updated["project"]["start_date"], "2026-02-01")
+        response, history = self.request("GET", f"/api/projects/{pid}/events", cookie=sessions["viewer"][0])
+        self.assertEqual(response.status, 200)
+        rows = [e for e in history["events"] if e["event_type"] == "project_schedule_changed"]
+        self.assertEqual([(r["actor_user_id"], r["reason"]) for r in rows], [(users["manager"], "Try")])
+        response, _ = self.request("GET", f"/api/projects/{pid}/events", cookie=sessions["outsider"][0])
+        self.assertEqual(response.status, 403)
+        response, _ = self.request("GET", f"/api/projects/{pid}/events")
+        self.assertIn(response.status, (401, 403))
 
     def test_task_detail_subtasks_carry_step_schedule_fields_over_http(self):
         # D73AQW: GET /api/tasks/{id} subtasks include the fields the Gantt step
@@ -2006,6 +2056,30 @@ class AstraFinalResultsDialogTests(unittest.TestCase):
         self.assertEqual(out["calls"], ["/api/final-results?from=2026-05-01"])
         self.assertIn('id="fr-from" type="date" value="2026-05-01"', out["afterApply"])
         self.assertIn('id="fr-to" type="date" value=""', out["afterApply"])
+
+
+class AstraProjectHistoryUiTests(unittest.TestCase):
+    """5WZ4A8: the project's date-change history has a user-facing surface."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.js = (STATIC / "app.js").read_text(encoding="utf-8")
+        cls.html = (STATIC / "index.html").read_text(encoding="utf-8")
+
+    def test_project_history_dialog_reads_the_project_events_endpoint(self):
+        self.assertIn('id="project-history-btn"', self.html)
+        self.assertIn('<dialog id="project-history-dialog">', self.html)
+        self.assertIn("api(`/api/projects/${projectId}/events`)", self.js)
+        # The button is tied to a single selected project.
+        self.assertIn('document.querySelector("#project-history-btn").hidden=!document.querySelector("#project-filter").value;', self.js)
+
+    def test_schedule_change_renders_before_after_and_reason_escaped(self):
+        render = self.js[self.js.index("function renderProjectEvent(ev){"):]
+        render = render[:render.index("\n}\n") + 3]
+        self.assertIn('project_schedule_changed:"Project dates changed"', self.js)
+        self.assertIn("escapeHtml(b[k]||\"\u2014\")} \u2192 ${escapeHtml(a[k]||\"\u2014\")}", render)
+        self.assertIn("escapeHtml(ev.reason)", render)
+        self.assertIn("escapeHtml(who)", render)
 
 
 if __name__ == "__main__":

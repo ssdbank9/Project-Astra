@@ -205,6 +205,10 @@ class AstraHandler(BaseHTTPRequestHandler):
                 user, _ = self._require_user()
                 project_id = path.split("/")[3]
                 return self._json({"calendar": self.service.get_project_calendar(user, project_id)})
+            if path.startswith("/api/projects/") and path.endswith("/events") and path.count("/") == 4:
+                user, _ = self._require_user()
+                project_id = path.split("/")[3]
+                return self._json({"events": self.service.project_events(user, project_id)})
             if path.startswith("/api/tasks/") and path.endswith("/events"):
                 user, _ = self._require_user()
                 task_id = path.split("/")[3]

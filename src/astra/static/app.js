@@ -8,6 +8,8 @@ function fillFilters(){const pf=document.querySelector("#project-filter"),tp=doc
 function projectEntityIds(projectId){const p=state.projects.find(p=>p.id===projectId);return new Set((p&&p.entities?p.entities:[]).map(e=>e.id))}
 function fillPredecessors(){const project=document.querySelector('#task-form select[name="project_id"]').value,select=document.querySelector('#task-form select[name="predecessor_task_id"]'),parent=document.querySelector('#task-form select[name="parent_task_id"]');select.innerHTML='<option value="">No predecessor</option>';parent.innerHTML='<option value="">No parent</option>';for(const task of state.tasks.filter(t=>t.project_id===project)){select.add(new Option(task.title,task.id));parent.add(new Option(task.title,task.id))}}
 function render(){
+  // 5WZ4A8: project history is per project, so the button shows only when one project is selected.
+  document.querySelector("#project-history-btn").hidden=!document.querySelector("#project-filter").value;
   const project=document.querySelector("#project-filter").value,status=document.querySelector("#status-filter").value,
     entity=document.querySelector("#entity-filter").value,crit=document.querySelector("#crit-filter").value,
     band=document.querySelector("#band-filter").value,owner=document.querySelector("#owner-filter").value.toLowerCase(),
@@ -347,6 +349,34 @@ for(const id of ["project-filter","status-filter","entity-filter","crit-filter",
 document.querySelector("#sort-filter").onchange=e=>{state.sort=e.target.value;load()};
 document.querySelector("#new-project").onclick=()=>document.querySelector("#project-dialog").showModal();document.querySelector("#new-task").onclick=()=>document.querySelector("#task-dialog").showModal();
 document.querySelector("#portfolio-btn").onclick=openPortfolio;
+// 5WZ4A8: project history (schedule changes, closure, imports, owner-action decisions) for
+// anyone who can view the project; the server gates GET /api/projects/{id}/events.
+const PROJECT_EVENT_LABELS={project_schedule_changed:"Project dates changed",project_closed:"Project closed",import_committed:"Import committed",protected_action_blocked:"Owner action blocked",protected_action_approved:"Owner request approved",protected_action_rejected:"Owner request rejected",protected_action_cancelled:"Owner request cancelled"};
+document.querySelector("#project-history-btn").onclick=()=>{const pid=document.querySelector("#project-filter").value;if(pid)openProjectHistory(pid)};
+async function openProjectHistory(projectId){
+  const body=document.querySelector("#project-history-body"),project=state.projects.find(p=>p.id===projectId)||{};
+  try{
+    const {events}=await api(`/api/projects/${projectId}/events`);
+    const items=events.slice().reverse().map(renderProjectEvent).join("")||"<li>No history yet.</li>";
+    body.innerHTML=`<h2>Project history · ${escapeHtml(project.name||"")}</h2>
+      <p class="muted">Every change to the project's dates is logged here with who made it, the old and new dates, and the reason. Newest first.</p>
+      <div class="history"><ul>${items}</ul></div>`;
+  }catch(err){body.innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`}
+  const d=document.querySelector("#project-history-dialog");if(!d.open)d.showModal();
+}
+function renderProjectEvent(ev){
+  const when=new Date(ev.occurred_at).toLocaleString(),who=ev.actor_name||"Unknown";
+  const label=PROJECT_EVENT_LABELS[ev.event_type]||ev.event_type;
+  let detail="";
+  if(ev.event_type==="project_schedule_changed"){
+    const d=safeParse(ev.detail_json),b=d.before||{},a=d.after||{};
+    detail=[["start_date","Start date"],["target_date","Target date"]]
+      .filter(([k])=>String(b[k]??"")!==String(a[k]??""))
+      .map(([k,l])=>`<br>${escapeHtml(l)}: ${escapeHtml(b[k]||"—")} → ${escapeHtml(a[k]||"—")}`).join("");
+  }
+  const reason=ev.reason?`<br><em>Reason: ${escapeHtml(ev.reason)}</em>`:"";
+  return `<li><strong>${escapeHtml(label)}</strong> · ${escapeHtml(when)} · ${escapeHtml(who)}${reason}${detail}</li>`;
+}
 async function openPortfolio(){
   try{
     const {portfolio}=await api("/api/portfolio");
@@ -1400,7 +1430,7 @@ function renderImportConfirm(){
   document.querySelector("#import-body").innerHTML=`
     <div class="import-result">
       <h3>Import complete</h3>
-      <p class="muted">${escapeHtml(r.filename)} → <strong>${escapeHtml(r.project.name)}</strong>${r.project.create?" (new project)":""}. Nothing was deleted; existing baselines were kept. Every change is in each task's history and in the project activity.</p>
+      <p class="muted">${escapeHtml(r.filename)} → <strong>${escapeHtml(r.project.name)}</strong>${r.project.create?" (new project)":""}. Nothing was deleted; existing baselines were kept. Every change is in each task's history, and the import is in the project's history (Project history, with this project selected).</p>
       <div class="facts">${fact("Created",String(r.create))}${fact("Updated",String(r.update))}${fact("Unchanged",String(r.unchanged))}${fact("Skipped (errors)",String(r.skipped_errors||0))}${fact("Dependencies",String(r.dependencies||0))}</div>
       <p><a href="${escapeHtml(r.report_url)}" download>Download the import report (.csv)</a></p>
       <div class="actions"><button type="button" id="import-done">Done</button></div>

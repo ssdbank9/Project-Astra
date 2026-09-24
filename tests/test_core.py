@@ -1827,6 +1827,62 @@ class AstraCoreTests(unittest.TestCase):
         change = [e for e in events if e["event_type"] == "project_schedule_changed"]
         self.assertEqual(len(change), 2)
 
+    def test_project_schedule_audit_row_records_actor_before_after_and_reason(self):
+        # 5WZ4A8 review gap 2: pin every field of the audit row, not just a substring.
+        project = self.service.create_project(self.owner, "Audited")
+        manager = self.service.create_user(self.owner, "pm@example.org", "PM", "manager password safe", "member")
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        self.service.set_project_schedule(self.owner, project["id"], "2026-03-01", "2026-06-30", "Board approved the plan")
+        self.service.set_project_schedule(manager, project["id"], "2026-03-01", "2026-07-31", "Vendor slipped")
+        rows = [e for e in self.service.project_events(self.owner, project["id"])
+                if e["event_type"] == "project_schedule_changed"]
+        self.assertEqual(len(rows), 2)
+        first, second = rows
+        self.assertEqual(first["actor_user_id"], self.owner["id"])
+        self.assertEqual(first["reason"], "Board approved the plan")
+        self.assertEqual(json.loads(first["detail_json"]), {
+            "before": {"start_date": None, "target_date": None},
+            "after": {"start_date": "2026-03-01", "target_date": "2026-06-30"},
+        })
+        self.assertEqual(second["actor_user_id"], manager["id"])
+        self.assertEqual(second["actor_name"], "PM")
+        self.assertEqual(second["reason"], "Vendor slipped")
+        self.assertEqual(json.loads(second["detail_json"]), {
+            "before": {"start_date": "2026-03-01", "target_date": "2026-06-30"},
+            "after": {"start_date": "2026-03-01", "target_date": "2026-07-31"},
+        })
+
+    def test_project_schedule_change_requires_manage_access(self):
+        # 5WZ4A8 review gap 1: only the owner or a project manager may change project dates;
+        # a viewer and a non-member are refused and nothing is written.
+        project = self.service.create_project(self.owner, "Guarded")
+        viewer = self.service.create_user(self.owner, "v@example.org", "Viewer", "viewer password safe", "member")
+        outsider = self.service.create_user(self.owner, "o@example.org", "Outsider", "outsider password safe", "member")
+        manager = self.service.create_user(self.owner, "m@example.org", "Manager", "manager password safe", "member")
+        self.service.grant_project_access(self.owner, project["id"], viewer["id"], "viewer")
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        for actor in (viewer, outsider):
+            with self.subTest(actor=actor["email"]), self.assertRaises(Forbidden):
+                self.service.set_project_schedule(actor, project["id"], "2026-03-01", "2026-06-30", "try")
+        unchanged = self.service.get_project(self.owner, project["id"])
+        self.assertEqual((unchanged["start_date"], unchanged["target_date"]), (None, None))
+        self.assertEqual([e for e in self.service.project_events(self.owner, project["id"])
+                          if e["event_type"] == "project_schedule_changed"], [])
+        updated = self.service.set_project_schedule(manager, project["id"], "2026-03-01", "2026-06-30", "PM set it")
+        self.assertEqual(updated["target_date"], "2026-06-30")
+
+    def test_project_history_readable_by_members_not_outsiders(self):
+        # 5WZ4A8 review gap 4: anyone who can view the project can read its history.
+        project = self.service.create_project(self.owner, "Readable")
+        viewer = self.service.create_user(self.owner, "rv@example.org", "Viewer", "viewer password safe", "member")
+        outsider = self.service.create_user(self.owner, "ro@example.org", "Outsider", "outsider password safe", "member")
+        self.service.grant_project_access(self.owner, project["id"], viewer["id"], "viewer")
+        self.service.set_project_schedule(self.owner, project["id"], "2026-03-01", "2026-06-30", "Plan set")
+        seen = self.service.project_events(viewer, project["id"])
+        self.assertEqual([e["event_type"] for e in seen], ["project_schedule_changed"])
+        with self.assertRaises(Forbidden):
+            self.service.project_events(outsider, project["id"])
+
     def test_list_projects_exposes_schedule_dates_for_gantt_markers(self):
         # 5WZ4A8: the Gantt draws project start/target markers from list_projects,
         # so those fields must be present on the listed project.

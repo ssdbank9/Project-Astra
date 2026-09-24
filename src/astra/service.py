@@ -424,19 +424,24 @@ class AstraService:
         # constraint on task dates (matches the permissive calendar decision).
         if not self.can_manage_project(actor, project_id):
             raise Forbidden("Project-management access denied.")
-        project = self.get_project(actor, project_id)
+        self.get_project(actor, project_id)
         start_date = self._date(start_date)
         target_date = self._date(target_date)
         if start_date and target_date and target_date < start_date:
             raise ValueError("Target date cannot be earlier than the start date.")
-        old = {"start_date": project.get("start_date"), "target_date": project.get("target_date")}
         new = {"start_date": start_date, "target_date": target_date}
-        if old == new:
-            raise ValueError("The project schedule is already set to those dates.")
         reason = str(reason or "").strip()
-        if not reason:
-            raise ValueError("A reason is required to change the project schedule.")
         with transaction(self.db):
+            # Read the old values inside the write transaction so two concurrent edits
+            # cannot both record the same "before" (5WZ4A8 review gap 5).
+            row = self.db.execute(
+                "SELECT start_date, target_date FROM projects WHERE id=?", (project_id,)
+            ).fetchone()
+            old = {"start_date": row["start_date"], "target_date": row["target_date"]}
+            if old == new:
+                raise ValueError("The project schedule is already set to those dates.")
+            if not reason:
+                raise ValueError("A reason is required to change the project schedule.")
             self.db.execute(
                 "UPDATE projects SET start_date=?, target_date=? WHERE id=?",
                 (start_date, target_date, project_id),

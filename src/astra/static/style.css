@@ -133,9 +133,9 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .fr-table th { font-size: .75rem; text-transform: uppercase; color: #667085; }
 .detail-close { padding: 16px 26px; display: flex; justify-content: flex-end; }
 #inbox.has-unread { background: var(--amber); color: white; }
-#inbox-dialog, #search-dialog { width: min(560px, 94vw); }
-#inbox-body, #search-body { padding: 26px 26px 0; max-height: 76vh; overflow: auto; }
-#inbox-body h2, #search-body h2 { margin: 0 0 6px; }
+#inbox-dialog, #search-dialog, #project-history-dialog { width: min(560px, 94vw); }
+#inbox-body, #search-body, #project-history-body { padding: 26px 26px 0; max-height: 76vh; overflow: auto; }
+#inbox-body h2, #search-body h2, #project-history-body h2 { margin: 0 0 6px; }
 #search-body h3 { margin: 18px 0 6px; font-size: 14px; }
 #portfolio-dialog { width: min(640px, 94vw); }
 #portfolio-body { padding: 26px 26px 0; max-height: 76vh; overflow: auto; }
