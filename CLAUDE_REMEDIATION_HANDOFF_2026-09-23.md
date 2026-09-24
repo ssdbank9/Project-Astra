@@ -2,6 +2,12 @@
 
 ## Current state after Claude remediation (2026-09-23)
 
+> Superseded 2026-09-24 by `CLAUDE_HANDOFF_2026-09-24.md`. The figures in this
+> section (head on top of `4178278`, schema v15, 335 tests, the fifteen
+> remediation tickets in `signoff`) are as of `44fcf5d` and are kept as history;
+> today the head is `6e52df8`, the schema is v16, the suite is 396 tests and
+> those fifteen tickets are in `done`.
+
 This section supersedes every figure below it. The sections after the `---`
 line are Codex's original handoff, kept as history; where they disagree with
 this section (schema v13 or v14, 220 or 269 tests, 7/7 and 8/8 focused counts,

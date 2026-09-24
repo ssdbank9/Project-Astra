@@ -1,11 +1,11 @@
 # Astra repository working instructions
 
-> **Current remediation handoff:** Read
-> [`CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md`](CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md)
-> before reviewing or changing the state-integrity and migration-safety branch.
-> Its top section, "Current state after Claude remediation (2026-09-23)", has
-> the current branch, commits, 269-test evidence, ticket states and follow-ups;
-> the sections below it are Codex's original findings, kept as history.
+> **Current handoff:** Read
+> [`CLAUDE_HANDOFF_2026-09-24.md`](CLAUDE_HANDOFF_2026-09-24.md) before
+> reviewing or changing `codex/migration-safety-remediation`. It has the
+> current branch and head, the 2026-09-24 commits, the 396-test evidence,
+> schema v16, the board by lane, the write-lock rules and the open asks.
+> `CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md` is kept as history.
 
 - Treat this standalone repository as the Git source of truth. Work on a named
   branch, keep commits scoped, and preserve unrelated work.
@@ -19,7 +19,7 @@
   virtual environments, caches, or local browser artifacts.
 - `main` is the clean imported baseline. Current work is on
   `codex/migration-safety-remediation`; read
-  `CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md` before continuing. The older
+  `CLAUDE_HANDOFF_2026-09-24.md` before continuing. The older
   `hs3jry-handoff` branch is already contained in it. Use another branch only if
   Aly directs it.
 
