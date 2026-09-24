@@ -16,6 +16,8 @@ from pathlib import Path
 
 from astra.web import AstraHandler, AstraServer
 
+from link_roots import allow_attachment_roots, link
+
 STATIC = Path(str(files("astra").joinpath("static")))
 REPO = Path(__file__).resolve().parents[1]
 HEX = r"#[0-9A-Fa-f]{6}"
@@ -37,6 +39,7 @@ class AstraWebTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.old_home = os.environ.get("ASTRA_HOME")
         os.environ["ASTRA_HOME"] = self.temp.name
+        allow_attachment_roots(self)
         self.server = AstraServer(("127.0.0.1", 0))
         self.server.service.create_initial_owner("owner@example.org", "Owner", "correct horse battery")
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -699,7 +702,7 @@ class AstraWebTests(unittest.TestCase):
             self.assertEqual(_csv_cell(value), expected, repr(value))
         self.assertEqual({row["project_name"] for row in rows}, {"'=HYPERLINK(\"http://x\")"})
         task_id = next(t["id"] for t in tasks["tasks"] if t["title"] == "=1+1")
-        _, attachment = self.request("POST", f"/api/tasks/{task_id}/attachments", {"path": "/out/final.pdf"}, cookie=cookie, csrf=csrf)
+        _, attachment = self.request("POST", f"/api/tasks/{task_id}/attachments", {"path": link("out", "final.pdf")}, cookie=cookie, csrf=csrf)
         response, _ = self.request("POST", "/api/final-results", {
             "task_id": task_id, "source_type": "attachment", "source_id": attachment["attachment"]["id"],
         }, cookie=cookie, csrf=csrf)
@@ -956,7 +959,7 @@ class AstraWebTests(unittest.TestCase):
         }, cookie=cookie, csrf=csrf)
         task_id = task["task"]["id"]
         response, added = self.request("POST", f"/api/tasks/{task_id}/attachments", {
-            "path": "/reports/audit-memo.pdf", "note": "Board copy",
+            "path": link("reports", "audit-memo.pdf"), "note": "Board copy",
         }, cookie=cookie, csrf=csrf)
         self.assertEqual(response.status, 201)
         self.assertEqual(added["attachment"]["display_name"], "audit-memo.pdf")
@@ -981,7 +984,7 @@ class AstraWebTests(unittest.TestCase):
         }, cookie=owner_cookie, csrf=owner_csrf)
         task_id = task["task"]["id"]
         _, attachment = self.request("POST", f"/api/tasks/{task_id}/attachments", {
-            "path": "/evidence/owner.pdf",
+            "path": link("evidence", "owner.pdf"),
         }, cookie=owner_cookie, csrf=owner_csrf)
         _, submission = self.request(
             "POST", f"/api/tasks/{task_id}/submit", {"note": "ready"},
@@ -1009,7 +1012,7 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(len(detail["task"]["attachments"]), 1)
         response, _ = self.request("POST", f"/api/tasks/{task_id}/attachments", {
-            "path": "/evidence/manager.pdf",
+            "path": link("evidence", "manager.pdf"),
         }, cookie=manager_cookie, csrf=manager_csrf)
         self.assertEqual(response.status, 403)
         response, _ = self.request("DELETE", "/api/task-attachments", {
@@ -1031,6 +1034,124 @@ class AstraWebTests(unittest.TestCase):
         _, notifications = self.request("GET", "/api/notifications", cookie=owner_cookie)
         kinds = {item["kind"] for item in notifications["notifications"]}
         self.assertIn("attachment_removal_blocked", kinds)
+
+    # 6G89SJ (Owner decision 2026-09-19, Item 4): attachment denials proven over HTTP.
+    def _attachment_fixture(self, name):
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": name}, cookie=cookie, csrf=csrf)
+        project_id = project["project"]["id"]
+        _, task = self.request("POST", "/api/tasks", {"project_id": project_id, "title": f"{name} task"},
+                               cookie=cookie, csrf=csrf)
+        task_id = task["task"]["id"]
+        response, added = self.request("POST", f"/api/tasks/{task_id}/attachments", {"path": link(name, "memo.pdf")},
+                                       cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 201)
+        return cookie, csrf, project_id, task_id, added["attachment"]["id"]
+
+    def _user_session(self, owner_cookie, owner_csrf, key, global_role, project_id=None, project_role=None):
+        password = f"{key} password safe"
+        _, created = self.request("POST", "/api/users", {
+            "email": f"{key}@example.org", "display_name": key.title(), "password": password, "role": global_role,
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        if project_role:
+            self.request("POST", "/api/project-access", {
+                "project_id": project_id, "user_id": created["user"]["id"], "role": project_role,
+            }, cookie=owner_cookie, csrf=owner_csrf)
+        response, login = self.request("POST", "/api/login", {"email": f"{key}@example.org", "password": password})
+        self.assertEqual(response.status, 200)
+        return response.getheader("Set-Cookie").split(";", 1)[0], login["csrf"]
+
+    def test_attachment_authorization_matrix_over_http(self):
+        owner_cookie, owner_csrf, project_id, task_id, attachment_id = self._attachment_fixture("Matrix")
+        sessions = {
+            "viewer": self._user_session(owner_cookie, owner_csrf, "att-viewer", "member", project_id, "viewer"),
+            "chairman": self._user_session(owner_cookie, owner_csrf, "att-chair", "chairman"),
+            "outsider": self._user_session(owner_cookie, owner_csrf, "att-outsider", "member"),
+        }
+        expected_read = {"viewer": 200, "chairman": 200, "outsider": 403}
+        for who, (cookie, csrf) in sessions.items():
+            with self.subTest(who=who):
+                response, detail = self.request("GET", f"/api/tasks/{task_id}", cookie=cookie)
+                self.assertEqual(response.status, expected_read[who])
+                if response.status == 200:
+                    self.assertEqual([a["id"] for a in detail["task"]["attachments"]], [attachment_id])
+                    self.assertFalse(detail["task"]["permissions"]["can_manage_files"])
+                else:
+                    self.assertNotIn("task", detail)
+                response, _ = self.request("POST", f"/api/tasks/{task_id}/attachments",
+                                           {"path": link("Matrix", f"{who}.pdf")}, cookie=cookie, csrf=csrf)
+                self.assertEqual(response.status, 403)
+                response, _ = self.request("DELETE", "/api/task-attachments",
+                                           {"task_id": task_id, "attachment_id": attachment_id}, cookie=cookie, csrf=csrf)
+                self.assertEqual(response.status, 403)
+        response, detail = self.request("GET", f"/api/tasks/{task_id}", cookie=owner_cookie)
+        self.assertEqual([a["id"] for a in detail["task"]["attachments"]], [attachment_id])
+
+    def test_attachment_mutations_reject_missing_and_wrong_csrf(self):
+        owner_cookie, owner_csrf, project_id, task_id, attachment_id = self._attachment_fixture("Tokens")
+        _, other_csrf = self._user_session(owner_cookie, owner_csrf, "att-token", "member", project_id, "viewer")
+        for label, token in (("missing", None), ("wrong", "not-the-token"), ("another session's", other_csrf)):
+            with self.subTest(token=label):
+                response, payload = self.request("POST", f"/api/tasks/{task_id}/attachments",
+                                                 {"path": link("Tokens", "forged.pdf")}, cookie=owner_cookie, csrf=token)
+                self.assertEqual(response.status, 403)
+                self.assertIn("request token", payload["error"])
+                response, payload = self.request("DELETE", "/api/task-attachments",
+                                                 {"task_id": task_id, "attachment_id": attachment_id},
+                                                 cookie=owner_cookie, csrf=token)
+                self.assertEqual(response.status, 403)
+                self.assertIn("request token", payload["error"])
+        response, detail = self.request("GET", f"/api/tasks/{task_id}", cookie=owner_cookie)
+        self.assertEqual([a["id"] for a in detail["task"]["attachments"]], [attachment_id])
+
+    def test_attachment_removal_needs_the_matching_task(self):
+        cookie, csrf, project_id, task_id, attachment_id = self._attachment_fixture("Pairing")
+        _, other = self.request("POST", "/api/tasks", {"project_id": project_id, "title": "Other task"},
+                                cookie=cookie, csrf=csrf)
+        for body in ({"task_id": other["task"]["id"], "attachment_id": attachment_id},
+                     {"task_id": task_id, "attachment_id": "no-such-attachment"}):
+            with self.subTest(body=body):
+                response, _ = self.request("DELETE", "/api/task-attachments", body, cookie=cookie, csrf=csrf)
+                self.assertEqual(response.status, 404)
+        response, _ = self.request("POST", "/api/tasks/no-such-task/attachments", {"path": link("Pairing", "x.pdf")},
+                                   cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 404)
+        response, detail = self.request("GET", f"/api/tasks/{task_id}", cookie=cookie)
+        self.assertEqual([a["id"] for a in detail["task"]["attachments"]], [attachment_id])
+
+    def test_attachment_marked_as_final_result_is_not_removed_over_http(self):
+        cookie, csrf, _, task_id, attachment_id = self._attachment_fixture("Kept")
+        response, marked = self.request("POST", "/api/final-results", {
+            "task_id": task_id, "source_type": "attachment", "source_id": attachment_id,
+        }, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 201)
+        response, payload = self.request("DELETE", "/api/task-attachments",
+                                         {"task_id": task_id, "attachment_id": attachment_id}, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 409)
+        self.assertEqual(payload["error"], "Unmark the final result first.")
+        response, listed = self.request("GET", "/api/final-results", cookie=cookie)
+        self.assertEqual([r["id"] for r in listed["results"]], [marked["result"]["id"]])
+        response, detail = self.request("GET", f"/api/tasks/{task_id}", cookie=cookie)
+        self.assertEqual([a["id"] for a in detail["task"]["attachments"]], [attachment_id])
+        response, _ = self.request("DELETE", "/api/final-results", {"result_id": marked["result"]["id"]},
+                                   cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 200)
+        response, _ = self.request("DELETE", "/api/task-attachments",
+                                   {"task_id": task_id, "attachment_id": attachment_id}, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 200)
+
+    def test_attachment_path_outside_the_rules_is_rejected_over_http(self):
+        cookie, csrf, _, task_id, attachment_id = self._attachment_fixture("Rules")
+        for path, message in ((r"\\server\share\memo.pdf", "UNC"), ("https://example.org/memo.pdf", "URL"),
+                              ("memo.pdf", "full path"), (link("Rules", "..", "..", "memo.pdf"), r"'\.\.'"),
+                              (link("Rules", "CON"), "Device names"), ("", "required")):
+            with self.subTest(path=path):
+                response, payload = self.request("POST", f"/api/tasks/{task_id}/attachments", {"path": path},
+                                                 cookie=cookie, csrf=csrf)
+                self.assertEqual(response.status, 400)
+                self.assertRegex(payload["error"], message)
+        response, detail = self.request("GET", f"/api/tasks/{task_id}", cookie=cookie)
+        self.assertEqual([a["id"] for a in detail["task"]["attachments"]], [attachment_id])
 
     def test_project_template_roundtrip_over_http(self):
         cookie, csrf = self._owner_session()
@@ -1127,7 +1248,7 @@ class AstraWebTests(unittest.TestCase):
         response, listed = self.request("GET", "/api/final-results", cookie=cookie)
         self.assertEqual(len(listed["results"]), 1)
         _, attachment = self.request("POST", f"/api/tasks/{task_id}/attachments", {
-            "path": "/out/final.pdf",
+            "path": link("out", "final.pdf"),
         }, cookie=cookie, csrf=csrf)
         response, marked = self.request("POST", "/api/final-results", {
             "task_id": task_id, "source_type": "attachment", "source_id": attachment["attachment"]["id"],
@@ -1145,7 +1266,7 @@ class AstraWebTests(unittest.TestCase):
     def _mark_final_attachment(self, cookie, csrf, project_id, title, marked_at):
         _, task = self.request("POST", "/api/tasks", {"project_id": project_id, "title": title}, cookie=cookie, csrf=csrf)
         task_id = task["task"]["id"]
-        _, attachment = self.request("POST", f"/api/tasks/{task_id}/attachments", {"path": f"/out/{title}.pdf"}, cookie=cookie, csrf=csrf)
+        _, attachment = self.request("POST", f"/api/tasks/{task_id}/attachments", {"path": link("out", f"{title}.pdf")}, cookie=cookie, csrf=csrf)
         response, marked = self.request("POST", "/api/final-results", {
             "task_id": task_id, "source_type": "attachment", "source_id": attachment["attachment"]["id"],
         }, cookie=cookie, csrf=csrf)
@@ -1635,6 +1756,8 @@ OWNER_PERMS = {"can_edit_ordinary": True, "can_request_protected": False,
                "can_decide_protected": True, "can_manage_files": True, "can_read_files": True}
 MANAGER_PERMS = {"can_edit_ordinary": True, "can_request_protected": True,
                  "can_decide_protected": False, "can_manage_files": False, "can_read_files": True}
+VIEWER_PERMS = {"can_edit_ordinary": False, "can_request_protected": False,
+                "can_decide_protected": False, "can_manage_files": False, "can_read_files": True}
 
 
 def _detail_task(status, permissions):
@@ -1818,6 +1941,12 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
         for status in ("completed", "cancelled", "abandoned", "submitted", "in_progress"):
             cases[f"owner-{status}"] = _detail_task(status, OWNER_PERMS)
             cases[f"manager-{status}"] = _detail_task(status, MANAGER_PERMS)
+        # 6G89SJ: a viewer's dialog, with a stored link that was not checked (exists None),
+        # and an Owner's with a checked link that is missing (exists False).
+        cases["viewer-unchecked"] = _detail_task("in_progress", VIEWER_PERMS)
+        cases["viewer-unchecked"]["attachments"][0]["exists"] = None
+        cases["owner-missing"] = _detail_task("in_progress", OWNER_PERMS)
+        cases["owner-missing"]["attachments"][0]["exists"] = False
         with tempfile.TemporaryDirectory() as tmp:
             driver = Path(tmp) / "driver.js"
             driver.write_text(DETAIL_DRIVER, encoding="utf-8")
@@ -1862,6 +1991,16 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
         self.assertIn("Request Owner reopening", self.html["manager-cancelled"])
         self.assertIn(">Reopen task…</button>", self.html["owner-completed"])
         self.assertIn(">Request reopening…</button>", self.html["manager-completed"])
+
+    def test_attachment_form_is_absent_for_a_viewer_and_unchecked_links_are_not_called_missing(self):
+        viewer = self.html["viewer-unchecked"]
+        self.assertIn("data-copy-path=", viewer)  # Owner Item 3: viewers keep metadata and Copy path
+        for refused in ('id="attachment-form"', 'data-remove-attachment=', 'data-mark-fr-att=', "Link file"):
+            self.assertNotIn(refused, viewer, refused)
+        self.assertIn("Read/download only", viewer)
+        self.assertIn("Report", viewer)
+        self.assertNotIn("(file not found)", viewer)
+        self.assertIn("(file not found)", self.html["owner-missing"])
 
     def test_manager_status_request_sits_under_reopen_as_the_alternative(self):
         for status in ("completed", "cancelled", "abandoned"):

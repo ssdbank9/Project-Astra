@@ -229,7 +229,7 @@ and People sheets.
 | Next Action / Decision Needed | `tasks.next_action_note` | shown as the task's next action while it is open |
 | Reason (if delayed or changed) | `task_events.reason` | default `Excel import <file> row <n>` |
 | Notes | `tasks.description` "Notes:" section | also receives anything that could not be stored exactly |
-| Attachment Links | `task_attachments` | Owner only; links, never bytes |
+| Attachment Links | `task_attachments` | Owner only; links, never bytes; a path that is not a full local path inside `ASTRA_ATTACHMENT_ROOTS` is skipped with `W_ATTACHMENT_PATH_SKIPPED` |
 
 ### Closed tasks (`W_CLOSED_TASK`)
 

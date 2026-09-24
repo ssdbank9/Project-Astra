@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sqlite3
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
@@ -95,6 +96,89 @@ def new_id() -> str:
 
 def row_dict(row: sqlite3.Row | None) -> dict | None:
     return dict(row) if row is not None else None
+
+
+# 6G89SJ (Owner decision 2026-09-19, Item 1): an attachment link must name a local file
+# inside a folder the installation allows. The allowed folders come from the environment
+# variable below (absolute folders separated by ';', or by the platform's path separator).
+# Unset or empty means no path can be linked. The checks are on the text only: nothing
+# here touches the filesystem until a path has passed them.
+ATTACHMENT_ROOTS_ENV = "ASTRA_ATTACHMENT_ROOTS"
+MAX_ATTACHMENT_PATH = 1024
+_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"{port}{n}" for port in ("COM", "LPT") for n in "123456789\u00b9\u00b2\u00b3"}
+)
+_URL_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+:")  # two or more letters: not a drive
+_DRIVE_ROOT = re.compile(r"^[A-Za-z]:[\\/]")
+_BIDI_CONTROLS = frozenset("\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
+
+
+def _attachment_path_shape_error(path: str, pathmod) -> str | None:
+    """Why ``path`` can never be linked, or None. Text checks only."""
+    if len(path) > MAX_ATTACHMENT_PATH:
+        return f"An attachment path is limited to {MAX_ATTACHMENT_PATH} characters."
+    if any(unicodedata.category(ch) == "Cc" or ch in _BIDI_CONTROLS for ch in path):
+        return "An attachment path cannot contain control characters."
+    if _URL_SCHEME.match(path):
+        return "Link a file path, not a URL."
+    if path[:2] in {"\\\\", "//", "\\/", "/\\"}:
+        return "Network (UNC) and device paths cannot be linked."
+    if pathmod.sep == "\\":
+        if not _DRIVE_ROOT.match(path):
+            return r"Use a full path that starts with a drive, for example C:\Shared\report.pdf."
+        if ":" in path[2:]:
+            return "A colon is allowed only after the drive letter."
+    elif not path.startswith("/"):
+        return "Use a full path that starts with /."
+    for part in re.split(r"[\\/]", path):
+        if part and part != "." and not part.rstrip(" ."):
+            return "An attachment path cannot contain '..'."
+        if part.split(".", 1)[0].rstrip(" :").upper() in _DEVICE_NAMES:
+            return "Device names such as CON, NUL, COM1 or LPT1 cannot be linked."
+    return None
+
+
+def _path_inside(path: str, root: str, pathmod) -> bool:
+    path, root = pathmod.normcase(path), pathmod.normcase(root)
+    return path == root or path.startswith(root.rstrip("\\/") + pathmod.sep)
+
+
+def attachment_roots(pathmod=os.path) -> list[str]:
+    """The installation's allowed attachment folders; malformed entries are ignored."""
+    raw = os.environ.get(ATTACHMENT_ROOTS_ENV, "")
+    entries = re.split("[;" + re.escape(pathmod.pathsep) + "]", raw)
+    return [pathmod.normpath(entry.strip()) for entry in entries
+            if entry.strip() and _attachment_path_shape_error(entry.strip(), pathmod) is None]
+
+
+def validate_attachment_path(path, roots: list[str] | None = None, pathmod=os.path) -> str:
+    """The normalised path to store for an attachment link; ValueError when it may not be linked.
+
+    ``pathmod`` is ``os.path`` in production; tests pass ``ntpath`` or ``posixpath`` to check
+    either platform's paths anywhere.
+    """
+    path = str(path or "").strip()
+    if not path:
+        raise ValueError("A file path is required.")
+    error = _attachment_path_shape_error(path, pathmod)
+    if error:
+        raise ValueError(error)
+    roots = attachment_roots(pathmod) if roots is None else [
+        pathmod.normpath(root) for root in roots if _attachment_path_shape_error(root, pathmod) is None
+    ]
+    if not roots:
+        raise ValueError("Attachment links are disabled until the installation sets allowed folders "
+                         f"({ATTACHMENT_ROOTS_ENV}).")
+    path = pathmod.normpath(path)
+    if not any(_path_inside(path, root, pathmod) for root in roots):
+        raise ValueError("This path is outside the folders allowed for attachment links.")
+    if pathmod is os.path:
+        # The text is inside an allowed folder; a symlink under it must not lead back out.
+        real = os.path.realpath(path)
+        if not any(_path_inside(real, os.path.realpath(root), pathmod) for root in roots):
+            raise ValueError("This path is outside the folders allowed for attachment links.")
+    return path
 
 
 class Forbidden(PermissionError):
@@ -2139,9 +2223,7 @@ class AstraService:
                 {"attempted_path": str(path or "").strip()}, "Owner-only file management",
             )
             raise Forbidden("Owner access required for file management.")
-        path = str(path or "").strip()
-        if not path:
-            raise ValueError("A file path is required.")
+        path = validate_attachment_path(path)
         display_name = str(display_name or "").strip() or os.path.basename(path.rstrip("/\\")) or path
         attachment_id = new_id()
         with transaction(self.db):
@@ -2184,11 +2266,27 @@ class AstraService:
                 "Owner-only file management",
             )
             raise Forbidden("Owner access required for file management.")
+        # 6G89SJ (Owner decision 2026-09-19, Item 2): a link marked as a final result stays
+        # until the final result is explicitly unmarked, which is audited. The schema's
+        # ON DELETE CASCADE would otherwise drop the final result without a trace.
         with transaction(self.db):
-            self.db.execute("DELETE FROM task_attachments WHERE id=? AND task_id=?", (attachment_id, task_id))
-            # Removing the link never touches the file on disk.
-            self._event(task_id, actor["id"], "attachment_removed",
-                        {"path": row["path"], "display_name": row["display_name"]}, None, None)
+            final_result = self.db.execute(
+                "SELECT id, title FROM final_results WHERE attachment_id=?", (attachment_id,)
+            ).fetchone()
+            if not final_result:
+                self.db.execute("DELETE FROM task_attachments WHERE id=? AND task_id=?", (attachment_id, task_id))
+                # Removing the link never touches the file on disk.
+                self._event(task_id, actor["id"], "attachment_removed",
+                            {"path": row["path"], "display_name": row["display_name"]}, None, None)
+        if final_result:
+            # Recorded after the empty transaction, so the audit row is kept.
+            self._event(
+                task_id, actor["id"], "attachment_removal_blocked", None,
+                {"attachment_id": attachment_id, "display_name": row["display_name"],
+                 "final_result_id": final_result["id"], "reason": "final_result"},
+                "Marked as a final result",
+            )
+            raise Conflict("Unmark the final result first.")
 
     def _get_attachment(self, task_id: str, attachment_id: str) -> dict:
         row = row_dict(self.db.execute(
@@ -2202,9 +2300,16 @@ class AstraService:
         return row
 
     @staticmethod
-    def _path_exists(path: str) -> bool:
+    def _path_exists(path: str) -> bool | None:
         # Best-effort: a linked file can be moved or renamed outside Astra, so
         # this flags dead links in the UI. Never fatal if the check itself fails.
+        # 6G89SJ: only a path the installation allows is ever looked up; a stored link
+        # that fails validation (an older row, or a folder no longer allowed) is None,
+        # "not checked", and the filesystem is not touched.
+        try:
+            path = validate_attachment_path(path)
+        except (OSError, ValueError):
+            return None
         try:
             return os.path.exists(path)
         except (OSError, ValueError):
@@ -2523,10 +2628,16 @@ class AstraService:
         for task in tasks:  # attachment links copied last
             new_task_id = id_of[task["local_id"]]
             for attachment in task.get("attachments", []):
+                # 6G89SJ: a template link is re-checked against today's allowed folders; one
+                # that no longer passes is not copied, like a dependency whose end is missing.
+                try:
+                    path = validate_attachment_path(attachment.get("path"))
+                except (OSError, ValueError):
+                    continue
                 self.db.execute(
                     "INSERT INTO task_attachments(id,task_id,path,display_name,note,added_by,added_at)"
                     " VALUES(?,?,?,?,?,?,?)",
-                    (new_id(), new_task_id, attachment["path"], attachment["display_name"],
+                    (new_id(), new_task_id, path, attachment["display_name"],
                      attachment.get("note", ""), actor["id"], timestamp),
                 )
 
@@ -3547,7 +3658,7 @@ class AstraService:
                 new_project_name = names[0]
         engine = importer.ImportEngine(
             self.db, config, actor=actor, is_owner=is_owner, project=project, new_project_name=new_project_name,
-            filename=filename, options=options,
+            filename=filename, options=options, check_attachment_path=validate_attachment_path,
         )
         preview = engine.validate(parsed)
         return engine, preview, options

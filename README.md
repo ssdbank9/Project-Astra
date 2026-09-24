@@ -51,7 +51,10 @@ This first vertical slice provides:
   App Owner-only event, with exceptional closure preserving a residual-work snapshot rather
   than silently completing unfinished tasks;
 - attachment-link and final-result mutations (add/remove, mark/unmark) are App Owner-only,
-  while every user authorized on the project may still read and list them;
+  while every user authorized on the project may still read and list them; a link must be a
+  full local path inside a folder the installation allows (`ASTRA_ATTACHMENT_ROOTS`, see Run
+  locally), never a URL, network (UNC) or device path, and a link marked as a final result
+  cannot be removed until the final result is unmarked (HTTP 409);
 - reviewers, approvers, and collaborators recorded separately from the accountable owner;
 - entities and cross-entity project filing: a project keeps one stable id with links to one
   or more entities (the approved baseline entity list can be seeded on owner request);
@@ -179,6 +182,11 @@ python -m venv .venv
 
 The owner password is requested without echo. Application data defaults to
 `%LOCALAPPDATA%\AstraProjectTracker`; override it for testing with `ASTRA_HOME`.
+
+Attachment links are off until the installation names the folders they may point into:
+set `ASTRA_ATTACHMENT_ROOTS` to one or more absolute folders separated by `;` (for example
+`$env:ASTRA_ATTACHMENT_ROOTS = "D:\Shared\Astra"`) before `astra serve`. Only paths inside
+those folders can be linked or imported, and only those are checked for "file not found".
 
 Do not expose the development HTTP server directly to the public internet. Private
 network/Tailscale access and HTTPS termination will be configured during deployment.

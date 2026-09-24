@@ -1,5 +1,7 @@
 import json
+import ntpath
 import os
+import posixpath
 import sqlite3
 import tempfile
 import threading
@@ -9,7 +11,9 @@ from unittest.mock import patch
 
 from astra.auth import hash_password, verify_password
 from astra.db import connect
-from astra.service import AstraService, Conflict, Forbidden
+from astra.service import AstraService, Conflict, Forbidden, validate_attachment_path
+
+from link_roots import allow_attachment_roots, link
 
 
 class AstraCoreTests(unittest.TestCase):
@@ -19,6 +23,7 @@ class AstraCoreTests(unittest.TestCase):
         self.db = connect(self.db_path)
         self.service = AstraService(self.db)
         self.owner = self.service.create_initial_owner("owner@example.org", "Owner", "correct horse battery")
+        allow_attachment_roots(self)
 
     def tearDown(self):
         self.db.close()
@@ -779,7 +784,7 @@ class AstraCoreTests(unittest.TestCase):
         task = self.service.create_task(self.owner, {
             "project_id": project["id"], "title": "Read-only deliverable", "owner_user_id": self.owner["id"],
         })
-        attachment = self.service.add_task_attachment(self.owner, task["id"], "/data/viewer-cannot.pdf")
+        attachment = self.service.add_task_attachment(self.owner, task["id"], link("data", "viewer-cannot.pdf"))
         submission = self.service.submit_task(self.owner, task["id"], "Owner submitted")
 
         with self.assertRaises(Forbidden):
@@ -1302,7 +1307,7 @@ class AstraCoreTests(unittest.TestCase):
     def test_attachment_authorization(self):
         project = self.service.create_project(self.owner, "Restricted")
         task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Secret"})
-        self.service.add_task_attachment(self.owner, task["id"], "/data/secret.pdf")
+        self.service.add_task_attachment(self.owner, task["id"], link("data", "secret.pdf"))
         outsider = self.service.create_user(self.owner, "out@example.org", "Outsider", "password outsider ok", "member")
         # No project access: cannot even see the link records.
         with self.assertRaises(Forbidden):
@@ -1312,28 +1317,201 @@ class AstraCoreTests(unittest.TestCase):
         # A viewer sees the link but cannot add — adding is management-gated.
         self.assertEqual(len(self.service.list_task_attachments(viewer, task["id"])), 1)
         with self.assertRaises(Forbidden):
-            self.service.add_task_attachment(viewer, task["id"], "/data/x.pdf")
+            self.service.add_task_attachment(viewer, task["id"], link("data", "x.pdf"))
         # HS3JRY (owner decision 2026-09-20): every attachment mutation is
         # App-Owner-only. Authorized project users retain read access.
         manager = self.service.create_user(self.owner, "mgr@example.org", "Manager", "password manager okay", "member")
         self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
         self.assertEqual(len(self.service.list_task_attachments(manager, task["id"])), 1)
         with self.assertRaises(Forbidden):
-            self.service.add_task_attachment(manager, task["id"], "/data/mgr.pdf")
+            self.service.add_task_attachment(manager, task["id"], link("data", "mgr.pdf"))
         chairman = self.service.create_user(
             self.owner, "chair@example.org", "Chairman", "password chairman okay", "chairman"
         )
         self.assertEqual(len(self.service.list_task_attachments(chairman, task["id"])), 1)
         with self.assertRaises(Forbidden):
-            self.service.add_task_attachment(chairman, task["id"], "/data/chair.pdf")
-        owner_added = self.service.add_task_attachment(self.owner, task["id"], "/data/owner.pdf")
+            self.service.add_task_attachment(chairman, task["id"], link("data", "chair.pdf"))
+        owner_added = self.service.add_task_attachment(self.owner, task["id"], link("data", "owner.pdf"))
         with self.assertRaises(Forbidden):
             self.service.remove_task_attachment(manager, task["id"], owner_added["id"])
         self.assertEqual(self.service.list_notifications(self.owner)[0]["kind"], "attachment_removal_blocked")
         # The App Owner can remove.
         self.service.remove_task_attachment(self.owner, task["id"], owner_added["id"])
         remaining = {a["path"] for a in self.service.list_task_attachments(self.owner, task["id"])}
-        self.assertNotIn("/data/owner.pdf", remaining)
+        self.assertNotIn(link("data", "owner.pdf"), remaining)
+
+    def test_attachment_path_validation_rejects_every_unsafe_shape(self):
+        # 6G89SJ (Owner decision 2026-09-19, Item 1). Windows shapes are checked with ntpath
+        # and POSIX shapes with posixpath, so both run on any platform.
+        windows_roots = [r"C:\Shared"]
+        windows = {
+            "": "required",
+            "   ": "required",
+            r"\\server\share\memo.pdf": "UNC",
+            "//server/share/memo.pdf": "UNC",
+            r"\\?\C:\Shared\memo.pdf": "UNC",
+            r"\\.\PhysicalDrive0": "UNC",
+            r"C:\Shared\CON": "Device names",
+            r"C:\Shared\nul.txt": "Device names",
+            r"C:\Shared\sub\COM1.log": "Device names",
+            r"C:\Shared\LPT9": "Device names",
+            r"C:\Shared\aux .pdf": "Device names",
+            r"Shared\memo.pdf": "full path",
+            r"\Shared\memo.pdf": "full path",
+            r"C:memo.pdf": "full path",
+            r"C:\Shared\..\Windows\win.ini": r"'\.\.'",
+            r"C:\Shared\.. \Windows\win.ini": r"'\.\.'",
+            "file:///C:/Shared/memo.pdf": "URL",
+            "https://example.org/memo.pdf": "URL",
+            r"C:\Shared\memo.pdf:hidden": "colon",
+            "C:\\Shared\\me\x00mo.pdf": "control characters",
+            "C:\\Shared\\memo\n.pdf": "control characters",
+            "C:\\Shared\\memo\x85.pdf": "control characters",
+            "C:\\Shared\\fdp.\u202eexe.pdf": "control characters",
+            "C:\\Shared\\" + "a" * 1100: "1024",
+            r"C:\SharedOther\memo.pdf": "outside",
+            r"D:\memo.pdf": "outside",
+        }
+        for path, message in windows.items():
+            with self.subTest(path=path[:40]):
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_attachment_path(path, windows_roots, ntpath)
+        self.assertEqual(validate_attachment_path(r" c:/shared/Board/memo.pdf ", windows_roots, ntpath),
+                         r"c:\shared\Board\memo.pdf")
+        self.assertEqual(validate_attachment_path(r"C:\Shared\console.pdf", windows_roots, ntpath),
+                         r"C:\Shared\console.pdf")
+        posix = {"/etc/shadow": "outside", "/srv/astra/../etc/passwd": r"'\.\.'", "srv/astra/memo.pdf": "full path",
+                 "//srv/astra/memo.pdf": "UNC", "/srv/astra-other/memo.pdf": "outside"}
+        for path, message in posix.items():
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_attachment_path(path, ["/srv/astra"], posixpath)
+        self.assertEqual(validate_attachment_path("/srv/astra/./memo.pdf", ["/srv/astra"], posixpath),
+                         "/srv/astra/memo.pdf")
+        # No allowed folder (unset, empty, or only malformed entries) disables linking entirely.
+        for setting in ("", "   ", r"relative;\\server\share;https://example.org"):
+            with self.subTest(setting=setting), patch.dict(os.environ, {"ASTRA_ATTACHMENT_ROOTS": setting}):
+                with self.assertRaisesRegex(ValueError, "disabled until the installation sets allowed folders"):
+                    validate_attachment_path(link("memo.pdf"))
+        with patch.dict(os.environ):
+            os.environ.pop("ASTRA_ATTACHMENT_ROOTS", None)
+            with self.assertRaisesRegex(ValueError, "disabled until the installation sets allowed folders"):
+                validate_attachment_path(link("memo.pdf"))
+
+    def test_add_attachment_rejects_unsafe_paths_and_writes_nothing(self):
+        project = self.service.create_project(self.owner, "Paths")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "T"})
+        outside = os.path.join(os.path.dirname(link()), "astra-not-allowed", "memo.pdf")
+        for path in (r"\\server\share\memo.pdf", "https://example.org/memo.pdf", link("..", "memo.pdf"),
+                     link("NUL"), "memo.pdf", outside):
+            with self.subTest(path=path):
+                with self.assertRaises(ValueError):
+                    self.service.add_task_attachment(self.owner, task["id"], path)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM task_attachments").fetchone()[0], 0)
+        kinds = [e["event_type"] for e in self.service.task_events(self.owner, task["id"])]
+        self.assertNotIn("attachment_added", kinds)
+        stored = self.service.add_task_attachment(self.owner, task["id"], link("ok", "memo.pdf"))
+        self.assertEqual(stored["path"], link("ok", "memo.pdf"))
+
+    def test_attachment_symlink_out_of_an_allowed_folder_is_rejected(self):
+        allowed = Path(self.temp.name) / "allowed"
+        secret = Path(self.temp.name) / "secret"
+        allowed.mkdir()
+        secret.mkdir()
+        (secret / "memo.pdf").write_text("secret")
+        try:
+            os.symlink(secret, allowed / "escape", target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are not available here")
+        allow_attachment_roots(self, str(allowed), include_defaults=False)
+        project = self.service.create_project(self.owner, "Links")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "T"})
+        with self.assertRaisesRegex(ValueError, "outside"):
+            self.service.add_task_attachment(self.owner, task["id"], str(allowed / "escape" / "memo.pdf"))
+
+    def test_stored_path_that_fails_validation_is_never_looked_up(self):
+        project = self.service.create_project(self.owner, "Legacy")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Old links"})
+        outside = os.path.join(os.path.dirname(link()), "astra-not-allowed", "old.pdf")
+        for index, path in enumerate((r"\\server\share\old.pdf", r"\\.\PhysicalDrive0", "CON", outside)):
+            # Rows written before 6G89SJ, or under a folder that is no longer allowed.
+            self.db.execute(
+                "INSERT INTO task_attachments(id,task_id,path,display_name,note,added_by,added_at)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (f"legacy-{index}", task["id"], path, f"Old {index}", "", self.owner["id"], f"2026-01-0{index + 1}"),
+            )
+        with patch("astra.service.os.path.exists", side_effect=AssertionError("dereferenced")), \
+                patch("astra.service.os.path.realpath", side_effect=AssertionError("resolved")):
+            listed = self.service.list_task_attachments(self.owner, task["id"])
+            detail = self.service.task_detail(self.owner, task["id"])
+        self.assertEqual([a["exists"] for a in listed], [None, None, None, None])
+        self.assertEqual([a["exists"] for a in detail["attachments"]], [None, None, None, None])
+        # An allowed path is still checked, so a moved file shows as missing.
+        allowed = self.service.add_task_attachment(self.owner, task["id"], link("gone.pdf"))
+        self.assertIs(allowed["exists"], False)
+
+    def test_attachment_marked_as_final_result_cannot_be_removed(self):
+        # 6G89SJ (Owner decision 2026-09-19, Item 2): no silent cascade of the final result.
+        deputy = self.service.create_user(self.owner, "deputy@example.org", "Deputy", "deputy password safe", "member")
+        deputy = self.service.grant_secondary_owner(self.owner, deputy["id"], "cover")
+        project = self.service.create_project(self.owner, "Deliverables")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Board memo"})
+        attachment = self.service.add_task_attachment(self.owner, task["id"], link("out", "memo.pdf"))
+        result = self.service.mark_final_result(self.owner, task["id"], "attachment", attachment["id"])
+        before = {n["id"] for n in self.service.list_notifications(deputy)}
+        with self.assertRaisesRegex(Conflict, "Unmark the final result first"):
+            self.service.remove_task_attachment(self.owner, task["id"], attachment["id"])
+        # Both the link and its final result are kept.
+        self.assertEqual([a["id"] for a in self.service.list_task_attachments(self.owner, task["id"])],
+                         [attachment["id"]])
+        self.assertEqual([r["id"] for r in self.service.list_final_results(self.owner)], [result["id"]])
+        blocked = [e for e in self.service.task_events(self.owner, task["id"])
+                   if e["event_type"] == "attachment_removal_blocked"]
+        self.assertEqual(len(blocked), 1)
+        self.assertEqual(blocked[0]["actor_user_id"], self.owner["id"])
+        after = json.loads(blocked[0]["after_json"])
+        self.assertEqual((after["attachment_id"], after["final_result_id"], after["reason"]),
+                         (attachment["id"], result["id"], "final_result"))
+        kinds = [e["event_type"] for e in self.service.task_events(self.owner, task["id"])]
+        self.assertNotIn("attachment_removed", kinds)
+        self.assertNotIn("final_result_unmarked", kinds)
+        # The other owner is told; the acting owner is not self-notified.
+        fresh = [n for n in self.service.list_notifications(deputy) if n["id"] not in before]
+        self.assertEqual([n["kind"] for n in fresh], ["attachment_removal_blocked"])
+        self.assertNotIn("attachment_removal_blocked",
+                         [n["kind"] for n in self.service.list_notifications(self.owner)])
+        # After an explicit, audited unmark the link can be removed.
+        self.service.unmark_final_result(self.owner, result["id"])
+        self.service.remove_task_attachment(self.owner, task["id"], attachment["id"])
+        kinds = [e["event_type"] for e in self.service.task_events(self.owner, task["id"])]
+        self.assertIn("final_result_unmarked", kinds)
+        self.assertIn("attachment_removed", kinds)
+        self.assertEqual(self.service.list_task_attachments(self.owner, task["id"]), [])
+
+    def test_template_apply_skips_attachment_links_that_fail_validation(self):
+        project, _, fieldwork = self._seed_template_project()
+        self.db.execute(
+            "INSERT INTO task_attachments(id,task_id,path,display_name,note,added_by,added_at)"
+            " VALUES(?,?,?,?,?,?,?)",
+            ("legacy-unc", fieldwork["id"], r"\\server\share\old.xlsx", "old.xlsx", "", self.owner["id"],
+             "2026-01-01T00:00:00+00:00"),
+        )
+        template = self.service.save_project_as_template(self.owner, project["id"], "Annual Audit")
+        self.assertEqual(len({t["title"]: t for t in template["body"]["tasks"]}["Fieldwork"]["attachments"]), 2)
+        created = self.service.create_project_from_template(self.owner, template["id"], "Annual Audit 2027",
+                                                            anchor_date="2027-02-01")
+        tasks = {t["title"]: t for t in self.service.list_tasks(self.owner, created["id"])}
+        links = self.service.list_task_attachments(self.owner, tasks["Fieldwork"]["id"])
+        self.assertEqual([a["path"] for a in links], [link("refs", "audit-checklist.xlsx")])
+        # Once the folder is no longer allowed, the template's link is not copied either.
+        allow_attachment_roots(self, self.temp.name, include_defaults=False)
+        other = self.service.create_project(self.owner, "Target")
+        task_template = self.service.save_task_as_template(self.owner, fieldwork["id"], "Fieldwork step")
+        result = self.service.create_task_from_template(self.owner, task_template["id"], other["id"])
+        self.assertGreaterEqual(result["created"], 1)
+        copied = [t for t in self.service.list_tasks(self.owner, other["id"]) if t["title"] == "Fieldwork"]
+        self.assertEqual(len(copied), 1)
+        self.assertEqual(self.service.list_task_attachments(self.owner, copied[0]["id"]), [])
 
     def _seed_template_project(self):
         project = self.service.create_project(self.owner, "Annual Audit 2026")
@@ -1350,7 +1528,7 @@ class AstraCoreTests(unittest.TestCase):
             "project_id": project["id"], "title": "Sampling",
             "start_date": "2026-01-12", "due_date": "2026-01-16", "parent_task_id": fieldwork["id"],
         })
-        self.service.add_task_attachment(self.owner, fieldwork["id"], "/refs/audit-checklist.xlsx")
+        self.service.add_task_attachment(self.owner, fieldwork["id"], link("refs", "audit-checklist.xlsx"))
         # Give Kickoff real history so we can prove it is NOT carried into the template.
         submission = self.service.submit_task(self.owner, kickoff["id"])
         self.service.accept_submission(self.owner, submission["id"])
@@ -1400,7 +1578,7 @@ class AstraCoreTests(unittest.TestCase):
         ).fetchone()["c"]
         self.assertEqual(deps, 1)
         links = self.service.list_task_attachments(self.owner, tasks["Fieldwork"]["id"])
-        self.assertEqual([a["path"] for a in links], ["/refs/audit-checklist.xlsx"])
+        self.assertEqual([a["path"] for a in links], [link("refs", "audit-checklist.xlsx")])
         # No history rode along: the new Kickoff has only its creation event and no submissions.
         events = [e["event_type"] for e in self.service.task_events(self.owner, tasks["Kickoff"]["id"])]
         self.assertEqual(events, ["task_created"])
@@ -1634,7 +1812,7 @@ class AstraCoreTests(unittest.TestCase):
     def test_attachment_can_be_marked_and_unmarked_as_final_result(self):
         project = self.service.create_project(self.owner, "Outputs")
         task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Model"})
-        attachment = self.service.add_task_attachment(self.owner, task["id"], "/out/model.xlsx")
+        attachment = self.service.add_task_attachment(self.owner, task["id"], link("out", "model.xlsx"))
         marked = self.service.mark_final_result(self.owner, task["id"], "attachment", attachment["id"])
         self.assertEqual([r["source_type"] for r in self.service.list_final_results(self.owner)], ["attachment"])
         self.service.unmark_final_result(self.owner, marked["id"])
@@ -1695,7 +1873,7 @@ class AstraCoreTests(unittest.TestCase):
             self.owner, "file-chair@example.org", "Chairman", "chairman password safe", "chairman"
         )
         task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Board pack"})
-        attachment = self.service.add_task_attachment(self.owner, task["id"], "/data/board-pack.pdf")
+        attachment = self.service.add_task_attachment(self.owner, task["id"], link("data", "board-pack.pdf"))
 
         # Organization-wide read: the Chairman sees the link record without any membership.
         self.assertEqual(len(self.service.list_task_attachments(chairman, task["id"])), 1)
@@ -1757,7 +1935,7 @@ class AstraCoreTests(unittest.TestCase):
         project = self.service.create_project(self.owner, "Mixed")
         task = self._accepted_task(project["id"], "Report")
         self.service.mark_final_result(self.owner, task["id"], "submission", task["submission_id"])
-        attachment = self.service.add_task_attachment(self.owner, task["id"], "/out/appendix.pdf")
+        attachment = self.service.add_task_attachment(self.owner, task["id"], link("out", "appendix.pdf"))
         self.service.mark_final_result(self.owner, task["id"], "attachment", attachment["id"])
         self.assertEqual(len(self.service.list_final_results(self.owner)), 2)
         only_attachments = self.service.list_final_results(self.owner, {"type": "attachment"})

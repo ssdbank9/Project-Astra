@@ -203,7 +203,7 @@ COLUMNS: tuple[Column, ...] = (
            target="tasks.description (Notes: section)"),
     Column("Attachment Links", "attachment_links", "string_list", aliases=("Attachments", "Links", "Evidence Links"),
            width=30, example="", vkind="long",
-           prompt="Paths or URLs separated by ;  App Owner import only.", target="task_attachments"),
+           prompt="Full file paths inside the folders this installation allows, separated by ;  App Owner import only.", target="task_attachments"),
 )
 COLUMN_BY_KEY = {column.key: column for column in COLUMNS}
 
@@ -1982,8 +1982,11 @@ class ImportEngine:
     """Turns parsed rows into a validated plan and applies it inside the caller's transaction."""
 
     def __init__(self, db, config: TemplateConfig, *, actor: dict, is_owner: bool, project: dict | None,
-                 new_project_name: str | None, filename: str, options: dict):
+                 new_project_name: str | None, filename: str, options: dict, check_attachment_path):
         self.db = db
+        # 6G89SJ: the service's attachment-path check (returns the path to store, raises
+        # ValueError for one that may not be linked). Passed in: this module cannot import the service.
+        self.check_attachment_path = check_attachment_path
         self.config = config
         self.actor = actor
         self.is_owner = is_owner
@@ -2319,7 +2322,14 @@ class ImportEngine:
                            "Attachment links are Owner-only; skipped.", "Attachment Links")
             else:
                 for item in split_list(cells.get("attachment_links")):
-                    attachments.append((item, os.path.basename(item.rstrip("/\\")) or item))
+                    try:
+                        path = self.check_attachment_path(item)
+                    except (OSError, ValueError) as exc:
+                        shown = item if len(item) <= 80 else item[:77] + "..."
+                        result.add("warning", "W_ATTACHMENT_PATH_SKIPPED",
+                                   f"'{shown}' was not linked: {exc}", "Attachment Links")
+                        continue
+                    attachments.append((path, os.path.basename(path.rstrip("/\\")) or path))
         entity_ids = []
         if cells.get("entity"):
             if is_manager_import:

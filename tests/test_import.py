@@ -17,6 +17,7 @@ from astra.service import AstraService, Forbidden
 from astra.web import AstraHandler, AstraServer
 from astra.xlsx_reader import Percent, read_workbook
 
+from link_roots import allow_attachment_roots, link
 from import_fixtures import ErrorValue, PERCENT_STYLE, Styled, filled_template, forge_declared_size, sheet_xml, workbook_bytes
 
 
@@ -37,6 +38,7 @@ class ImportServiceTests(unittest.TestCase):
         self.service.grant_project_access(self.owner, self.project["id"], self.viewer["id"], "viewer")
         # Most tests exercise every column: switch the Owner's template to the Full preset.
         self.service.set_import_template_config(self.owner, {"preset": "full"})
+        allow_attachment_roots(self)
 
     def tearDown(self):
         self.db.close()
@@ -476,7 +478,7 @@ class ImportServiceTests(unittest.TestCase):
             dict(row, title=f"{row['title']} edited", start_date="2027-01-04", due_date="2027-01-08", progress=40,
                  criticality="Critical", parent_key="O-1", predecessors="O-2 FS+2d", owner_email="Jamal",
                  collaborators="jamal@example.org", reviewers="waseem@example.org",
-                 attachment_links="\\\\server\\late.pdf", description="late words", next_action="late action",
+                 attachment_links=link("late.pdf"), description="late words", next_action="late action",
                  milestone="Yes", entity="Unfiled Co", baseline_due_date="2026-08-30", x_risk_dependency="late risk",
                  notes="late note")
             for row in seed[2:]
@@ -901,6 +903,37 @@ class ImportServiceTests(unittest.TestCase):
         preview = self.service.import_preview(self.owner, None, "again.xlsx", data)
         self.assertFalse(preview["summary"]["project"]["create"])
         self.assertEqual(preview["summary"]["update"] + preview["summary"]["unchanged"], 3)
+
+    def test_owner_import_skips_attachment_paths_that_fail_validation(self):
+        # 6G89SJ: an unsafe or disallowed path is skipped with a row warning, never a hard
+        # failure; the row and its allowed links still apply.
+        config = self.enable_all_columns()
+        rows = self.rows()
+        rows[0]["attachment_links"] = "; ".join(
+            [link("ok", "plan.pdf"), r"\\server\share\x.pdf", "https://example.org/a.pdf", "NUL", "relative.pdf"])
+        data = filled_template(rows, config)
+        preview = self.service.import_preview(self.owner, self.project["id"], "demo.xlsx", data)
+        self.assertEqual(preview["summary"]["errors"], 0)
+        self.assertEqual(self.codes(preview["rows"][0]).count("W_ATTACHMENT_PATH_SKIPPED"), 4)
+        message = next(f["message"] for f in preview["rows"][0]["findings"] if f["code"] == "W_ATTACHMENT_PATH_SKIPPED")
+        self.assertIn("server", message)
+        self.assertIn("not linked", message)
+        result = self.service.import_commit(self.owner, self.project["id"], "demo.xlsx", data, {}, None)
+        self.assertEqual(result["create"], 3)
+        first = self.task_by_key("RA-001")
+        self.assertEqual([a["path"] for a in self.service.list_task_attachments(self.owner, first["id"])],
+                         [link("ok", "plan.pdf")])
+        # With no allowed folder at all, every link is skipped and the rows still import.
+        allow_attachment_roots(self, include_defaults=False)
+        rows = [dict(row, import_key=f"NB-{index}") for index, row in enumerate(self.rows())]
+        rows[0]["attachment_links"] = link("ok", "later.pdf")
+        rows[1]["parent_key"] = rows[2]["parent_key"] = ""
+        data = filled_template(rows, config)
+        preview = self.service.import_preview(self.owner, self.project["id"], "none.xlsx", data)
+        message = next(f["message"] for f in preview["rows"][0]["findings"] if f["code"] == "W_ATTACHMENT_PATH_SKIPPED")
+        self.assertIn("disabled until the installation sets allowed folders", message)
+        self.service.import_commit(self.owner, self.project["id"], "none.xlsx", data, {}, None)
+        self.assertEqual(self.service.list_task_attachments(self.owner, self.task_by_key("NB-0")["id"]), [])
 
     # -- authorization ---------------------------------------------------
     def test_manager_imports_into_own_project_with_protected_actions_downgraded(self):

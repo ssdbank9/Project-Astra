@@ -12,6 +12,8 @@ from astra import service as service_module
 from astra.db import connect, transaction as database_transaction
 from astra.service import AstraService
 
+from link_roots import allow_attachment_roots, link
+
 
 class AstraStateIntegrityTests(unittest.TestCase):
     def setUp(self):
@@ -22,6 +24,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
         self.owner = self.service.create_initial_owner(
             "owner@example.org", "Owner", "correct horse battery"
         )
+        allow_attachment_roots(self)
 
     def tearDown(self):
         self.db.close()
@@ -1582,7 +1585,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
                 self.assertTrue(added["created"])
                 self.service.remove_task_dependency(actor, task["id"], successor["id"], "test unlink")
         revision = self.service.get_task(self.owner, task["id"])["revision"]
-        attachment = self.service.add_task_attachment(self.owner, task["id"], "/data/signed-after-close.pdf")
+        attachment = self.service.add_task_attachment(self.owner, task["id"], link("data", "signed-after-close.pdf"))
         submission_id = self.db.execute(
             "SELECT id FROM task_submissions WHERE task_id=?", (task["id"],)).fetchone()["id"]
         result = self.service.mark_final_result(self.owner, task["id"], "submission", submission_id)
