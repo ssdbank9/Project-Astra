@@ -382,6 +382,113 @@ class AstraCoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already set"):
             self.service.confirm_criticality(self.owner, task["id"], "high", "again")
 
+    def test_criticality_sort_orders_normal_above_low(self):
+        # QY0WG2 review gap 2: Normal must rank above Low in the criticality order even
+        # when the Low task is due sooner; Unrated stays last.
+        from datetime import date, timedelta
+        project = self.service.create_project(self.owner, "NormalLow", timezone_name="UTC")
+        base = date.fromisoformat(AstraService._today_in_timezone("UTC"))
+        low = self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Low", "criticality": "low",
+            "due_date": (base + timedelta(days=1)).isoformat()})
+        normal = self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Normal", "criticality": "normal",
+            "due_date": (base + timedelta(days=9)).isoformat()})
+        unrated = self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Unrated", "due_date": base.isoformat()})
+        order = [t["id"] for t in self.service.list_tasks(self.owner, project["id"], "criticality")]
+        self.assertEqual(order, [normal["id"], low["id"], unrated["id"]])
+
+    def test_confirm_criticality_event_records_actor_old_and_new_value(self):
+        # QY0WG2 review gap 2: the audit record must carry who changed it and from what.
+        import json
+        project = self.service.create_project(self.owner, "CritAudit")
+        manager = self.service.create_user(self.owner, "crit-mgr@example.org", "Crit Manager",
+                                           "manager password safe", "member")
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "T"})
+        self.service.confirm_criticality(manager, task["id"], "low", "Initial rating")
+        self.service.confirm_criticality(manager, task["id"], "critical", "Board escalation")
+        changes = [e for e in self.service.task_events(self.owner, task["id"])
+                   if e["event_type"] == "criticality_changed"]
+        self.assertEqual(len(changes), 2)
+        self.assertEqual([e["actor_user_id"] for e in changes], [manager["id"], manager["id"]])
+        self.assertEqual(json.loads(changes[0]["before_json"]), {"criticality": None})
+        self.assertEqual(json.loads(changes[0]["after_json"]), {"criticality": "low"})
+        self.assertEqual(json.loads(changes[1]["before_json"]), {"criticality": "low"})
+        self.assertEqual(json.loads(changes[1]["after_json"]), {"criticality": "critical"})
+        self.assertEqual(changes[1]["reason"], "Board escalation")
+
+    def test_confirm_criticality_requires_project_manager(self):
+        project = self.service.create_project(self.owner, "CritAuth")
+        member = self.service.create_user(self.owner, "crit-member@example.org", "Crit Member",
+                                          "member password safe", "member")
+        self.service.grant_project_access(self.owner, project["id"], member["id"], "member")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "T"})
+        with self.assertRaises(Forbidden):
+            self.service.confirm_criticality(member, task["id"], "critical", "I think so")
+        self.assertIsNone(self.service.get_task(self.owner, task["id"])["criticality"])
+
+    def test_confirm_criticality_refuses_null_reason_and_non_string_values(self):
+        # QY0WG2 review gaps 3-4: JSON null must not become the reason "None", and a
+        # non-string level is a validation error (400), not a TypeError (500).
+        project = self.service.create_project(self.owner, "CritTypes")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "T"})
+        for reason in (None, 42, ["x"], "   "):
+            with self.subTest(reason=reason), self.assertRaisesRegex(ValueError, "reason"):
+                self.service.confirm_criticality(self.owner, task["id"], "high", reason)
+        for level in (["high"], {"high": 1}, 3, True):
+            with self.subTest(level=level), self.assertRaisesRegex(ValueError, "Invalid criticality"):
+                self.service.confirm_criticality(self.owner, task["id"], level, "evidence")
+        self.assertFalse([e for e in self.service.task_events(self.owner, task["id"])
+                          if e["event_type"] == "criticality_changed"])
+
+    def _race_confirmations(self, **first_kwargs):
+        """A reads the task, then B confirms low->critical on its own connection, then A writes high."""
+        a = AstraService(connect(self.db_path))
+        b = AstraService(connect(self.db_path))
+        self.addCleanup(a.db.close)
+        self.addCleanup(b.db.close)
+        project = self.service.create_project(self.owner, "CritRace")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "T", "criticality": "low"})
+        if "expected_revision" in first_kwargs:
+            first_kwargs["expected_revision"] = self.service.get_task(self.owner, task["id"])["revision"]
+        original = a.get_task
+        calls = {"n": 0}
+
+        def racing_get_task(actor, task_id):
+            row = original(actor, task_id)
+            calls["n"] += 1
+            if calls["n"] == 1:
+                b.confirm_criticality(self.owner, task_id, "critical", "B: board escalation")
+            return row
+
+        a.get_task = racing_get_task
+        return a, task, lambda: a.confirm_criticality(self.owner, task["id"], "high", "A: evidence", **first_kwargs)
+
+    def test_confirm_criticality_records_true_old_value_under_interleaving(self):
+        # QY0WG2 review gap 1: the old value is re-read under the write lock, so A's event
+        # says critical->high (what it really replaced), not a stale low->high.
+        import json
+        _, task, confirm_a = self._race_confirmations()
+        confirm_a()
+        changes = [e for e in self.service.task_events(self.owner, task["id"])
+                   if e["event_type"] == "criticality_changed"]
+        self.assertEqual([json.loads(e["before_json"])["criticality"] for e in changes], ["low", "critical"])
+        self.assertEqual([json.loads(e["after_json"])["criticality"] for e in changes], ["critical", "high"])
+
+    def test_confirm_criticality_with_stale_expected_revision_is_a_conflict(self):
+        # QY0WG2 review gap 1: a caller that says which revision it saw is refused if the
+        # task moved on, so B's confirmed Critical is not silently overwritten.
+        from astra.service import Conflict
+        _, task, confirm_a = self._race_confirmations(expected_revision=None)
+        with self.assertRaisesRegex(Conflict, "revision"):
+            confirm_a()
+        self.assertEqual(self.service.get_task(self.owner, task["id"])["criticality"], "critical")
+        changes = [e for e in self.service.task_events(self.owner, task["id"])
+                   if e["event_type"] == "criticality_changed"]
+        self.assertEqual(len(changes), 1)
+
     def test_update_task_cannot_change_criticality_directly(self):
         project = self.service.create_project(self.owner, "Guard2")
         task = self.service.create_task(self.owner, {

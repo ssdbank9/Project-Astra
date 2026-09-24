@@ -4,7 +4,7 @@ title: "Criticality: approved sorting and confirmation workflow"
 status: review
 ready: true
 creator: Aly Jafferani
-assignee: Aly Jafferani
+assignee: Claude
 goal: "Make task criticality behave per the approved design so consequence, not just date proximity, drives ordering, and changes are governed."
 context: |-
   Astra project tracker (astra_project_tracker/), step 3 of the standalone-tracker gap work.
@@ -19,14 +19,14 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T04:51:48Z
-updated-at: 2026-09-24T05:29:48Z
-claimed-by: X1CarbonPC-18840
-claimed-at: 2026-09-15T04:52:45Z
+updated-at: 2026-09-24T06:02:53Z
+claimed-by: vm-809
+claimed-at: 2026-09-24T05:49:40Z
 updated-by: Claude
-outcome-what: "Added a user-selectable sort toggle to the task list: list_tasks(sort='criticality'|'due_date') with two ORDER BY branches; /api/tasks?sort= and an Export CSV sort param; a 'Sort by' dropdown in the toolbar that re-fetches. Default stays criticality."
-outcome-why: "Owner wanted BOTH orderings available in the app, not a single hard-coded criticality-primary sort."
+outcome-what: "Rework of the review send-back: confirm_criticality now re-reads the old level and revision inside its BEGIN IMMEDIATE transaction and takes an optional expected_revision (stale -> 409); rejects a non-string level and a null/non-string/blank reason with 400; web passes expected_revision and the detail form sends task.revision. Unrated tasks show the shared amber .badge 'Unrated' in the Gantt meta, the schedule table (new Criticality column; the mobile list) and the detail dialog. 8 new tests (6 core, 2 web) plus event assertions in test_confirm_criticality_over_http. README criticality bullet updated."
+outcome-why: "Review at 54b6744 found a reproduced race that recorded a false old value and silently overwrote a concurrent confirmation, mutants (no auth check, before dropped, Normal/Low swapped) surviving the suite, JSON null reason stored as 'None', a list level returning 500, and Unrated only as plain text. Aly approved reassignment and fix (Slack ts 1790228901.999149)."
 question: "Please accept, or send back: (1) OK that criticality is now criticality-PRIMARY over due-date in the task list order? (2) Any real-browser check needed before sign-off? No browser surface here so it's unverified visually."
-outcome-resolves: "Both sort modes reachable and correct; unit tests for both orders + unknown-mode fallback, HTTP test for ?sort=; full suite green (102)."
+outcome-resolves: "DoD: old value now correct under interleaving (test_confirm_criticality_records_true_old_value_under_interleaving, test_confirm_criticality_with_stale_expected_revision_is_a_conflict); actor/old/new/reason pinned in unit and HTTP tests; sort order Critical>High>Normal>Low>Unrated pinned incl. Normal/Low and export sort; member 403 and missing/null reason 400 over HTTP; Unrated conspicuous via badge while sort stays as specified. Five injected mutants all caught. Full suite 343 tests OK (replaces stale 52/102 counts)."
 review-summary: |-
   What the code does (it came in with baseline import c25e1f6, so there is no QY0WG2 diff to read):
   - src/astra/service.py:835-855: list_tasks(actor, project_id, sort) takes one of two modes. "criticality" is the default. It orders Critical, High, Normal, Low, then Unrated (rank 4), then by due date with undated tasks last, then by title. "due_date" orders by due date first (undated last), then by criticality, then by title. An unknown mode falls back to "criticality".
@@ -59,7 +59,7 @@ review-check: |-
 ## Definition of Done
 
 - [x] Confirmed criticality sorts descending Critical>High>Normal>Low then by nearest due date; Unrated tasks stay conspicuous (not hidden or sorted away); changing criticality records actor, old value, new value, and reason as an audit event; unit + HTTP tests cover the sort order and the confirmation record; existing tests stay green.
-  proof: astra_project_tracker: service.confirm_criticality + list_tasks ORDER BY criticality rank; tests test_core.test_list_tasks_sorts_by_confirmed_criticality_then_due_date, test_confirm_criticality_records_event_and_requires_reason, test_update_task_cannot_change_criticality_directly, test_web.test_confirm_criticality_over_http; 52 pass
+  proof: service.confirm_criticality (src/astra/service.py, re-reads old level + revision inside BEGIN IMMEDIATE, optional expected_revision -> 409) + list_tasks rank; Unrated badge via critLabel() in app.js (Gantt meta, schedule table, detail). Tests: test_core test_list_tasks_sorts_by_confirmed_criticality_then_due_date, test_criticality_sort_orders_normal_above_low, test_confirm_criticality_event_records_actor_old_and_new_value, test_confirm_criticality_requires_project_manager, test_confirm_criticality_refuses_null_reason_and_non_string_values, test_confirm_criticality_records_true_old_value_under_interleaving, test_confirm_criticality_with_stale_expected_revision_is_a_conflict; test_web test_confirm_criticality_over_http, test_confirm_criticality_over_http_refuses_member_and_bad_input, test_export_honours_sort_parameter. Full suite 343 tests OK (2026-09-24).
 
 ## Options
 
@@ -74,9 +74,16 @@ review-check: |-
 - [x] Add confirm_criticality service method writing a dedicated criticality_changed audit event (actor, old, new, reason)
 - [x] Add API route + wire detail UI to the confirmation path
 - [x] Tests: sort order, Unrated placement, confirmation audit record
+- [x] Rework: re-read old criticality inside the write transaction + expected_revision check; two-connection race test
+- [x] Rework: tests pinning the confirmation record (403 member over HTTP, event before/actor, Normal/Low order, 400 missing reason, export sort)
+- [x] Rework: refuse JSON-null reason and non-string level with 400
+- [x] Rework: conspicuous Unrated badge in list and detail using existing badge classes; before/after screenshots
+- [x] Rework: refresh stale test counts in proof/outcome
 
 ## Progress
 - **2026-09-15 04:57 · Aly Jafferani** — Criticality changes are now blocked from update_task and routed through confirm_criticality (dedicated criticality_changed audit event with old/new/reason). Sort is criticality-PRIMARY then nearest due date, per section 6 (consequence over date proximity) — a Critical task due in 60 days outranks a Low task due tomorrow. Unrated sorts last but stays labeled/visible (not hidden). Detail dialog now has a dedicated Confirm-criticality control; removed criticality from the plain edit form. No real-browser visual pass (no browser surface).
 - **2026-09-15 18:31 · Aly Jafferani** — OWNER DECISION (2026-09-15): do NOT hard-code criticality-primary sorting. Provide BOTH sort options in the app, user-selectable: sort by due date AND sort by criticality. Sent back to add a sort toggle (default choice TBD; keep criticality option present).
 - **2026-09-19 06:14 · Aly Jafferani** — HANDOFF 2026-09-19 (Claude->Codex): see astra_project_tracker/CODEX_HANDOFF_2026-09-19.md. Rework DONE per owner decision (both sort modes, user-selectable; confirm_criticality writes criticality_changed audit). In REVIEW awaiting the model review pass. Re-claim first (claim is stale ~90h). Baseline: python tests/run.py = 102 green. After review pass: jaira move --to signoff with review-summary/gaps/verdict/check, and commit the ticket file with the code in one commit whose message names the handle (board is unshared, so the handle is what makes the commit list derivable).
 - **2026-09-24 05:29 · Claude** — Independent review verdict: send back. Recorded by Claude in review-summary/gaps/verdict/check. Why: old criticality read outside the write transaction (reproduced race), and mutants removing the auth check / dropping the old value / swapping Normal-Low all pass the suite. Left in review because the assignee is Aly Jafferani; moving it to in-progress needs Aly to move it or approve reassignment. Any rework commit must name QY0WG2.
+- **2026-09-24 05:49 · Claude** — Reassigned from Aly Jafferani to Claude with Aly's approval: Slack thread C0C43N1CE00 ts 1790160392.461299, message ts 1790228901.999149 (2026-09-24 05:48 UTC), Aly: 'Yes please fix them' (the review gaps recorded at 54b6744).
+- **2026-09-24 06:02 · Claude** — Rework notes (2026-09-24): (a) expected_revision on confirm_criticality is OPTIONAL on purpose: the re-read under BEGIN IMMEDIATE alone fixes the false old value for any caller; the UI now sends task.revision (data-revision on #crit-form) so a person who confirmed from a stale dialog gets a 409 instead of silently overwriting. Making it mandatory would break test_state_integrity callers and the API contract for no extra safety on the audit. (b) The no-op check ('already set') moved inside the transaction so it compares against the fresh value. (c) Mutation check, 5 mutants in scratch copies, all killed by test_core+test_web: removed can_manage_project, before=None, Normal/Low swapped, str(reason) null path, actor dropped. (d) On narrow screens the task list is the schedule table, which had no criticality column at all; added one (after Status) so the Unrated badge shows on mobile too. Reused global .badge[data-level=warning] (amber #8a5a00 on #fdf1d9), no new CSS. (e) Not fixed, out of scope: at 1280px the toolbar overflows to the right of the filter card (visible in QY0WG2-before/after-task-list.png); pre-existing. (f) Screenshots: scratchpad/ui-shots/QY0WG2-{before,after}-{task-list,detail-criticality,mobile-*,detail-after-confirm}.png, synthetic data on 127.0.0.1.

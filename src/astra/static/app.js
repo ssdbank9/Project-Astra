@@ -238,7 +238,7 @@ function renderGantt(tasks){
     const swatch=isStep?`<i class="sw step-c${stepHue(meta.idx)}${meta.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${meta.idx}</i> `:"";
     const nameTop=isStep?`<span class="step-kicker">${swatch}Step ${meta.idx} of ${meta.total}</span>`:escapeHtml(t.project_name);
     const name=`<div class="task-name${isStep?" is-step":""}"><div class="name-wrap">${expandBtn}<div>${nameTop}<br><small>${escapeHtml(t.title)}</small>${kids.length?`<br><small class="muted">${kids.length} step${kids.length===1?"":"s"}</small>`:""}<br><button type="button" class="link" data-detail="${id}">Details &amp; history</button></div></div></div>`;
-    const metaCol=`<div class="task-meta">${escapeHtml(t.owner_name||"Unassigned")}<br>${escapeHtml(t.due_date||"No due date")} · ${escapeHtml(t.criticality||"Unrated")}${derived}${undatedChip}${metaMore}${overrunText}${blocked}${cp}<br><span class="next-action">Next: ${escapeHtml(t.next_action||"—")}</span></div>`;
+    const metaCol=`<div class="task-meta">${escapeHtml(t.owner_name||"Unassigned")}<br>${escapeHtml(t.due_date||"No due date")} · ${critLabel(t.criticality)}${derived}${undatedChip}${metaMore}${overrunText}${blocked}${cp}<br><span class="next-action">Next: ${escapeHtml(t.next_action||"—")}</span></div>`;
     const html=`<div class="gantt-row${isStep?" step-row":""}">${name}${metaCol}<div class="timeline${tall?" tall":""}">${markerLines}${todayLine}${bar}</div></div>`;
     if(!kids.length)return html;
     return html+`<div class="step-rows" id="steps-${id}" role="group" aria-label="Steps of ${escapeHtml(t.title)}"${expanded?"":" hidden"}>${kids.map(k=>row(k,depth+1)).join("")}</div>`;
@@ -255,13 +255,13 @@ function renderScheduleTable(groups,tableEl){
     const kids=childrenOf.get(t.id)||[];const m=stepIndex.get(t.id);const isStep=!!parent;
     const link=`<button type="button" class="link" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>`;
     const stepNo=isStep?`<i class="sw step-c${stepHue(m.idx)}${m.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${m.idx}</i><span class="sr-only">Step ${m.idx}</span> of ${m.total}`:"—";
-    rows.push(`<tr class="${isStep?"step-tr":"task-tr"}">${cell(t.project_name)}<td>${isStep?escapeHtml(parent.title):link}</td><td>${stepNo}</td><td>${isStep?link:"—"}</td>${cell(t.owner_name||"Unassigned")}${cell(t.start_date||"—")}${cell(t.due_date||"—")}${cell(statusLabel(t.status))}${cell(dueText(t)||t.due_state)}<td>${t.is_critical_path?"Yes":"No"}</td></tr>`);
+    rows.push(`<tr class="${isStep?"step-tr":"task-tr"}">${cell(t.project_name)}<td>${isStep?escapeHtml(parent.title):link}</td><td>${stepNo}</td><td>${isStep?link:"—"}</td>${cell(t.owner_name||"Unassigned")}${cell(t.start_date||"—")}${cell(t.due_date||"—")}${cell(statusLabel(t.status))}<td>${critLabel(t.criticality)}</td>${cell(dueText(t)||t.due_state)}<td>${t.is_critical_path?"Yes":"No"}</td></tr>`);
     if(isStep)steps++;
     kids.forEach(k=>walk(k,t));
   };
   top.forEach(t=>walk(t,null));
   const asOf=document.querySelector("#as-of").textContent;
-  const head=["Project","Task","Step #","Step","Owner","Start","Due","Status","Due state","Critical path"].map(h=>`<th scope="col">${h}</th>`).join("");
+  const head=["Project","Task","Step #","Step","Owner","Start","Due","Status","Criticality","Due state","Critical path"].map(h=>`<th scope="col">${h}</th>`).join("");
   tableEl.innerHTML=`<table class="sched-table"><caption>Schedule table · ${top.length} task${top.length===1?"":"s"}, ${steps} step${steps===1?"":"s"} · same filters as the Gantt · ${escapeHtml(asOf)}</caption><thead><tr>${head}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 // Shared tooltip (WCAG 1.4.13: hoverable, persistent, dismissible). Shown on hover after a
@@ -611,6 +611,13 @@ async function openDetail(taskId){
   }catch(err){document.querySelector("#detail-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`;return null}
 }
 
+// QY0WG2: an Unrated task has no confirmed consequence yet, so it must stand out rather than read
+// like a level. It reuses the shared warning badge; rated levels keep their plain text.
+function critLabel(level,strong){
+  if(!level)return `<span class="badge" data-level="warning" title="No confirmed criticality yet — confirm a level in Details">Unrated</span>`;
+  return strong?`<strong>${escapeHtml(level)}</strong>`:escapeHtml(level);
+}
+
 function fact(label,value){return `<div class="fact"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`}
 
 function renderDetail(task,events){
@@ -644,9 +651,9 @@ function renderDetail(task,events){
   const attachments=buildAttachments(task);
   const subtasks=buildSubtasks(task,closed);
   const schedule=buildSchedule(task,closed);
-  const critForm=closed?`<div class="crit-confirm"><h3>Criticality</h3><p>Current: <strong>${escapeHtml(task.criticality||"Unrated")}</strong></p></div>`:`<div class="crit-confirm"><h3>Criticality</h3>
-    <p>Current: <strong>${escapeHtml(task.criticality||"Unrated")}</strong> — changes are confirmed with a reason and recorded.</p>
-    <form id="crit-form"><label>Set level<select name="criticality">${crit}</select></label>
+  const critForm=closed?`<div class="crit-confirm"><h3>Criticality</h3><p>Current: ${critLabel(task.criticality,true)}</p></div>`:`<div class="crit-confirm"><h3>Criticality</h3>
+    <p>Current: ${critLabel(task.criticality,true)} — changes are confirmed with a reason and recorded.</p>
+    <form id="crit-form" data-revision="${escapeHtml(String(task.revision))}"><label>Set level<select name="criticality">${crit}</select></label>
       <label>Reason (evidence for this level)<input name="reason" required></label>
       <div class="actions"><button>Confirm criticality</button></div><div class="error" id="crit-error"></div></form></div>`;
   const closedNote=closed?`<div class="state-note" role="note"><p><strong>${escapeHtml(statusLabel(task.status))}.</strong> Reopen this task to change it.${perms.can_manage_files?" Attachments and final results can still be added.":""}</p>
@@ -803,7 +810,7 @@ async function submitParent(e){
 
 async function submitCriticality(e){
   e.preventDefault();const err=document.querySelector("#crit-error");err.textContent="";
-  try{await api(`/api/tasks/${detailTaskId}/criticality`,{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});await load();await openDetail(detailTaskId)}
+  try{await api(`/api/tasks/${detailTaskId}/criticality`,{method:"POST",body:JSON.stringify({...Object.fromEntries(new FormData(e.target)),expected_revision:Number(e.target.dataset.revision)})});await load();await openDetail(detailTaskId)}
   catch(x){err.textContent=x.message}
 }
 

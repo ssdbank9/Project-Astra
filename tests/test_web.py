@@ -766,6 +766,69 @@ class AstraWebTests(unittest.TestCase):
         }, cookie=cookie, csrf=csrf)
         self.assertEqual(response.status, 200)
         self.assertEqual(updated["task"]["criticality"], "critical")
+        # QY0WG2 review gap 2: the audit event over HTTP carries actor, old and new value.
+        _, events = self.request("GET", f"/api/tasks/{tid}/events", cookie=cookie)
+        change = [e for e in events["events"] if e["event_type"] == "criticality_changed"][-1]
+        self.assertEqual(change["actor_name"], "Owner")
+        self.assertEqual(json.loads(change["before_json"]), {"criticality": None})
+        self.assertEqual(json.loads(change["after_json"]), {"criticality": "critical"})
+        self.assertEqual(change["reason"], "urgent")
+
+    def test_confirm_criticality_over_http_refuses_member_and_bad_input(self):
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "CritGuard"}, cookie=cookie, csrf=csrf)
+        pid = project["project"]["id"]
+        _, task = self.request("POST", "/api/tasks", {"project_id": pid, "title": "T", "criticality": "low"},
+                               cookie=cookie, csrf=csrf)
+        tid = task["task"]["id"]
+        url = f"/api/tasks/{tid}/criticality"
+        # Missing, null and blank reasons, and a non-string level, are 400s that change nothing.
+        for body in ({"criticality": "high"}, {"criticality": "high", "reason": None},
+                     {"criticality": "high", "reason": "  "}, {"criticality": ["high"], "reason": "x"},
+                     {"criticality": {"level": "high"}, "reason": "x"}):
+            with self.subTest(body=body):
+                response, error = self.request("POST", url, body, cookie=cookie, csrf=csrf)
+                self.assertEqual(response.status, 400)
+                self.assertIn("error", error)
+        # A stale expected_revision is a 409.
+        response, _ = self.request("POST", url, {"criticality": "high", "reason": "x", "expected_revision": 99},
+                                   cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 409)
+        # A plain project member (not a manager) is refused with 403.
+        _, member = self.request("POST", "/api/users", {
+            "email": "crit-member@example.org", "display_name": "Crit Member",
+            "password": "member password safe", "role": "member",
+        }, cookie=cookie, csrf=csrf)
+        self.request("POST", "/api/project-access", {
+            "project_id": pid, "user_id": member["user"]["id"], "role": "member",
+        }, cookie=cookie, csrf=csrf)
+        login_response, member_login = self.request(
+            "POST", "/api/login", {"email": "crit-member@example.org", "password": "member password safe"})
+        member_cookie = login_response.getheader("Set-Cookie").split(";", 1)[0]
+        response, error = self.request("POST", url, {"criticality": "critical", "reason": "mine"},
+                                       cookie=member_cookie, csrf=member_login["csrf"])
+        self.assertEqual(response.status, 403)
+        _, current = self.request("GET", f"/api/tasks/{tid}", cookie=cookie)
+        self.assertEqual(current["task"]["criticality"], "low")
+        _, events = self.request("GET", f"/api/tasks/{tid}/events", cookie=cookie)
+        self.assertFalse([e for e in events["events"] if e["event_type"] == "criticality_changed"])
+
+    def test_export_honours_sort_parameter(self):
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "ExportSort"}, cookie=cookie, csrf=csrf)
+        pid = project["project"]["id"]
+        for title, crit, due in (("Low soon", "low", "2030-01-02"), ("Critical late", "critical", "2030-03-01"),
+                                 ("Normal mid", "normal", "2030-02-01")):
+            self.request("POST", "/api/tasks", {"project_id": pid, "title": title, "criticality": crit,
+                                                "due_date": due}, cookie=cookie, csrf=csrf)
+        _, by_crit = self.request("GET", f"/api/export?project_id={pid}&sort=criticality", cookie=cookie)
+        _, by_due = self.request("GET", f"/api/export?project_id={pid}&sort=due_date", cookie=cookie)
+        self.assertEqual([t["title"] for t in by_crit["export"]["tasks"]], ["Critical late", "Normal mid", "Low soon"])
+        self.assertEqual([t["title"] for t in by_due["export"]["tasks"]], ["Low soon", "Normal mid", "Critical late"])
+        self.connection.request("GET", f"/api/export?project_id={pid}&sort=due_date&format=csv", None, {"Cookie": cookie})
+        response = self.connection.getresponse()
+        body = response.read().decode("utf-8-sig")
+        self.assertLess(body.index("Low soon"), body.index("Critical late"))
 
     def test_close_project_over_http(self):
         cookie, csrf = self._owner_session()

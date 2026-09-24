@@ -347,7 +347,8 @@ class AstraHandler(BaseHTTPRequestHandler):
             if path.startswith("/api/tasks/") and path.endswith("/criticality"):
                 task_id = path.split("/")[3]
                 task = self.service.confirm_criticality(
-                    user, task_id, payload.get("criticality"), payload.get("reason", "")
+                    user, task_id, payload.get("criticality"), payload.get("reason", ""),
+                    payload.get("expected_revision"),
                 )
                 return self._json({"task": task})
             if path.startswith("/api/tasks/") and path.endswith("/parent"):

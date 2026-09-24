@@ -37,9 +37,12 @@ This first vertical slice provides:
 - a portfolio dashboard with rolling due-bands (Overdue, Today, 1–7, 8–14, 15–30), combinable
   entity/project/status/criticality/owner and cumulative due-within filters, an "open work
   only" toggle, and a per-task "next action" shown separately from the accountable owner;
-- criticality governance: task lists sort criticality-first (Critical→Low, Unrated last but
-  visible) then by nearest due date, and criticality changes are confirmed with a reason and
-  recorded as a dedicated audit event;
+- criticality governance: a "Sort by" choice orders tasks criticality-first (Critical→Low,
+  Unrated last) or by nearest due date; Unrated tasks carry an amber "Unrated" badge in the
+  task list, schedule table and detail so they stay conspicuous. Only a project manager or the
+  owner confirms a level, with a reason; the old value is re-read under the write lock and an
+  optional `expected_revision` refuses a stale confirmation (409). Each change is recorded as a
+  dedicated `criticality_changed` audit event (actor, old value, new value, reason);
 - parent/subtask hierarchy with a completed/total roll-up shown separately from a task's own
   declared progress, cycle-safe re-parenting, and clickable subtasks;
 - a durable in-app notification inbox: the owner gets an idempotent record of every task change

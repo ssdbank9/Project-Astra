@@ -1901,23 +1901,39 @@ class AstraService:
             self._event(task_id, actor["id"], "parent_changed", before, {"parent_task_id": parent_task_id}, None)
         return self.get_task(actor, task_id)
 
-    def confirm_criticality(self, actor: dict, task_id: str, criticality, reason: str) -> dict:
+    def confirm_criticality(self, actor: dict, task_id: str, criticality, reason,
+                            expected_revision: int | None = None) -> dict:
         task = self.get_task(actor, task_id)
         if not self.can_manage_project(actor, task["project_id"]):
             raise Forbidden("Task-management access denied.")
         self._refuse_closed(task)
+        # QY0WG2 review: validate types before use, so a JSON list/object level is a 400
+        # (not an unhashable-type 500) and a JSON null reason is refused, not stored as "None".
+        if criticality is not None and not isinstance(criticality, str):
+            raise ValueError("Invalid criticality.")
         criticality = criticality or None
         if criticality not in CRITICALITIES:
             raise ValueError("Invalid criticality.")
-        reason = str(reason).strip()
-        if not reason:
+        if not isinstance(reason, str) or not reason.strip():
             raise ValueError("A reason is required to confirm criticality.")
-        old = task.get("criticality") or None
-        if old == criticality:
-            raise ValueError("Criticality is already set to that level.")
+        reason = reason.strip()
+        if expected_revision is not None and (isinstance(expected_revision, bool)
+                                              or not isinstance(expected_revision, int)):
+            raise ValueError("expected_revision must be an integer.")
         timestamp = now_text()
         with transaction(self.db):
             self._refuse_closed_in_transaction(task_id)
+            # QY0WG2 review: the old level and revision are re-read under the write lock.
+            # Read before BEGIN IMMEDIATE, a confirmation that landed in between would be
+            # overwritten silently and this event would record a stale old value.
+            current = self.db.execute("SELECT criticality, revision FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if expected_revision is not None and expected_revision != current["revision"]:
+                raise Conflict(
+                    f"Task revision conflict: expected {expected_revision}, current revision is {current['revision']}."
+                )
+            old = current["criticality"] or None
+            if old == criticality:
+                raise ValueError("Criticality is already set to that level.")
             self.db.execute(
                 "UPDATE tasks SET criticality=?, updated_at=?, revision=revision+1 WHERE id=?",
                 (criticality, timestamp, task_id),
