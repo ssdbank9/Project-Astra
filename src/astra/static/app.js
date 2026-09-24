@@ -1090,10 +1090,11 @@ function renderPeople(users,memberships,ownerEvents){
       :u.active?`<button type="button" class="link" data-owner-grant="${id}">Make secondary owner</button>`:"";
     return `<li><strong>${escapeHtml(u.display_name)}</strong> · ${escapeHtml(u.email)} · ${role}${u.active?"":' · <em>inactive</em>'} ${toggle} ${ownerAction}</li>`;
   }).join("");
-  const ownerEventRow=e=>`<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(OWNER_EVENT_LABELS[e.event_type]||e.event_type)}: <strong>${escapeHtml(e.target_name)}</strong> by ${escapeHtml(e.actor_name)}${e.reason?` · ${escapeHtml(e.reason)}`:""}</li>`;
+  const ownerEventRow=e=>`<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(OWNER_EVENT_LABELS[e.event_type]||e.event_type)}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`} by ${escapeHtml(e.actor_name)}${e.reason?` · ${escapeHtml(e.reason)}`:""}</li>`;
   const blocked=e=>e.event_type==="owner_change_blocked"||e.event_type==="import_blocked";
   const ownerHistory=(ownerEvents||[]).filter(e=>!blocked(e)).slice(0,20).map(ownerEventRow).join("")||"<li>No owner access changes yet.</li>";
-  const blockedHistory=(ownerEvents||[]).filter(blocked).slice(0,10).map(ownerEventRow).join("")||"<li>None.</li>";
+  const blockedList=type=>(ownerEvents||[]).filter(e=>e.event_type===type).slice(0,10).map(ownerEventRow).join("")||"<li>None.</li>";
+  const blockedHistory=blockedList("owner_change_blocked"),blockedImports=blockedList("import_blocked");
   // Only the primary may change an owner's project access, so others are not offered it.
   const ownerIds=new Set(users.filter(u=>u.global_role==="owner").map(u=>u.id));
   const userOptions=users.filter(u=>u.active&&(primary||!ownerIds.has(u.id))).map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.display_name)}</option>`).join("");
@@ -1106,6 +1107,7 @@ function renderPeople(users,memberships,ownerEvents){
     <h3>Users</h3><ul class="people-list">${rows}</ul>
     <h3>Owner access history</h3><ul class="people-list">${ownerHistory}</ul>
     <h3>Blocked owner-access attempts</h3><ul class="people-list">${blockedHistory}</ul>
+    <h3>Blocked imports without a project</h3><ul class="people-list">${blockedImports}</ul>
     <form id="add-user-form"><h3>Add a user</h3>
       <label>Email<input name="email" type="email" required></label>
       <label>Display name<input name="display_name" required></label>

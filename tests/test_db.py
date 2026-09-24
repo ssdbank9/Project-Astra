@@ -1146,9 +1146,6 @@ class PrimaryOwnerMigrationTests(unittest.TestCase):
             connection.close()
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 class NotificationActorMigrationTests(unittest.TestCase):
     """KBWY86: schema 17 records who caused each notification (nullable, no backfill),
     indexed for the per-recipient, per-actor cap on blocked-attempt notices."""
@@ -1179,7 +1176,7 @@ class NotificationActorMigrationTests(unittest.TestCase):
     def test_fresh_database_has_the_notification_actor_and_its_index(self):
         connection = db.connect(self.path)
         try:
-            self.assertEqual(db.SCHEMA_VERSION, 17)
+            self.assertGreaterEqual(db.SCHEMA_VERSION, 17)
             self.assertIn("actor_user_id", table_columns(connection, "notifications"))
             self.assertEqual(self.actor_index(connection), ["user_id", "actor_user_id", "created_at"])
         finally:
@@ -1219,7 +1216,11 @@ class NotificationActorMigrationTests(unittest.TestCase):
             self.assertNotIn("actor_user_id", table_columns(connection, "notifications"))
             self.assertFalse(connection.in_transaction)
             db.migrate(connection)
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 17)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
             self.assertEqual(self.actor_index(connection), ["user_id", "actor_user_id", "created_at"])
         finally:
             connection.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

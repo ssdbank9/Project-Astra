@@ -71,7 +71,9 @@ LOGIN_WINDOW_SECONDS = 900
 LOGIN_MAX_FAILURES = 5
 # KBWY86 (Aly, Slack ts 1790268694.030539): one person's blocked attempts reach each
 # recipient at most BLOCKED_NOTICE_CAP times per rolling window, pooled across these kinds
-# and targets. Past the cap only the notice is skipped; the audit row is always written.
+# and targets. owner_change_blocked has its own bucket, so cheaper attempts cannot use up
+# the cap before an owner-access attempt. Past the cap only the notice is skipped; the
+# audit row is always written, and the notice that reaches the cap says so.
 BLOCKED_NOTICE_WINDOW_SECONDS = 600
 BLOCKED_NOTICE_CAP = 5
 BLOCKED_NOTICE_KINDS = frozenset({
@@ -236,9 +238,15 @@ class AstraService:
     def _notify(self, user_id: str, event_id: str, task_id: str | None, kind: str, summary: str,
                 created_at: str | None = None, actor_id: str | None = None) -> None:
         # KBWY86: a blocked-attempt notice past the per-actor cap is skipped (the caller has
-        # already written the audit row).
-        if actor_id and kind in BLOCKED_NOTICE_KINDS and self._blocked_notices_capped(user_id, actor_id):
-            return
+        # already written the audit row); the one that reaches the cap says so.
+        if actor_id and kind in BLOCKED_NOTICE_KINDS:
+            sent = self._blocked_notices_sent(user_id, actor_id, kind)
+            if sent >= BLOCKED_NOTICE_CAP:
+                return
+            if sent == BLOCKED_NOTICE_CAP - 1:
+                who = self.db.execute("SELECT display_name FROM users WHERE id=?", (actor_id,)).fetchone()
+                summary += (f" Further blocked attempts by {who['display_name'] if who else actor_id} in the next"
+                            f" {BLOCKED_NOTICE_WINDOW_SECONDS // 60} minutes are recorded in history only.")
         # INSERT OR IGNORE with the unique (user_id, event_id) index makes retries idempotent.
         self.db.execute(
             "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at,actor_user_id)"
@@ -246,17 +254,18 @@ class AstraService:
             (new_id(), user_id, event_id, task_id, kind, summary, created_at or now_text(), actor_id),
         )
 
-    def _blocked_notices_capped(self, user_id: str, actor_id: str) -> bool:
-        """True when this recipient already has the cap of blocked-attempt notices caused by
-        this actor inside the rolling window (same count-in-window shape as the login throttle)."""
+    def _blocked_notices_sent(self, user_id: str, actor_id: str, kind: str) -> int:
+        """How many blocked-attempt notices in ``kind``'s bucket this actor has caused this
+        recipient inside the rolling window (same count-in-window shape as the login throttle).
+        owner_change_blocked is its own bucket; the other blocked kinds share one."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=BLOCKED_NOTICE_WINDOW_SECONDS)).isoformat()
-        kinds = sorted(BLOCKED_NOTICE_KINDS)
-        count = self.db.execute(
+        own = kind == "owner_change_blocked"
+        kinds = sorted({"owner_change_blocked"} if own else BLOCKED_NOTICE_KINDS - {"owner_change_blocked"})
+        return self.db.execute(
             "SELECT COUNT(*) c FROM notifications WHERE user_id=? AND actor_user_id=? AND created_at>=?"
             f" AND kind IN ({','.join('?' * len(kinds))})",
             (user_id, actor_id, cutoff, *kinds),
         ).fetchone()["c"]
-        return count >= BLOCKED_NOTICE_CAP
 
     def _notify_owners(self, actor_id: str, event_id: str, task_id: str | None, kind: str, summary: str,
                        created_at: str | None = None) -> None:
@@ -462,15 +471,17 @@ class AstraService:
         return self.get_user(user_id)
 
     def list_user_events(self, actor: dict) -> list[dict]:
-        """Newest first: the latest 200 grants and removals, then the latest 50 blocked
-        attempts (owner changes, and imports with no target project, KBWY86). Separate
-        limits, so blocked attempts never push a grant out of view."""
+        """Newest first: the latest 200 grants and removals, then the latest 50 blocked owner
+        changes, then the latest 50 imports blocked for lack of a target project (KBWY86).
+        Separate limits, so no kind of row pushes another out of view."""
         self.require_owner(actor)
-        query = """SELECT e.*, t.display_name target_name, a.display_name actor_name FROM user_events e
-               JOIN users t ON t.id=e.target_user_id JOIN users a ON a.id=e.actor_user_id
-               WHERE (e.event_type IN ('owner_change_blocked','import_blocked'))=?
+        base = """SELECT e.*, t.display_name target_name, a.display_name actor_name FROM user_events e
+               JOIN users t ON t.id=e.target_user_id JOIN users a ON a.id=e.actor_user_id WHERE {}
                ORDER BY e.occurred_at DESC, e.id DESC LIMIT ?"""
-        rows = self.db.execute(query, (0, 200)).fetchall() + self.db.execute(query, (1, 50)).fetchall()
+        rows = self.db.execute(base.format("e.event_type NOT IN ('owner_change_blocked','import_blocked')"),
+                               (200,)).fetchall()
+        for kind in ("owner_change_blocked", "import_blocked"):
+            rows += self.db.execute(base.format("e.event_type=?"), (kind, 50)).fetchall()
         return [dict(row) for row in rows]
 
     def list_assignable_users(self, actor: dict, project_id: str) -> list[dict]:

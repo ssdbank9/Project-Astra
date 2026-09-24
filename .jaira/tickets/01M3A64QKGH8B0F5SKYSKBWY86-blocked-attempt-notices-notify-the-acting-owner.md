@@ -28,7 +28,7 @@ related:
   - 01M2HPH35W0MHCMKGRQ9Z24KVH
 commits: []
 created-at: 2026-09-24T17:06:51Z
-updated-at: 2026-09-24T17:16:33Z
+updated-at: 2026-09-24T17:28:53Z
 updated-by: Claude
 claimed-by: vm-6361
 claimed-at: 2026-09-24T17:07:27Z
@@ -68,3 +68,4 @@ outcome-resolves: "Every DoD clause: self-notice for the three kinds with single
 
 ## Progress
 - **2026-09-24 17:12 · Claude** — Choices (Claude, 2026-09-24): (1) A blocked import with no target project is audited as a user_events row, event_type import_blocked, target_user_id = actor_user_id = the actor (user_events is the established table for audit rows with no project or task, GTEYTG; project_events needs a project). list_user_events and the People screen group it with the blocked attempts, so it never pushes a grant out of view. The notice kind stays protected_action_blocked. (2) The cap is checked in _notify with a COUNT on notifications; two concurrent requests could both pass at 4, so the cap is soft by at most the number of simultaneous requests. (3) The cap counts notices, not attempts: the window slides on notices sent. (4) Self-notice summary: '<kind>: <task> · <attachment or final-result title> · by <actor>'; time is created_at. (5) Every notification now stores actor_user_id where an actor exists (all _notify callers pass it).
+- **2026-09-24 17:28 · Claude** — Review 5 (approve-with-follow-ups) fixed in commit C: owner_change_blocked has its own cap bucket; the notice that reaches the cap says further attempts are in history only; list_user_events limits owner changes and blocked imports separately (50 each) and the People screen shows them as two lists; window edge, NULL-actor rows and the no-project import cap are pinned by tests; test_db v17 tests moved above the main guard. Documented follow-ups, not done: gap 5 the cap is soft under concurrency (COUNT and INSERT can race; overshoot at most concurrent requests minus 1); gap 6 every scripted owner-change attempt and no-project import preview adds a user_events row with no rate limit (rate-limit at the HTTP layer for the hosted deployment); gap 9 the handoff's v16 bullet reads as current until the v17 bullet below it.

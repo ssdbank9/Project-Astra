@@ -21,7 +21,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-24T11:10:01Z
-updated-at: 2026-09-24T17:16:32Z
+updated-at: 2026-09-24T17:28:53Z
 updated-by: Claude
 claimed-by: vm-26532
 claimed-at: 2026-09-24T11:12:14Z
@@ -51,7 +51,7 @@ review-check: "Copy the tree (git ls-files | tar) to a scratch dir; PYTHONPATH=s
 - [x] Primary grants and revokes: grant makes the user an owner (not primary) and records secondary_owner_granted with the prior role; revoke restores the prior role, revokes their sessions, keeps memberships and records secondary_owner_revoked; several secondaries allowed; a reason is required
   proof: tests/test_core.py SecondaryOwnerTests.test_primary_grants_and_revokes_a_secondary_owner, test_revoke_restores_a_chairman_and_several_secondaries_are_allowed, test_grant_and_revoke_input_errors (incl. blank revoke reason, deactivate-a-secondary message)
 - [x] Forbidden paths (403, nothing changed, owner_change_blocked recorded): a secondary grants, revokes a secondary, revokes the primary, deactivates the primary or another secondary, or changes project access of the primary or another owner; a Chairman or member calling grant/revoke; the primary cannot revoke themselves
-  proof: tests/test_core.py SecondaryOwnerTests.test_secondary_owner_cannot_change_owner_access_or_target_other_owners (8 attempts incl. own project access), test_repeated_blocked_attempts_record_one_row_and_one_notice, test_user_changes_read_the_target_under_the_write_lock, test_non_owners_cannot_grant_or_revoke_owner_access
+  proof: tests/test_core.py SecondaryOwnerTests.test_secondary_owner_cannot_change_owner_access_or_target_other_owners (8 attempts incl. own project access), test_repeated_blocked_owner_changes_are_all_audited_and_notices_capped (renamed in KBWY86 37f0122; was test_repeated_blocked_attempts_record_one_row_and_one_notice), test_user_changes_read_the_target_under_the_write_lock, test_non_owners_cannot_grant_or_revoke_owner_access
 - [x] Secondary owners use ordinary Owner powers (create project and user, decide an Owner request) and lose them on the next request after revoke
   proof: tests/test_core.py SecondaryOwnerTests.test_secondary_owner_has_ordinary_owner_powers_until_revoked
 - [x] An owner cannot approve or reject an Owner request they filed themselves; cancel still works

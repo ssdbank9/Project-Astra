@@ -20,8 +20,9 @@ This first vertical slice provides:
   subject to the blocked-attempt notice cap below). To deactivate a secondary owner the primary first removes
   their secondary owner access. Removing access restores the user's earlier role, signs
   them out and keeps their project roles. The People screen shows the latest 20 grants and
-  removals under **Owner access history** and the latest 10 blocked attempts separately, so
-  blocked attempts never hide a grant (`GET /api/user-events`, owners only). An owner
+  removals under **Owner access history**, then the latest 10 blocked owner-access attempts
+  and, separately, the latest 10 imports blocked for lack of a target project, so no list
+  hides another (`GET /api/user-events`, owners only). An owner
   cannot approve or reject an Owner request they filed;
 - project-scoped access;
 - projects, tasks, responsible people, dates, criticality, progress, and dependencies;
@@ -73,8 +74,9 @@ This first vertical slice provides:
   made by someone else (in-app only; marking read never deletes or approves anything); a
   blocked attachment removal, a final-result unmark and an attachment removal are also sent
   to the owner who did them, so a single-owner install hears of them; blocked-attempt notices
-  are capped at 5 per recipient and per person in any 10 minutes (every attempt is still
-  audited, including an import refused for lack of a target project);
+  are capped at 5 per recipient and per person in any 10 minutes, with blocked owner-access
+  attempts counted separately, and the 5th notice says further attempts are in history only
+  (every attempt is still audited, including an import refused for lack of a target project);
 - portfolio and per-project Gantt views with overdue and upcoming highlighting;
 - task steps (subtasks) drawn as numbered, colour-coded segments inside the parent's Gantt
   bar: a shared tooltip on hover and keyboard focus, a chevron that expands the step rows,

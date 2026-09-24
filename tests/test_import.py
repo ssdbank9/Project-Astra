@@ -998,6 +998,18 @@ class ImportServiceTests(unittest.TestCase):
         self.assertEqual(self.service.list_imports(self.viewer), [])
         self.assertEqual(len(self.service.list_imports(self.waseem)), 1)  # manager of the project may see it
 
+    def test_blocked_import_without_a_project_is_audited_every_time_and_its_notice_capped(self):
+        from astra.service import BLOCKED_NOTICE_CAP
+        data = filled_template(self.rows())
+        for _ in range(BLOCKED_NOTICE_CAP + 2):
+            with self.assertRaises(Forbidden):
+                self.service.import_preview(self.chair, None, "x.xlsx", data)
+        audited = self.db.execute("SELECT COUNT(*) c FROM user_events WHERE event_type='import_blocked'").fetchone()["c"]
+        self.assertEqual(audited, BLOCKED_NOTICE_CAP + 2)
+        notices = [n for n in self.service.list_notifications(self.owner)
+                   if n["kind"] == "protected_action_blocked" and n["actor_user_id"] == self.chair["id"]]
+        self.assertEqual(len(notices), BLOCKED_NOTICE_CAP)
+
     def test_import_targets_follow_roles(self):
         self.assertTrue(self.service.import_targets(self.owner)["can_create_project"])
         manager_targets = self.service.import_targets(self.waseem)

@@ -6,12 +6,14 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 from astra.auth import hash_password, verify_password
 from astra.db import connect
-from astra.service import BLOCKED_NOTICE_CAP, AstraService, Conflict, Forbidden, validate_attachment_path
+from astra.service import (BLOCKED_NOTICE_CAP, BLOCKED_NOTICE_WINDOW_SECONDS, AstraService, Conflict, Forbidden,
+                           now_text, validate_attachment_path)
 
 from link_roots import allow_attachment_roots, link
 
@@ -1555,6 +1557,42 @@ class AstraCoreTests(unittest.TestCase):
         self.assertEqual(len(self._blocked_notices(self.owner, first)), BLOCKED_NOTICE_CAP)
         self.assertEqual(len(self._blocked_notices(self.owner, second)), 1)
 
+    def test_blocked_notice_window_edge_and_null_actor_rows(self):
+        viewer, task, attachment = self._viewer_on_attachment("edge@example.org")
+        # Old notices with no actor (before schema 17) never count toward anyone's cap.
+        for n in range(BLOCKED_NOTICE_CAP):
+            self.db.execute(
+                "INSERT INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at)"
+                " VALUES(?,?,?,?,'attachment_removal_blocked','old',?)",
+                (f"legacy-{n}", self.owner["id"], f"legacy-event-{n}", task["id"], now_text()))
+        for _ in range(BLOCKED_NOTICE_CAP):
+            with self.assertRaises(Forbidden):
+                self.service.remove_task_attachment(viewer, task["id"], attachment["id"])
+        self.assertEqual(len(self._blocked_notices(self.owner, viewer)), BLOCKED_NOTICE_CAP)
+
+        def age_viewer_notices(seconds):
+            stamp = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+            self.db.execute("UPDATE notifications SET created_at=? WHERE user_id=? AND actor_user_id=?",
+                            (stamp, self.owner["id"], viewer["id"]))
+
+        age_viewer_notices(BLOCKED_NOTICE_WINDOW_SECONDS - 1)  # still inside the window: capped
+        with self.assertRaises(Forbidden):
+            self.service.remove_task_attachment(viewer, task["id"], attachment["id"])
+        self.assertEqual(len(self._blocked_notices(self.owner, viewer)), BLOCKED_NOTICE_CAP)
+        age_viewer_notices(BLOCKED_NOTICE_WINDOW_SECONDS + 1)  # just outside: notices resume
+        with self.assertRaises(Forbidden):
+            self.service.remove_task_attachment(viewer, task["id"], attachment["id"])
+        self.assertEqual(len(self._blocked_notices(self.owner, viewer)), BLOCKED_NOTICE_CAP + 1)
+
+    def test_the_notice_that_reaches_the_cap_says_later_attempts_are_in_history_only(self):
+        viewer, task, attachment = self._viewer_on_attachment("fifth@example.org")
+        for _ in range(BLOCKED_NOTICE_CAP + 1):
+            with self.assertRaises(Forbidden):
+                self.service.remove_task_attachment(viewer, task["id"], attachment["id"])
+        notices = sorted(self._blocked_notices(self.owner, viewer), key=lambda n: n["created_at"])
+        suffix = "Further blocked attempts by Fifth in the next 10 minutes are recorded in history only."
+        self.assertEqual([suffix in n["summary"] for n in notices], [False] * (BLOCKED_NOTICE_CAP - 1) + [True])
+
     def test_owner_self_notices_are_capped_too_and_ordinary_notices_are_not(self):
         project = self.service.create_project(self.owner, "Self cap")
         task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Kept memo"})
@@ -2486,6 +2524,47 @@ class SecondaryOwnerTests(unittest.TestCase):
         kinds = [e["event_type"] for e in self.service.list_user_events(self.primary)]
         self.assertEqual(kinds.count("secondary_owner_granted"), 2)
         self.assertEqual(kinds.count("owner_change_blocked"), 50)
+
+    def test_owner_change_notices_have_their_own_cap_bucket(self):
+        # Review 5 gap 1: cheap blocked attempts must not use up the cap before an
+        # owner-access attempt by the same person.
+        member, target = self.user("prober"), self.user("target")
+        project = self.service.create_project(self.primary, "Probe")
+        self.service.grant_project_access(self.primary, project["id"], member["id"], "viewer")
+        task = self.service.create_task(self.primary, {"project_id": project["id"], "title": "Probe task"})
+        for n in range(BLOCKED_NOTICE_CAP):
+            with self.assertRaises(Forbidden):
+                self.service.add_task_attachment(member, task["id"], f"/probe/{n}.pdf")
+        for _ in range(3):
+            with self.assertRaises(Forbidden):
+                self.service.grant_secondary_owner(member, target["id"], "promote me")
+        self.assertEqual(self.notified(self.primary).count("attachment_add_blocked"), BLOCKED_NOTICE_CAP)
+        self.assertEqual(self.notified(self.primary).count("owner_change_blocked"), 3)
+        # The owner-change bucket caps at 5 on its own, and further add attempts stay capped.
+        for _ in range(4):
+            with self.assertRaises(Forbidden):
+                self.service.grant_secondary_owner(member, target["id"], "promote me")
+        with self.assertRaises(Forbidden):
+            self.service.add_task_attachment(member, task["id"], "/probe/late.pdf")
+        self.assertEqual(len(self.user_events("owner_change_blocked")), 7)
+        self.assertEqual(self.notified(self.primary).count("owner_change_blocked"), BLOCKED_NOTICE_CAP)
+        self.assertEqual(self.notified(self.primary).count("attachment_add_blocked"), BLOCKED_NOTICE_CAP)
+
+    def test_blocked_imports_do_not_push_owner_changes_out_of_the_history(self):
+        # Review 5 gap 2: each blocked kind has its own limit in list_user_events.
+        first, second = self.secondary("first"), self.secondary("second")
+        with self.assertRaises(Forbidden):
+            self.service.set_user_active(first, second["id"], False)
+        chairman = self.user("chair", "chairman")
+        self.db.executemany(
+            "INSERT INTO user_events(id,target_user_id,event_type,actor_user_id,occurred_at,reason,detail_json)"
+            " VALUES(?,?,'import_blocked',?,'2999-01-01T00:00:00Z',NULL,'{}')",
+            [(f"import-{n}", chairman["id"], chairman["id"]) for n in range(60)],
+        )
+        kinds = [e["event_type"] for e in self.service.list_user_events(self.primary)]
+        self.assertEqual(kinds.count("owner_change_blocked"), 1)
+        self.assertEqual(kinds.count("import_blocked"), 50)
+        self.assertEqual(kinds.count("secondary_owner_granted"), 2)
 
     def test_user_changes_read_the_target_under_the_write_lock(self):
         # A target must not become an owner between the guard's read and the write.
