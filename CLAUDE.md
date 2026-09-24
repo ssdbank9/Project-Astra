@@ -3,7 +3,7 @@
 > **Current handoff:** Read
 > [`CLAUDE_HANDOFF_2026-09-24.md`](CLAUDE_HANDOFF_2026-09-24.md) before
 > reviewing or changing `codex/migration-safety-remediation`. It has the
-> current branch and head, the 2026-09-24 commits, the 437-test evidence,
+> current branch and head, the 2026-09-24 commits, the 438-test evidence,
 > schema v17, the board by lane, the write-lock rules and the open asks.
 > `CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md` is kept as history.
 

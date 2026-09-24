@@ -3004,11 +3004,35 @@ class ServerCommandCliTests(unittest.TestCase):
 
     def test_reset_password_needs_an_interactive_terminal(self):
         before = self.password_hash("deputy@example.org")
-        code, _, asked = self.run_cli(["reset-password", "--email", "deputy@example.org", "--yes"],
-                                      passwords=["a brand new passphrase"] * 2, interactive=False)
-        self.assertEqual(code, "reset-password needs an interactive terminal.")
-        asked.assert_not_called()
+        with patch.object(self.entry.getpass, "getpass") as prompted:
+            with patch.object(self.entry, "_interactive", return_value=False), \
+                    patch("sys.stdout", new_callable=io.StringIO) as out:
+                with self.assertRaises(SystemExit) as stopped:
+                    self.entry.main(["reset-password", "--email", "deputy@example.org", "--yes"])
+        self.assertEqual(stopped.exception.code, "reset-password needs an interactive terminal.")
+        prompted.assert_not_called()  # refused before any prompt
+        self.assertNotIn("Database:", out.getvalue())  # and before the database is opened
         self.assertEqual(self.password_hash("deputy@example.org"), before)
+
+    def test_serve_on_a_busy_port_prints_one_line(self):
+        import socket as socket_module
+        from astra.web import AstraServer
+        busy = socket_module.socket()
+        if hasattr(socket_module, "SO_EXCLUSIVEADDRUSE"):  # Windows: keep the port ours alone
+            busy.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_EXCLUSIVEADDRUSE, 1)
+        busy.bind(("127.0.0.1", 0))
+        busy.listen(1)
+        self.addCleanup(busy.close)
+        port = busy.getsockname()[1]
+        # Never block the suite: if the bind somehow succeeds, stop instead of serving.
+        with patch.object(AstraServer, "serve_forever", side_effect=AssertionError("bound a busy port")), \
+                patch("sys.stdout", new_callable=io.StringIO):
+            with self.assertRaises(SystemExit) as stopped:
+                self.entry.main(["serve", "--host", "127.0.0.1", "--port", str(port)])
+        self.assertIsInstance(stopped.exception.code, str)
+        self.assertTrue(stopped.exception.code.startswith(f"Could not start the server on 127.0.0.1:{port}: "),
+                        stopped.exception.code)
+        self.assertNotIn("database", stopped.exception.code)
 
     def test_database_errors_print_one_line(self):
         for error in (sqlite3.OperationalError("database is locked"), PermissionError("read-only folder")):

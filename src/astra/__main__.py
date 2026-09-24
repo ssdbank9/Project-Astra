@@ -44,6 +44,9 @@ def main(argv=None):
     except (KeyboardInterrupt, EOFError):
         raise SystemExit("Aborted; nothing was changed.") from None
     except (sqlite3.OperationalError, OSError) as exc:
+        if args.command == "serve" and not isinstance(exc, sqlite3.OperationalError):
+            # For example the port is in use or the host name does not resolve.
+            raise SystemExit(f"Could not start the server on {args.host}:{args.port}: {exc}") from None
         # For example "database is locked" after the busy timeout, or a read-only folder.
         raise SystemExit(f"Could not use the database at {database_path()}: {exc}") from None
 

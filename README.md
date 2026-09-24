@@ -206,8 +206,8 @@ active user and needs an interactive terminal: the new password (12+ characters)
 twice and is never taken from the command line, the environment or piped input; the user is
 signed out everywhere and their failed sign-ins are cleared. Both are recorded in the
 owner-access history as "via server command". A transfer notifies every active owner; a
-reset notifies the user, and the other owners only when the user is an owner. For another data folder set
-`$env:ASTRA_HOME = "D:\Astra Data"` first. On Linux (for example the planned Oracle
+reset notifies the user, and the other owners only when the user is an owner. For another
+data folder set `$env:ASTRA_HOME = "D:\Astra Data"` first. On Linux (for example the planned Oracle
 Cloud VM) always set `ASTRA_HOME`, because the default is a Windows folder:
 `ASTRA_HOME=/srv/astra .venv/bin/astra reset-password --email someone@example.org`,
 run as the user the server runs as.

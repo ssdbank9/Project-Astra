@@ -718,7 +718,9 @@ class AstraServer(ThreadingHTTPServer):
 
     def server_close(self):
         super().server_close()
-        self.db.close()
+        # A failed bind raises inside __init__ before self.db exists.
+        if getattr(self, "db", None) is not None:
+            self.db.close()
 
 
 def serve(host: str, port: int):
