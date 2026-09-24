@@ -70,8 +70,9 @@ This first vertical slice provides:
   dedicated `criticality_changed` audit event (actor, old value, new value, reason);
 - parent/subtask hierarchy with a completed/total roll-up shown separately from a task's own
   declared progress, cycle-safe re-parenting, and clickable subtasks;
-- a durable in-app notification inbox: every owner gets an idempotent record of every task change
-  made by someone else (in-app only; marking read never deletes or approves anything); a
+- a durable in-app notification inbox: every owner gets an idempotent record of every task change,
+  project close and project date change made by someone else (in-app only; marking read never
+  deletes or approves anything); a
   blocked attachment removal, a final-result unmark and an attachment removal are also sent
   to the owner who did them, so a single-owner install hears of them; blocked-attempt notices
   are capped at 5 per recipient and per person in any 10 minutes, with blocked owner-access

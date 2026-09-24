@@ -2683,6 +2683,74 @@ class SecondaryOwnerTests(unittest.TestCase):
         self.service.update_task(secondary, task["id"], {"title": "Watched 3", "expected_revision": current["revision"]})
         self.assertEqual((len(task_changes(self.primary)), len(task_changes(secondary))), (2, 2))
 
+    # XX9RFM (Aly, Slack ts 1790276936.363329 / 1790277044.283429): project closes and date
+    # changes notify every other active owner; secondary owners keep the right to close.
+    def project_notices(self, user, kind):
+        return [n for n in self.service.list_notifications(user) if n["kind"] == kind]
+
+    def test_a_secondary_owner_closes_a_project_with_open_work_and_the_primary_is_told(self):
+        secondary, other = self.secondary("deputy"), self.secondary("other")
+        member = self.user("member")
+        project = self.service.create_project(self.primary, "Harbour works")
+        self.service.grant_project_access(self.primary, project["id"], member["id"], "member")
+        self.service.create_task(self.primary, {"project_id": project["id"], "title": "Still open"})
+        closed = self.service.close_project(secondary, project["id"], "Stopping here", exceptional=True)
+        self.assertEqual(closed["status"], "closed")
+        for owner in (self.primary, other):
+            with self.subTest(owner=owner["email"]):
+                [notice] = self.project_notices(owner, "project_closed")
+                self.assertEqual(notice["summary"], "project closed with 1 open task: Harbour works · by Deputy")
+                self.assertEqual(notice["actor_user_id"], secondary["id"])
+        self.assertEqual(self.project_notices(secondary, "project_closed"), [])
+        self.assertEqual(self.project_notices(member, "project_closed"), [])
+        events = [e["event_type"] for e in self.service.project_events(self.primary, project["id"])]
+        self.assertEqual(events.count("project_closed"), 1)  # no extra audit row
+
+    def test_the_primary_closing_a_project_tells_the_secondary_owners(self):
+        secondary = self.secondary("deputy")
+        project = self.service.create_project(self.primary, "Done and dusted")
+        self.service.close_project(self.primary, project["id"], "")
+        [notice] = self.project_notices(secondary, "project_closed")
+        self.assertEqual(notice["summary"], "project closed: Done and dusted · by Primary")
+        self.assertEqual(self.project_notices(self.primary, "project_closed"), [])
+
+    def test_approving_a_managers_close_request_notifies_the_other_owners(self):
+        secondary = self.secondary("deputy")
+        manager = self.user("pm")
+        project = self.service.create_project(self.primary, "Requested close")
+        self.service.grant_project_access(self.primary, project["id"], manager["id"], "manager")
+        request = self.service.close_project(manager, project["id"], "All delivered")["request"]
+        self.assertEqual(self.project_notices(secondary, "project_closed"), [])
+        self.service.decide_owner_action_request(self.primary, request["id"], "approved", "fine")
+        [notice] = self.project_notices(secondary, "project_closed")
+        self.assertEqual(notice["summary"],
+                         "project closed: Requested close (approving a close request) · by Primary")
+        self.assertEqual(self.project_notices(self.primary, "project_closed"), [])
+        self.assertEqual(self.project_notices(manager, "project_closed"), [])
+
+    def test_project_date_changes_notify_the_other_owners_with_old_and_new_dates(self):
+        secondary = self.secondary("deputy")
+        manager = self.user("pm")
+        project = self.service.create_project(self.primary, "Dated")
+        self.service.grant_project_access(self.primary, project["id"], manager["id"], "manager")
+        self.service.set_project_schedule(self.primary, project["id"], "2026-10-01", "2026-12-31", "kick-off")
+        [first] = self.project_notices(secondary, "project_schedule_changed")
+        self.assertEqual(first["summary"], "project dates changed: Dated · start none → 2026-10-01, "
+                                           "target none → 2026-12-31 · by Primary")
+        self.assertEqual(self.project_notices(self.primary, "project_schedule_changed"), [])
+        self.service.set_project_schedule(manager, project["id"], "2026-10-01", "2027-01-31", "slip")
+        summaries = {n["summary"] for n in self.project_notices(self.primary, "project_schedule_changed")}
+        self.assertEqual(summaries, {"project dates changed: Dated · target 2026-12-31 → 2027-01-31 · by Pm"})
+        self.assertEqual(len(self.project_notices(secondary, "project_schedule_changed")), 2)
+        self.assertEqual(self.project_notices(manager, "project_schedule_changed"), [])
+
+    def test_a_single_owner_gets_no_notice_of_their_own_project_changes(self):
+        project = self.service.create_project(self.primary, "Solo")
+        self.service.set_project_schedule(self.primary, project["id"], "2026-10-01", None, "start")
+        self.service.close_project(self.primary, project["id"], "")
+        self.assertEqual([n for n in self.service.list_notifications(self.primary)
+                          if n["kind"] in ("project_closed", "project_schedule_changed")], [])
+
     def test_template_owner_role_goes_to_the_acting_owner(self):
         project = self.service.create_project(self.primary, "Recurring")
         self.service.create_task(self.primary, {

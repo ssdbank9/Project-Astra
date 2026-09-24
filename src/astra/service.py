@@ -805,7 +805,7 @@ class AstraService:
         # constraint on task dates (matches the permissive calendar decision).
         if not self.can_manage_project(actor, project_id):
             raise Forbidden("Project-management access denied.")
-        self.get_project(actor, project_id)
+        project_name = self.get_project(actor, project_id)["name"]
         start_date = self._date(start_date)
         target_date = self._date(target_date)
         if start_date and target_date and target_date < start_date:
@@ -827,8 +827,12 @@ class AstraService:
                 "UPDATE projects SET start_date=?, target_date=? WHERE id=?",
                 (start_date, target_date, project_id),
             )
+            changes = [f"{label} {old[key] or 'none'} → {new[key] or 'none'}"
+                       for key, label in (("start_date", "start"), ("target_date", "target")) if old[key] != new[key]]
             self._project_event(project_id, actor["id"], "project_schedule_changed",
-                                {"before": old, "after": new}, reason)
+                                {"before": old, "after": new}, reason,
+                                notice=f"project dates changed: {project_name} · {', '.join(changes)}"
+                                       f" · by {self._actor_name(actor)}")
         return self.get_project(actor, project_id)
 
     def set_primary_entity(self, actor: dict, project_id: str, entity_id) -> dict:
@@ -3047,9 +3051,12 @@ class AstraService:
             )
             if cursor.rowcount != 1:
                 raise Conflict("Project closure conflict: this project is already closed.")
+            open_work = f" with {len(outstanding)} open task{'s' if len(outstanding) != 1 else ''}" if outstanding else ""
+            approved = " (approving a close request)" if owner_decision is not None else ""
             self._project_event(
                 project_id, actor["id"], "project_closed",
                 {"exceptional": bool(outstanding), "note": note, "residual_work": outstanding}, note or None,
+                notice=f"project closed{open_work}: {current['name']}{approved} · by {self._actor_name(actor)}",
             )
             self._resolve_pending_requests(
                 actor,
@@ -3093,12 +3100,21 @@ class AstraService:
         return self._history_rows(actor, project_id, "project_events", project_id,
                                   self.NON_MANAGER_PROJECT_EVENT_KINDS)
 
-    def _project_event(self, project_id: str, actor_id: str, kind: str, detail: dict | None, reason: str | None) -> None:
+    def _project_event(self, project_id: str, actor_id: str, kind: str, detail: dict | None, reason: str | None,
+                       *, notice: str | None = None) -> None:
+        event_id = new_id()
         self.db.execute(
             "INSERT INTO project_events VALUES(?,?,?,?,?,?,?)",
-            (new_id(), project_id, kind, actor_id, now_text(), reason,
+            (event_id, project_id, kind, actor_id, now_text(), reason,
              json.dumps(detail, default=str, sort_keys=True) if detail is not None else None),
         )
+        if notice:
+            # XX9RFM (Aly, 2026-09-24): project closes and date changes reach every other
+            # active owner, like task changes. Ordinary notices, so the KBWY86 cap does not apply.
+            self._notify_owners(actor_id, event_id, None, kind, notice)
+
+    def _actor_name(self, actor: dict) -> str:
+        return actor.get("display_name") or actor["id"]
 
     # --- Schedule revisions: baseline / current / pending ---
 
