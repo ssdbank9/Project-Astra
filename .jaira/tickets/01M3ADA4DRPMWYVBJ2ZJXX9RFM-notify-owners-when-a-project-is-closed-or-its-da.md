@@ -1,7 +1,7 @@
 ---
 id: 01M3ADA4DRPMWYVBJ2ZJXX9RFM
 title: Notify owners when a project is closed or its dates change
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -30,13 +30,17 @@ related:
   - 01M3ADCB413BRFJTKCEXZ72D79
 commits: []
 created-at: 2026-09-24T19:12:08Z
-updated-at: 2026-09-24T19:33:03Z
+updated-at: 2026-09-24T19:37:38Z
 updated-by: Claude
 claimed-by: vm-593
 claimed-at: 2026-09-24T19:12:09Z
 outcome-what: "Project closes (an owner closing directly, or approving a Manager's close request) and project date changes now send an inbox notice to every other active owner through _notify_owners (actor excluded; ordinary, uncapped). The summary names the project, whether it closed with open work (or the start/target dates old → new) and who did it. Secondary owners keep the right to close, including with open work. No new audit rows, no schema change. Also filed Z72D79 (backlog, Aly): record settings changes and reopen a closed project."
 outcome-why: "_project_event never notified, so project closes and date changes were the only owner-relevant changes that reached nobody, and a close cannot be undone. Aly approved notices for these and nothing else (Slack ts 1790276936.363329, 1790277044.283429)."
 outcome-resolves: "DoD covered by the five new SecondaryOwnerTests: secondary close with open work (allowed, primary and other secondary told, actor and member not, one audit row), primary close, approved close request, date changes with old/new dates, single owner no self-notice; 443 tests OK."
+review-summary: "Independent review 7 (d6012de on 39f4faf), 2026-09-24. _project_event gains an optional notice= that calls _notify_owners with the same event id inside the same write transaction: every other active owner gets one inbox notice, the actor is excluded, actor_user_id is stored, and the notice is not capped. The only two code paths that write project dates or close state (set_project_schedule and close_project) now pass a notice: 'project dates changed: <name> · start A → B, target C → D · by <actor>' (changed fields only, cleared date shown as none) and 'project closed[ with N open task(s)]: <name>[ (approving a close request)] · by <actor>', covering a direct owner close and an owner approving a Manager's request. No close guard (secondary owners still close with open work), no new audit rows, no schema change; app.js, web.py, reviewer and template code untouched. 5 new tests; Z72D79 filed in backlog for Aly."
+review-gaps: "Review 7 gaps 1-3 (low) were then pinned in commit 106aea5 by test_project_notices_are_not_capped_skip_inactive_owners_and_show_cleared_dates (six date changes by one owner all notify; an inactive owner gets no project notice; a cleared date reads '→ none'); that commit passed the full suite (Ran 444 tests, OK) but was not re-reviewed. Info only (4-7): (4) notices show ISO dates while the project screen shows '1 Oct 2026' and import screens dd-mm-yyyy (cosmetic). (5) No HTTP-level test; the schedule and close routes call the same service methods and did not change. (6) Existing behaviour: an owner closing directly while a Manager's close request is pending marks that request approved, and the notice (accurately) has no '(approving a close request)'; changing the dates of a closed project is still allowed and now notifies (Z72D79 may consider it). (7) Ticket upkeep: plan step wording (notice=None) and related Z72D79 fixed in 106aea5; handoff section 4 is still the dated 6e52df8 board snapshot."
+review-verdict: "approve-with-follow-ups (independent review 7, 2026-09-24). The diff meets the definition of done within Aly's approved scope with no behaviour change beyond the notices; no defects found. The optional follow-up tests (gaps 1-3) were added afterwards in 106aea5."
+review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 444 tests' and 'OK'. 2. .venv\\Scripts\\astra init-owner --email owner@example.org, then .venv\\Scripts\\astra serve --host 127.0.0.1 --port 8765; sign in as the owner (Primary). 3. People: add user 'Deputy' and click 'Make secondary owner'. 4. New project 'Check XX9RFM' with one open task. 5. Sign in as Deputy; set a start and target date for the project with a reason and save. 6. As Deputy close the project (exceptional close with a note): it is allowed even with open work. 7. Deputy's bell shows neither notice. 8. Sign in as Primary; the bell shows 'project dates changed: Check XX9RFM · start none → <date>, target none → <date> · by Deputy' and 'project closed with 1 open task: Check XX9RFM · by Deputy'. 9. Project history shows one 'project closed' row."
 ---
 
 # Notify owners when a project is closed or its dates change
@@ -66,3 +70,4 @@ outcome-resolves: "DoD covered by the five new SecondaryOwnerTests: secondary cl
 
 ## Progress
 - **2026-09-24 19:18 · Claude** — Choices (Claude, 2026-09-24): notices use the event kind (project_closed / project_schedule_changed) with task_id NULL; the inbox renders the summary as-is, so app.js needs no change. Summaries: 'project closed[ with N open task(s)]: <project>[ (approving a close request)] · by <actor>' and 'project dates changed: <project> · start A → B, target C → D · by <actor>' (only changed fields; 'none' for a cleared date). Project dates are set only by set_project_schedule: import sets dates only when it creates a project (and never changes an existing project's dates), template apply likewise creates, so neither is a 'change'. No new audit rows, no schema change, no close guard (Aly: secondary owners keep the primary's right to close).
+- **2026-09-24 19:37 · Claude** — Review 7 recorded (approve-with-follow-ups, no defects). Gaps 1-3 pinned by a test in 106aea5 (not re-reviewed); gaps 4-7 are info.
