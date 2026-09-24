@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 def app_home() -> Path:
@@ -375,3 +375,62 @@ def migrate(connection: sqlite3.Connection) -> None:
                 """
             )
             connection.execute("PRAGMA user_version = 12")
+    if version < 13:
+        _migrate_v13(connection)
+
+
+# Columns the v13 step adds to tasks, in order (name, definition).
+V13_TASK_COLUMNS = (
+    ("import_key", "TEXT"),
+    ("is_milestone", "INTEGER NOT NULL DEFAULT 0 CHECK(is_milestone IN (0,1))"),
+    ("next_action_note", "TEXT"),
+    ("import_extras", "TEXT"),
+)
+
+V13_STATEMENTS = (
+    """CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_import_key
+           ON tasks(project_id, import_key) WHERE import_key IS NOT NULL""",
+    """CREATE TABLE IF NOT EXISTS imports (
+           id TEXT PRIMARY KEY,
+           project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+           actor_user_id TEXT NOT NULL REFERENCES users(id),
+           filename TEXT NOT NULL,
+           sha256 TEXT NOT NULL,
+           created_at TEXT NOT NULL,
+           summary_json TEXT NOT NULL,
+           report_csv TEXT NOT NULL
+       )""",
+    "CREATE INDEX IF NOT EXISTS idx_imports_project ON imports(project_id, created_at)",
+    """CREATE TABLE IF NOT EXISTS import_template_config (
+           id INTEGER PRIMARY KEY CHECK(id = 1),
+           version INTEGER NOT NULL,
+           config_json TEXT NOT NULL,
+           updated_at TEXT NOT NULL,
+           updated_by TEXT REFERENCES users(id)
+       )""",
+)
+
+
+def _migrate_v13(connection: sqlite3.Connection) -> None:
+    """v12 -> v13: the Excel import feature's task columns, ``imports`` and
+    ``import_template_config``.
+
+    The statements run one at a time inside a single BEGIN IMMEDIATE transaction and
+    ``PRAGMA user_version = 13`` is the last statement of that same transaction.
+    ``executescript()`` commits any open transaction before it starts, so the earlier
+    form of this step ran in autocommit: a crash, kill or disk error between two of its
+    statements left user_version at 12 with some columns already present, and every
+    later ``connect()`` re-ran the step and died on "duplicate column name" (regression
+    review MIGRATION-1). Now an interruption anywhere rolls the whole step back and the
+    next start simply runs it again. Each statement is also guarded (table_info before an
+    ALTER, IF NOT EXISTS on CREATE) so a database the earlier code left half-applied
+    completes on the next start instead of needing hand SQL.
+    """
+    with transaction(connection):
+        present = {row[1] for row in connection.execute("PRAGMA table_info(tasks)").fetchall()}
+        for name, definition in V13_TASK_COLUMNS:
+            if name not in present:
+                connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
+        for statement in V13_STATEMENTS:
+            connection.execute(statement)
+        connection.execute("PRAGMA user_version = 13")

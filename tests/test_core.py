@@ -698,6 +698,70 @@ class AstraCoreTests(unittest.TestCase):
         self.assertFalse(permissions["can_manage_files"])
         self.assertTrue(permissions["can_read_files"])
 
+    def test_update_task_protects_the_source_status_for_managers_and_points_the_owner_at_the_lifecycle_action(self):
+        # Adversarial review AS-1 (2026-09-22): the guard read only the target status, so a Manager
+        # could edit completed -> in_progress with 200 and no Owner request, and the Owner could
+        # leave completed without the reopen record handoff 7.3 requires.
+        import json as json_module
+        project = self.service.create_project(self.owner, "Source guard")
+        manager = self.service.create_user(self.owner, "source-manager@example.org", "Manager", "manager password safe")
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+
+        def make(status):
+            task = self.service.create_task(self.owner, {
+                "project_id": project["id"], "title": f"Leaving {status}", "owner_user_id": manager["id"],
+            })
+            if status == "completed":
+                submission = self.service.submit_task(manager, task["id"], "done")
+                self.service.accept_submission(self.owner, submission["id"], "ok")
+            elif status == "submitted":
+                self.service.submit_task(manager, task["id"], "v1")
+            elif status == "on_hold":
+                self.service.set_on_hold(self.owner, task["id"], "hold", "2026-12-01")
+            elif status == "reopened":
+                submission = self.service.submit_task(manager, task["id"], "done")
+                self.service.accept_submission(self.owner, submission["id"], "ok")
+                self.service.reopen_task(self.owner, task["id"], "second look", "2027-01-15")
+            elif status == "changes_requested":
+                submission = self.service.submit_task(manager, task["id"], "v1")
+                self.service.request_changes(self.owner, submission["id"], "not yet")
+            else:
+                self.service.update_task(self.owner, task["id"], {"status": status, "reason": "x"})
+            return self.service.get_task(self.owner, task["id"])
+
+        # Regression review TESTS-1 (2026-09-22): reopened and changes_requested are locked sources
+        # too (authorization matrix row 24); until they were listed here a change in either
+        # direction passed the suite.
+        for source, target in (("completed", "in_progress"), ("cancelled", "assigned"), ("on_hold", "in_progress"),
+                               ("submitted", "in_progress"), ("abandoned", "in_progress"),
+                               ("reopened", "in_progress"), ("changes_requested", "in_progress")):
+            with self.subTest(source=source, actor="manager"):
+                task = make(source)
+                outcome = self.service.update_task(manager, task["id"], {"status": target, "reason": "back to work"})
+                self.assertEqual(outcome["request"]["action"], "update_task_status")
+                self.assertEqual(json_module.loads(outcome["request"]["payload_json"])["from_status"], source)
+                current = self.service.get_task(self.owner, task["id"])
+                self.assertEqual((current["status"], current["revision"]), (source, task["revision"]))
+        for source in ("completed", "cancelled", "abandoned"):
+            with self.subTest(source=source, actor="owner"):
+                task = make(source)
+                with self.assertRaisesRegex(ValueError, "reopen"):
+                    self.service.update_task(self.owner, task["id"], {"status": "in_progress", "reason": "shortcut"})
+                self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], source)
+        task = make("submitted")
+        with self.assertRaisesRegex(ValueError, "accept"):
+            self.service.update_task(self.owner, task["id"], {"status": "in_progress", "reason": "undo"})
+        self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], "submitted")
+        # the recorded way back: reopen with a reason and a revised due date
+        done = make("completed")
+        reopened = self.service.reopen_task(self.owner, done["id"], "second round", "2027-01-15")
+        self.assertEqual(reopened["status"], "reopened")
+        self.assertIn("task_reopened", [e["event_type"] for e in self.service.task_events(self.owner, done["id"])])
+        # on hold has no dedicated release action: the Owner's update with a reason is the recorded path out
+        held = make("on_hold")
+        released = self.service.update_task(self.owner, held["id"], {"status": "in_progress", "reason": "checkpoint met"})
+        self.assertEqual(released["status"], "in_progress")
+
     def test_update_task_cannot_shortcut_governed_status(self):
         project = self.service.create_project(self.owner, "Guard")
         task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "G"})

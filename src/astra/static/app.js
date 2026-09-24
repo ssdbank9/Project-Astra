@@ -1,7 +1,7 @@
 const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality"};
 async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");return data}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
-function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=`${state.user.display_name} · ${state.user.global_role}`;const isOwner=state.user.global_role==="owner";document.querySelector("#new-project").hidden=!isOwner;document.querySelector("#people").hidden=!isOwner;document.querySelector("#close-project").hidden=!isOwner;document.querySelector("#save-template-btn").hidden=!isOwner}
+function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=`${state.user.display_name} · ${state.user.global_role}`;const isOwner=state.user.global_role==="owner";document.querySelector("#new-project").hidden=!isOwner;document.querySelector("#people").hidden=!isOwner;document.querySelector("#close-project").hidden=!isOwner;document.querySelector("#save-template-btn").hidden=!isOwner;refreshImportAccess()}
 async function load(){const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;updateBell();fillFilters();render()}
 function updateBell(){document.querySelector("#unread-count").textContent=state.unread||0;document.querySelector("#inbox").classList.toggle("has-unread",(state.unread||0)>0)}
 function fillFilters(){const pf=document.querySelector("#project-filter"),tp=document.querySelector('#task-form select[name="project_id"]');const selected=pf.value;pf.innerHTML='<option value="">All projects</option>';tp.innerHTML="";for(const p of state.projects){pf.add(new Option(p.status==="closed"?`${p.name} (closed)`:p.name,p.id));if(p.status!=="closed")tp.add(new Option(p.name,p.id))}pf.value=selected;const statuses=[...new Set(state.tasks.map(t=>t.status))].sort();document.querySelector("#status-filter").innerHTML='<option value="">All statuses</option>'+statuses.map(s=>`<option>${escapeHtml(s)}</option>`).join("");const ef=document.querySelector("#entity-filter"),efSel=ef.value;ef.innerHTML='<option value="">All entities</option>'+(state.entities||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`).join("");ef.value=efSel;fillPredecessors()}
@@ -527,7 +527,7 @@ document.querySelector("#task-form").addEventListener("submit",async e=>{e.preve
 const STATUSES=["draft","assigned","in_progress","submitted","changes_requested","completed","on_hold","delayed","cancelled","abandoned","reopened"];
 const CRITICALITIES=[["","Unrated"],["critical","Critical"],["high","High"],["normal","Normal"],["low","Low"]];
 const GOVERNED=["submitted","completed","on_hold","reopened"];
-const EVENT_LABELS={task_created:"Task created",task_updated:"Task updated",dependency_added:"Dependency added",dependency_removed:"Dependency removed",task_submitted:"Work submitted",submission_accepted:"Submission accepted",changes_requested:"Changes requested",task_reopened:"Task reopened",task_on_hold:"Put on hold",criticality_changed:"Criticality changed",parent_changed:"Parent changed",schedule_proposed:"Schedule change proposed",schedule_revised:"Schedule revised",schedule_proposal_rejected:"Schedule proposal rejected",attachment_added:"Attachment linked",attachment_removed:"Attachment link removed"};
+const EVENT_LABELS={import_committed:"Import committed",task_created:"Task created",task_updated:"Task updated",dependency_added:"Dependency added",dependency_removed:"Dependency removed",task_submitted:"Work submitted",submission_accepted:"Submission accepted",changes_requested:"Changes requested",task_reopened:"Task reopened",task_on_hold:"Put on hold",criticality_changed:"Criticality changed",parent_changed:"Parent changed",schedule_proposed:"Schedule change proposed",schedule_revised:"Schedule revised",schedule_proposal_rejected:"Schedule proposal rejected",attachment_added:"Attachment linked",attachment_removed:"Attachment link removed"};
 const DIFF_FIELDS=[["title","Title"],["status","Status"],["criticality","Criticality"],["start_date","Start date"],["due_date","Due date"],["progress","Progress"],["description","Description"]];
 let detailTaskId=null;
 
@@ -596,6 +596,7 @@ function renderDetail(task,events){
     <h2>${escapeHtml(task.title)}</h2>
     <div class="facts">${facts}</div>
     <p class="desc">${escapeHtml(task.description||"No description.")}</p>
+    ${buildImportedFields(task)}
     <p><button type="button" class="link" id="save-task-template">Save this task (and its subtasks) as a template</button></p>
     ${critForm}
     ${schedule}
@@ -1095,6 +1096,255 @@ async function revokeAccess(e){
   const b=e.target;
   try{await api("/api/project-access",{method:"DELETE",body:JSON.stringify({project_id:b.dataset.revokeProject,user_id:b.dataset.revokeUser})});await load();await openPeople()}
   catch(x){document.querySelector("#people-body").insertAdjacentHTML("afterbegin",`<p class="error">${escapeHtml(x.message)}</p>`)}
+}
+
+// ---- C9KPH6: Excel / CSV import (three steps: Upload → Review → Confirm) ----
+const importState={targets:null,file:null,preview:null,result:null,filter:"",opener:null,settings:null,view:"upload"};
+async function apiUpload(path,file,headers){
+  const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/octet-stream","X-CSRF-Token":state.csrf||"",...headers},body:file});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");return data;
+}
+async function refreshImportAccess(){
+  const button=document.querySelector("#import-btn");
+  try{const {targets}=await api("/api/import/targets");importState.targets=targets;button.hidden=!(targets.projects.length||targets.can_create_project)}
+  catch{importState.targets=null;button.hidden=true}
+}
+document.querySelector("#import-btn").onclick=openImport;
+const importDialog=document.querySelector("#import-dialog");
+importDialog.addEventListener("close",()=>{const opener=importState.opener;importState.opener=null;if(opener&&typeof opener.focus==="function")opener.focus()});
+async function openImport(){
+  importState.opener=document.activeElement;
+  importState.file=null;importState.preview=null;importState.result=null;importState.filter="";
+  try{const {targets}=await api("/api/import/targets");importState.targets=targets}catch(err){importState.targets={projects:[],can_create_project:false}}
+  renderImportStep("upload");
+  if(!importDialog.open)importDialog.showModal();
+}
+function setImportStep(step){
+  const order=["upload","review","confirm"];
+  document.querySelectorAll("#import-steps .wiz-step").forEach(li=>{
+    const mine=li.dataset.step;const done=order.indexOf(mine)<order.indexOf(step);
+    li.classList.toggle("is-done",done);
+    if(mine===step)li.setAttribute("aria-current","step");else li.removeAttribute("aria-current");
+  });
+}
+function importError(message,info){const el=document.querySelector("#import-error");if(!el)return;el.textContent=message||"";el.classList.toggle("is-info",!!info)}
+function focusImportBody(){const target=document.querySelector("#import-body h3, #import-body [autofocus]");if(target){target.setAttribute("tabindex","-1");target.focus()}}
+function renderImportStep(step){
+  importState.view=step;setImportStep(step==="settings"?"upload":step);
+  if(step==="upload")renderImportUpload();
+  else if(step==="review")renderImportReview();
+  else if(step==="confirm")renderImportConfirm();
+  else if(step==="settings")renderTemplateSettings();
+  focusImportBody();
+}
+function renderImportUpload(){
+  const targets=importState.targets||{projects:[],can_create_project:false,can_edit_template:false};
+  const options=targets.projects.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("");
+  const createOption=targets.can_create_project?`<option value="">Create or find the project named in the file's Project column</option>`:"";
+  const settings=targets.can_edit_template?`<button type="button" class="link" id="import-settings-btn">Template settings</button>`:"";
+  const selected=document.querySelector("#project-filter").value;
+  document.querySelector("#import-body").innerHTML=`
+    <h3>Upload a filled template</h3>
+    <p class="muted">Choose the target project, download the template and fill its <strong>Project</strong> and <strong>Tasks</strong> sheets (dates as dd-mm-yyyy; the Example sheet shows worked rows), then upload it here. With a project chosen the download already lists that project's tasks with their Import Keys, so a re-upload updates them instead of duplicating; add new rows at the bottom. Nothing is written until you confirm in step 3. An import never deletes.</p>
+    <div class="import-links"><a href="/api/import/template.xlsx" id="import-template-xlsx" download>Download template (.xlsx)</a><a href="/api/import/template.csv" id="import-template-csv" download>Download template (.csv)</a>${settings}</div>
+    <label>Target project<select id="import-project">${createOption}${options}</select></label>
+    <div id="import-drop" class="dropzone" tabindex="0" role="button" aria-describedby="import-file-name"><strong>Drop your .xlsx or .csv here</strong><span>or press Enter / click to choose a file</span><input type="file" id="import-file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="sr-only" tabindex="-1"></div>
+    <div id="import-file-name" class="muted">${importState.file?escapeHtml(`Selected: ${importState.file.name} (${Math.ceil(importState.file.size/1024)} KB)`):"No file selected."}</div>
+    <div class="import-options">
+      <label class="inline"><input type="checkbox" id="import-valid-only"> Import valid rows only (rows with errors are skipped)</label>
+      <label>Default reason recorded on changes<input id="import-reason" placeholder="Excel import &lt;file&gt; row n" maxlength="200"></label>
+    </div>
+    <div class="actions"><button type="button" id="import-preview-btn"${importState.file?"":" disabled"}>Preview</button></div>
+    <div class="error" id="import-error"></div>`;
+  const select=document.querySelector("#import-project");
+  if(selected&&[...select.options].some(o=>o.value===selected))select.value=selected;
+  else if(!targets.can_create_project&&select.options.length)select.selectedIndex=0;
+  // With a project chosen the template comes pre-filled with that project's tasks (GET ...?project_id=).
+  const updateTemplateLinks=()=>{
+    const pid=select.value,suffix=pid?`?project_id=${encodeURIComponent(pid)}`:"";
+    const label=pid?"Download template (with this project's tasks)":"Download template";
+    for(const [id,ext] of [["import-template-xlsx","xlsx"],["import-template-csv","csv"]]){const a=document.querySelector(`#${id}`);a.href=`/api/import/template.${ext}${suffix}`;a.textContent=`${label} (.${ext})`}
+  };
+  select.addEventListener("change",updateTemplateLinks);updateTemplateLinks();
+  const drop=document.querySelector("#import-drop"),input=document.querySelector("#import-file");
+  const pick=file=>{if(!file)return;importState.file=file;document.querySelector("#import-file-name").textContent=`Selected: ${file.name} (${Math.ceil(file.size/1024)} KB)`;document.querySelector("#import-preview-btn").disabled=false;importError("")};
+  drop.addEventListener("click",()=>input.click());
+  drop.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();input.click()}});
+  drop.addEventListener("dragover",e=>{e.preventDefault();drop.classList.add("is-over")});
+  drop.addEventListener("dragleave",()=>drop.classList.remove("is-over"));
+  drop.addEventListener("drop",e=>{e.preventDefault();drop.classList.remove("is-over");pick(e.dataTransfer.files&&e.dataTransfer.files[0])});
+  input.addEventListener("change",()=>pick(input.files&&input.files[0]));
+  document.querySelector("#import-preview-btn").addEventListener("click",runImportPreview);
+  document.querySelector("#import-settings-btn")?.addEventListener("click",()=>renderImportStep("settings"));
+}
+function importHeaders(){
+  const options={valid_rows_only:!!importState.validOnly,default_reason:importState.defaultReason||""};
+  return {"X-Filename":encodeURIComponent(importState.file.name),"X-Project-Id":encodeURIComponent(importState.projectId||""),"X-Options":encodeURIComponent(JSON.stringify(options))};
+}
+async function runImportPreview(){
+  const file=importState.file;if(!file)return;
+  if(file.size>5*1024*1024){importError("The file is larger than 5 MB. Split it or remove unused sheets.");return}
+  importState.projectId=document.querySelector("#import-project").value;
+  importState.validOnly=document.querySelector("#import-valid-only").checked;
+  importState.defaultReason=document.querySelector("#import-reason").value.trim();
+  const button=document.querySelector("#import-preview-btn");button.disabled=true;button.textContent="Checking…";importError("");
+  try{const {preview}=await apiUpload("/api/import/preview",file,importHeaders());importState.preview=preview;importState.filter="";renderImportStep("review")}
+  catch(err){importError(err.message);button.disabled=false;button.textContent="Preview"}
+}
+function fmtDmy(iso){if(!iso)return "";const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso);return m?`${m[3]}-${m[2]}-${m[1]}`:iso}
+function fmtChange(value,change){
+  if(!change)return escapeHtml(value??"");
+  return `<span class="change"><s>${escapeHtml(change.from||"—")}</s> → ${escapeHtml(change.to||"—")}</span>`;
+}
+function renderImportReview(){
+  const p=importState.preview,s=p.summary;
+  const chips=[["create","Create",s.create],["update","Update",s.update],["unchanged","Unchanged",s.unchanged],["warnings","Warnings",s.warnings],["errors","Errors",s.errors]]
+    .map(([k,label,n])=>`<button type="button" class="import-chip" data-kind="${k}" data-filter="${k}" aria-pressed="${importState.filter===k}">${escapeHtml(label)} <strong>${n}</strong></button>`).join("");
+  const project=s.project||{};
+  const projectLine=project.create?`<strong>${escapeHtml(project.name||"")}</strong> (a new project will be created)`:`<strong>${escapeHtml(project.name||"")}</strong>`;
+  const header=p.project_header||{};
+  // Every Project-sheet value is user input from the workbook: escape each one (review probe P15c).
+  const headerBits=[header.manager_email?`manager ${escapeHtml(header.manager_email)}`:"",header.timezone?escapeHtml(header.timezone):"",header.start_date?`planned ${escapeHtml(fmtDmy(header.start_date))} → ${escapeHtml(fmtDmy(header.target_date)||"—")}`:"",header.as_of_date?`plan as of ${escapeHtml(fmtDmy(header.as_of_date))}`:""].filter(Boolean).join(" · ");
+  const projectSheet=header.name?`<div>Project sheet: <strong>${escapeHtml(header.name)}</strong>${headerBits?` · ${headerBits}`:""}</div>`:"";
+  const peopleRows=(p.people||[]).map(x=>`<li data-status="${escapeHtml(x.status)}"><span class="badge" data-level="${x.status==="ok"?"ok":"warning"}">${escapeHtml(x.status==="ok"?"ready":x.status.replace("_"," "))}</span> ${escapeHtml(x.email||x.name)}${x.name&&x.email?` · ${escapeHtml(x.name)}`:""}${x.role?` · ${escapeHtml(x.role)}`:""}${x.message?`<br><small>${escapeHtml(x.message)}</small>`:""}</li>`).join("");
+  const people=peopleRows?`<details class="import-people"${(p.people||[]).some(x=>x.status!=="ok")?" open":""}><summary>People sheet: ${p.people.length} listed, ${p.people.filter(x=>x.status!=="ok").length} for the App Owner to add or grant</summary><ul class="findings">${peopleRows}</ul></details>`:"";
+  const fileWarnings=(p.file_warnings||[]).filter(w=>!/^People row|has no email/.test(w));
+  const notes=[projectSheet,...fileWarnings.map(w=>`<div>${escapeHtml(w)}</div>`),(p.unknown_columns||[]).length?`<div>Columns not imported: ${escapeHtml(p.unknown_columns.join(", "))}</div>`:""].filter(Boolean).join("");
+  const custom=p.custom_columns||[];
+  const head=["Row","Key","Action","Title","Owner","Start","Due","Status","Criticality",...custom.map(c=>c.label),"Findings"];
+  const rows=p.rows.map(r=>{
+    const v=r.values||{},c=r.changes||{};
+    const findings=r.findings.map(f=>`<li data-level="${escapeHtml(f.level)}"><b>${escapeHtml(f.level)}</b>${f.column?escapeHtml(f.column)+": ":""}${escapeHtml(f.message)}</li>`).join("");
+    const badgeLabel=r.level==="ok"?"OK":r.level==="warning"?"Warning":"Error";
+    const cells=[
+      ["Row",String(r.row)],["Key",escapeHtml(r.import_key||"")],["Action",escapeHtml(r.action)],
+      ["Title",fmtChange(v.title,c.title)],["Owner",fmtChange(v.owner||"Unassigned",c.owner_user_id)],
+      ["Start",fmtChange(v.start_date||"—",c.start_date)],["Due",fmtChange(v.due_date||"—",c.due_date)],
+      ["Status",fmtChange(v.status||"—",c.status)],["Criticality",fmtChange(v.criticality||"Unrated",c.criticality)],
+      ...custom.map(col=>[col.label,escapeHtml((v.extras||{})[col.key]??"—")]),
+    ].map(([label,html])=>`<td data-label="${escapeHtml(label)}">${html}</td>`).join("");
+    return `<tr data-level="${escapeHtml(r.level)}" data-action="${escapeHtml(r.action)}">${cells}<td class="import-findings" data-label="Findings"><span class="badge" data-level="${escapeHtml(r.level)}">${badgeLabel}</span>${findings?`<ul class="findings">${findings}</ul>`:""}</td></tr>`;
+  }).join("");
+  const importable=p.rows.filter(r=>r.action!=="error").length;
+  const canCommit=p.can_commit&&importable>0;
+  document.querySelector("#import-body").innerHTML=`
+    <h3>Review ${p.rows.length} row${p.rows.length===1?"":"s"} from ${escapeHtml(p.filename)}</h3>
+    <p class="muted">Target: ${projectLine}${s.not_in_file?` · ${s.not_in_file} existing task(s) not in this file stay untouched`:""}. Errors block their row${p.options.valid_rows_only?" and are skipped":"; fix them in the template or tick “Import valid rows only” in step 1"}.</p>
+    <div class="import-summary">${chips}</div>
+    ${notes?`<div class="import-notes">${notes}</div>`:""}
+    ${people}
+    <div class="import-table-wrap"><table class="import-table"><thead><tr>${head.map(h=>`<th scope="col">${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="actions"><button type="button" class="quiet" id="import-back">Back</button><button type="button" id="import-commit-btn"${canCommit?"":" disabled"}>Import ${importable} row${importable===1?"":"s"}</button></div>
+    <div class="error" id="import-error"></div>`;
+  if(!canCommit)importError(importable?"Rows with errors block the import. Fix them in the template, or go back and tick “Import valid rows only”.":"Nothing can be imported until the errors are fixed.");
+  document.querySelectorAll("#import-body .import-chip").forEach(chip=>chip.addEventListener("click",()=>{importState.filter=importState.filter===chip.dataset.filter?"":chip.dataset.filter;applyImportFilter()}));
+  applyImportFilter();
+  document.querySelector("#import-back").addEventListener("click",()=>renderImportStep("upload"));
+  document.querySelector("#import-commit-btn").addEventListener("click",runImportCommit);
+}
+function applyImportFilter(){
+  const f=importState.filter;
+  document.querySelectorAll("#import-body .import-chip").forEach(c=>c.setAttribute("aria-pressed",String(c.dataset.filter===f)));
+  document.querySelectorAll("#import-body .import-table tbody tr").forEach(tr=>{
+    let show=true;
+    if(f==="errors")show=tr.dataset.level==="error";
+    else if(f==="warnings")show=tr.dataset.level==="warning";
+    else if(f)show=tr.dataset.action===f;
+    tr.hidden=!show;
+  });
+}
+async function runImportCommit(){
+  const button=document.querySelector("#import-commit-btn");button.disabled=true;button.textContent="Importing…";importError("");
+  try{
+    // The server refuses the commit (409) when the bytes or the plan they produce changed since the preview.
+    const {result}=await apiUpload("/api/import/commit",importState.file,{...importHeaders(),"X-Sha256":importState.preview.sha256,"X-Plan-Fingerprint":importState.preview.plan_fingerprint||""});
+    importState.result=result;await load();renderImportStep("confirm");
+  }catch(err){importError(err.message);button.disabled=false;button.textContent="Retry import"}
+}
+function renderImportConfirm(){
+  const r=importState.result;
+  document.querySelector("#import-body").innerHTML=`
+    <div class="import-result">
+      <h3>Import complete</h3>
+      <p class="muted">${escapeHtml(r.filename)} → <strong>${escapeHtml(r.project.name)}</strong>${r.project.create?" (new project)":""}. Nothing was deleted; existing baselines were kept. Every change is in each task's history and in the project activity.</p>
+      <div class="facts">${fact("Created",String(r.create))}${fact("Updated",String(r.update))}${fact("Unchanged",String(r.unchanged))}${fact("Skipped (errors)",String(r.skipped_errors||0))}${fact("Dependencies",String(r.dependencies||0))}</div>
+      <p><a href="${escapeHtml(r.report_url)}" download>Download the import report (.csv)</a></p>
+      <div class="actions"><button type="button" id="import-done">Done</button></div>
+    </div>`;
+  document.querySelector("#import-done").addEventListener("click",()=>importDialog.close());
+}
+// ---- Owner-only template settings ----
+async function renderTemplateSettings(){
+  const body=document.querySelector("#import-body");
+  if(!importState.settings){
+    try{const {config}=await api("/api/import/template-config");importState.settings=config}
+    catch(err){body.innerHTML=`<p class="error">${escapeHtml(err.message)}</p><div class="actions"><button type="button" class="quiet" id="tpl-cancel">Back</button></div>`;document.querySelector("#tpl-cancel").addEventListener("click",()=>renderImportStep("upload"));return}
+  }
+  const cfg=importState.settings,core=new Set(cfg.core_keys||[]);
+  const items=cfg.columns.map((col,i)=>{
+    const isCore=core.has(col.key);
+    const kind=col.custom?`${col.type}${col.type==="list"?` (${(col.values||[]).join(", ")})`:""}${col.required?" · required":""}`:"built-in";
+    return `<li data-index="${i}">
+      <label class="inline"><input type="checkbox" class="tpl-enabled"${col.enabled?" checked":""}${isCore?" disabled":""} aria-label="Enable ${escapeHtml(col.label)}"> On</label>
+      <input class="tpl-label" value="${escapeHtml(col.label)}"${isCore?" disabled":""} aria-label="Label for ${escapeHtml(col.label)}" maxlength="60">
+      <span class="kind">${escapeHtml(kind)}${isCore?" · core":""}</span>
+      <button type="button" class="link tpl-up"${i===0?" disabled":""} aria-label="Move ${escapeHtml(col.label)} up">Up</button>
+      <button type="button" class="link tpl-down"${i===cfg.columns.length-1?" disabled":""} aria-label="Move ${escapeHtml(col.label)} down">Down</button>
+      ${col.custom?`<button type="button" class="link tpl-remove" aria-label="Remove ${escapeHtml(col.label)}">Remove</button>`:"<span></span>"}
+    </li>`;
+  }).join("");
+  body.innerHTML=`
+    <h3>Template settings</h3>
+    <p class="muted">Choose which columns the template carries, rename or reorder them, and add your own. Simple (the default) is nine columns with pre-filled keys; Full is the complete set with Project and People sheets. Core columns (Import Key, Title, Start Date, Due Date, Status, Owner Email) stay fixed. Saving changes the template's version: files downloaded before the change are rejected on upload and must be downloaded again.${cfg.updated_at?` Last saved ${escapeHtml(new Date(cfg.updated_at).toLocaleString())}${cfg.updated_by_name?` by ${escapeHtml(cfg.updated_by_name)}`:""}.`:""}</p>
+    <div class="import-summary" role="group" aria-label="Presets"><span class="muted">Presets:</span><button type="button" class="import-chip" data-preset="simple">Simple (${(cfg.presets?.simple||[]).length} columns)</button><button type="button" class="import-chip" data-preset="full">Full (${(cfg.presets?.full||[]).length} columns)</button></div>
+    <ol class="col-list" id="tpl-cols">${items}</ol>
+    <form id="tpl-add" class="add-col">
+      <label>New column label<input name="label" maxlength="60" required></label>
+      <label>Type<select name="type"><option value="text">Text</option><option value="number">Number</option><option value="date">Date (dd-mm-yyyy)</option><option value="list">List (dropdown)</option></select></label>
+      <label>Allowed values (comma-separated, lists only)<input name="values"></label>
+      <label class="inline"><input type="checkbox" name="required"> Required</label>
+      <button>Add column</button>
+    </form>
+    <div class="actions"><button type="button" class="quiet" id="tpl-reset">Reset to default</button><button type="button" class="quiet" id="tpl-cancel">Back</button><button type="button" id="tpl-save">Save template</button></div>
+    <div class="error" id="tpl-error"></div>`;
+  const list=document.querySelector("#tpl-cols");
+  const readBack=()=>{list.querySelectorAll("li").forEach(li=>{const col=cfg.columns[Number(li.dataset.index)];col.enabled=li.querySelector(".tpl-enabled").checked;if(!core.has(col.key))col.label=li.querySelector(".tpl-label").value.trim()||col.label})};
+  list.addEventListener("click",e=>{
+    const button=e.target.closest("button");if(!button)return;
+    const li=button.closest("li"),i=Number(li.dataset.index);readBack();
+    if(button.classList.contains("tpl-up")&&i>0){[cfg.columns[i-1],cfg.columns[i]]=[cfg.columns[i],cfg.columns[i-1]]}
+    else if(button.classList.contains("tpl-down")&&i<cfg.columns.length-1){[cfg.columns[i+1],cfg.columns[i]]=[cfg.columns[i],cfg.columns[i+1]]}
+    else if(button.classList.contains("tpl-remove")){cfg.columns.splice(i,1)}
+    renderTemplateSettings();
+  });
+  document.querySelector("#tpl-add").addEventListener("submit",e=>{
+    e.preventDefault();readBack();const f=Object.fromEntries(new FormData(e.target));
+    const values=String(f.values||"").split(",").map(v=>v.trim()).filter(Boolean);
+    cfg.columns.push({key:"",label:String(f.label||"").trim(),enabled:true,custom:true,type:f.type,values,required:f.required==="on"});
+    renderTemplateSettings();
+  });
+  document.querySelectorAll("#import-body [data-preset]").forEach(b=>b.addEventListener("click",()=>{
+    readBack();const on=new Set((cfg.presets||{})[b.dataset.preset]||[]);
+    cfg.columns.forEach(col=>{col.enabled=core.has(col.key)||on.has(col.key)});
+    renderTemplateSettings();document.querySelector("#tpl-error").textContent=`${b.dataset.preset==="simple"?"Simple":"Full"} preset applied - press Save template to keep it.`;
+  }));
+  document.querySelector("#tpl-cancel").addEventListener("click",()=>{importState.settings=null;renderImportStep("upload")});
+  document.querySelector("#tpl-reset").addEventListener("click",async()=>{
+    if(!confirm("Reset the import template to its default columns? Custom columns are removed from the template (values already imported stay on their tasks)."))return;
+    try{const {config}=await api("/api/import/template-config",{method:"PUT",body:JSON.stringify({reset:true})});importState.settings=config;renderTemplateSettings();document.querySelector("#tpl-error").textContent="Template reset to default."}
+    catch(err){document.querySelector("#tpl-error").textContent=err.message}
+  });
+  document.querySelector("#tpl-save").addEventListener("click",async()=>{
+    readBack();const err=document.querySelector("#tpl-error");err.textContent="";
+    try{const {config}=await api("/api/import/template-config",{method:"PUT",body:JSON.stringify({columns:cfg.columns})});importState.settings=config;renderTemplateSettings();document.querySelector("#tpl-error").textContent="Saved. Download the template again before filling it."}
+    catch(x){err.textContent=x.message}
+  });
+}
+function buildImportedFields(task){
+  const fields=task.imported_fields||[];
+  if(!fields.length)return "";
+  const rows=fields.map(f=>`<dt>${escapeHtml(f.label)}</dt><dd>${escapeHtml(f.value==null?"—":String(f.value))}</dd>`).join("");
+  return `<div class="import-fields"><h3>Imported fields</h3><p class="muted">Custom template columns from the last import (read-only; re-import to change them).</p><dl>${rows}</dl></div>`;
 }
 
 (async()=>{try{const data=await api("/api/me");Object.assign(state,data);showApp();await load()}catch{showLogin()}})();
