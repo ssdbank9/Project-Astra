@@ -52,7 +52,7 @@ Locks so far:
 - Lock #7: `39f4faf` → `caf261a` (XX9RFM project notices; Z72D79 filed); pushed after
   independent review 7.
 - Lock #8: from `caf261a` (3M2AYA sign-in without lockout, in-app password reset,
-  8-character minimum); not pushed at the time of writing.
+  8-character minimum); pushed after independent review 8.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
 
