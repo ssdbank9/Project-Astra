@@ -49,7 +49,12 @@ This first vertical slice provides:
   bar: a shared tooltip on hover and keyboard focus, a chevron that expands the step rows,
   a `+N` disclosure for steps not drawn at this scale, an "n steps need dates" chip, a dashed
   extension where a step runs past its parent's dates, and a Schedule table twin with the
-  same rows as text, which is the default at phone width; and
+  same rows as text, which is the default at phone width;
+- scoped search and CSV/JSON export of the current dashboard view and of final results: rows
+  are limited to the projects the user may see, the CSV starts with its header row, the
+  download filename carries the as-of time and the active filters
+  (`astra-export-<as-of>__status=in_progress__open-only.csv`), and a cell starting with
+  `=` `+` `-` `@`, tab or CR is prefixed with `'` so a spreadsheet shows it as text; and
 - Excel/CSV import of tasks and Gantt rows from a locked, Owner-configurable template
   (dropdowns, date validation, version marker): the App Owner imports anywhere and may create
   a project from the file, a project Manager imports into the projects they manage with

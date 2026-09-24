@@ -1,4 +1,6 @@
+import csv
 import http.client
+import io
 import inspect
 import json
 import os
@@ -631,6 +633,109 @@ class AstraWebTests(unittest.TestCase):
         # Provenance (as-of) now rides in the download filename instead of an in-band row.
         self.assertIsNotNone(disposition)
         self.assertRegex(disposition, r'filename="astra-export-\d{4}-\d{2}-\d{2}.*\.csv"')
+
+    def _get_raw(self, path, cookie=None):
+        self.connection.request("GET", path, None, {"Cookie": cookie} if cookie else {})
+        response = self.connection.getresponse()
+        return response, response.read().decode("utf-8")
+
+    def test_export_scope_isolation_over_http(self):
+        # Y3WC71 review gaps 1 and 4: a member's export (JSON and CSV) never carries another
+        # project's task, a hidden project_id is 403, and anonymous search/export are 403.
+        cookie, csrf = self._owner_session()
+        _, visible = self.request("POST", "/api/projects", {"name": "Scoped visible"}, cookie=cookie, csrf=csrf)
+        _, hidden = self.request("POST", "/api/projects", {"name": "Scoped hidden"}, cookie=cookie, csrf=csrf)
+        visible_id, hidden_id = visible["project"]["id"], hidden["project"]["id"]
+        self.request("POST", "/api/tasks", {"project_id": visible_id, "title": "Visible export task"}, cookie=cookie, csrf=csrf)
+        self.request("POST", "/api/tasks", {"project_id": hidden_id, "title": "Secret hidden task"}, cookie=cookie, csrf=csrf)
+        _, member = self.request("POST", "/api/users", {
+            "email": "scoped@example.org", "display_name": "Scoped", "password": "member password safe", "role": "member",
+        }, cookie=cookie, csrf=csrf)
+        response, _ = self.request("POST", "/api/project-access", {
+            "project_id": visible_id, "user_id": member["user"]["id"], "role": "viewer",
+        }, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 200)
+        member_cookie, _ = self._login_as("scoped@example.org", "member password safe")
+        response, export = self.request("GET", "/api/export", cookie=member_cookie)
+        self.assertEqual(response.status, 200)
+        self.assertEqual([t["title"] for t in export["export"]["tasks"]], ["Visible export task"])
+        response, body = self._get_raw("/api/export?format=csv", member_cookie)
+        self.assertEqual(response.status, 200)
+        self.assertIn("Visible export task", body)
+        self.assertNotIn("Secret hidden task", body)
+        response, _ = self.request("GET", f"/api/export?project_id={hidden_id}", cookie=member_cookie)
+        self.assertEqual(response.status, 403)
+        response, _ = self._get_raw(f"/api/export?format=csv&project_id={hidden_id}", member_cookie)
+        self.assertEqual(response.status, 403)
+        for path in ("/api/export", "/api/export?format=csv", "/api/search?q=Secret", "/api/final-results?format=csv"):
+            response, _ = self._get_raw(path)
+            self.assertEqual(response.status, 403, path)
+
+    def test_csv_exports_neutralise_formula_cells(self):
+        # Y3WC71 review gap 2 (CWE-1236): a cell a spreadsheet would evaluate is quoted, in both
+        # the task export and the final-results export, the same way importer.csv_cell does it.
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "=HYPERLINK(\"http://x\")"}, cookie=cookie, csrf=csrf)
+        pid = project["project"]["id"]
+        titles = ["=1+1", "+SUM(A1:A2)", "-2+3", "@cmd", "\tTabbed", "\rReturn", "Plain title"]
+        for title in titles:
+            response, _ = self.request("POST", "/api/tasks", {"project_id": pid, "title": title}, cookie=cookie, csrf=csrf)
+            self.assertEqual(response.status, 201, title)
+        _, body = self._get_raw("/api/export?format=csv&sort=title", cookie)
+        rows = list(csv.DictReader(io.StringIO(body)))
+        exported = {row["title"] for row in rows}
+        _, tasks = self.request("GET", "/api/tasks", cookie=cookie)
+        stored = {t["title"] for t in tasks["tasks"]}  # the service may trim tab/CR off a title
+        for title in stored:
+            if title.startswith(("=", "+", "-", "@", "\t", "\r")):
+                self.assertIn("'" + title, exported, title)
+                self.assertNotIn(title, exported, f"formula cell left live: {title!r}")
+        self.assertTrue({"'=1+1", "'+SUM(A1:A2)", "'-2+3", "'@cmd"} <= exported, exported)
+        self.assertIn("Plain title", exported)
+        # Tab and CR leads are neutralised by the cell helper itself, whatever the service stores.
+        from astra.web import _csv_cell
+        for value, expected in (("\tx", "'\tx"), ("\rx", "'\rx"), ("=1", "'=1"), ("a=1", "a=1"),
+                                (None, ""), (3, "3"), ("", "")):
+            self.assertEqual(_csv_cell(value), expected, repr(value))
+        self.assertEqual({row["project_name"] for row in rows}, {"'=HYPERLINK(\"http://x\")"})
+        task_id = next(t["id"] for t in tasks["tasks"] if t["title"] == "=1+1")
+        _, attachment = self.request("POST", f"/api/tasks/{task_id}/attachments", {"path": "/out/final.pdf"}, cookie=cookie, csrf=csrf)
+        response, _ = self.request("POST", "/api/final-results", {
+            "task_id": task_id, "source_type": "attachment", "source_id": attachment["attachment"]["id"],
+        }, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 201)
+        response, body = self._get_raw("/api/final-results?format=csv", cookie)
+        self.assertEqual(response.status, 200)
+        self.assertTrue(body.startswith("title,"), body[:40])
+        self.assertRegex(response.getheader("Content-Disposition"), r'filename="astra-final-results-\d{4}-\d{2}-\d{2}.*\.csv"')
+        [row] = list(csv.DictReader(io.StringIO(body)))
+        self.assertEqual(row["task_title"], "'=1+1")
+        self.assertEqual(row["project_name"], "'=HYPERLINK(\"http://x\")")
+
+    def test_csv_export_filename_names_the_active_filters(self):
+        # Y3WC71 review gap 3: the owner moved provenance out of the CSV body (header row first);
+        # the active filters ride in the download filename next to the as-of stamp.
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "Filtered"}, cookie=cookie, csrf=csrf)
+        pid = project["project"]["id"]
+        self.request("POST", "/api/tasks", {"project_id": pid, "title": "Keep", "status": "in_progress"}, cookie=cookie, csrf=csrf)
+        response, body = self._get_raw(f"/api/export?format=csv&status=in_progress&open_only=1&band=7&project_id={pid}&sort=title", cookie)
+        self.assertEqual(response.status, 200)
+        self.assertTrue(body.startswith("project_name,"), body[:40])
+        disposition = response.getheader("Content-Disposition")
+        self.assertRegex(disposition, r'^attachment; filename="astra-export-\d{4}-\d{2}-\d{2}[^"/\\]*\.csv"$')
+        filename = disposition.split('filename="', 1)[1].rstrip('"')
+        self.assertIn(f"__project={pid}", filename)
+        self.assertIn("__status=in_progress", filename)
+        self.assertIn("__band=7", filename)
+        self.assertIn("__open-only", filename)
+        self.assertNotIn("sort", filename)  # ordering is not a filter
+        response, _ = self._get_raw("/api/export?format=csv", cookie)
+        self.assertNotIn("__", response.getheader("Content-Disposition"))  # unfiltered: as-of only
+        response, _ = self._get_raw('/api/final-results?format=csv&type=attachment&q=a%22b/c%5Cd', cookie)
+        filename = response.getheader("Content-Disposition").split('filename="', 1)[1].rstrip('"')
+        self.assertIn("__type=attachment", filename)
+        self.assertIn("__search=a-b-c-d", filename)  # quote, slash and backslash never reach the header
 
     def test_schedule_proposal_over_http(self):
         cookie, csrf = self._owner_session()

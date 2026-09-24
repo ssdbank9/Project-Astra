@@ -1037,6 +1037,19 @@ class AstraCoreTests(unittest.TestCase):
         self.assertEqual(export["filters"]["status"], "in_progress")
         self.assertEqual([t["title"] for t in export["tasks"]], ["Keep"])
 
+    def test_export_is_scope_limited_for_a_member(self):
+        # Y3WC71 review gap 1: export authorization must be guarded by a non-owner case.
+        visible = self.service.create_project(self.owner, "Export visible")
+        hidden = self.service.create_project(self.owner, "Export hidden")
+        self.service.create_task(self.owner, {"project_id": visible["id"], "title": "Visible export task"})
+        self.service.create_task(self.owner, {"project_id": hidden["id"], "title": "Secret hidden task"})
+        member = self.service.create_user(self.owner, "exp@example.org", "Exp", "member password safe")
+        self.service.grant_project_access(self.owner, visible["id"], member["id"], "viewer")
+        export = self.service.export_tasks(member, {})
+        self.assertEqual([t["title"] for t in export["tasks"]], ["Visible export task"])
+        with self.assertRaises(Forbidden):
+            self.service.export_tasks(member, {"project_id": hidden["id"]})
+
     def test_working_calendar_default_restrictions_and_holidays(self):
         from datetime import date, timedelta
         p = self.service.create_project(self.owner, "Cal")

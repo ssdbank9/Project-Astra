@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from .auth import new_token, token_digest, verify_password
 from .db import connect, database_path
-from .importer import ImportConflict, ImportTooLarge
+from .importer import FORMULA_PREFIXES, ImportConflict, ImportTooLarge
 from .service import AstraService, Conflict, Forbidden, now_text
 
 
@@ -45,6 +45,58 @@ def _as_of_slug(as_of: str | None) -> str:
     while "--" in slug:
         slug = slug.replace("--", "-")
     return slug or "export"
+
+
+def _csv_cell(value) -> str:
+    """A task/final-results export cell a spreadsheet opens as text (CWE-1236).
+
+    Same rule as importer.csv_cell (template and import-report CSVs): a value starting with
+    = + - @ tab or CR gets a leading single quote. Unlike csv_cell it does not normalise the
+    value (no trimming, no Yes/No for booleans), so the export keeps the exact stored text."""
+    if value is None:
+        return ""
+    text = str(value)
+    return "'" + text if text.startswith(FORMULA_PREFIXES) else text
+
+
+# Filter keys as they appear in a CSV download's filename; anything not listed (sort, format)
+# does not narrow the rows and is left out.
+_FILTER_LABELS = {
+    "project_id": "project", "entity_id": "entity", "status": "status", "criticality": "criticality",
+    "owner": "owner", "band": "band", "open_only": "open-only", "type": "type", "from": "from",
+    "to": "to", "q": "search",
+}
+_FILTER_VALUE_MAX = 40
+_FILTER_SEGMENT_MAX = 160
+
+
+def _filter_slug(filters: dict | None) -> str:
+    """'__key=value' per active filter, for the CSV filename (owner decision 2026-09-15: the
+    CSV starts with its header row, so as-of and filters travel in the filename). Values keep
+    only letters, digits, '.', '-' and '_' so nothing unsafe reaches Content-Disposition; an
+    over-long list ends in '__more' and the JSON export (?format omitted) carries it in full."""
+    parts = []
+    for key, label in _FILTER_LABELS.items():
+        value = (filters or {}).get(key)
+        if value is True:
+            parts.append(f"__{label}")
+            continue
+        text = str(value or "").strip()
+        if not text:
+            continue
+        safe = "".join(ch if (ch.isascii() and (ch.isalnum() or ch in ".-_")) else "-" for ch in text)
+        while "--" in safe:
+            safe = safe.replace("--", "-")
+        while "__" in safe:
+            safe = safe.replace("__", "_")
+        safe = safe.strip("-_")[:_FILTER_VALUE_MAX] or "-"
+        parts.append(f"__{label}={safe}")
+    segment = ""
+    for part in parts:
+        if len(segment) + len(part) > _FILTER_SEGMENT_MAX:
+            return segment + "__more"
+        segment += part
+    return segment
 
 
 class AstraHandler(BaseHTTPRequestHandler):
@@ -571,13 +623,13 @@ class AstraHandler(BaseHTTPRequestHandler):
                    "start_date", "due_date", "due_state", "next_action", "is_critical_path"]
         buffer = io.StringIO()
         # Header row first, no in-band comment line: some parsers/Excel treat a
-        # leading "# ..." line as data. Provenance (as-of) rides in the filename.
+        # leading "# ..." line as data. Provenance (as-of + active filters) rides in the filename.
         writer = csv.writer(buffer)
         writer.writerow(columns)
         for task in export["tasks"]:
-            writer.writerow([task.get(column, "") for column in columns])
+            writer.writerow([_csv_cell(task.get(column)) for column in columns])
         payload = buffer.getvalue().encode("utf-8")
-        filename = f"astra-export-{_as_of_slug(export.get('as_of'))}.csv"
+        filename = f"astra-export-{_as_of_slug(export.get('as_of'))}{_filter_slug(export.get('filters'))}.csv"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/csv; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
@@ -591,15 +643,15 @@ class AstraHandler(BaseHTTPRequestHandler):
         columns = ["title", "source_type", "task_title", "project_name", "entities",
                    "attachment_path", "submission_version", "marked_by_name", "marked_at"]
         buffer = io.StringIO()
-        # Header row first, no in-band comment line. Provenance rides in the filename.
+        # Header row first, no in-band comment line. As-of + active filters ride in the filename.
         writer = csv.writer(buffer)
         writer.writerow(columns)
         for item in export["results"]:
             row = dict(item)
             row["entities"] = "; ".join(row.get("entities") or [])
-            writer.writerow([row.get(column, "") for column in columns])
+            writer.writerow([_csv_cell(row.get(column)) for column in columns])
         payload = buffer.getvalue().encode("utf-8")
-        filename = f"astra-final-results-{_as_of_slug(export.get('as_of'))}.csv"
+        filename = f"astra-final-results-{_as_of_slug(export.get('as_of'))}{_filter_slug(export.get('filters'))}.csv"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/csv; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))

@@ -4,7 +4,7 @@ title: Exports and search
 status: review
 ready: true
 creator: Aly Jafferani
-assignee: Aly Jafferani
+assignee: Claude
 goal: Let an authorized user export the current dashboard view and search tasks/projects within their authorized scope.
 context: |-
   Astra tracker, section 11 gap "Exports/search: Missing". No export or search endpoints/UI exist.
@@ -17,14 +17,14 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:22Z
-updated-at: 2026-09-24T05:30:26Z
-claimed-by: X1CarbonPC-32260
-claimed-at: 2026-09-15T07:58:27Z
+updated-at: 2026-09-24T05:56:25Z
+claimed-by: vm-1022
+claimed-at: 2026-09-24T05:49:42Z
 updated-by: Claude
-outcome-what: "Dropped the leading '# Astra export' comment row from both CSV exports (tasks + final results); header row is now first; the as-of date moved into the download filename via _as_of_slug."
-outcome-why: "Owner wanted a clean header-first CSV; the in-band comment row broke Excel/parser import."
+outcome-what: "Export scope tests at service and HTTP level (member excludes other project, hidden project_id 403, anonymous 403); both export CSV writers quote formula-leading cells via web._csv_cell (importer.FORMULA_PREFIXES); CSV filenames now carry active filters (__status=..., __open-only) after the as-of stamp; export buttons defer to the server filename; README exports bullet."
+outcome-why: "Review send-back: removing export authorization passed every test; =1+1 titles were exported live into Excel; the header-first CSV had dropped the active filters instead of moving them to the filename as the owner decided."
 question: "Accept, or send back? The CSV has a leading '# Astra export — as of ...' comment line before the header row (Excel shows it as a row) — keep it, or drop it for a clean header-first CSV?"
-outcome-resolves: "CSV starts with the header; filename carries the as-of date; export HTTP test asserts header-first + dated filename; full suite green."
+outcome-resolves: "DoD 2-4 ticked with proof; reviewer's auth-removal mutant now fails test_export_is_scope_limited_for_a_member and test_export_scope_isolation_over_http; full suite 339 tests OK; node --check, compileall, git diff --check clean."
 review-summary: |-
   Search: AstraService.search (src/astra/service.py:992) matches task title/description and project name with LIKE. Owner and chairman see everything, capped at 50 rows. Everyone else sees only projects where they have a row in memberships, which is the same rule as can_view_project and list_tasks.
 
@@ -58,7 +58,13 @@ review-check: "1. cd /workspace/project-astra && .venv/bin/python tests/run.py\n
 ## Definition of Done
 
 - [x] Export returns only the authorized current view with active filters and an as-of timestamp; search covers tasks/projects the actor may see and never leaks beyond scope; both enforced at the service boundary; unit + HTTP tests including a scope-isolation case; existing tests green.
-  proof: service.search (scoped) + export_tasks (list_tasks authz + filters + as_of); GET /api/search, GET /api/export (JSON + CSV via _csv); search box + results dialog + Export CSV button; tests test_core.test_search_is_scope_limited/test_export_echoes_as_of_and_filters_and_is_scoped, test_web.test_search_and_export_over_http; 69 pass
+  proof: service.export_tasks (list_tasks authz); tests test_core.test_search_is_scope_limited, test_export_echoes_as_of_and_filters_and_is_scoped, test_export_is_scope_limited_for_a_member; test_web.test_search_and_export_over_http, test_export_scope_isolation_over_http; full suite 339 tests OK (2026-09-24)
+- [x] Removing export authorization fails a test: a member's export (service, HTTP JSON and CSV) excludes another project's task and a hidden project_id is 403; anonymous search/export are 403.
+  proof: tests/test_core.py test_export_is_scope_limited_for_a_member + tests/test_web.py test_export_scope_isolation_over_http; both fail with mutant list_tasks({**actor,'global_role':'owner'}) in export_tasks ('Secret hidden task' leaks)
+- [x] Both export CSV writers (tasks, final results) neutralise cells starting with = + - @ tab or CR with a leading single quote, the same rule as importer.csv_cell.
+  proof: src/astra/web.py _csv_cell (reuses importer.FORMULA_PREFIXES) used in _csv and _csv_final_results; test_web.test_csv_exports_neutralise_formula_cells; template/import-report CSVs already use importer.csv_cell (test_import SECURITY-2 test)
+- [x] A downloaded CSV states its active filters without an in-band row: header stays first; the filename carries as-of and each active filter.
+  proof: src/astra/web.py _filter_slug in both CSV filenames; test_web.test_csv_export_filename_names_the_active_filters; app.js export buttons use a.download="" so the server filename is the one saved; README.md exports bullet
 
 ## Options
 
@@ -73,9 +79,13 @@ review-check: "1. cd /workspace/project-astra && .venv/bin/python tests/run.py\n
 - [x] API: GET /api/search?q=; GET /api/export (JSON, or CSV via format=csv) with Content-Disposition
 - [x] UI: search box -> results dialog (tasks clickable); Export CSV button honoring current filters
 - [x] Tests: search scope isolation (member can't see other projects), export echoes as_of+filters, export scope-limited
+- [x] Rework: regression tests first for export scope (unit + HTTP, mutant-checked), CSV formula cells, filters in CSV filename
+- [x] Rework: _csv_cell (importer.FORMULA_PREFIXES) in both export CSV writers; _filter_slug in both CSV filenames; README
 
 ## Progress
 - **2026-09-15 08:02 · Aly Jafferani** — Search and export authorization both inherit the project-scope rules: search runs an EXISTS(memberships) clause for non-owner/chairman; export_tasks calls list_tasks (already authz) then applies cosmetic filters (status/entity/criticality/owner/band/open_only) mirroring the dashboard render(). Export carries as_of + the active filters. CSV variant (?format=csv) returns text/csv with Content-Disposition; the front-end Export CSV button builds the query from the current toolbar filters. Scope-isolation proven: a member's search returns only their granted project's task/project. No real-browser visual pass (no browser in session).
 - **2026-09-15 18:31 · Aly Jafferani** — OWNER DECISION (2026-09-15): drop the leading '# Astra export - as of ...' comment line from CSV. Header row must be first for clean Excel/parser import. Put as-of/filters in the filename or a separate metadata channel, not an in-band comment row.
 - **2026-09-19 06:14 · Aly Jafferani** — HANDOFF 2026-09-19 (Claude->Codex): see astra_project_tracker/CODEX_HANDOFF_2026-09-19.md. Rework DONE per owner decision (CSV header-first; leading comment row dropped; as-of moved into filename via _as_of_slug). In REVIEW awaiting the model review pass. Re-claim first (claim is stale ~90h). Baseline: python tests/run.py = 102 green. After review pass: jaira move --to signoff with review-summary/gaps/verdict/check, and commit the ticket file with the code in one commit whose message names the handle (board is unshared, so the handle is what makes the commit list derivable).
 - **2026-09-24 05:30 · Claude** — Independent review verdict: send back. Recorded by Claude in review-summary/gaps/verdict/check. Why: no test guards export scope (auth-removal mutant passes), CSV formula injection in both CSV writers, and CSV no longer carries active filters. Left in review because the assignee is Aly Jafferani; moving it to in-progress needs Aly to move it or approve reassignment. Any rework commit must name Y3WC71.
+- **2026-09-24 05:49 · Claude** — Reassigned to Claude with owner approval: Aly Jafferani replied 'Yes please fix them' in Slack (ts 1790228901.999149, 2026-09-24T05:48Z) to the send-back verdict. Reworking review gaps 1-4 and 7 (export scope tests, CSV formula injection, filters in CSV output, stale proof).
+- **2026-09-24 05:56 · Claude** — Rework notes (not in the repo): (a) importer.csv_cell was NOT reused directly for exports: it normalises (trims, bool->Yes/No, date display) which would change exported values; web._csv_cell shares importer.FORMULA_PREFIXES and the quote rule only. PR #4 (C9KPH6, d295d78) is already on this branch and covers the template + import-report CSVs. (b) The service trims titles, so tab/CR-led titles never reach the export via HTTP; those two prefixes are covered by a direct _csv_cell unit assertion inside test_csv_exports_neutralise_formula_cells. (c) Filters go in the filename, not a comment row, per Aly's 2026-09-15 decision; format __key=value, values sanitised to [A-Za-z0-9._-], 40 chars each, 160 total then '__more'; sort is not a filter and is omitted. Filename shows raw project/entity ids, not names — resolving names would need a service change; the JSON export carries full filters. (d) app.js now sets a.download="" so the browser keeps the server's Content-Disposition name (review gap 6); still no real-browser check in this session. (e) Not fixed, out of scope: review gap 5 (search does not escape LIKE % and _; in-scope only, no leak).

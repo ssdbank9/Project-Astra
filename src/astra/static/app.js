@@ -456,7 +456,7 @@ function renderFinalResults(results,filters){
     <table class="fr-table"><thead><tr><th>Result</th><th>Type</th><th>Task / project</th><th>Marked</th></tr></thead><tbody>${rows}</tbody></table>`;
   const collect=()=>({project_id:document.querySelector("#fr-project").value,entity_id:document.querySelector("#fr-entity").value,type:document.querySelector("#fr-type").value,q:document.querySelector("#fr-q").value});
   document.querySelector("#fr-apply").onclick=()=>openFinalResults(collect());
-  document.querySelector("#fr-export").onclick=()=>{const f=collect();const p=new URLSearchParams();for(const k in f){if(f[k])p.set(k,f[k])}p.set("format","csv");const a=document.createElement("a");a.href="/api/final-results?"+p.toString();a.download="astra-final-results.csv";document.body.appendChild(a);a.click();a.remove()};
+  document.querySelector("#fr-export").onclick=()=>{const f=collect();const p=new URLSearchParams();for(const k in f){if(f[k])p.set(k,f[k])}p.set("format","csv");const a=document.createElement("a");a.href="/api/final-results?"+p.toString();a.download="";document.body.appendChild(a);a.click();a.remove()};
   document.querySelectorAll("#final-results-body [data-detail]").forEach(b=>b.addEventListener("click",()=>{document.querySelector("#final-results-dialog").close();openDetail(b.dataset.detail)}));
 }
 document.querySelector("#export-btn").onclick=()=>{
@@ -465,7 +465,7 @@ document.querySelector("#export-btn").onclick=()=>{
   for(const k in map){const v=document.querySelector(map[k]).value;if(v)p.set(k,v)}
   if(document.querySelector("#open-only").checked)p.set("open_only","1");
   p.set("format","csv");
-  const a=document.createElement("a");a.href="/api/export?"+p.toString();a.download="astra-export.csv";document.body.appendChild(a);a.click();a.remove();
+  const a=document.createElement("a");a.href="/api/export?"+p.toString();a.download="";document.body.appendChild(a);a.click();a.remove();
 };
 document.querySelector("#search-box").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();openSearch(e.target.value)}});
 async function openSearch(q){
