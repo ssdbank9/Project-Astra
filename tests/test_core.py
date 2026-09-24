@@ -2803,6 +2803,73 @@ class ServerCommandTests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("UPDATE users SET is_primary_owner=1 WHERE id=?", (deputy["id"],))
 
+    def test_a_target_or_primary_that_changed_after_the_check_is_refused(self):
+        # Review 6 gap 2: both guarded UPDATEs check their rowcount, so stale rows from the
+        # eligibility check can never leave zero primaries.
+        deputy, other = self.secondary("deputy"), self.secondary("other")
+        real_check = AstraService.check_primary_transfer
+        stale = real_check(self.service, deputy["email"])
+        self.service.revoke_secondary_owner(self.primary, deputy["id"], "no longer an owner")  # target changed
+        before = self.state()
+        with patch.object(AstraService, "check_primary_transfer", return_value=stale):
+            with self.assertRaisesRegex(Conflict, "target user changed"):
+                self.service.transfer_primary_owner(deputy["email"], self.VIA)
+        self.assertEqual(self.state(), before)
+        stale = real_check(self.service, other["email"])
+        self.db.execute("UPDATE users SET is_primary_owner=0 WHERE id=?", (self.primary["id"],))  # primary changed
+        self.db.execute("UPDATE users SET is_primary_owner=1 WHERE id=?", (other["id"],))
+        before = self.state()
+        with patch.object(AstraService, "check_primary_transfer", return_value=stale):
+            with self.assertRaisesRegex(Conflict, "primary owner changed"):
+                self.service.transfer_primary_owner(other["email"], self.VIA)
+        self.assertEqual(self.state(), before)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM users WHERE is_primary_owner=1").fetchone()[0], 1)
+
+    def test_the_transfer_check_runs_under_the_write_lock(self):
+        # Review 6 gap 2: another writer cannot change the target between check and write.
+        deputy = self.secondary("deputy")
+        other_writer = sqlite3.connect(self.db_path, timeout=0.1, isolation_level=None)
+        self.addCleanup(other_writer.close)
+        outcome = {}
+        real_check = AstraService.check_primary_transfer
+
+        def check_then_try_to_demote(service, email):
+            rows = real_check(service, email)
+            try:
+                other_writer.execute("UPDATE users SET global_role='member' WHERE id=?", (deputy["id"],))
+                outcome["other_write"] = "applied"
+            except sqlite3.OperationalError as exc:
+                outcome["other_write"] = str(exc)
+            return rows
+
+        with patch.object(AstraService, "check_primary_transfer", check_then_try_to_demote):
+            self.service.transfer_primary_owner(deputy["email"], self.VIA)
+        self.assertIn("locked", outcome["other_write"])
+        self.assertEqual(self.service.current_primary_owner()["id"], deputy["id"])
+
+    def test_a_stale_old_primary_can_no_longer_change_owner_access(self):
+        # Review 6 gap 3: the actor dict an in-flight request holds predates the transfer.
+        deputy, other = self.secondary("deputy"), self.secondary("other")
+        member = self.user("member")
+        project = self.service.create_project(self.primary, "Stale")
+        stale_actor = dict(self.primary)
+        self.service.transfer_primary_owner(deputy["email"], self.VIA)
+        before = self.state()
+        for name, attempt in (
+            ("grant", lambda: self.service.grant_secondary_owner(stale_actor, member["id"], "late")),
+            ("revoke", lambda: self.service.revoke_secondary_owner(stale_actor, other["id"], "late")),
+            ("owner project access", lambda: self.service.grant_project_access(
+                stale_actor, project["id"], other["id"], "viewer")),
+        ):
+            with self.subTest(attempt=name):
+                with self.assertRaises(Forbidden):
+                    attempt()
+        users, _, _, _ = self.state()
+        self.assertEqual(users, before[0])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM memberships").fetchone()[0], 0)
+        blocked = self.events("owner_change_blocked")
+        self.assertEqual([e["actor_user_id"] for e in blocked], [self.primary["id"]] * 3)
+
     def test_reset_password_for_any_active_user(self):
         member = self.user("member")
         self.session(member, "member-1")
@@ -2867,10 +2934,11 @@ class ServerCommandCliTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def run_cli(self, argv, typed="", passwords=()):
+    def run_cli(self, argv, typed="", passwords=(), interactive=True):
         answers = iter(passwords)
         with patch("builtins.input", return_value=typed) as asked, \
                 patch.object(self.entry.getpass, "getpass", side_effect=lambda prompt="": next(answers)), \
+                patch.object(self.entry, "_interactive", return_value=interactive), \
                 patch("sys.stdout", new_callable=io.StringIO) as out:
             try:
                 self.entry.main(argv)
@@ -2922,6 +2990,35 @@ class ServerCommandCliTests(unittest.TestCase):
                                   passwords=["short", "short"])
         self.assertEqual(code, "Password must contain at least 12 characters.")
         self.assertEqual(self.password_hash("deputy@example.org"), before)
+
+    def test_recovery_commands_refuse_a_missing_database_without_creating_one(self):
+        missing = Path(self.temp.name) / "typo" / "home"
+        with patch.dict(os.environ, {"ASTRA_HOME": str(missing)}):
+            for argv in (["transfer-primary", "--to", "deputy@example.org", "--yes"],
+                         ["reset-password", "--email", "deputy@example.org", "--yes"]):
+                with self.subTest(argv=argv[0]):
+                    code, out, _ = self.run_cli(argv, passwords=["a brand new passphrase"] * 2)
+                    self.assertEqual(code, f"No Astra database at {missing / 'astra.sqlite3'}; set ASTRA_HOME.")
+                    self.assertIn(f"Database: {missing / 'astra.sqlite3'}", out)
+                    self.assertFalse(missing.exists())
+
+    def test_reset_password_needs_an_interactive_terminal(self):
+        before = self.password_hash("deputy@example.org")
+        code, _, asked = self.run_cli(["reset-password", "--email", "deputy@example.org", "--yes"],
+                                      passwords=["a brand new passphrase"] * 2, interactive=False)
+        self.assertEqual(code, "reset-password needs an interactive terminal.")
+        asked.assert_not_called()
+        self.assertEqual(self.password_hash("deputy@example.org"), before)
+
+    def test_database_errors_print_one_line(self):
+        for error in (sqlite3.OperationalError("database is locked"), PermissionError("read-only folder")):
+            with self.subTest(error=type(error).__name__):
+                with patch.object(AstraService, "transfer_primary_owner", side_effect=error):
+                    code, _, _ = self.run_cli(["transfer-primary", "--to", "deputy@example.org", "--yes"])
+                self.assertIsInstance(code, str)
+                self.assertIn("Could not use the database at", code)
+                self.assertIn(str(error), code)
+        self.assertEqual(self.primary_email(), "owner@example.org")
 
     def test_reset_password_reads_the_password_twice_from_the_terminal_only(self):
         before = self.password_hash("deputy@example.org")

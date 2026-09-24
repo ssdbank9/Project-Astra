@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import getpass
 import socket
+import sqlite3
+import sys
 
 from .db import SchemaMigrationRefused, connect, database_path
 from .service import AstraService, Conflict, Forbidden
@@ -41,6 +43,9 @@ def main(argv=None):
         raise SystemExit(str(exc).strip("'")) from None
     except (KeyboardInterrupt, EOFError):
         raise SystemExit("Aborted; nothing was changed.") from None
+    except (sqlite3.OperationalError, OSError) as exc:
+        # For example "database is locked" after the busy timeout, or a read-only folder.
+        raise SystemExit(f"Could not use the database at {database_path()}: {exc}") from None
 
 
 def _read_new_password(prompt: str) -> str:
@@ -57,6 +62,20 @@ def _confirm(email: str, skip: bool) -> None:
     typed = input(f"Type {email} to confirm: ")
     if typed.strip().casefold() != email.casefold():
         raise SystemExit("Confirmation did not match; nothing was changed.")
+
+
+def _interactive() -> bool:
+    return sys.stdin.isatty()
+
+
+def _existing_database():
+    """Open the database a recovery command changes, refusing to create one: a missing
+    file almost always means ASTRA_HOME is unset or mistyped (review 6)."""
+    path = database_path()
+    print(f"Database: {path}")
+    if not path.is_file():
+        raise SystemExit(f"No Astra database at {path}; set ASTRA_HOME.")
+    return connect(path)
 
 
 def _via() -> dict:
@@ -78,11 +97,10 @@ def _run(args):
         finally:
             db.close()
     elif args.command == "transfer-primary":
-        db = connect()
+        db = _existing_database()
         try:
             service = AstraService(db)
             old, new = service.check_primary_transfer(args.to)
-            print(f"Database: {database_path()}")
             print(f"Make {new['display_name']} <{new['email']}> the primary owner.")
             print(f"{old['display_name']} <{old['email']}> stays a secondary owner and is signed out everywhere.")
             _confirm(new["email"], args.yes)
@@ -91,11 +109,13 @@ def _run(args):
         finally:
             db.close()
     elif args.command == "reset-password":
-        db = connect()
+        if not _interactive():
+            # getpass would fall back to reading (and echoing) stdin, so a password could be piped in.
+            raise SystemExit("reset-password needs an interactive terminal.")
+        db = _existing_database()
         try:
             service = AstraService(db)
             user = service.check_password_reset(args.email)
-            print(f"Database: {database_path()}")
             print(f"Reset the password of {user['display_name']} <{user['email']}> ({user['global_role']}); "
                   "they are signed out everywhere.")
             _confirm(user["email"], args.yes)

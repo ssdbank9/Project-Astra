@@ -401,6 +401,16 @@ class AstraService:
                              actor_id=actor["id"])
         raise Forbidden("Only the primary owner can change another owner's access.")
 
+    def _require_primary_now(self, actor: dict) -> None:
+        """Inside a write transaction: the actor must still be the active primary owner. The
+        actor dict was read when the request began; a transfer may have landed since (PDDS2D
+        review 6). Raises _OwnerTargetBlocked, which the caller audits after the rollback."""
+        if not self.db.execute(
+            "SELECT 1 FROM users WHERE id=? AND is_primary_owner=1 AND global_role='owner' AND active=1",
+            (actor["id"],),
+        ).fetchone():
+            raise _OwnerTargetBlocked()
+
     def _guarded_user_change(self, actor: dict, user_id: str, action: str, write) -> None:
         """The one path for any call that changes a user: read the target, refuse unless
         the actor is the primary owner when the target is an owner, and write, all under
@@ -409,8 +419,8 @@ class AstraService:
         try:
             with transaction(self.db):
                 target = self.get_user(user_id)
-                if target["global_role"] == "owner" and not self._is_primary_owner(actor):
-                    raise _OwnerTargetBlocked()
+                if target["global_role"] == "owner":
+                    self._require_primary_now(actor)  # re-read: the actor dict may predate a transfer
                 write(target)
         except _OwnerTargetBlocked:
             self._owner_change_blocked(actor, user_id, action)
@@ -431,15 +441,19 @@ class AstraService:
             raise ValueError("This user is already an owner.")
         if not target["active"]:
             raise ValueError("Only an active user can be made an owner.")
-        with transaction(self.db):
-            cursor = self.db.execute(
-                "UPDATE users SET global_role='owner' WHERE id=? AND global_role=? AND active=1",
-                (user_id, target["global_role"]),
-            )
-            if cursor.rowcount != 1:
-                raise Conflict("This user changed; reload and try again.")
-            self._record_user_event(target, actor, "secondary_owner_granted", reason,
-                                    {"prior_role": target["global_role"]})
+        try:
+            with transaction(self.db):
+                self._require_primary_now(actor)
+                cursor = self.db.execute(
+                    "UPDATE users SET global_role='owner' WHERE id=? AND global_role=? AND active=1",
+                    (user_id, target["global_role"]),
+                )
+                if cursor.rowcount != 1:
+                    raise Conflict("This user changed; reload and try again.")
+                self._record_user_event(target, actor, "secondary_owner_granted", reason,
+                                        {"prior_role": target["global_role"]})
+        except _OwnerTargetBlocked:
+            self._owner_change_blocked(actor, user_id, "grant owner access")
         return self.get_user(user_id)
 
     def revoke_secondary_owner(self, actor: dict, user_id: str, reason: str) -> dict:
@@ -459,16 +473,20 @@ class AstraService:
         ).fetchone()
         prior = json.loads(granted["detail_json"]).get("prior_role") if granted else None
         restored = prior if prior in {"chairman", "member"} else "member"
-        with transaction(self.db):
-            cursor = self.db.execute(
-                "UPDATE users SET global_role=? WHERE id=? AND global_role='owner' AND is_primary_owner=0",
-                (restored, user_id),
-            )
-            if cursor.rowcount != 1:
-                raise Conflict("This user changed; reload and try again.")
-            sessions = self.revoke_user_sessions(user_id)
-            self._record_user_event(target, actor, "secondary_owner_revoked", reason,
-                                    {"restored_role": restored, "sessions_revoked": sessions})
+        try:
+            with transaction(self.db):
+                self._require_primary_now(actor)
+                cursor = self.db.execute(
+                    "UPDATE users SET global_role=? WHERE id=? AND global_role='owner' AND is_primary_owner=0",
+                    (restored, user_id),
+                )
+                if cursor.rowcount != 1:
+                    raise Conflict("This user changed; reload and try again.")
+                sessions = self.revoke_user_sessions(user_id)
+                self._record_user_event(target, actor, "secondary_owner_revoked", reason,
+                                        {"restored_role": restored, "sessions_revoked": sessions})
+        except _OwnerTargetBlocked:
+            self._owner_change_blocked(actor, user_id, "remove owner access")
         return self.get_user(user_id)
 
     # --- Server commands (PDDS2D, Aly 2026-09-24): run by whoever operates the server ---

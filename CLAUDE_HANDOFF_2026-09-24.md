@@ -45,6 +45,9 @@ Locks so far:
   released (from the previous thread).
 - Lock #3: granted 13:54 UTC 2026-09-24 for this handoff commit and the local jaira sync
   change (start `6e52df8`).
+- Lock #4: `0a64320` → `2e2e728` (6G89SJ attachment fixes, MXY7BG filed); pushed.
+- Lock #5: `2e2e728` → `719ccbb` (6G89SJ DoD reworded, KBWY86 notices and cap); pushed.
+- Lock #6: from `719ccbb` (PDDS2D server commands); not pushed at the time of writing.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
 
@@ -78,7 +81,7 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   `_migrate_v17` adds the nullable `notifications.actor_user_id` and
   `idx_notifications_actor`). Tests with KBWY86: `Ran 421 tests`, `OK`. With PDDS2D
   (server commands `transfer-primary` and `reset-password`, no schema change):
-  `Ran 431 tests`, `OK`.
+  `Ran 437 tests`, `OK`.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 
@@ -157,7 +160,8 @@ old handoff's top section marked superseded; (b) the jaira sync fix as local set
 
 1. Send back 6G89SJ? (option 1 above)
 2. Cap blocked-attempt notices per actor (option 2).
-3. Primary-role transfer and primary password reset, as a CLI command (option 3).
+3. Primary-role transfer and password reset as CLI commands (option 3): built as PDDS2D
+   (`astra transfer-primary`, `astra reset-password`); in signoff after lock #6.
 4. Task-level actions against the primary owner are unguarded (option 4).
 5. The per-email sign-in throttle can lock the primary out for 15 minutes; pre-existing
    (option 5).
