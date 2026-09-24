@@ -844,6 +844,70 @@ class AstraCoreTests(unittest.TestCase):
         cp = {t["id"]: t["is_critical_path"] for t in self.service.list_tasks(self.owner, p["id"])}
         self.assertFalse(cp[a["id"]] or cp[b["id"]])
 
+    def test_critical_path_isolated_task_longer_than_chain_is_not_flagged(self):
+        # AYW0QC review gap: the test above has no edges, so it returns before the
+        # isolation rule runs. Here a chain exists AND an unlinked task outlasts it;
+        # the chain must stay critical and neither isolated task may be flagged.
+        p = self.service.create_project(self.owner, "CP isolated beside chain")
+        a = self.service.create_task(self.owner, {"project_id": p["id"], "title": "A", "start_date": "2026-09-01", "due_date": "2026-09-02"})
+        b = self.service.create_task(self.owner, {"project_id": p["id"], "title": "B", "start_date": "2026-09-03", "due_date": "2026-09-04"})
+        long_x = self.service.create_task(self.owner, {"project_id": p["id"], "title": "X long", "start_date": "2026-09-01", "due_date": "2026-10-30"})
+        short_y = self.service.create_task(self.owner, {"project_id": p["id"], "title": "Y short", "start_date": "2026-09-01", "due_date": "2026-09-01"})
+        self.service.add_task_dependency(self.owner, a["id"], b["id"])
+        cp = {t["id"]: t["is_critical_path"] for t in self.service.list_tasks(self.owner, p["id"])}
+        self.assertTrue(cp[a["id"]] and cp[b["id"]])
+        self.assertFalse(cp[long_x["id"]])
+        self.assertFalse(cp[short_y["id"]])
+        # The same holds on the unscoped list (all projects), where tasks from
+        # other projects are present too.
+        cp_all = {t["id"]: t["is_critical_path"] for t in self.service.list_tasks(self.owner)}
+        self.assertTrue(cp_all[a["id"]] and cp_all[b["id"]])
+        self.assertFalse(cp_all[long_x["id"]] or cp_all[short_y["id"]])
+
+    def test_critical_path_one_day_slack_is_not_critical(self):
+        # Pins the zero-slack threshold: C finishes one day before B, so C has
+        # exactly one day of slack and must not be flagged.
+        p = self.service.create_project(self.owner, "CP one-day slack")
+        a = self.service.create_task(self.owner, {"project_id": p["id"], "title": "A", "start_date": "2026-09-01", "due_date": "2026-09-01"})
+        b = self.service.create_task(self.owner, {"project_id": p["id"], "title": "B", "start_date": "2026-09-02", "due_date": "2026-09-04"})
+        c = self.service.create_task(self.owner, {"project_id": p["id"], "title": "C", "start_date": "2026-09-02", "due_date": "2026-09-03"})
+        self.service.add_task_dependency(self.owner, a["id"], b["id"])
+        self.service.add_task_dependency(self.owner, a["id"], c["id"])
+        cp = {t["id"]: t["is_critical_path"] for t in self.service.list_tasks(self.owner, p["id"])}
+        self.assertTrue(cp[a["id"]] and cp[b["id"]])
+        self.assertFalse(cp[c["id"]])
+
+    def test_critical_path_join_follows_longest_predecessor(self):
+        # Two branches merge into J. The forward pass must take the LATEST
+        # predecessor finish and the backward pass must propagate slack back
+        # through the short branch, including its own predecessor S.
+        p = self.service.create_project(self.owner, "CP join")
+        long_l = self.service.create_task(self.owner, {"project_id": p["id"], "title": "L", "start_date": "2026-09-01", "due_date": "2026-09-10"})
+        s = self.service.create_task(self.owner, {"project_id": p["id"], "title": "S", "start_date": "2026-09-01", "due_date": "2026-09-02"})
+        s2 = self.service.create_task(self.owner, {"project_id": p["id"], "title": "S2", "start_date": "2026-09-03", "due_date": "2026-09-04"})
+        j = self.service.create_task(self.owner, {"project_id": p["id"], "title": "J", "start_date": "2026-09-11", "due_date": "2026-09-12"})
+        self.service.add_task_dependency(self.owner, long_l["id"], j["id"])
+        self.service.add_task_dependency(self.owner, s["id"], s2["id"])
+        self.service.add_task_dependency(self.owner, s2["id"], j["id"])
+        cp = {t["id"]: t["is_critical_path"] for t in self.service.list_tasks(self.owner, p["id"])}
+        self.assertTrue(cp[long_l["id"]] and cp[j["id"]])
+        self.assertFalse(cp[s["id"]] or cp[s2["id"]])
+
+    def test_critical_path_is_computed_per_project(self):
+        # A much longer chain in another project must not take the critical path
+        # away from this project's chain when both appear in one list.
+        p = self.service.create_project(self.owner, "CP short project")
+        q = self.service.create_project(self.owner, "CP long project")
+        a = self.service.create_task(self.owner, {"project_id": p["id"], "title": "A", "start_date": "2026-09-01", "due_date": "2026-09-01"})
+        b = self.service.create_task(self.owner, {"project_id": p["id"], "title": "B", "start_date": "2026-09-02", "due_date": "2026-09-02"})
+        c = self.service.create_task(self.owner, {"project_id": q["id"], "title": "C", "start_date": "2026-09-01", "due_date": "2026-10-01"})
+        d = self.service.create_task(self.owner, {"project_id": q["id"], "title": "D", "start_date": "2026-10-02", "due_date": "2026-11-01"})
+        self.service.add_task_dependency(self.owner, a["id"], b["id"])
+        self.service.add_task_dependency(self.owner, c["id"], d["id"])
+        cp = {t["id"]: t["is_critical_path"] for t in self.service.list_tasks(self.owner)}
+        self.assertTrue(cp[a["id"]] and cp[b["id"]])
+        self.assertTrue(cp[c["id"]] and cp[d["id"]])
+
     def test_critical_path_marks_multiple_parallel_paths(self):
         # AYW0QC: full CPM marks EVERY zero-slack activity, so two equal-length
         # parallel chains are both critical (the old longest-single-chain heuristic
