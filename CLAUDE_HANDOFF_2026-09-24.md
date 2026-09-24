@@ -88,7 +88,7 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   (server commands `transfer-primary` and `reset-password`, no schema change):
   `Ran 438 tests`, `OK`. With XX9RFM (project close and date-change notices):
   `Ran 444 tests`, `OK`. With 3M2AYA (no sign-in lockout, in-app password reset,
-  8-character minimum): `Ran 452 tests`, `OK`.
+  8-character minimum): `Ran 456 tests`, `OK`.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 

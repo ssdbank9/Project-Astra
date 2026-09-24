@@ -258,6 +258,9 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .import-body .error.is-info { color: var(--teal); }
 #people-body .error.is-info { color: var(--teal); }
 #people-body .form-hint { color: #667085; font-size: 12px; margin: 0 0 8px; }
+#people-body .people-list button.link { white-space: nowrap; }
+#people-body .people-list li.user-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+#people-body .row-actions { display: inline-flex; gap: 12px; flex-shrink: 0; }
 @media (max-width: 760px) {
   .import-options, .add-col { grid-template-columns: 1fr; }
   .col-list li { grid-template-columns: 1fr 1fr; }

@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from html.parser import HTMLParser
 from importlib.resources import files
 from pathlib import Path
@@ -929,6 +930,26 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(payload["user"]["email"], "owner@example.org")
 
+    def test_unknown_and_long_emails_are_checked_against_a_dummy_hash(self):
+        # Review 8 L1/M1: the same 401 and the same PBKDF2 work whether or not the email exists.
+        from astra import web as web_module
+        from astra.auth import dummy_password_hash
+        seen = []
+        real_verify = web_module.verify_password
+
+        def spy(password, encoded):
+            seen.append(encoded)
+            return real_verify(password, encoded)
+
+        with mock.patch.object(web_module, "verify_password", side_effect=spy):
+            for email in ("nobody@example.org", "y" * 400 + "@example.org"):
+                response, payload = self.request("POST", "/api/login", {"email": email, "password": "some guess"})
+                self.assertEqual((response.status, payload["error"]), (401, "Incorrect email or password."))
+            response, payload = self.request("POST", "/api/login", {"email": "owner@example.org", "password": 12345})
+            self.assertEqual((response.status, payload["error"]), (401, "Incorrect email or password."))
+        self.assertEqual(seen[:2], [dummy_password_hash()] * 2)
+        self.assertNotEqual(seen[2], dummy_password_hash())  # a real account uses its own hash
+
     def test_owner_resets_a_password_over_http(self):
         owner_cookie, owner_csrf = self._owner_session()
         _, created = self.request("POST", "/api/users", {
@@ -945,6 +966,10 @@ class AstraWebTests(unittest.TestCase):
         response, payload = self.request("POST", f"/api/users/{user_id}/password", {"password": "1234567"},
                                          cookie=owner_cookie, csrf=owner_csrf)
         self.assertEqual((response.status, payload["error"]), (400, "Password must contain at least 8 characters."))
+        for value in (12345678, [1, 2, 3, 4, 5, 6, 7, 8]):
+            response, payload = self.request("POST", f"/api/users/{user_id}/password", {"password": value},
+                                             cookie=owner_cookie, csrf=owner_csrf)
+            self.assertEqual((response.status, payload["error"]), (400, "Password must be text."))
         response, payload = self.request("POST", f"/api/users/{user_id}/password", {"password": "new pass 8"},
                                          cookie=member_cookie, csrf=member_login["csrf"])
         self.assertEqual(response.status, 403)  # a member cannot reset anyone
@@ -1792,10 +1817,23 @@ class AstraStaticAssetTests(unittest.TestCase):
         self.assertIn("--step-1-edge", self.contract)
         for phrase in ("steps", "tooltip", "chevron", "Schedule table", "phone width"):
             self.assertIn(phrase, self.readme)
+        # 3M2AYA review 8 L2: only the primary is offered a reset on the primary's row.
+        rule = re.search(r"function canResetPassword\(u,viewerIsPrimary\)\{return ([^}]*)\}", self.js)
+        self.assertIsNotNone(rule)
+        self.assertEqual(rule.group(1), "!!u.active&&(!u.is_primary_owner||viewerIsPrimary)")
+        if shutil.which("node"):
+            probe = ("const canResetPassword=(u,viewerIsPrimary)=>" + rule.group(1) + ";"
+                     "console.log(JSON.stringify([[{active:1,is_primary_owner:1},false],[{active:1,is_primary_owner:1},true],"
+                     "[{active:1,is_primary_owner:0},false],[{active:0,is_primary_owner:0},true]]"
+                     ".map(([u,p])=>canResetPassword(u,p))))")
+            result = subprocess.run(["node", "-e", probe], capture_output=True, text=True, timeout=30)
+            self.assertEqual(json.loads(result.stdout), [False, True, True, False])
         # PDDS2D: server-command events are labelled on the People screen.
         for phrase in ('primary_owner_transferred:"Primary owner transferred"', 'password_reset:"Password reset"',
                        '" via server command"', 'data-reset-password=', 'id="reset-password-form"',
-                       'const MIN_PASSWORD=8;', 'minlength="${MIN_PASSWORD}"'):
+                       'const MIN_PASSWORD=8;', 'minlength="${MIN_PASSWORD}"',
+                       '"Your password has been changed. Your other sessions were signed out."',
+                       '"Blocked password reset of the primary owner"'):
             self.assertIn(phrase, self.js)
 
 

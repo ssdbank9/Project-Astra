@@ -566,6 +566,8 @@ class AstraCoreTests(unittest.TestCase):
 
     def test_login_attempts_are_history_only_and_pruned_after_90_days(self):
         # 3M2AYA (Aly, 2026-09-24): no lockout; attempts are kept as history.
+        from astra import service as service_module
+        service_module._last_login_prune["at"] = None  # the prune runs at most hourly per process
         self.assertFalse(hasattr(self.service, "login_is_throttled"))
         self.db.execute("INSERT INTO login_attempts VALUES('old','owner@example.org','1.2.3.4',?,0)",
                         ((datetime.now(timezone.utc) - timedelta(days=91)).isoformat(),))
@@ -577,6 +579,32 @@ class AstraCoreTests(unittest.TestCase):
         self.assertNotIn("old", ids)
         self.assertIn("recent", ids)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM login_attempts WHERE success=0").fetchone()[0], 26)
+
+    def test_the_login_history_prune_runs_at_most_once_an_hour(self):
+        # Review 8 M1: the 90-day prune scans the table, so it must not run on every attempt.
+        from astra import service as service_module
+        service_module._last_login_prune["at"] = None
+        old = (datetime.now(timezone.utc) - timedelta(days=91)).isoformat()
+
+        def add_old(row_id):
+            self.db.execute("INSERT INTO login_attempts VALUES(?,'owner@example.org','1.2.3.4',?,0)", (row_id, old))
+
+        def ids():
+            return {r[0] for r in self.db.execute("SELECT id FROM login_attempts")}
+
+        with patch.object(service_module.time, "monotonic", return_value=1000.0):
+            add_old("old-1")
+            self.service.record_login_attempt("owner@example.org", "127.0.0.1", False)  # first call prunes
+            self.assertNotIn("old-1", ids())
+            add_old("old-2")
+            self.service.record_login_attempt("owner@example.org", "127.0.0.1", False)
+            self.assertIn("old-2", ids())  # within the hour: no scan
+        with patch.object(service_module.time, "monotonic", return_value=1000.0 + 3601):
+            self.service.record_login_attempt("owner@example.org", "127.0.0.1", False)
+            self.assertNotIn("old-2", ids())
+        # A typed email is stored at most 320 characters long.
+        self.service.record_login_attempt("x" * 5000 + "@example.org", "127.0.0.1", False)
+        self.assertEqual(self.db.execute("SELECT MAX(LENGTH(email)) FROM login_attempts").fetchone()[0], 320)
 
     def test_passwords_need_eight_characters(self):
         from astra.auth import MIN_PASSWORD_LENGTH
@@ -3043,8 +3071,9 @@ class ServerCommandTests(unittest.TestCase):
         self.assertEqual(self.events("password_reset"), [])
         [blocked] = self.events("owner_change_blocked")
         self.assertEqual((blocked["target_user_id"], blocked["actor_user_id"]), (self.primary["id"], deputy["id"]))
-        self.assertEqual(json.loads(blocked["detail_json"]), {"action": "reset the primary owner's password"})
-        self.assertIn("owner_change_blocked", self.kinds(self.primary))
+        self.assertEqual(json.loads(blocked["detail_json"]), {"action": "password reset of the primary owner"})
+        [notice] = [n for n in self.service.list_notifications(self.primary) if n["kind"] == "owner_change_blocked"]
+        self.assertEqual(notice["summary"], "blocked password reset of the primary owner by Deputy")
 
     def test_the_primary_resets_a_secondary_and_their_own_password(self):
         deputy = self.secondary("deputy")
@@ -3069,6 +3098,30 @@ class ServerCommandTests(unittest.TestCase):
         self.assertEqual([e["actor_user_id"] for e in self.events("owner_change_blocked")], [self.primary["id"]])
         # The ex-primary is still a secondary owner and may reset their own password.
         self.service.reset_user_password(stale, self.primary["id"], "still mine ok")
+
+    def test_a_demoted_or_deactivated_secondary_with_a_live_session_cannot_reset(self):
+        # Review 8 L2: the actor dict is from the start of the request; the reset re-reads it.
+        member = self.user("member")
+        for change in ("demoted", "deactivated"):
+            with self.subTest(change=change):
+                deputy = self.secondary(f"deputy-{change}")
+                stale = dict(deputy)
+                self.service.revoke_secondary_owner(self.primary, deputy["id"], "no longer an owner")
+                if change == "deactivated":
+                    self.service.set_user_active(self.primary, deputy["id"], False)
+                before = self.state()
+                with patch.object(AstraService, "require_owner"):  # as if the request passed the door check
+                    with self.assertRaisesRegex(Forbidden, "Owner access required"):
+                        self.service.reset_user_password(stale, member["id"], "stale reset 8")
+                self.assertEqual(self.state(), before)
+
+    def test_a_non_string_password_is_refused(self):
+        member = self.user("member")
+        before = self.hash_of(member)
+        for value in (12345678, ["1", "2", "3", "4", "5", "6", "7", "8"], None):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "Password must be text."):
+                self.service.reset_user_password(self.primary, member["id"], value)
+        self.assertEqual(self.hash_of(member), before)
 
     def test_non_owners_and_inactive_targets_are_refused(self):
         member, chair = self.user("member"), self.user("chair", "chairman")

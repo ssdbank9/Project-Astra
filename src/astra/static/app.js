@@ -1092,14 +1092,18 @@ function renderPeople(users,memberships,ownerEvents){
     const ownerAction=!primary||u.is_primary_owner?"":isOwner?`<button type="button" class="link" data-owner-revoke="${id}">Remove secondary owner</button>`
       :u.active?`<button type="button" class="link" data-owner-grant="${id}">Make secondary owner</button>`:"";
     const reset=canResetPassword(u,primary)?`<button type="button" class="link" data-reset-password="${id}">Reset password</button>`:"";
-    return `<li><strong>${escapeHtml(u.display_name)}</strong> · ${escapeHtml(u.email)} · ${role}${u.active?"":' · <em>inactive</em>'} ${toggle} ${ownerAction} ${reset}</li>`;
+    return `<li class="user-row"><span><strong>${escapeHtml(u.display_name)}</strong> · ${escapeHtml(u.email)} · ${role}${u.active?"":' · <em>inactive</em>'}</span><span class="row-actions">${toggle}${ownerAction}${reset}</span></li>`;
   }).join("");
-  const ownerEventRow=e=>`<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(OWNER_EVENT_LABELS[e.event_type]||e.event_type)}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`}${viaServerCommand(e)?" via server command":` by ${escapeHtml(e.actor_name)}`}${e.reason&&!viaServerCommand(e)?` · ${escapeHtml(e.reason)}`:""}</li>`;
+  const ownerEventLabel=e=>{
+    if(e.event_type==="owner_change_blocked"){try{if(JSON.parse(e.detail_json||"{}").action==="password reset of the primary owner")return "Blocked password reset of the primary owner"}catch{}}
+    return OWNER_EVENT_LABELS[e.event_type]||e.event_type;
+  };
+  const ownerEventRow=e=>`<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(ownerEventLabel(e))}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`}${viaServerCommand(e)?" via server command":` by ${escapeHtml(e.actor_name)}`}${e.reason&&!viaServerCommand(e)?` · ${escapeHtml(e.reason)}`:""}</li>`;
   const blocked=e=>e.event_type==="owner_change_blocked"||e.event_type==="import_blocked";
   const ownerHistory=(ownerEvents||[]).filter(e=>!blocked(e)).slice(0,20).map(ownerEventRow).join("")||"<li>No owner access changes yet.</li>";
   const blockedList=type=>(ownerEvents||[]).filter(e=>e.event_type===type).slice(0,10).map(ownerEventRow).join("")||"<li>None.</li>";
   const blockedHistory=blockedList("owner_change_blocked"),blockedImports=blockedList("import_blocked");
-  const resetOptions=users.filter(u=>canResetPassword(u,primary)).map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.display_name)} · ${escapeHtml(u.email)}</option>`).join("");
+  const resetOptions=users.filter(u=>canResetPassword(u,primary)).map(u=>`<option value="${escapeHtml(u.id)}" data-name="${escapeHtml(u.display_name)}">${escapeHtml(u.display_name)} · ${escapeHtml(u.email)}</option>`).join("");
   // Only the primary may change an owner's project access, so others are not offered it.
   const ownerIds=new Set(users.filter(u=>u.global_role==="owner").map(u=>u.id));
   const userOptions=users.filter(u=>u.active&&(primary||!ownerIds.has(u.id))).map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.display_name)}</option>`).join("");
@@ -1295,10 +1299,15 @@ async function submitResetPassword(e){
   if(!data.user_id){out.textContent="Choose a user.";return}
   if(data.password.length<MIN_PASSWORD){out.textContent=`Use at least ${MIN_PASSWORD} characters.`;return}
   if(data.password!==data.confirm){out.textContent="The two passwords do not match.";return}
-  const name=form.querySelector("#reset-password-user").selectedOptions[0]?.textContent||"the user";
+  const name=form.querySelector("#reset-password-user").selectedOptions[0]?.dataset.name||"the user";
+  const own=data.user_id===state.user.id;
   try{
     await api(`/api/users/${data.user_id}/password`,{method:"POST",body:JSON.stringify({password:data.password})});
-    form.reset();out.classList.add("is-info");out.textContent=`Password reset for ${name}. Give them the new password; they are signed out everywhere else.`;
+    await openPeople();  // re-render, so the owner-access history shows the reset
+    const done=document.querySelector("#reset-password-error");done.classList.add("is-info");
+    done.textContent=own?"Your password has been changed. Your other sessions were signed out."
+      :`Password reset for ${name}. Give them the new password; they are signed out everywhere else.`;
+    document.querySelector("#reset-password-form").scrollIntoView({block:"nearest"});
   }catch(x){out.textContent=x.message}
 }
 async function submitGrant(e){

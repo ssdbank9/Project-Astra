@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -70,6 +71,12 @@ REOPEN_EQUIVALENT_STATUSES = frozenset(MANAGER_ORDINARY_STATUSES | {"reopened"})
 # 3M2AYA (Aly, 2026-09-24): failed sign-ins never lock anyone out; they are kept as
 # history only, for this many days.
 LOGIN_HISTORY_DAYS = 90
+# The 90-day prune scans the table (no attempted_at index until the next schema bump), so it
+# runs at most once an hour per server process, not on every attempt (review 8, M1).
+LOGIN_PRUNE_INTERVAL_SECONDS = 3600
+_last_login_prune: dict[str, float | None] = {"at": None}  # time.monotonic() of the last prune
+# A typed email is stored at most this long (the longest valid address is 320 characters).
+MAX_STORED_EMAIL = 320
 # KBWY86 (Aly, Slack ts 1790268694.030539): one person's blocked attempts reach each
 # recipient at most BLOCKED_NOTICE_CAP times per rolling window, pooled across these kinds
 # and targets. owner_change_blocked has its own bucket, so cheaper attempts cannot use up
@@ -258,7 +265,7 @@ class AstraService:
 
     def _blocked_notices_sent(self, user_id: str, actor_id: str, kind: str) -> int:
         """How many blocked-attempt notices in ``kind``'s bucket this actor has caused this
-        recipient inside the rolling window (same count-in-window shape as the login throttle).
+        recipient inside the rolling window (a count of rows newer than a cutoff).
         owner_change_blocked is its own bucket; the other blocked kinds share one."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=BLOCKED_NOTICE_WINDOW_SECONDS)).isoformat()
         own = kind == "owner_change_blocked"
@@ -285,14 +292,24 @@ class AstraService:
 
     def record_login_attempt(self, email: str, ip: str, success: bool) -> None:
         """History only: no number of failures ever blocks a sign-in (3M2AYA)."""
+        email = str(email)[:MAX_STORED_EMAIL]
         self.db.execute(
             "INSERT INTO login_attempts VALUES(?,?,?,?,?)",
             (new_id(), email, ip or "", now_text(), 1 if success else 0),
         )
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=LOGIN_HISTORY_DAYS)).isoformat()
-        self.db.execute("DELETE FROM login_attempts WHERE attempted_at<?", (cutoff,))
+        self._prune_login_attempts()
         if success:
             self.db.execute("DELETE FROM login_attempts WHERE email=? AND success=0", (email,))
+
+    def _prune_login_attempts(self) -> None:
+        """Delete sign-in history older than LOGIN_HISTORY_DAYS, at most once per interval."""
+        now = time.monotonic()
+        last = _last_login_prune["at"]
+        if last is not None and now - last < LOGIN_PRUNE_INTERVAL_SECONDS:
+            return
+        _last_login_prune["at"] = now
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=LOGIN_HISTORY_DAYS)).isoformat()
+        self.db.execute("DELETE FROM login_attempts WHERE attempted_at<?", (cutoff,))
 
     def cleanup_expired_sessions(self) -> None:
         self.db.execute("DELETE FROM sessions WHERE expires_at <= ?", (now_text(),))
@@ -382,7 +399,8 @@ class AstraService:
         return event_id
 
     def _owner_change_blocked(self, actor: dict, target_id: str | None, action: str,
-                              message: str = "Only the primary owner can change another owner's access.") -> None:
+                              message: str = "Only the primary owner can change another owner's access.",
+                              notice: str | None = None) -> None:
         """Record and refuse an owner-access change the actor may not make. Called with no
         transaction open, so the audit row and the primary's notice are kept. Every attempt
         is audited (KBWY86); repeated notices are limited by the blocked-notice cap instead.
@@ -393,7 +411,7 @@ class AstraService:
             primary = self.db.execute("SELECT id FROM users WHERE is_primary_owner=1").fetchone()
             if primary and primary["id"] != actor["id"]:
                 self._notify(primary["id"], event_id, None, "owner_change_blocked",
-                             f"blocked {action} attempt by {actor.get('display_name', actor['id'])}",
+                             notice or f"blocked {action} attempt by {actor.get('display_name', actor['id'])}",
                              actor_id=actor["id"])
         raise Forbidden(message)
 
@@ -589,6 +607,8 @@ class AstraService:
         audited like other blocked owner changes). ``keep_session`` keeps the actor's current
         session when they reset their own password."""
         self.require_owner(actor)
+        if not isinstance(password, str):
+            raise ValueError("Password must be text.")
         password_hash = hash_password(password)  # refuses fewer than 8 characters, before any write
         try:
             with transaction(self.db):
@@ -607,8 +627,11 @@ class AstraService:
                     keep_session if target["id"] == actor["id"] else None,
                 )
         except _OwnerTargetBlocked:
-            self._owner_change_blocked(actor, user_id, "reset the primary owner's password",
-                                       "Only the primary owner can change the primary owner's password.")
+            self._owner_change_blocked(
+                actor, user_id, "password reset of the primary owner",
+                "Only the primary owner can change the primary owner's password.",
+                notice=f"blocked password reset of the primary owner by {self._actor_name(actor)}",
+            )
         return self.get_user(user_id)
 
     def list_user_events(self, actor: dict) -> list[dict]:

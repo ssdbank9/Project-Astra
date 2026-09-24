@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+from functools import lru_cache
 
 
 PBKDF2_ITERATIONS = 600_000
@@ -23,6 +24,13 @@ def hash_password(password: str, *, salt: bytes | None = None) -> str:
     salt = salt or secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, PBKDF2_ITERATIONS)
     return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${salt.hex()}${digest.hex()}"
+
+
+@lru_cache(maxsize=1)
+def dummy_password_hash() -> str:
+    """A fixed hash with the real PBKDF2 cost, computed once. Sign-in checks an unknown or
+    inactive email against it so that answer takes as long as a wrong password (3M2AYA)."""
+    return hash_password("no account has this password", salt=b"astra-dummy-salt")
 
 
 def verify_password(password: str, encoded: str) -> bool:

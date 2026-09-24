@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from urllib.parse import parse_qs, unquote, urlparse
 
-from .auth import new_token, token_digest, verify_password
+from .auth import dummy_password_hash, new_token, token_digest, verify_password
 from .db import connect, database_path
 from .importer import FORMULA_PREFIXES, ImportConflict, ImportTooLarge
 from .service import AstraService, Conflict, Forbidden, now_text
@@ -338,8 +338,10 @@ class AstraHandler(BaseHTTPRequestHandler):
                 return self._json({"user": granted}, HTTPStatus.CREATED)
             if path.startswith("/api/users/") and path.endswith("/password") and path.count("/") == 4:
                 raw = self._cookie_value(SESSION_COOKIE)
+                if not isinstance(payload.get("password"), str):
+                    raise ValueError("Password must be text.")
                 updated = self.service.reset_user_password(
-                    user, path.split("/")[3], str(payload.get("password", "")),
+                    user, path.split("/")[3], payload["password"],
                     keep_session=token_digest(raw) if raw else None,
                 )
                 return self._json({"user": updated})
@@ -536,9 +538,13 @@ class AstraHandler(BaseHTTPRequestHandler):
     def _login(self, payload: dict):
         email = str(payload.get("email", "")).strip().casefold()
         ip = self.client_address[0] if self.client_address else ""
+        password = payload.get("password", "")
+        password = password if isinstance(password, str) else ""
         # 3M2AYA (Aly, 2026-09-24): no lockout; a wrong password or unknown email just says so.
         row = self.db.execute("SELECT * FROM users WHERE email=? AND active=1", (email,)).fetchone()
-        if not row or not verify_password(str(payload.get("password", "")), row["password_hash"]):
+        # An unknown or inactive email is checked against a dummy hash, so it takes as long.
+        matches = verify_password(password, row["password_hash"] if row else dummy_password_hash())
+        if not row or not matches:
             self.service.record_login_attempt(email, ip, False)
             return self._json({"error": "Incorrect email or password."}, HTTPStatus.UNAUTHORIZED)
         self.service.record_login_attempt(email, ip, True)
