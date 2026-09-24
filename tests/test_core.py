@@ -1883,6 +1883,41 @@ class AstraCoreTests(unittest.TestCase):
         with self.assertRaises(Forbidden):
             self.service.project_events(outsider, project["id"])
 
+    def test_project_history_non_managers_see_only_schedule_changes_and_closure(self):
+        # ZSZ9T2: Aly decided (Slack 2026-09-24) that anyone who can view but not manage
+        # the project sees only project_schedule_changed and project_closed. That includes
+        # a Chairman who is not a manager of the project (Aly, ts 1790243107.569629).
+        project = self.service.create_project(self.owner, "Filtered")
+        people = {}
+        for key, global_role, role in (("chairman", "chairman", None), ("viewer", "member", "viewer"),
+                                       ("member", "member", "member"), ("manager", "member", "manager"),
+                                       ("outsider", "member", None)):
+            people[key] = self.service.create_user(
+                self.owner, f"zs-{key}@example.org", key.title(), f"{key} password safe", global_role)
+            if role:
+                self.service.grant_project_access(self.owner, project["id"], people[key]["id"], role)
+        every = ("project_schedule_changed", "import_committed", "protected_action_blocked",
+                 "protected_action_requested", "protected_action_approved", "protected_action_rejected",
+                 "protected_action_cancelled", "project_closed")
+        # Synthetic rows, one per kind the service writes, with the payloads a
+        # non-manager must not see (owner-request reasons, import file metadata).
+        for kind in every:
+            detail = {"filename": "secret-plan.xlsx", "sha256": "ab" * 32} if kind == "import_committed" \
+                else {"action": "delete_task", "payload": {"note": "private"}}
+            self.service._project_event(project["id"], self.owner["id"], kind, detail, f"reason for {kind}")
+        # Order-independent: back-to-back rows can share a timestamp on coarse clocks.
+        for key in ("chairman", "viewer", "member"):
+            with self.subTest(actor=key):
+                self.assertFalse(self.service.can_manage_project(people[key], project["id"]))
+                kinds = [e["event_type"] for e in self.service.project_events(people[key], project["id"])]
+                self.assertCountEqual(kinds, ["project_schedule_changed", "project_closed"])
+        for key, actor in (("owner", self.owner), ("manager", people["manager"])):
+            with self.subTest(actor=key):
+                kinds = [e["event_type"] for e in self.service.project_events(actor, project["id"])]
+                self.assertCountEqual(kinds, every)
+        with self.assertRaises(Forbidden):
+            self.service.project_events(people["outsider"], project["id"])
+
     def test_list_projects_exposes_schedule_dates_for_gantt_markers(self):
         # 5WZ4A8: the Gantt draws project start/target markers from list_projects,
         # so those fields must be present on the listed project.

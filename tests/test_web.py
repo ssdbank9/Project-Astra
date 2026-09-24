@@ -1273,6 +1273,48 @@ class AstraWebTests(unittest.TestCase):
         response, _ = self.request("GET", f"/api/projects/{pid}/events")
         self.assertIn(response.status, (401, 403))
 
+    def test_project_history_kinds_are_limited_for_non_managers_over_http(self):
+        # ZSZ9T2: the server filters; a viewer, member or non-manager Chairman never
+        # receives owner-request or import rows.
+        owner_cookie, owner_csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "Filtered HTTP"}, cookie=owner_cookie, csrf=owner_csrf)
+        pid = project["project"]["id"]
+        for key, global_role, role in (("chairman", "chairman", None), ("viewer", "member", "viewer"),
+                                       ("member", "member", "member"), ("manager", "member", "manager"),
+                                       ("outsider", "member", None)):
+            _, created = self.request("POST", "/api/users", {
+                "email": f"{key}-kinds@example.org", "display_name": key.title(),
+                "password": f"{key} password safe", "role": global_role,
+            }, cookie=owner_cookie, csrf=owner_csrf)
+            if role:
+                self.request("POST", "/api/project-access", {
+                    "project_id": pid, "user_id": created["user"]["id"], "role": role,
+                }, cookie=owner_cookie, csrf=owner_csrf)
+        service = self.server.service
+        owner_id = service.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()["id"]
+        every = ["project_schedule_changed", "import_committed", "protected_action_requested",
+                 "protected_action_rejected", "project_closed"]
+        for kind in every:
+            # Only the kinds a non-manager must not see carry the sensitive filename.
+            hidden = kind not in ("project_schedule_changed", "project_closed")
+            detail = {"filename": "secret-plan.xlsx"} if hidden else {"note": "public"}
+            service._project_event(pid, owner_id, kind, detail, f"reason for {kind}")
+        filtered = ["project_schedule_changed", "project_closed"]
+        expected = {"owner": every, "manager": every, "chairman": filtered, "viewer": filtered, "member": filtered}
+        cookies = {"owner": owner_cookie}
+        for key in ("chairman", "viewer", "member", "manager", "outsider"):
+            cookies[key] = self._login_as(f"{key}-kinds@example.org", f"{key} password safe")[0]
+        for key, kinds in expected.items():
+            with self.subTest(actor=key):
+                response, history = self.request("GET", f"/api/projects/{pid}/events", cookie=cookies[key])
+                self.assertEqual(response.status, 200)
+                # Order-independent: back-to-back rows can share a timestamp on coarse clocks.
+                self.assertCountEqual([e["event_type"] for e in history["events"]], kinds)
+                if kinds == filtered:
+                    self.assertNotIn("secret-plan.xlsx", json.dumps(history))
+        response, _ = self.request("GET", f"/api/projects/{pid}/events", cookie=cookies["outsider"])
+        self.assertEqual(response.status, 403)
+
     def test_task_detail_subtasks_carry_step_schedule_fields_over_http(self):
         # D73AQW: GET /api/tasks/{id} subtasks include the fields the Gantt step
         # tooltip and the detail dialog render (start, criticality, progress, owner id, parent).

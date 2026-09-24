@@ -349,8 +349,8 @@ for(const id of ["project-filter","status-filter","entity-filter","crit-filter",
 document.querySelector("#sort-filter").onchange=e=>{state.sort=e.target.value;load()};
 document.querySelector("#new-project").onclick=()=>document.querySelector("#project-dialog").showModal();document.querySelector("#new-task").onclick=()=>document.querySelector("#task-dialog").showModal();
 document.querySelector("#portfolio-btn").onclick=openPortfolio;
-// 5WZ4A8: project history (schedule changes, closure, imports, owner-action decisions) for
-// anyone who can view the project; the server gates GET /api/projects/{id}/events.
+// 5WZ4A8: project history (schedule changes, closure, imports, owner-action decisions).
+// ZSZ9T2: the server sends only schedule changes and closure to anyone who cannot manage the project.
 const PROJECT_EVENT_LABELS={project_schedule_changed:"Project dates changed",project_closed:"Project closed",import_committed:"Import committed",protected_action_blocked:"Owner action blocked",protected_action_approved:"Owner request approved",protected_action_rejected:"Owner request rejected",protected_action_cancelled:"Owner request cancelled"};
 document.querySelector("#project-history-btn").onclick=()=>{const pid=document.querySelector("#project-filter").value;if(pid)openProjectHistory(pid)};
 async function openProjectHistory(projectId){

@@ -2665,13 +2665,20 @@ class AstraService:
             )
         return self.get_project(actor, project_id)
 
+    # ZSZ9T2: kinds a viewer or member who cannot manage the project may read (Aly,
+    # 2026-09-24). An allow-list, so a new kind stays hidden from them by default.
+    NON_MANAGER_PROJECT_EVENT_KINDS = ("project_schedule_changed", "project_closed")
+
     def project_events(self, actor: dict, project_id: str) -> list[dict]:
         self.get_project(actor, project_id)
-        rows = self.db.execute(
-            """SELECT e.*, u.display_name actor_name FROM project_events e
-               LEFT JOIN users u ON u.id=e.actor_user_id WHERE e.project_id=? ORDER BY e.occurred_at,e.id""",
-            (project_id,),
-        ).fetchall()
+        sql = """SELECT e.*, u.display_name actor_name FROM project_events e
+               LEFT JOIN users u ON u.id=e.actor_user_id WHERE e.project_id=?"""
+        params: list = [project_id]
+        if not self.can_manage_project(actor, project_id):
+            kinds = self.NON_MANAGER_PROJECT_EVENT_KINDS
+            sql += f" AND e.event_type IN ({','.join('?' * len(kinds))})"
+            params.extend(kinds)
+        rows = self.db.execute(sql + " ORDER BY e.occurred_at,e.id", params).fetchall()
         return [dict(row) for row in rows]
 
     def _project_event(self, project_id: str, actor_id: str, kind: str, detail: dict | None, reason: str | None) -> None:

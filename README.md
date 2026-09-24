@@ -20,7 +20,9 @@ This first vertical slice provides:
   owner or a project manager may change them, a reason is required, and each change writes a
   `project_schedule_changed` project event (actor, before, after, reason). Anyone who can view
   the project reads its history through **Project history** (shown when one project is
-  selected), served by `GET /api/projects/{id}/events` (403 for non-members);
+  selected), served by `GET /api/projects/{id}/events` (403 for non-members). The owner and
+  project managers see every project event; anyone else who can view the project, including a
+  Chairman who is not a project manager, sees only `project_schedule_changed` and `project_closed`;
 - a task detail view with authorized inline editing (reason required for status/schedule
   changes), add/remove of multiple dependencies, and a human-readable event history;
 - a governed work lifecycle: submissions are recorded and only the App Owner decides the
