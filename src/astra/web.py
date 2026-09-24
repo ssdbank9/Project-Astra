@@ -413,6 +413,7 @@ class AstraHandler(BaseHTTPRequestHandler):
                 template_id = path.split("/")[3]
                 project = self.service.create_project_from_template(
                     user, template_id, str(payload.get("name", "")), payload.get("anchor_date"),
+                    payload.get("role_assignments"),
                 )
                 return self._json({"project": project}, HTTPStatus.CREATED)
             if path.startswith("/api/templates/") and path.endswith("/create-task"):
@@ -420,6 +421,7 @@ class AstraHandler(BaseHTTPRequestHandler):
                 result = self.service.create_task_from_template(
                     user, template_id, str(payload.get("project_id", "")),
                     payload.get("parent_task_id"), payload.get("anchor_date"),
+                    payload.get("role_assignments"),
                 )
                 return self._json({"result": result}, HTTPStatus.CREATED)
             if path.startswith("/api/projects/") and path.endswith("/close"):

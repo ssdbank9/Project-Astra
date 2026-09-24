@@ -1059,6 +1059,50 @@ class AstraWebTests(unittest.TestCase):
         response, _ = self.request("DELETE", "/api/templates", {"template_id": template_id}, cookie=cookie, csrf=csrf)
         self.assertEqual(response.status, 200)
 
+    def test_templates_carry_roles_and_apply_role_picks_over_http(self):
+        # 8B9NBH: suggested owners are roles; the Owner picks a person per role.
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "Role source"}, cookie=cookie, csrf=csrf)
+        pid = project["project"]["id"]
+        _, pm = self.request("POST", "/api/users", {
+            "email": "pm@example.org", "display_name": "PM", "password": "member password safe",
+        }, cookie=cookie, csrf=csrf)
+        pm_id = pm["user"]["id"]
+        self.request("POST", "/api/project-access", {"project_id": pid, "user_id": pm_id, "role": "manager"},
+                     cookie=cookie, csrf=csrf)
+        _, task = self.request("POST", "/api/tasks", {"project_id": pid, "title": "Plan", "owner_user_id": pm_id},
+                               cookie=cookie, csrf=csrf)
+        response, saved = self.request("POST", "/api/templates/from-project", {"project_id": pid, "name": "P"},
+                                       cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 201)
+        self.assertEqual(saved["template"]["body"]["tasks"][0]["suggested_role"], "manager")
+        _, listed = self.request("GET", "/api/templates", cookie=cookie)
+        self.assertEqual(listed["templates"][0]["roles"], ["manager"])
+        _, other = self.request("POST", "/api/users", {
+            "email": "pm2@example.org", "display_name": "PM2", "password": "member password safe",
+        }, cookie=cookie, csrf=csrf)
+        response, created = self.request("POST", f"/api/templates/{saved['template']['id']}/create-project", {
+            "name": "Next cycle", "role_assignments": {"manager": other["user"]["id"]},
+        }, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 201)
+        _, tasks = self.request("GET", f"/api/tasks?project_id={created['project']['id']}", cookie=cookie)
+        self.assertEqual(tasks["tasks"][0]["owner_user_id"], other["user"]["id"])
+        response, error = self.request("POST", f"/api/templates/{saved['template']['id']}/create-project", {
+            "name": "Bad", "role_assignments": {"auditor": pm_id},
+        }, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 400)
+        # Task subtree: saved and applied into the source project, where the role has one holder.
+        response, task_tmpl = self.request("POST", "/api/templates/from-task", {
+            "task_id": task["task"]["id"], "name": "T",
+        }, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 201)
+        response, result = self.request("POST", f"/api/templates/{task_tmpl['template']['id']}/create-task", {
+            "project_id": pid,
+        }, cookie=cookie, csrf=csrf)
+        self.assertEqual((response.status, result["result"]["created"]), (201, 1))
+        _, tasks = self.request("GET", f"/api/tasks?project_id={pid}", cookie=cookie)
+        self.assertEqual([t["owner_user_id"] for t in tasks["tasks"]], [pm_id, pm_id])
+
     def test_final_results_over_http(self):
         cookie, csrf = self._owner_session()
         _, project = self.request("POST", "/api/projects", {"name": "Results HTTP"}, cookie=cookie, csrf=csrf)

@@ -82,6 +82,19 @@ who may create a project from a file; a project Manager may import into projects
 manage, with Owner-only actions skipped per row as warnings.
 _Avoid_: upload (bare), sync, bulk edit.
 
+## Project & task templates
+
+**Suggested role**:
+What a project or task template carries in place of a Task Owner: the role the
+task's owner held when the template was saved — App Owner, Chairman, or their project
+role (manager, member, viewer). Never a named person. When the template is used the
+App Owner picks a person per role (on a new project that person is given the role);
+a role left on automatic goes to its only active holder on the target project, and
+otherwise the task starts unassigned. Templates saved before roles held a display
+name; those still load (an App Owner or Chairman name maps to that role, anyone else
+is pre-filled only while still assignable).
+_Avoid_: suggested owner, default assignee.
+
 ## Portfolio & budget
 
 **Budget**:

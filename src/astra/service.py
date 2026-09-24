@@ -15,6 +15,10 @@ from .db import V15_EXPECTED_REVISION_SQL, owner_request_intent_key, transaction
 
 
 ROLES = {"owner", "chairman", "member"}
+# Suggested-owner roles a template can carry (8B9NBH), in display order: the two
+# global roles, then the three project membership roles.
+TEMPLATE_ROLES = ("owner", "chairman", "manager", "member", "viewer")
+PROJECT_ROLES = ("manager", "member", "viewer")
 STATUSES = {
     "draft", "assigned", "in_progress", "submitted", "changes_requested",
     "completed", "on_hold", "delayed", "cancelled", "abandoned", "reopened",
@@ -2068,13 +2072,14 @@ class AstraService:
     # --- Templates: reusable STRUCTURE snapshots (never evidence or history) ---
     #
     # A template captures the shape of recurring work — task titles, hierarchy,
-    # criticality, dependencies, attachment links, a SUGGESTED owner (by name),
-    # and dates as day OFFSETS from an anchor — as a JSON snapshot. It deliberately
+    # criticality, dependencies, attachment links, a SUGGESTED owner ROLE, and
+    # dates as day OFFSETS from an anchor — as a JSON snapshot. It deliberately
     # omits everything that is evidence or history: live status/progress, revisions,
     # baselines, events, submissions, checkpoints, schedule proposals and
     # notifications. Instantiating one re-applies the offsets to a fresh anchor
-    # date, starts every task in 'draft', and pre-fills each suggested owner when
-    # they are still an assignable project member (otherwise unassigned). Owner-only.
+    # date, starts every task in 'draft', and resolves each suggested role to a
+    # person: the one the Owner picked for that role, else the role's single
+    # holder on the target project, else unassigned (never a guess). Owner-only.
 
     @staticmethod
     def _compute_anchor(rows: list[dict]) -> str | None:
@@ -2119,17 +2124,10 @@ class AstraService:
                 "SELECT path, display_name, note FROM task_attachments WHERE task_id=? ORDER BY added_at, id",
                 (row["id"],),
             ).fetchall()]
-            # 8B9NBH (owner decision 2026-09-15): carry a SUGGESTED owner — the
-            # display name of who held the task last cycle — so instantiation can
-            # pre-fill them instead of always leaving the task unassigned. It is a
-            # hint only (resolved by name at instantiation), never a stored user id.
-            suggested_owner = None
-            if row["owner_user_id"]:
-                owner_row = self.db.execute(
-                    "SELECT display_name FROM users WHERE id=?", (row["owner_user_id"],)
-                ).fetchone()
-                if owner_row:
-                    suggested_owner = owner_row["display_name"]
+            # 8B9NBH (owner decision 2026-09-15): carry a role-based SUGGESTED
+            # owner — the role the task's owner held (App Owner, Chairman, or their
+            # role on this project) — never the person, who changes each cycle.
+            suggested_role = self._owner_role(row["project_id"], row["owner_user_id"])
             tasks.append({
                 "local_id": local_of[row["id"]],
                 "title": row["title"],
@@ -2138,7 +2136,7 @@ class AstraService:
                 "start_offset": self._offset(row["start_date"], anchor),
                 "due_offset": self._offset(row["due_date"], anchor),
                 "parent_local_id": local_of.get(parent) if parent in local_of else None,
-                "suggested_owner": suggested_owner,
+                "suggested_role": suggested_role,
                 "attachments": attachments,
             })
         ids = set(local_of)
@@ -2203,6 +2201,7 @@ class AstraService:
             item = dict(row)
             body = json.loads(item.pop("body_json"))
             item["task_count"] = len(body.get("tasks", []))
+            item["roles"] = self._template_roles(body)
             result.append(item)
         return result
 
@@ -2223,36 +2222,132 @@ class AstraService:
             raise KeyError("Template not found.")
         self.db.execute("DELETE FROM templates WHERE id=?", (template_id,))
 
-    def _resolve_suggested_owner(self, project_id: str, name: str | None) -> str | None:
-        """Map a template's suggested-owner display name to a currently assignable
-        user for this project. Returns None when the name is missing, unknown,
-        ambiguous, inactive, or not permitted on the project — the task then
-        instantiates unassigned (8B9NBH)."""
+    def _owner_role(self, project_id: str, user_id: str | None) -> str | None:
+        """The template role a task owner holds: 'owner'/'chairman' globally, else
+        their membership role on the project; None when there is no owner."""
+        if not user_id:
+            return None
+        user = self.db.execute("SELECT global_role FROM users WHERE id=?", (user_id,)).fetchone()
+        if not user:
+            return None
+        if user["global_role"] in {"owner", "chairman"}:
+            return user["global_role"]
+        member = self.db.execute(
+            "SELECT role FROM memberships WHERE project_id=? AND user_id=?", (project_id, user_id)
+        ).fetchone()
+        return member["role"] if member else None
+
+    def _legacy_suggested_user(self, name: str | None) -> dict | None:
+        """Templates saved before the role rework hold a display name in
+        'suggested_owner'. Returns the single active user with that name, if any."""
         if not name:
             return None
         rows = self.db.execute(
-            "SELECT id FROM users WHERE display_name=? AND active=1", (name,)
+            "SELECT id, global_role FROM users WHERE display_name=? AND active=1", (name,)
         ).fetchall()
-        if len(rows) != 1:  # unknown or ambiguous -> no pre-fill
+        return dict(rows[0]) if len(rows) == 1 else None
+
+    def _task_role(self, task: dict) -> str | None:
+        """A template task's suggested role, read-compatibly: a legacy name maps to
+        a role only for the App Owner or a Chairman (their role is global)."""
+        if "suggested_role" in task:
+            role = task.get("suggested_role")
+            return role if role in TEMPLATE_ROLES else None
+        legacy = self._legacy_suggested_user(task.get("suggested_owner"))
+        if legacy and legacy["global_role"] in {"owner", "chairman"}:
+            return legacy["global_role"]
+        return None
+
+    def _template_roles(self, body: dict) -> list[str]:
+        used = {self._task_role(task) for task in body.get("tasks", [])}
+        return [role for role in TEMPLATE_ROLES if role in used]
+
+    def _check_role_assignments(self, body: dict, project_id: str | None, role_assignments,
+                                *, grants_membership: bool) -> dict[str, str]:
+        """Validate the Owner's role -> person picks before anything is written.
+        'owner' is never picked (there is one App Owner). A 'chairman' pick must be
+        an active Chairman. A project-role pick must be an active ordinary user; on
+        a new project (grants_membership) they are given that role, otherwise they
+        must already hold it on the target project."""
+        if role_assignments in (None, ""):
+            return {}
+        if not isinstance(role_assignments, dict):
+            raise ValueError("Role assignments must map a role to a person.")
+        used = set(self._template_roles(body))
+        picks: dict[str, str] = {}
+        for role, user_id in role_assignments.items():
+            if not user_id:
+                continue
+            if role not in TEMPLATE_ROLES or role == "owner":
+                raise ValueError(f"'{role}' is not a role that can be assigned here.")
+            if role not in used:
+                raise ValueError(f"This template has no '{role}' tasks.")
+            user = self.db.execute(
+                "SELECT global_role, active FROM users WHERE id=?", (str(user_id),)
+            ).fetchone()
+            if not user or not user["active"]:
+                raise ValueError(f"The person picked for '{role}' is not an active user.")
+            if role == "chairman":
+                if user["global_role"] != "chairman":
+                    raise ValueError("Only a Chairman can fill the 'chairman' role.")
+            elif user["global_role"] != "member":
+                raise ValueError(f"Only an ordinary user can fill the project role '{role}'.")
+            elif not grants_membership and self._owner_role(project_id, str(user_id)) != role:
+                raise ValueError(f"The person picked for '{role}' must hold that role on the project.")
+            picks[role] = str(user_id)
+        project_picks = [picks[role] for role in PROJECT_ROLES if role in picks]
+        if len(project_picks) != len(set(project_picks)):
+            raise ValueError("One person can hold only one project role.")
+        return picks
+
+    def _resolve_role(self, project_id: str, role: str | None, picks: dict[str, str]) -> str | None:
+        """A role -> the Owner's pick, else its single active holder, else None."""
+        if not role:
             return None
-        try:
-            return self._validate_assignee(project_id, rows[0]["id"])
-        except (ValueError, Forbidden):
-            return None
+        if role in picks:
+            return picks[role]
+        if role in {"owner", "chairman"}:
+            rows = self.db.execute(
+                "SELECT id FROM users WHERE global_role=? AND active=1", (role,)
+            ).fetchall()
+        else:
+            rows = self.db.execute(
+                """SELECT u.id FROM memberships m JOIN users u ON u.id=m.user_id
+                   WHERE m.project_id=? AND m.role=? AND u.active=1 AND u.global_role='member'""",
+                (project_id, role),
+            ).fetchall()
+        return rows[0]["id"] if len(rows) == 1 else None  # none or ambiguous -> unassigned
+
+    def _suggested_owner(self, project_id: str, task: dict, picks: dict[str, str]) -> tuple[str | None, str | None]:
+        """(owner_user_id, role) to pre-fill for one template task."""
+        role = self._task_role(task)
+        if role:
+            return self._resolve_role(project_id, role, picks), role
+        # Legacy name for an ordinary user: pre-filled only while still assignable.
+        legacy = self._legacy_suggested_user(task.get("suggested_owner"))
+        if legacy:
+            try:
+                return self._validate_assignee(project_id, legacy["id"]), None
+            except (ValueError, Forbidden):
+                pass
+        return None, None
 
     def _instantiate_tasks(self, actor: dict, body: dict, project_id: str,
-                           root_parent_id: str | None, anchor_date: str | None, source_name: str) -> None:
+                           root_parent_id: str | None, anchor_date: str | None, source_name: str,
+                           picks: dict[str, str]) -> None:
         tasks = body.get("tasks", [])
         timestamp = now_text()
         id_of: dict[int, str] = {}
+        owners: dict[int, tuple[str | None, str | None]] = {}
         for task in tasks:  # pass 1 — insert every row, parents wired in pass 2
             new_task_id = new_id()
             id_of[task["local_id"]] = new_task_id
             start_date = self._apply_offset(anchor_date, task.get("start_offset"))
             due_date = self._apply_offset(anchor_date, task.get("due_offset"))
-            # Pre-fill the suggested owner when they are still an assignable member;
-            # otherwise leave it unassigned.
-            owner_user_id = self._resolve_suggested_owner(project_id, task.get("suggested_owner"))
+            # Resolve the suggested role to a person (the pick, else the single
+            # holder); otherwise leave the task unassigned.
+            owner_user_id, role = self._suggested_owner(project_id, task, picks)
+            owners[task["local_id"]] = (owner_user_id, role)
             self.db.execute(
                 """INSERT INTO tasks(id,project_id,parent_task_id,title,description,owner_user_id,status,criticality,
                    start_date,due_date,progress,created_at,created_by,updated_at)
@@ -2271,8 +2366,10 @@ class AstraService:
             if parent_id:
                 self.db.execute("UPDATE tasks SET parent_task_id=? WHERE id=?", (parent_id, new_task_id))
             self._ensure_baseline(new_task_id)
+            owner_user_id, role = owners[task["local_id"]]
             self._event(new_task_id, actor["id"], "task_created", None,
-                        {"title": task["title"], "from_template": source_name}, None)
+                        {"title": task["title"], "from_template": source_name,
+                         "owner_user_id": owner_user_id, "suggested_role": role}, None)
         for dep in body.get("dependencies", []):
             pred = id_of.get(dep.get("predecessor_local_id"))
             succ = id_of.get(dep.get("successor_local_id"))
@@ -2290,7 +2387,8 @@ class AstraService:
                      attachment.get("note", ""), actor["id"], timestamp),
                 )
 
-    def create_project_from_template(self, actor: dict, template_id: str, name: str, anchor_date=None) -> dict:
+    def create_project_from_template(self, actor: dict, template_id: str, name: str, anchor_date=None,
+                                     role_assignments=None) -> dict:
         self.require_owner(actor)
         template = self.get_template(actor, template_id)
         if template["kind"] != "project":
@@ -2300,6 +2398,7 @@ class AstraService:
             raise ValueError("A project name is required.")
         anchor_date = self._date(anchor_date)
         body = template["body"]
+        picks = self._check_role_assignments(body, None, role_assignments, grants_membership=True)
         meta = body.get("project") or {}
         with transaction(self.db):
             project_id = new_id()
@@ -2309,11 +2408,19 @@ class AstraService:
                 (project_id, name, meta.get("description", ""), meta.get("timezone", "Asia/Karachi"),
                  meta.get("working_days", "0123456"), now_text(), actor["id"]),
             )
-            self._instantiate_tasks(actor, body, project_id, None, anchor_date, template["name"])
+            # A person picked for a project role gets that role on the new project,
+            # so they can see and work the tasks pre-filled for them.
+            for role, user_id in picks.items():
+                if role in PROJECT_ROLES:
+                    self.db.execute(
+                        "INSERT INTO memberships VALUES(?,?,?,?,?)",
+                        (project_id, user_id, role, now_text(), actor["id"]),
+                    )
+            self._instantiate_tasks(actor, body, project_id, None, anchor_date, template["name"], picks)
         return self.get_project(actor, project_id)
 
     def create_task_from_template(self, actor: dict, template_id: str, project_id: str,
-                                  parent_task_id=None, anchor_date=None) -> dict:
+                                  parent_task_id=None, anchor_date=None, role_assignments=None) -> dict:
         self.require_owner(actor)
         template = self.get_template(actor, template_id)
         if template["kind"] != "task":
@@ -2326,8 +2433,9 @@ class AstraService:
                 raise ValueError("A parent task must belong to the same project.")
         anchor_date = self._date(anchor_date)
         body = template["body"]
+        picks = self._check_role_assignments(body, project_id, role_assignments, grants_membership=False)
         with transaction(self.db):
-            self._instantiate_tasks(actor, body, project_id, parent_task_id, anchor_date, template["name"])
+            self._instantiate_tasks(actor, body, project_id, parent_task_id, anchor_date, template["name"], picks)
         return {"project_id": project_id, "created": len(body.get("tasks", []))}
 
     # --- Final results: a searchable index of accepted deliverables ---

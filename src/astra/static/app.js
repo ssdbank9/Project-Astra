@@ -370,14 +370,14 @@ async function openTemplates(){
   }catch(err){document.querySelector("#templates-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`;document.querySelector("#templates-dialog").showModal()}
 }
 function renderTemplates(templates){
-  const rows=(templates||[]).map(t=>`<li><strong>${escapeHtml(t.name)}</strong> · <span style="color:#667085">${escapeHtml(t.kind)} · ${t.task_count} task(s)</span>
+  const rows=(templates||[]).map(t=>`<li><strong>${escapeHtml(t.name)}</strong> · <span style="color:#667085">${escapeHtml(t.kind)} · ${t.task_count} task(s)${(t.roles||[]).length?` · roles: ${escapeHtml(t.roles.map(r=>TEMPLATE_ROLE_LABELS[r]||r).join(", "))}`:""}</span>
     ${t.description?`<br><em style="color:#667085">${escapeHtml(t.description)}</em>`:""}
-    <br><button type="button" class="link" data-use-template="${escapeHtml(t.id)}" data-kind="${escapeHtml(t.kind)}">Use</button>
+    <br><button type="button" class="link" data-use-template="${escapeHtml(t.id)}" data-kind="${escapeHtml(t.kind)}" data-roles="${escapeHtml((t.roles||[]).join(","))}">Use</button>
     <button type="button" class="link" data-delete-template="${escapeHtml(t.id)}">Delete</button></li>`).join("")||"<li>No templates yet. Save a project or a task as a template to reuse it.</li>";
   document.querySelector("#templates-body").innerHTML=`<h2>Templates</h2>
-    <p style="color:#667085;font-size:12px;">A template copies structure — titles, hierarchy, dependencies, criticality, attachment links, relative dates and a suggested owner. Never status, history or evidence. New tasks start in draft; each suggested owner is pre-filled if they are still an assignable member, otherwise left unassigned.</p>
+    <p style="color:#667085;font-size:12px;">A template copies structure — titles, hierarchy, dependencies, criticality, attachment links, relative dates and a suggested owner <em>role</em> (App Owner, Chairman, Project manager, member or viewer), never a named person. Never status, history or evidence. New tasks start in draft. When you use a template you pick who fills each role; a role you leave on automatic goes to its only holder on the target project, otherwise the task stays unassigned.</p>
     <ul class="people-list">${rows}</ul><div class="error" id="templates-error"></div>`;
-  document.querySelectorAll("#templates-body [data-use-template]").forEach(b=>b.addEventListener("click",()=>useTemplate(b.dataset.useTemplate,b.dataset.kind)));
+  document.querySelectorAll("#templates-body [data-use-template]").forEach(b=>b.addEventListener("click",()=>useTemplate(b.dataset.useTemplate,b.dataset.kind,(b.dataset.roles||"").split(",").filter(Boolean))));
   document.querySelectorAll("#templates-body [data-delete-template]").forEach(b=>b.addEventListener("click",()=>deleteTemplate(b.dataset.deleteTemplate)));
 }
 async function saveProjectAsTemplate(){
@@ -388,21 +388,51 @@ async function saveProjectAsTemplate(){
   try{await api("/api/templates/from-project",{method:"POST",body:JSON.stringify({project_id:pid,name,description})});alert("Saved as a template.");await openTemplates()}
   catch(x){alert(x.message)}
 }
-async function useTemplate(id,kind){
+// 8B9NBH: templates carry suggested owner ROLES; the Owner picks a person per role when using one.
+const TEMPLATE_ROLE_LABELS={owner:"App Owner",chairman:"Chairman",manager:"Project manager",member:"Project member",viewer:"Project viewer"};
+async function useTemplate(id,kind,roles){
   try{
+    let url,payload,done;
     if(kind==="project"){
       const name=prompt("New project name:");if(!name)return;
       const anchor_date=prompt("Anchor date for relative schedule (YYYY-MM-DD, blank to leave dates unset):")||null;
-      await api(`/api/templates/${id}/create-project`,{method:"POST",body:JSON.stringify({name,anchor_date})});
-      alert("Project created from template.");document.querySelector("#templates-dialog").close();await load();
+      url=`/api/templates/${id}/create-project`;payload={name,anchor_date};done="Project created from template.";
     }else{
       const project_id=prompt("Target project id to add this task subtree to:\n(Tip: open the project, a task's detail shows its project.)");if(!project_id)return;
       const parent_task_id=prompt("Parent task id (optional, blank for top-level):")||null;
       const anchor_date=prompt("Anchor date for relative schedule (YYYY-MM-DD, blank to leave dates unset):")||null;
-      await api(`/api/templates/${id}/create-task`,{method:"POST",body:JSON.stringify({project_id,parent_task_id,anchor_date})});
-      alert("Task subtree created from template.");document.querySelector("#templates-dialog").close();await load();
+      url=`/api/templates/${id}/create-task`;payload={project_id,parent_task_id,anchor_date};done="Task subtree created from template.";
     }
+    const finish=async role_assignments=>{
+      await api(url,{method:"POST",body:JSON.stringify({...payload,role_assignments})});
+      alert(done);document.querySelector("#templates-dialog").close();await load();
+    };
+    if(!(roles||[]).some(r=>r!=="owner"))return await finish({});
+    await renderRolePicker(kind,roles,finish);
   }catch(x){const e=document.querySelector("#templates-error");if(e)e.textContent=x.message;else alert(x.message)}
+}
+async function renderRolePicker(kind,roles,finish){
+  const {users}=await api("/api/users");
+  const active=(users||[]).filter(u=>u.active);
+  const fallback=kind==="project"?"Leave unassigned":"Automatic (the role's only holder, else unassigned)";
+  const rows=roles.map(r=>{
+    const label=escapeHtml(TEMPLATE_ROLE_LABELS[r]||r);
+    if(r==="owner")return `<label>${label}<select disabled><option>${escapeHtml(state.user.display_name)} (App Owner)</option></select></label>`;
+    const people=active.filter(u=>r==="chairman"?u.global_role==="chairman":u.global_role==="member");
+    const options=people.map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.display_name)}</option>`).join("");
+    return `<label>${label}<select name="${escapeHtml(r)}"><option value="">${escapeHtml(fallback)}</option>${options}</select></label>`;
+  }).join("");
+  const hint=kind==="project"?"Each person you pick is given that role on the new project and is pre-filled on its tasks.":"A person you pick must already hold that role on the target project.";
+  document.querySelector("#templates-body").innerHTML=`<form id="template-role-form"><h2>Who fills each role?</h2>
+    <p class="muted" style="font-size:12px;">${hint}</p>${rows}
+    <div class="actions"><button type="button" class="quiet" id="template-role-back">Back</button><button>Create</button></div>
+    <div class="error" id="templates-error"></div></form>`;
+  document.querySelector("#template-role-back").addEventListener("click",openTemplates);
+  document.querySelector("#template-role-form").addEventListener("submit",async ev=>{
+    ev.preventDefault();
+    const picks={};for(const [role,user] of new FormData(ev.target))if(user)picks[role]=user;
+    try{await finish(picks)}catch(x){document.querySelector("#templates-error").textContent=x.message}
+  });
 }
 async function markFinalResult(taskId,sourceType,sourceId){
   try{await api("/api/final-results",{method:"POST",body:JSON.stringify({task_id:taskId,source_type:sourceType,source_id:sourceId})});await openDetail(taskId)}

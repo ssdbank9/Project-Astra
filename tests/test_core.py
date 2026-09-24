@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import threading
@@ -1404,30 +1405,180 @@ class AstraCoreTests(unittest.TestCase):
         self.assertEqual(self.service.list_task_submissions(self.owner, tasks["Kickoff"]["id"]), [])
         self.assertIsNone(tasks["Kickoff"]["accepted_submission_id"])
 
-    def test_template_carries_suggested_owner_and_prefills_when_assignable(self):
-        # 8B9NBH (owner decision 2026-09-15): a template carries a suggested owner
-        # and pre-fills them on instantiation when they are still assignable;
-        # otherwise the task instantiates unassigned.
+    def _seed_role_project(self):
+        """A project whose tasks are owned by the App Owner, a project manager and a member."""
         project = self.service.create_project(self.owner, "Recurring")
+        manager = self.service.create_user(self.owner, "pm@example.org", "Pat Manager", "member password safe", "member")
         member = self.service.create_user(self.owner, "lead@example.org", "Lead Person", "member password safe", "member")
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
         self.service.grant_project_access(self.owner, project["id"], member["id"], "member")
-        # Task 1 owned by the App Owner (assignable to any project).
         self.service.create_task(self.owner, {
             "project_id": project["id"], "title": "Owner review", "owner_user_id": self.owner["id"]})
-        # Task 2 owned by a project member (not a member of a NEW project).
+        self.service.create_task(self.owner, {
+            "project_id": project["id"], "title": "Plan", "owner_user_id": manager["id"]})
         self.service.create_task(self.owner, {
             "project_id": project["id"], "title": "Member task", "owner_user_id": member["id"]})
+        self.service.create_task(self.owner, {"project_id": project["id"], "title": "Nobody's"})
+        return project, manager, member
+
+    def test_template_stores_a_suggested_role_not_a_person(self):
+        # 8B9NBH (owner decision 2026-09-15): the suggested owner is ROLE-based.
+        project, _, _ = self._seed_role_project()
         template = self.service.save_project_as_template(self.owner, project["id"], "Recurring tmpl")
         by_title = {t["title"]: t for t in template["body"]["tasks"]}
-        self.assertEqual(by_title["Owner review"]["suggested_owner"], self.owner["display_name"])
-        self.assertEqual(by_title["Member task"]["suggested_owner"], "Lead Person")
-        # Instantiate into a fresh project (the member has no access there).
+        self.assertEqual(by_title["Owner review"]["suggested_role"], "owner")
+        self.assertEqual(by_title["Plan"]["suggested_role"], "manager")
+        self.assertEqual(by_title["Member task"]["suggested_role"], "member")
+        self.assertIsNone(by_title["Nobody's"]["suggested_role"])
+        for task in by_title.values():  # no person rides along: no name, no user id
+            self.assertNotIn("suggested_owner", task)
+            self.assertNotIn("owner_user_id", task)
+        listed = self.service.list_templates(self.owner)[0]
+        self.assertEqual(listed["roles"], ["owner", "manager", "member"])
+
+    def test_project_from_template_resolves_each_role_to_the_picked_person(self):
+        project, _, _ = self._seed_role_project()
+        template = self.service.save_project_as_template(self.owner, project["id"], "Recurring tmpl")
+        new_pm = self.service.create_user(self.owner, "pm2@example.org", "New PM", "member password safe", "member")
+        new_lead = self.service.create_user(self.owner, "lead2@example.org", "New Lead", "member password safe", "member")
+        new_project = self.service.create_project_from_template(
+            self.owner, template["id"], "Recurring 2",
+            role_assignments={"manager": new_pm["id"], "member": new_lead["id"]},
+        )
+        tasks = {t["title"]: t for t in self.service.list_tasks(self.owner, new_project["id"])}
+        self.assertEqual(tasks["Owner review"]["owner_user_id"], self.owner["id"])  # 'owner' resolves itself
+        self.assertEqual(tasks["Plan"]["owner_user_id"], new_pm["id"])
+        self.assertEqual(tasks["Member task"]["owner_user_id"], new_lead["id"])
+        self.assertIsNone(tasks["Nobody's"]["owner_user_id"])
+        # The picked people get that role on the new project, so they can see and work their tasks.
+        roles = {row["user_id"]: row["role"] for row in self.db.execute(
+            "SELECT user_id, role FROM memberships WHERE project_id=?", (new_project["id"],))}
+        self.assertEqual(roles, {new_pm["id"]: "manager", new_lead["id"]: "member"})
+        self.assertIn(new_project["id"], {p["id"] for p in self.service.list_projects(new_lead)})
+        # The pre-fill is on the record: who got the task, from which role.
+        created = self.service.task_events(self.owner, tasks["Plan"]["id"])[0]
+        self.assertEqual(created["event_type"], "task_created")
+        after = json.loads(created["after_json"])
+        self.assertEqual((after["owner_user_id"], after["suggested_role"]), (new_pm["id"], "manager"))
+
+    def test_project_from_template_without_picks_leaves_project_roles_unassigned(self):
+        project, _, _ = self._seed_role_project()
+        template = self.service.save_project_as_template(self.owner, project["id"], "Recurring tmpl")
         new_project = self.service.create_project_from_template(self.owner, template["id"], "Recurring 2")
-        new_tasks = {t["title"]: t for t in self.service.list_tasks(self.owner, new_project["id"])}
-        # The owner is assignable anywhere -> pre-filled.
-        self.assertEqual(new_tasks["Owner review"]["owner_user_id"], self.owner["id"])
-        # The member is not on the new project -> left unassigned, not force-assigned.
-        self.assertIsNone(new_tasks["Member task"]["owner_user_id"])
+        tasks = {t["title"]: t for t in self.service.list_tasks(self.owner, new_project["id"])}
+        self.assertEqual(tasks["Owner review"]["owner_user_id"], self.owner["id"])
+        self.assertIsNone(tasks["Plan"]["owner_user_id"])  # a new project has no manager yet
+        self.assertIsNone(tasks["Member task"]["owner_user_id"])
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) c FROM memberships WHERE project_id=?", (new_project["id"],)).fetchone()["c"], 0)
+
+    def test_role_assignments_are_validated_before_anything_is_written(self):
+        project, manager, _ = self._seed_role_project()
+        template = self.service.save_project_as_template(self.owner, project["id"], "Recurring tmpl")
+        projects_before = len(self.service.list_projects(self.owner))
+        inactive = self.service.create_user(self.owner, "gone@example.org", "Gone", "member password safe", "member")
+        self.service.set_user_active(self.owner, inactive["id"], False)
+        chairman = self.service.create_user(self.owner, "c@example.org", "Chair", "member password safe", "chairman")
+        for label, picks in (
+            ("unknown role", {"auditor": manager["id"]}),
+            ("unknown user", {"manager": "no-such-user"}),
+            ("inactive user", {"manager": inactive["id"]}),
+            ("owner role is fixed", {"owner": manager["id"]}),
+            ("chairman as project manager", {"manager": chairman["id"]}),
+            ("not a mapping", ["manager"]),
+            ("one person, two project roles", {"manager": manager["id"], "member": manager["id"]}),
+        ):
+            with self.subTest(label):
+                with self.assertRaises(ValueError):
+                    self.service.create_project_from_template(
+                        self.owner, template["id"], "Bad picks", role_assignments=picks)
+        self.assertEqual(len(self.service.list_projects(self.owner)), projects_before)
+
+    def test_task_template_resolves_role_to_the_unique_holder_in_the_target_project(self):
+        project, manager, member = self._seed_role_project()
+        plan = next(t for t in self.service.list_tasks(self.owner, project["id"]) if t["title"] == "Plan")
+        template = self.service.save_task_as_template(self.owner, plan["id"], "Plan block")
+        self.assertEqual(template["body"]["tasks"][0]["suggested_role"], "manager")
+        # Same project: exactly one manager -> pre-filled.
+        self.service.create_task_from_template(self.owner, template["id"], project["id"])
+        plans = [t for t in self.service.list_tasks(self.owner, project["id"]) if t["title"] == "Plan"]
+        self.assertEqual([t["owner_user_id"] for t in plans], [manager["id"], manager["id"]])
+        # A second manager makes the role ambiguous -> unassigned, never a guess.
+        second = self.service.create_user(self.owner, "pm3@example.org", "Second PM", "member password safe", "member")
+        self.service.grant_project_access(self.owner, project["id"], second["id"], "manager")
+        self.service.create_task_from_template(self.owner, template["id"], project["id"])
+        plans = [t for t in self.service.list_tasks(self.owner, project["id"]) if t["title"] == "Plan"]
+        self.assertEqual(sorted(t["owner_user_id"] or "" for t in plans), sorted(["", manager["id"], manager["id"]]))
+        # An explicit pick settles it, but must already hold that role on the target project.
+        self.service.create_task_from_template(
+            self.owner, template["id"], project["id"], role_assignments={"manager": second["id"]})
+        self.assertIn(second["id"], {t["owner_user_id"] for t in self.service.list_tasks(self.owner, project["id"])})
+        with self.assertRaises(ValueError):
+            self.service.create_task_from_template(
+                self.owner, template["id"], project["id"], role_assignments={"manager": member["id"]})
+
+    def test_legacy_name_based_templates_still_instantiate(self):
+        # Templates saved before 8B9NBH's role rework hold a display name in
+        # 'suggested_owner'. They load read-compatibly: owner/chairman names map
+        # to that role; anyone else is pre-filled only if still assignable.
+        project, _, member = self._seed_role_project()
+        body = {"kind": "project", "anchor": None, "dependencies": [], "project": {},
+                "tasks": [
+                    {"local_id": 0, "title": "Owner review", "suggested_owner": self.owner["display_name"],
+                     "parent_local_id": None, "attachments": []},
+                    {"local_id": 1, "title": "Member task", "suggested_owner": "Lead Person",
+                     "parent_local_id": None, "attachments": []},
+                    {"local_id": 2, "title": "Ghost task", "suggested_owner": "Nobody Known",
+                     "parent_local_id": None, "attachments": []},
+                ]}
+        self.db.execute(
+            "INSERT INTO templates(id,kind,name,description,body_json,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
+            ("legacy-1", "project", "Legacy", "", json.dumps(body), self.owner["id"], "2026-09-19T00:00:00Z"))
+        self.assertEqual(self.service.list_templates(self.owner)[0]["roles"], ["owner"])
+        new_project = self.service.create_project_from_template(self.owner, "legacy-1", "From legacy")
+        tasks = {t["title"]: t for t in self.service.list_tasks(self.owner, new_project["id"])}
+        self.assertEqual(tasks["Owner review"]["owner_user_id"], self.owner["id"])
+        self.assertIsNone(tasks["Member task"]["owner_user_id"])  # not on the new project
+        self.assertIsNone(tasks["Ghost task"]["owner_user_id"])
+        body["kind"] = "task"
+        self.db.execute("INSERT INTO templates(id,kind,name,description,body_json,created_by,created_at)"
+                        " VALUES(?,?,?,?,?,?,?)", ("legacy-2", "task", "Legacy task", "", json.dumps(body),
+                                                   self.owner["id"], "2026-09-19T00:00:00Z"))
+        self.service.create_task_from_template(self.owner, "legacy-2", project["id"])
+        members = [t for t in self.service.list_tasks(self.owner, project["id"]) if t["title"] == "Member task"]
+        self.assertEqual(sorted(t["owner_user_id"] for t in members), [member["id"], member["id"]])
+
+    def test_every_template_action_is_owner_only_for_every_non_owner_role(self):
+        # Pins require_owner on each template method separately. The non-owners
+        # can all view the project and its tasks, so without require_owner the
+        # save methods would succeed; the count check proves nothing was written.
+        project, manager, member = self._seed_role_project()
+        viewer = self.service.create_user(self.owner, "v@example.org", "Viewer", "member password safe", "member")
+        self.service.grant_project_access(self.owner, project["id"], viewer["id"], "viewer")
+        chairman = self.service.create_user(self.owner, "ch@example.org", "Chair", "member password safe", "chairman")
+        task = self.service.list_tasks(self.owner, project["id"])[0]
+        project_tmpl = self.service.save_project_as_template(self.owner, project["id"], "P")
+        task_tmpl = self.service.save_task_as_template(self.owner, task["id"], "T")
+        actions = {
+            "save_project_as_template": lambda a: self.service.save_project_as_template(a, project["id"], "x"),
+            "save_task_as_template": lambda a: self.service.save_task_as_template(a, task["id"], "x"),
+            "list_templates": lambda a: self.service.list_templates(a),
+            "get_template": lambda a: self.service.get_template(a, task_tmpl["id"]),
+            "delete_template": lambda a: self.service.delete_template(a, task_tmpl["id"]),
+            "create_project_from_template": lambda a: self.service.create_project_from_template(
+                a, project_tmpl["id"], "x"),
+            "create_task_from_template": lambda a: self.service.create_task_from_template(
+                a, task_tmpl["id"], project["id"]),
+        }
+        tasks_before = len(self.service.list_tasks(self.owner, project["id"]))
+        for label, actor in (("manager", manager), ("member", member), ("viewer", viewer), ("chairman", chairman)):
+            for name, call in actions.items():
+                with self.subTest(role=label, action=name):
+                    with self.assertRaises(Forbidden):
+                        call(actor)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) c FROM templates").fetchone()["c"], 2)
+        self.assertEqual(len(self.service.list_projects(self.owner)), 1)
+        self.assertEqual(len(self.service.list_tasks(self.owner, project["id"])), tasks_before)
 
     def test_task_subtree_template_roundtrip(self):
         _, _, fieldwork = self._seed_template_project()
