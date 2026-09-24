@@ -2744,6 +2744,23 @@ class SecondaryOwnerTests(unittest.TestCase):
         self.assertEqual(len(self.project_notices(secondary, "project_schedule_changed")), 2)
         self.assertEqual(self.project_notices(manager, "project_schedule_changed"), [])
 
+    def test_project_notices_are_not_capped_skip_inactive_owners_and_show_cleared_dates(self):
+        # Review 7 gaps 1-3.
+        secondary = self.secondary("deputy")
+        sleepy = self.secondary("sleepy")
+        self.db.execute("UPDATE users SET active=0 WHERE id=?", (sleepy["id"],))
+        project = self.service.create_project(self.primary, "Busy dates")
+        for day in range(1, 7):  # six changes by one owner inside 10 minutes all notify
+            self.service.set_project_schedule(secondary, project["id"], f"2026-10-0{day}", None, f"move {day}")
+        self.assertEqual(len(self.project_notices(self.primary, "project_schedule_changed")), 6)
+        self.service.set_project_schedule(secondary, project["id"], None, None, "clear")
+        latest = max(self.project_notices(self.primary, "project_schedule_changed"), key=lambda n: n["created_at"])
+        self.assertEqual(latest["summary"], "project dates changed: Busy dates · start 2026-10-06 → none · by Deputy")
+        self.service.close_project(secondary, project["id"], "")
+        self.assertEqual(len(self.project_notices(self.primary, "project_closed")), 1)
+        self.assertEqual([n for n in self.service.list_notifications(sleepy)
+                          if n["kind"] in ("project_closed", "project_schedule_changed")], [])
+
     def test_a_single_owner_gets_no_notice_of_their_own_project_changes(self):
         project = self.service.create_project(self.primary, "Solo")
         self.service.set_project_schedule(self.primary, project["id"], "2026-10-01", None, "start")

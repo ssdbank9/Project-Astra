@@ -27,9 +27,10 @@ blocked-by: []
 related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
   - 01M3A64QKGH8B0F5SKYSKBWY86
+  - 01M3ADCB413BRFJTKCEXZ72D79
 commits: []
 created-at: 2026-09-24T19:12:08Z
-updated-at: 2026-09-24T19:18:12Z
+updated-at: 2026-09-24T19:33:03Z
 updated-by: Claude
 claimed-by: vm-593
 claimed-at: 2026-09-24T19:12:09Z
@@ -43,7 +44,7 @@ outcome-resolves: "DoD covered by the five new SecondaryOwnerTests: secondary cl
 ## Definition of Done
 
 - [x] Closing a project (by any owner directly, or by an owner approving a Manager's close request) and changing its dates notify every other active owner and not the actor or non-owners, with a summary naming the project, closed (and whether with open work) or the dates old -> new, and who did it; secondary owners can still close a project with open work; no new audit rows and no schema change; tests for secondary and primary closes, approved close requests, date changes and a single-owner install; existing tests green.
-  proof: service.py _project_event notice -> _notify_owners (actor excluded, uncapped); close_project (direct and approved request) and set_project_schedule. Tests: test_core SecondaryOwnerTests test_a_secondary_owner_closes_a_project_with_open_work_and_the_primary_is_told, test_the_primary_closing_a_project_tells_the_secondary_owners, test_approving_a_managers_close_request_notifies_the_other_owners, test_project_date_changes_notify_the_other_owners_with_old_and_new_dates, test_a_single_owner_gets_no_notice_of_their_own_project_changes. Ran 443 tests, OK.
+  proof: service.py _project_event notice -> _notify_owners (actor excluded, uncapped); close_project (direct and approved request) and set_project_schedule. Tests: test_core SecondaryOwnerTests test_a_secondary_owner_closes_a_project_with_open_work_and_the_primary_is_told, test_the_primary_closing_a_project_tells_the_secondary_owners, test_approving_a_managers_close_request_notifies_the_other_owners, test_project_date_changes_notify_the_other_owners_with_old_and_new_dates, test_a_single_owner_gets_no_notice_of_their_own_project_changes. test_project_notices_are_not_capped_skip_inactive_owners_and_show_cleared_dates (review 7 gaps 1-3). Ran 444 tests, OK.
 
 ## Options
 
@@ -54,7 +55,7 @@ outcome-resolves: "DoD covered by the five new SecondaryOwnerTests: secondary cl
 
 <Steps, in order — filled in by the pre-process step, or by you.>
 
-- [x] service.py: _project_event(..., notify=False); close_project and set_project_schedule pass a summary to _notify_owners
+- [x] service.py: _project_event(..., notice=None) notifies the other owners when a notice is given; close_project and set_project_schedule pass a summary to _notify_owners
   proof: service.py _project_event(..., notice=) -> _notify_owners; close_project and set_project_schedule pass summaries; _actor_name
 - [x] Tests in test_core: secondary/primary close, approved manager close request, date change, non-owners and single owner
   proof: test_core SecondaryOwnerTests: 5 new tests
