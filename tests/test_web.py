@@ -1274,8 +1274,8 @@ class AstraWebTests(unittest.TestCase):
         self.assertIn(response.status, (401, 403))
 
     def test_project_history_kinds_are_limited_for_non_managers_over_http(self):
-        # ZSZ9T2: the server filters; a viewer, member or non-manager Chairman never
-        # receives owner-request or import rows.
+        # ZSZ9T2: the server filters; a viewer or member never receives owner-request or
+        # import rows. K62ZAP: a Chairman gets the full list like the Owner.
         owner_cookie, owner_csrf = self._owner_session()
         _, project = self.request("POST", "/api/projects", {"name": "Filtered HTTP"}, cookie=owner_cookie, csrf=owner_csrf)
         pid = project["project"]["id"]
@@ -1300,7 +1300,7 @@ class AstraWebTests(unittest.TestCase):
             detail = {"filename": "secret-plan.xlsx"} if hidden else {"note": "public"}
             service._project_event(pid, owner_id, kind, detail, f"reason for {kind}")
         filtered = ["project_schedule_changed", "project_closed"]
-        expected = {"owner": every, "manager": every, "chairman": filtered, "viewer": filtered, "member": filtered}
+        expected = {"owner": every, "manager": every, "chairman": every, "viewer": filtered, "member": filtered}
         cookies = {"owner": owner_cookie}
         for key in ("chairman", "viewer", "member", "manager", "outsider"):
             cookies[key] = self._login_as(f"{key}-kinds@example.org", f"{key} password safe")[0]
@@ -1313,6 +1313,62 @@ class AstraWebTests(unittest.TestCase):
                 if kinds == filtered:
                     self.assertNotIn("secret-plan.xlsx", json.dumps(history))
         response, _ = self.request("GET", f"/api/projects/{pid}/events", cookie=cookies["outsider"])
+        self.assertEqual(response.status, 403)
+
+    def test_task_history_hides_approval_rows_from_non_managers_over_http(self):
+        # K62ZAP: Owner, Chairman and managers get every task event; a member, viewer or
+        # non-manager approver gets ordinary kinds plus their own rows; a non-member gets 403.
+        owner_cookie, owner_csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "Task history HTTP"}, cookie=owner_cookie, csrf=owner_csrf)
+        pid = project["project"]["id"]
+        _, task = self.request("POST", "/api/tasks", {"project_id": pid, "title": "Audited"},
+                               cookie=owner_cookie, csrf=owner_csrf)
+        tid = task["task"]["id"]
+        users = {}
+        for key, global_role, role in (("chairman", "chairman", None), ("manager", "member", "manager"),
+                                       ("member", "member", "member"), ("viewer", "member", "viewer"),
+                                       ("approver", "member", "member"), ("outsider", "member", None)):
+            _, created = self.request("POST", "/api/users", {
+                "email": f"{key}-task-kinds@example.org", "display_name": key.title(),
+                "password": f"{key} password safe", "role": global_role,
+            }, cookie=owner_cookie, csrf=owner_csrf)
+            users[key] = created["user"]["id"]
+            if role:
+                self.request("POST", "/api/project-access", {"project_id": pid, "user_id": users[key], "role": role},
+                             cookie=owner_cookie, csrf=owner_csrf)
+        service = self.server.service
+        owner_id = service.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()["id"]
+        service.add_task_reviewer(service.get_user(owner_id), tid, users["approver"], "approver")
+        for kind in ("task_updated", "protected_action_requested", "protected_action_rejected",
+                     "final_result_mark_blocked", "import_key_assigned"):
+            secret = None if kind == "task_updated" else {"payload": "secret-payload"}
+            service._event(tid, owner_id, kind, None, secret, None, notify=False)
+        service._event(tid, users["approver"], "protected_action_requested", None, {"note": "own"}, None, notify=False)
+        # The approver's hidden row on a second project/task must not leak into this task's history.
+        owner = service.get_user(owner_id)
+        other = service.create_project(owner, "Task history HTTP B")
+        service.grant_project_access(owner, other["id"], users["approver"], "member")
+        other_task = service.create_task(owner, {"project_id": other["id"], "title": "Elsewhere"})
+        service._event(other_task["id"], users["approver"], "protected_action_blocked", None,
+                       {"note": "elsewhere"}, None, notify=False)
+        every = ["task_created", "task_updated", "protected_action_requested", "protected_action_rejected",
+                 "final_result_mark_blocked", "import_key_assigned", "protected_action_requested"]
+        ordinary = ["task_created", "task_updated"]
+        expected = {"owner": every, "chairman": every, "manager": every, "member": ordinary, "viewer": ordinary,
+                    "approver": ordinary + ["protected_action_requested"]}
+        for key, kinds in expected.items():
+            cookie = owner_cookie if key == "owner" else \
+                self._login_as(f"{key}-task-kinds@example.org", f"{key} password safe")[0]
+            with self.subTest(actor=key):
+                response, history = self.request("GET", f"/api/tasks/{tid}/events", cookie=cookie)
+                self.assertEqual(response.status, 200)
+                # Order-independent: back-to-back rows can share a timestamp on coarse clocks.
+                self.assertCountEqual([e["event_type"] for e in history["events"]], kinds)
+                self.assertNotIn("elsewhere", json.dumps(history))
+                if key in ("member", "viewer", "approver"):
+                    self.assertNotIn("secret-payload", json.dumps(history))
+        cookie = self._login_as("outsider-task-kinds@example.org", "outsider password safe")[0]
+        response, _ = self.request("GET", f"/api/tasks/{tid}/events", cookie=cookie)
         self.assertEqual(response.status, 403)
 
     def test_task_detail_subtasks_carry_step_schedule_fields_over_http(self):

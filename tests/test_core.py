@@ -1885,8 +1885,8 @@ class AstraCoreTests(unittest.TestCase):
 
     def test_project_history_non_managers_see_only_schedule_changes_and_closure(self):
         # ZSZ9T2: Aly decided (Slack 2026-09-24) that anyone who can view but not manage
-        # the project sees only project_schedule_changed and project_closed. That includes
-        # a Chairman who is not a manager of the project (Aly, ts 1790243107.569629).
+        # the project sees only project_schedule_changed and project_closed. K62ZAP: a
+        # Chairman sees the full history like the Owner (Aly, ts 1790245584.314119).
         project = self.service.create_project(self.owner, "Filtered")
         people = {}
         for key, global_role, role in (("chairman", "chairman", None), ("viewer", "member", "viewer"),
@@ -1906,15 +1906,89 @@ class AstraCoreTests(unittest.TestCase):
                 else {"action": "delete_task", "payload": {"note": "private"}}
             self.service._project_event(project["id"], self.owner["id"], kind, detail, f"reason for {kind}")
         # Order-independent: back-to-back rows can share a timestamp on coarse clocks.
-        for key in ("chairman", "viewer", "member"):
+        for key in ("viewer", "member"):
             with self.subTest(actor=key):
                 self.assertFalse(self.service.can_manage_project(people[key], project["id"]))
                 kinds = [e["event_type"] for e in self.service.project_events(people[key], project["id"])]
                 self.assertCountEqual(kinds, ["project_schedule_changed", "project_closed"])
-        for key, actor in (("owner", self.owner), ("manager", people["manager"])):
+        for key, actor in (("owner", self.owner), ("chairman", people["chairman"]), ("manager", people["manager"])):
             with self.subTest(actor=key):
                 kinds = [e["event_type"] for e in self.service.project_events(actor, project["id"])]
                 self.assertCountEqual(kinds, every)
+        with self.assertRaises(Forbidden):
+            self.service.project_events(people["outsider"], project["id"])
+
+    def test_task_and_project_history_full_for_owner_chairman_manager_filtered_for_others(self):
+        # K62ZAP (Aly, ts 1790245384.787859 and 1790245584.314119): Owner, Chairman and
+        # project managers see every kind; members, viewers and non-manager approvers see
+        # ordinary kinds plus rows they wrote themselves; non-members get Forbidden.
+        ordinary = (
+            "task_created", "task_updated", "criticality_changed", "parent_changed", "dependency_added",
+            "dependency_removed", "task_submitted", "submission_accepted", "changes_requested", "task_reopened",
+            "task_on_hold", "schedule_proposed", "schedule_revised", "schedule_proposal_rejected",
+            "attachment_added", "attachment_removed", "final_result_marked", "final_result_unmarked",
+        )
+        hidden = (
+            "protected_action_blocked", "protected_action_requested", "protected_action_approved",
+            "protected_action_rejected", "protected_action_cancelled", "attachment_add_blocked",
+            "attachment_removal_blocked", "final_result_mark_blocked", "final_result_unmark_blocked",
+            "import_key_assigned",
+        )
+        project = self.service.create_project(self.owner, "History split")
+        task = self.service.create_task(self.owner, {"project_id": project["id"], "title": "Audited"})
+        people = {}
+        for key, global_role, role in (("chairman", "chairman", None), ("manager", "member", "manager"),
+                                       ("member", "member", "member"), ("viewer", "member", "viewer"),
+                                       ("approver", "member", "member"), ("outsider", "member", None)):
+            people[key] = self.service.create_user(
+                self.owner, f"k6-{key}@example.org", key.title(), f"{key} password safe", global_role)
+            if role:
+                self.service.grant_project_access(self.owner, project["id"], people[key]["id"], role)
+        self.service.add_task_reviewer(self.owner, task["id"], people["approver"]["id"], "approver")
+        # Synthetic rows: every kind written by the Owner (hidden ones carry a secret),
+        # plus one hidden row written by each filtered person, which they must still see.
+        for kind in ordinary[1:] + hidden:
+            secret = {"payload": "secret-payload"} if kind in hidden else None
+            self.service._event(task["id"], self.owner["id"], kind, None, secret, None, notify=False)
+        own = {"member": "attachment_add_blocked", "viewer": "protected_action_blocked",
+               "approver": "protected_action_requested"}
+        other_project = self.service.create_project(self.owner, "History split B")
+        other_task = self.service.create_task(self.owner, {"project_id": other_project["id"], "title": "Elsewhere"})
+        for key, kind in own.items():
+            self.service._event(task["id"], people[key]["id"], kind, None, {"note": "own"}, None, notify=False)
+            self.service._project_event(project["id"], people[key]["id"], "protected_action_blocked",
+                                        {"note": "own"}, None)
+            # A hidden row the same person wrote on a second project/task they can also view
+            # must not leak into the first one's history.
+            self.service.grant_project_access(self.owner, other_project["id"], people[key]["id"], "member")
+            self.service._event(other_task["id"], people[key]["id"], kind, None, {"note": "elsewhere"}, None,
+                                notify=False)
+            self.service._project_event(other_project["id"], people[key]["id"], "protected_action_blocked",
+                                        {"note": "elsewhere"}, None)
+        self.service._project_event(project["id"], self.owner["id"], "import_committed",
+                                    {"filename": "secret-payload.xlsx"}, None)
+        self.service._project_event(project["id"], self.owner["id"], "project_closed", None, None)
+        all_task = list(ordinary + hidden) + list(own.values())
+        all_project = ["import_committed", "project_closed"] + ["protected_action_blocked"] * len(own)
+        # Order-independent: back-to-back rows can share a timestamp on coarse clocks.
+        for key, actor in (("owner", self.owner), ("chairman", people["chairman"]), ("manager", people["manager"])):
+            with self.subTest(actor=key):
+                self.assertCountEqual([e["event_type"] for e in self.service.task_events(actor, task["id"])], all_task)
+                self.assertCountEqual([e["event_type"] for e in self.service.project_events(actor, project["id"])],
+                                      all_project)
+        for key, kind in own.items():
+            with self.subTest(actor=key):
+                actor = people[key]
+                task_rows = self.service.task_events(actor, task["id"])
+                self.assertCountEqual([e["event_type"] for e in task_rows], list(ordinary) + [kind])
+                self.assertEqual([e["actor_user_id"] for e in task_rows if e["event_type"] == kind], [actor["id"]])
+                project_rows = self.service.project_events(actor, project["id"])
+                self.assertCountEqual([(e["event_type"], e["actor_user_id"]) for e in project_rows],
+                                      [("project_closed", self.owner["id"]), ("protected_action_blocked", actor["id"])])
+                self.assertNotIn("secret-payload", json.dumps(task_rows + project_rows))
+                self.assertNotIn("elsewhere", json.dumps(task_rows + project_rows))
+        with self.assertRaises(Forbidden):
+            self.service.task_events(people["outsider"], task["id"])
         with self.assertRaises(Forbidden):
             self.service.project_events(people["outsider"], project["id"])
 

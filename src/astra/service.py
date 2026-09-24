@@ -1111,14 +1111,9 @@ class AstraService:
         return task
 
     def task_events(self, actor: dict, task_id: str) -> list[dict]:
-        self.get_task(actor, task_id)
-        rows = self.db.execute(
-            """SELECT e.*, u.display_name actor_name FROM task_events e
-               LEFT JOIN users u ON u.id=e.actor_user_id
-               WHERE e.task_id=? ORDER BY e.occurred_at,e.id""",
-            (task_id,),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        task = self.get_task(actor, task_id)
+        return self._history_rows(actor, task["project_id"], "task_events", task_id,
+                                  self.NON_MANAGER_TASK_EVENT_KINDS)
 
     # --- Lifecycle: submissions, acceptance, review, reopening, holds ---
 
@@ -2665,21 +2660,37 @@ class AstraService:
             )
         return self.get_project(actor, project_id)
 
-    # ZSZ9T2: kinds a viewer or member who cannot manage the project may read (Aly,
-    # 2026-09-24). An allow-list, so a new kind stays hidden from them by default.
+    # ZSZ9T2/K62ZAP (Aly, 2026-09-24): the Owner, the Chairman and project managers read
+    # full history. Anyone else who can view the project reads only these kinds plus rows
+    # they wrote themselves. Allow-lists, so a new kind stays hidden from them by default.
     NON_MANAGER_PROJECT_EVENT_KINDS = ("project_schedule_changed", "project_closed")
+    NON_MANAGER_TASK_EVENT_KINDS = (
+        "task_created", "task_updated", "criticality_changed", "parent_changed", "dependency_added",
+        "dependency_removed", "task_submitted", "submission_accepted", "changes_requested", "task_reopened",
+        "task_on_hold", "schedule_proposed", "schedule_revised", "schedule_proposal_rejected",
+        "attachment_added", "attachment_removed", "final_result_marked", "final_result_unmarked",
+    )
+
+    def _sees_full_history(self, actor: dict, project_id: str) -> bool:
+        return actor["global_role"] == "chairman" or self.can_manage_project(actor, project_id)
+
+    def _history_rows(self, actor: dict, project_id: str, table: str, value: str,
+                      limited_kinds: tuple[str, ...]) -> list[dict]:
+        key = {"task_events": "task_id", "project_events": "project_id"}[table]  # fixed allow-list
+        sql = f"""SELECT e.*, u.display_name actor_name FROM {table} e
+               LEFT JOIN users u ON u.id=e.actor_user_id WHERE e.{key}=?"""
+        params: list = [value]
+        if not self._sees_full_history(actor, project_id):
+            sql += f" AND (e.event_type IN ({','.join('?' * len(limited_kinds))}) OR e.actor_user_id=?)"
+            params.extend(limited_kinds)
+            params.append(actor["id"])
+        rows = self.db.execute(sql + " ORDER BY e.occurred_at,e.id", params).fetchall()
+        return [dict(row) for row in rows]
 
     def project_events(self, actor: dict, project_id: str) -> list[dict]:
         self.get_project(actor, project_id)
-        sql = """SELECT e.*, u.display_name actor_name FROM project_events e
-               LEFT JOIN users u ON u.id=e.actor_user_id WHERE e.project_id=?"""
-        params: list = [project_id]
-        if not self.can_manage_project(actor, project_id):
-            kinds = self.NON_MANAGER_PROJECT_EVENT_KINDS
-            sql += f" AND e.event_type IN ({','.join('?' * len(kinds))})"
-            params.extend(kinds)
-        rows = self.db.execute(sql + " ORDER BY e.occurred_at,e.id", params).fetchall()
-        return [dict(row) for row in rows]
+        return self._history_rows(actor, project_id, "project_events", project_id,
+                                  self.NON_MANAGER_PROJECT_EVENT_KINDS)
 
     def _project_event(self, project_id: str, actor_id: str, kind: str, detail: dict | None, reason: str | None) -> None:
         self.db.execute(
