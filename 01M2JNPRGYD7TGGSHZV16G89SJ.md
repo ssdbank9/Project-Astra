@@ -15,7 +15,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T13:57:04Z
-updated-at: 2026-09-24T15:30:23Z
+updated-at: 2026-09-24T15:30:28Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-43376
 claimed-at: 2026-09-19T08:05:19Z
@@ -69,3 +69,4 @@ review-check: "1. Run .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 102 
 - **2026-09-19 10:52 · Aly Jafferani** — OWNER DECISION / ACCEPTED RISK 2026-09-19 — Items 14 and 15 update: build BOTH installation-level managed-download modes so the App Owner can decide later. Mode 1: Astra-authorized streaming (task access rechecked for every request; audited). Mode 2: permanent direct storage/static URL (lowest Astra application-processing/bandwidth load, especially for OCI). Permanent URLs explicitly BYPASS ongoing Astra task authorization: anyone with the URL can access/share it until the object/URL is revoked, and later task-access revocation does not revoke prior copies. Never represent direct mode as task-access-controlled. For private desktop storage, direct serving still consumes the desktop's network bandwidth even if it bypasses Astra application streaming. Also support Item 15 Option 2: public Internet deployment through a domain and HTTPS reverse proxy, with hardened authentication, firewall, rate limiting, patching, monitoring and reliable uptime required before production exposure. The active download mode remains an App Owner deployment decision.
 - **2026-09-19 10:55 · Aly Jafferani** — OWNER DECISION 2026-09-19 — Item 16: combine secure streaming and permanent direct access per attachment. Every managed upload starts with task-authorized Astra streaming and has NO permanent URL by default. Only the App Owner may explicitly generate a permanent direct link for a specific attachment after a clear confirmation that it bypasses task authorization. Generation and revocation must be audited and notify the App Owner. Task-access revocation does not revoke a permanent link; revocation is separate. OCI uses a direct object-access mechanism; private-server storage uses a separately served public token URL and still consumes server/desktop network bandwidth. Never auto-generate permanent links.
 - **2026-09-20 03:13 · Aly Jafferani** — Owner confirmation recorded 2026-09-20: every file/final-result mutation, including attachment deletion, is App Owner-only. Hosted Astra uses authorized managed download/open behavior and never exposes or reveals local Explorer paths.
+- **2026-09-24 15:30 · Aly Jafferani** — Sent back from signoff 2026-09-24 to fix the three NO-GO review findings
