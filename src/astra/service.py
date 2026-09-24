@@ -15,6 +15,7 @@ from .db import V15_EXPECTED_REVISION_SQL, owner_request_intent_key, transaction
 
 
 ROLES = {"owner", "chairman", "member"}
+USER_COLUMNS = "id,email,display_name,global_role,active,created_at,is_primary_owner"
 # Suggested-owner roles a template can carry (8B9NBH), in display order: the two
 # global roles, then the three project membership roles.
 TEMPLATE_ROLES = ("owner", "chairman", "manager", "member", "viewer")
@@ -117,6 +118,11 @@ class OwnerDecision:
     reason: str = ""
 
 
+class _OwnerTargetBlocked(Exception):
+    """Internal: rolls back a user change aimed at an owner by someone other than the
+    primary owner; AstraService._guarded_user_change audits it after the rollback."""
+
+
 class ImportBlocked(Forbidden):
     """A non-permitted import attempt. Raised inside the import path and audited by the
     caller once no transaction is open, so the audit row survives the rollback."""
@@ -129,6 +135,23 @@ class ImportBlocked(Forbidden):
 class AstraService:
     def __init__(self, connection: sqlite3.Connection):
         self.db = connection
+
+    def _notify(self, user_id: str, event_id: str, task_id: str | None, kind: str, summary: str,
+                created_at: str | None = None) -> None:
+        # INSERT OR IGNORE with the unique (user_id, event_id) index makes retries idempotent.
+        self.db.execute(
+            "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (new_id(), user_id, event_id, task_id, kind, summary, created_at or now_text()),
+        )
+
+    def _notify_owners(self, actor_id: str, event_id: str, task_id: str | None, kind: str, summary: str,
+                       created_at: str | None = None) -> None:
+        """GTEYTG: an owner notice goes to every active owner except the one who acted."""
+        for row in self.db.execute(
+            "SELECT id FROM users WHERE global_role='owner' AND active=1 AND id<>?", (actor_id,)
+        ).fetchall():
+            self._notify(row["id"], event_id, task_id, kind, summary, created_at)
 
     def owner_exists(self) -> bool:
         return bool(self.db.execute("SELECT 1 FROM users WHERE global_role='owner'").fetchone())
@@ -158,18 +181,22 @@ class AstraService:
         return cursor.rowcount
 
     def create_initial_owner(self, email: str, display_name: str, password: str) -> dict:
-        if self.owner_exists():
-            raise ValueError("An owner account already exists.")
-        user_id = new_id()
-        self.db.execute(
-            "INSERT INTO users(id,email,display_name,password_hash,global_role,created_at) VALUES(?,?,?,?,?,?)",
-            (user_id, normalize_email(email), display_name.strip() or "Owner", hash_password(password), "owner", now_text()),
-        )
+        user_id, password_hash = new_id(), hash_password(password)
+        # GTEYTG: the check and the insert share one write lock, and the partial unique
+        # index on is_primary_owner refuses a second primary even if they did not.
+        with transaction(self.db):
+            if self.owner_exists():
+                raise ValueError("An owner account already exists.")
+            self.db.execute(
+                "INSERT INTO users(id,email,display_name,password_hash,global_role,created_at,is_primary_owner)"
+                " VALUES(?,?,?,?,?,?,1)",
+                (user_id, normalize_email(email), display_name.strip() or "Owner", password_hash, "owner", now_text()),
+            )
         return self.get_user(user_id)
 
     def get_user(self, user_id: str) -> dict:
         user = row_dict(self.db.execute(
-            "SELECT id,email,display_name,global_role,active,created_at FROM users WHERE id=?", (user_id,)
+            f"SELECT {USER_COLUMNS} FROM users WHERE id=?", (user_id,)
         ).fetchone())
         if not user:
             raise KeyError("User not found.")
@@ -186,7 +213,8 @@ class AstraService:
             raise ValueError("A user with this email already exists.")
         user_id = new_id()
         self.db.execute(
-            "INSERT INTO users VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO users(id,email,display_name,password_hash,global_role,active,created_at,created_by)"
+            " VALUES(?,?,?,?,?,?,?,?)",
             (user_id, email, display_name.strip(), hash_password(password), role, 1, now_text(), actor["id"]),
         )
         return self.get_user(user_id)
@@ -195,7 +223,7 @@ class AstraService:
         if actor["global_role"] not in {"owner", "chairman"}:
             raise Forbidden("User directory access denied.")
         rows = self.db.execute(
-            "SELECT id,email,display_name,global_role,active,created_at FROM users ORDER BY display_name COLLATE NOCASE"
+            f"SELECT {USER_COLUMNS} FROM users ORDER BY display_name COLLATE NOCASE"
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -203,13 +231,134 @@ class AstraService:
         self.require_owner(actor)
         if user_id == actor["id"]:
             raise ValueError("You cannot change your own active status.")
+
+        def write(target: dict) -> None:
+            if target["global_role"] == "owner":  # only the primary gets here: revoke, then deactivate
+                raise ValueError("Remove their secondary owner access first.")
+            self.db.execute("UPDATE users SET active=? WHERE id=?", (1 if active else 0, user_id))
+            if not active:
+                self.revoke_user_sessions(user_id)
+
+        self._guarded_user_change(actor, user_id, "deactivate" if not active else "reactivate", write)
+        return self.get_user(user_id)
+
+    # --- Primary and secondary owners (GTEYTG, Aly 2026-09-24) ---
+    # Every owner has global_role='owner'. Only the primary owner (is_primary_owner=1)
+    # grants or removes owner access, and no other owner may act on an owner account.
+
+    @staticmethod
+    def _is_primary_owner(actor: dict) -> bool:
+        return bool(actor.get("active") and actor.get("global_role") == "owner" and actor.get("is_primary_owner"))
+
+    def _insert_user_event(self, target_id: str, kind: str, actor_id: str, reason: str | None,
+                           detail: dict) -> str:
+        event_id = new_id()
+        self.db.execute(
+            "INSERT INTO user_events(id,target_user_id,event_type,actor_user_id,occurred_at,reason,detail_json)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (event_id, target_id, kind, actor_id, now_text(), reason, json.dumps(detail, sort_keys=True)),
+        )
+        return event_id
+
+    def _owner_change_blocked(self, actor: dict, target_id: str | None, action: str) -> None:
+        """Record and refuse an owner-access change the actor may not make. Called with no
+        transaction open, so the audit row and the primary's notice are kept. A repeat of
+        the same actor, target and action within 10 minutes is refused without a new row
+        or notice, so retries cannot flood the audit. An unknown target records nothing."""
+        known = target_id and self.db.execute("SELECT 1 FROM users WHERE id=?", (target_id,)).fetchone()
+        detail = {"action": action}
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        repeat = known and self.db.execute(
+            "SELECT 1 FROM user_events WHERE event_type='owner_change_blocked' AND actor_user_id=?"
+            " AND target_user_id=? AND detail_json=? AND occurred_at>=?",
+            (actor["id"], target_id, json.dumps(detail, sort_keys=True), cutoff),
+        ).fetchone()
+        if known and not repeat:
+            event_id = self._insert_user_event(target_id, "owner_change_blocked", actor["id"], None, detail)
+            primary = self.db.execute("SELECT id FROM users WHERE is_primary_owner=1").fetchone()
+            if primary and primary["id"] != actor["id"]:
+                self._notify(primary["id"], event_id, None, "owner_change_blocked",
+                             f"blocked {action} attempt by {actor.get('display_name', actor['id'])}")
+        raise Forbidden("Only the primary owner can change another owner's access.")
+
+    def _guarded_user_change(self, actor: dict, user_id: str, action: str, write) -> None:
+        """The one path for any call that changes a user: read the target, refuse unless
+        the actor is the primary owner when the target is an owner, and write, all under
+        one write lock so the target cannot become an owner in between. A refusal is
+        audited after the rollback."""
+        try:
+            with transaction(self.db):
+                target = self.get_user(user_id)
+                if target["global_role"] == "owner" and not self._is_primary_owner(actor):
+                    raise _OwnerTargetBlocked()
+                write(target)
+        except _OwnerTargetBlocked:
+            self._owner_change_blocked(actor, user_id, action)
+
+    def _record_user_event(self, target: dict, actor: dict, kind: str, reason: str, detail: dict) -> None:
+        event_id = self._insert_user_event(target["id"], kind, actor["id"], reason, detail)
+        self._notify(target["id"], event_id, None, kind, f"{kind.replace('_', ' ')} by {actor['display_name']}")
+
+    def grant_secondary_owner(self, actor: dict, user_id: str, reason: str) -> dict:
+        if not self._is_primary_owner(actor):
+            self._owner_change_blocked(actor, user_id, "grant owner access")
+        reason = str(reason or "").strip()
+        if not reason:
+            raise ValueError("A reason is required.")
         target = self.get_user(user_id)
         if target["global_role"] == "owner":
-            raise ValueError("The owner account cannot be deactivated.")
-        self.db.execute("UPDATE users SET active=? WHERE id=?", (1 if active else 0, user_id))
-        if not active:
-            self.revoke_user_sessions(user_id)
+            raise ValueError("This user is already an owner.")
+        if not target["active"]:
+            raise ValueError("Only an active user can be made an owner.")
+        with transaction(self.db):
+            cursor = self.db.execute(
+                "UPDATE users SET global_role='owner' WHERE id=? AND global_role=? AND active=1",
+                (user_id, target["global_role"]),
+            )
+            if cursor.rowcount != 1:
+                raise Conflict("This user changed; reload and try again.")
+            self._record_user_event(target, actor, "secondary_owner_granted", reason,
+                                    {"prior_role": target["global_role"]})
         return self.get_user(user_id)
+
+    def revoke_secondary_owner(self, actor: dict, user_id: str, reason: str) -> dict:
+        if not self._is_primary_owner(actor):
+            self._owner_change_blocked(actor, user_id, "remove owner access")
+        reason = str(reason or "").strip()
+        if not reason:
+            raise ValueError("A reason is required.")
+        target = self.get_user(user_id)
+        if target["is_primary_owner"]:
+            raise ValueError("The primary owner's access cannot be removed.")
+        if target["global_role"] != "owner":
+            raise ValueError("This user is not a secondary owner.")
+        granted = self.db.execute(
+            "SELECT detail_json FROM user_events WHERE target_user_id=? AND event_type='secondary_owner_granted'"
+            " ORDER BY occurred_at DESC, id DESC LIMIT 1", (user_id,),
+        ).fetchone()
+        prior = json.loads(granted["detail_json"]).get("prior_role") if granted else None
+        restored = prior if prior in {"chairman", "member"} else "member"
+        with transaction(self.db):
+            cursor = self.db.execute(
+                "UPDATE users SET global_role=? WHERE id=? AND global_role='owner' AND is_primary_owner=0",
+                (restored, user_id),
+            )
+            if cursor.rowcount != 1:
+                raise Conflict("This user changed; reload and try again.")
+            sessions = self.revoke_user_sessions(user_id)
+            self._record_user_event(target, actor, "secondary_owner_revoked", reason,
+                                    {"restored_role": restored, "sessions_revoked": sessions})
+        return self.get_user(user_id)
+
+    def list_user_events(self, actor: dict) -> list[dict]:
+        """Newest first: the latest 200 grants and removals, then the latest 50 blocked
+        attempts. Separate limits, so blocked attempts never push a grant out of view."""
+        self.require_owner(actor)
+        query = """SELECT e.*, t.display_name target_name, a.display_name actor_name FROM user_events e
+               JOIN users t ON t.id=e.target_user_id JOIN users a ON a.id=e.actor_user_id
+               WHERE (e.event_type='owner_change_blocked')=? ORDER BY e.occurred_at DESC, e.id DESC LIMIT ?"""
+        rows = self.db.execute(query, (0, 200)).fetchall() + self.db.execute(query, (1, 50)).fetchall()
+        return [dict(row) for row in rows]
 
     def list_assignable_users(self, actor: dict, project_id: str) -> list[dict]:
         if not self.can_manage_project(actor, project_id):
@@ -228,7 +377,8 @@ class AstraService:
 
     def revoke_project_access(self, actor: dict, project_id: str, user_id: str) -> None:
         self.require_owner(actor)
-        self.db.execute("DELETE FROM memberships WHERE project_id=? AND user_id=?", (project_id, user_id))
+        self._guarded_user_change(actor, user_id, "remove project access", lambda target: self.db.execute(
+            "DELETE FROM memberships WHERE project_id=? AND user_id=?", (project_id, user_id)))
 
     def list_memberships(self, actor: dict, project_id: str | None = None) -> list[dict]:
         self.require_owner(actor)
@@ -559,10 +709,10 @@ class AstraService:
         self.require_owner(actor)
         if role not in {"manager", "member", "viewer"}:
             raise ValueError("Invalid project role.")
-        self.db.execute(
+        self._guarded_user_change(actor, user_id, "change project access", lambda target: self.db.execute(
             "INSERT INTO memberships VALUES(?,?,?,?,?) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role",
             (project_id, user_id, role, now_text(), actor["id"]),
-        )
+        ))
 
     def _require_project(self, project_id: str) -> None:
         if not self.db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
@@ -1222,14 +1372,8 @@ class AstraService:
                 {"event_id": event_id, "action": action, "payload": payload or {}},
                 "Actor cannot request this Owner action",
             )
-            owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
-            if owner and owner["id"] != actor["id"]:
-                self.db.execute(
-                    "INSERT OR IGNORE INTO notifications"
-                    "(id,user_id,event_id,task_id,kind,summary,created_at) VALUES(?,?,?,?,?,?,?)",
-                    (new_id(), owner["id"], event_id, None, "protected_action_blocked",
-                     f"blocked {action.replace('_', ' ')} attempt: {project['name']}", occurred_at),
-                )
+            self._notify_owners(actor["id"], event_id, None, "protected_action_blocked",
+                                f"blocked {action.replace('_', ' ')} attempt: {project['name']}", occurred_at)
             raise Forbidden("Only a project Manager may request this Owner action.")
         request_payload = dict(payload or {})
         payload_json = json.dumps(request_payload, default=str, sort_keys=True)
@@ -1260,14 +1404,8 @@ class AstraService:
                 {"request_id": request_id, "action": action, "payload": request_payload},
                 request_reason or None,
             )
-            owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
-            if owner and owner["id"] != actor["id"]:
-                self.db.execute(
-                    "INSERT OR IGNORE INTO notifications"
-                    "(id,user_id,event_id,task_id,kind,summary,created_at) VALUES(?,?,?,?,?,?,?)",
-                    (new_id(), owner["id"], request_id, None, "protected_action_requested",
-                     f"{action.replace('_', ' ')} requested: {project['name']}", requested_at),
-                )
+            self._notify_owners(actor["id"], request_id, None, "protected_action_requested",
+                                f"{action.replace('_', ' ')} requested: {project['name']}", requested_at)
         return {"request": request}
 
     @staticmethod
@@ -1451,6 +1589,9 @@ class AstraService:
         decision = str(decision or "").strip().lower()
         if decision not in {"approved", "rejected", "cancelled"}:
             raise ValueError("Decision must be approved, rejected, or cancelled.")
+        if decision != "cancelled" and request["requested_by"] == actor["id"]:
+            # GTEYTG: with several owners, the requester may be an owner now; another owner decides.
+            raise Forbidden("Another owner must approve or reject a request you filed.")
         reason = str(reason or "").strip()
         if decision in {"rejected", "cancelled"}:
             if not reason:
@@ -2265,7 +2406,7 @@ class AstraService:
     def _check_role_assignments(self, body: dict, project_id: str | None, role_assignments,
                                 *, grants_membership: bool) -> dict[str, str]:
         """Validate the Owner's role -> person picks before anything is written.
-        'owner' is never picked (there is one App Owner). A 'chairman' pick must be
+        'owner' is never picked (it is the acting owner). A 'chairman' pick must be
         an active Chairman. A project-role pick must be an active ordinary user; on
         a new project (grants_membership) they are given that role, otherwise they
         must already hold it on the target project."""
@@ -2301,14 +2442,15 @@ class AstraService:
         return picks
 
     def _resolve_role(self, project_id: str, role: str | None, picks: dict[str, str]) -> str | None:
-        """A role -> the Owner's pick, else its single active holder, else None."""
+        """A role -> the Owner's pick ('owner' is the acting owner), else its single
+        active holder, else None."""
         if not role:
             return None
         if role in picks:
             return picks[role]
-        if role in {"owner", "chairman"}:
+        if role == "chairman":
             rows = self.db.execute(
-                "SELECT id FROM users WHERE global_role=? AND active=1", (role,)
+                "SELECT id FROM users WHERE global_role='chairman' AND active=1"
             ).fetchall()
         else:
             rows = self.db.execute(
@@ -2336,6 +2478,7 @@ class AstraService:
                            root_parent_id: str | None, anchor_date: str | None, source_name: str,
                            picks: dict[str, str]) -> None:
         tasks = body.get("tasks", [])
+        picks = {**picks, "owner": actor["id"]}  # GTEYTG: the 'owner' role is the acting owner
         timestamp = now_text()
         id_of: dict[int, str] = {}
         owners: dict[int, tuple[str | None, str | None]] = {}
@@ -3016,20 +3159,11 @@ class AstraService:
             self._notify_owner(event_id, task_id, actor_id, kind)
 
     def _notify_owner(self, event_id: str, task_id: str, actor_id: str, kind: str) -> None:
-        # Durable record for the app owner of every task change made by someone else.
-        # The owner's own actions are already visible to them, so they are not self-notified.
-        owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
-        if not owner or owner["id"] == actor_id:
-            return
+        # Durable record for the owners of every task change made by someone else.
+        # An owner's own actions are already visible to them, so they are not self-notified.
         row = self.db.execute("SELECT title FROM tasks WHERE id=?", (task_id,)).fetchone()
         title = row["title"] if row else task_id
-        summary = f"{kind.replace('_', ' ')}: {title}"
-        # INSERT OR IGNORE with the unique (user_id, event_id) index makes retries idempotent.
-        self.db.execute(
-            "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at)"
-            " VALUES(?,?,?,?,?,?,?)",
-            (new_id(), owner["id"], event_id, task_id, kind, summary, now_text()),
-        )
+        self._notify_owners(actor_id, event_id, task_id, kind, f"{kind.replace('_', ' ')}: {title}")
 
     def list_notifications(self, actor: dict, unread_only: bool = False) -> list[dict]:
         query = ("SELECT n.*, t.title task_title FROM notifications n LEFT JOIN tasks t ON t.id=n.task_id"
@@ -3350,14 +3484,8 @@ class AstraService:
                 project["id"], actor["id"], "protected_action_blocked",
                 {"event_id": event_id, "action": action, "payload": {}}, "Actor cannot import into this project",
             )
-        owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
-        if owner and owner["id"] != actor["id"]:
-            self.db.execute(
-                "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at)"
-                " VALUES(?,?,?,?,?,?,?)",
-                (new_id(), owner["id"], event_id, None, "protected_action_blocked",
-                 f"blocked {action.replace('_', ' ')} attempt: {label}", occurred_at),
-            )
+        self._notify_owners(actor["id"], event_id, None, "protected_action_blocked",
+                            f"blocked {action.replace('_', ' ')} attempt: {label}", occurred_at)
 
     def _import_authorize(self, actor: dict, project_id: str | None, action: str) -> tuple[bool, dict | None]:
         if not actor.get("active"):
@@ -3516,15 +3644,9 @@ class AstraService:
             (import_id, project_id, actor["id"], summary["filename"], digest, now_text(),
              json.dumps(summary, default=str, sort_keys=True), engine.report_csv()),
         )
-        owner = self.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()
-        if owner and owner["id"] != actor["id"]:
-            self.db.execute(
-                "INSERT OR IGNORE INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at)"
-                " VALUES(?,?,?,?,?,?,?)",
-                (new_id(), owner["id"], import_id, None, "import_committed",
-                 f"import committed: {summary['filename']} into {engine.project['name']}"
-                 f" ({summary['create']} created, {summary['update']} updated)", now_text()),
-            )
+        self._notify_owners(actor["id"], import_id, None, "import_committed",
+                            f"import committed: {summary['filename']} into {engine.project['name']}"
+                            f" ({summary['create']} created, {summary['update']} updated)")
         return summary
 
     def _create_project_from_header(self, actor: dict, name: str, header: dict) -> str:

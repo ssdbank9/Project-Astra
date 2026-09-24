@@ -10,8 +10,19 @@ This first vertical slice provides:
 - owner bootstrap and authenticated sessions;
 - App Owner, Chairman (organization-wide read-only unless separately granted a project role),
   manager, and member roles;
-- an owner-only People panel: create users, deactivate/reactivate them, and grant or
+- an owner-only People screen: create users, deactivate/reactivate them, and grant or
   revoke project access; task owners are chosen from users authorized on the project;
+- primary and secondary owners: the first owner (`init-owner`) is the primary owner and
+  alone may make an active user a secondary owner, or remove that access, with a reason
+  (`POST`/`DELETE /api/users/{id}/secondary-owner`). A secondary owner has every other
+  Owner power but cannot change the owner access, active status or project access of any
+  owner, their own included (403, recorded once per actor, target and action in 10 minutes,
+  and notified to the primary). To deactivate a secondary owner the primary first removes
+  their secondary owner access. Removing access restores the user's earlier role, signs
+  them out and keeps their project roles. The People screen shows the latest 20 grants and
+  removals under **Owner access history** and the latest 10 blocked attempts separately, so
+  blocked attempts never hide a grant (`GET /api/user-events`, owners only). An owner
+  cannot approve or reject an Owner request they filed;
 - project-scoped access;
 - projects, tasks, responsible people, dates, criticality, progress, and dependencies;
 - finish-to-start dependency creation, cycle prevention, blocking visibility, and audited removal;
@@ -55,7 +66,7 @@ This first vertical slice provides:
   dedicated `criticality_changed` audit event (actor, old value, new value, reason);
 - parent/subtask hierarchy with a completed/total roll-up shown separately from a task's own
   declared progress, cycle-safe re-parenting, and clickable subtasks;
-- a durable in-app notification inbox: the owner gets an idempotent record of every task change
+- a durable in-app notification inbox: every owner gets an idempotent record of every task change
   made by someone else (in-app only; marking read never deletes or approves anything);
 - portfolio and per-project Gantt views with overdue and upcoming highlighting;
 - task steps (subtasks) drawn as numbered, colour-coded segments inside the parent's Gantt
@@ -128,6 +139,14 @@ stops with "Astra cannot upgrade this database to schema 15", the database is un
 the message lists each group of identical pending requests by id. Back up
 `astra.sqlite3`, keep the earliest request of each group pending, set the others to
 `status='cancelled'`, then start Astra again.
+
+Schema 16 adds `users.is_primary_owner` (the database refuses a second primary owner, or a
+primary who is not an owner) and the `user_events` audit table; the existing owner becomes
+the primary owner. If start-up stops with "Astra cannot upgrade this database to schema 16",
+the database is untouched: it has more than one owner and the message lists their user ids.
+Back up `astra.sqlite3`, set every owner except the primary back to their earlier role
+(`UPDATE users SET global_role='member' WHERE id=...`), start Astra again, and make them
+secondary owners from the People screen.
 
 Database migrations are applied one SQL statement at a time inside a single
 `BEGIN IMMEDIATE` transaction per schema version. The schema changes and that step's

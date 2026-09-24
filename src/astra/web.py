@@ -128,6 +128,9 @@ class AstraHandler(BaseHTTPRequestHandler):
             if path == "/api/users":
                 user, _ = self._require_user()
                 return self._json({"users": self.service.list_users(user)})
+            if path == "/api/user-events":
+                user, _ = self._require_user()
+                return self._json({"events": self.service.list_user_events(user)})
             if path == "/api/memberships":
                 user, _ = self._require_user()
                 project = parse_qs(urlparse(self.path).query).get("project_id", [None])[0]
@@ -330,6 +333,9 @@ class AstraHandler(BaseHTTPRequestHandler):
                     user, request_id, payload.get("decision", ""), payload.get("reason", "")
                 )
                 return self._json(result)
+            if path.startswith("/api/users/") and path.endswith("/secondary-owner") and path.count("/") == 4:
+                granted = self.service.grant_secondary_owner(user, path.split("/")[3], payload.get("reason", ""))
+                return self._json({"user": granted}, HTTPStatus.CREATED)
             if path.startswith("/api/users/") and path.endswith("/active"):
                 user_id = path.split("/")[3]
                 updated = self.service.set_user_active(user, user_id, bool(payload.get("active")))
@@ -507,6 +513,9 @@ class AstraHandler(BaseHTTPRequestHandler):
             if path == "/api/final-results":
                 self.service.unmark_final_result(user, str(payload.get("result_id", "")))
                 return self._json({"ok": True})
+            if path.startswith("/api/users/") and path.endswith("/secondary-owner") and path.count("/") == 4:
+                revoked = self.service.revoke_secondary_owner(user, path.split("/")[3], payload.get("reason", ""))
+                return self._json({"user": revoked})
             self.send_error(HTTPStatus.NOT_FOUND)
         except Exception as exc:
             self._error(exc)
@@ -552,13 +561,15 @@ class AstraHandler(BaseHTTPRequestHandler):
         if not raw:
             raise Forbidden("Sign in required.")
         row = self.db.execute(
-            """SELECT s.csrf_token,s.expires_at,u.id,u.email,u.display_name,u.global_role,u.active,u.created_at
+            """SELECT s.csrf_token,s.expires_at,u.id,u.email,u.display_name,u.global_role,u.active,u.created_at,
+                      u.is_primary_owner
                FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?""",
             (token_digest(raw),),
         ).fetchone()
         if not row or not row["active"] or row["expires_at"] <= now_text():
             raise Forbidden("Session expired.")
-        user = {key: row[key] for key in ("id", "email", "display_name", "global_role", "active", "created_at")}
+        user = {key: row[key] for key in
+                ("id", "email", "display_name", "global_role", "active", "created_at", "is_primary_owner")}
         return user, row["csrf_token"]
 
     def _delete_session(self):

@@ -1,13 +1,15 @@
 import json
 import os
+import sqlite3
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from astra.auth import hash_password, verify_password
 from astra.db import connect
-from astra.service import AstraService, Forbidden
+from astra.service import AstraService, Conflict, Forbidden
 
 
 class AstraCoreTests(unittest.TestCase):
@@ -2053,6 +2055,285 @@ class AstraCoreTests(unittest.TestCase):
         detail = self.service.task_detail(self.owner, parent["id"])
         self.assertEqual({s["id"] for s in detail["subtasks"]}, {step["id"], undated["id"]})
         self.assertTrue(all("start_date" in s and "criticality" in s for s in detail["subtasks"]))
+
+
+class SecondaryOwnerTests(unittest.TestCase):
+    """GTEYTG (Aly, Slack ts 1790245584.314119 and 1790245630.918199): the primary owner
+    grants and removes full Owner access; secondary owners cannot remove, demote or
+    deactivate the primary or each other; every change and blocked attempt is recorded."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db = connect(Path(self.temp.name) / "test.sqlite3")
+        self.service = AstraService(self.db)
+        self.primary = self.service.create_initial_owner("owner@example.org", "Primary", "correct horse battery")
+
+    def tearDown(self):
+        self.db.close()
+        self.temp.cleanup()
+
+    def user(self, key, role="member"):
+        return self.service.create_user(self.primary, f"{key}@example.org", key.title(), f"{key} password safe", role)
+
+    def secondary(self, key):
+        created = self.user(key)
+        return self.service.grant_secondary_owner(self.primary, created["id"], f"cover for {key}")
+
+    def user_events(self, event_type=None):
+        rows = [dict(r) for r in self.db.execute("SELECT * FROM user_events ORDER BY occurred_at, id")]
+        return [r for r in rows if event_type in (None, r["event_type"])]
+
+    def notified(self, user):
+        return [n["kind"] for n in self.service.list_notifications(user)]
+
+    def test_initial_owner_is_primary_and_exposed(self):
+        self.assertEqual(self.primary["is_primary_owner"], 1)
+        listed = {u["id"]: u for u in self.service.list_users(self.primary)}
+        self.assertEqual(listed[self.primary["id"]]["is_primary_owner"], 1)
+        member = self.user("plain")
+        self.assertEqual(member["is_primary_owner"], 0)
+
+    def test_primary_grants_and_revokes_a_secondary_owner(self):
+        member = self.user("deputy")
+        project = self.service.create_project(self.primary, "Kept access")
+        self.service.grant_project_access(self.primary, project["id"], member["id"], "manager")
+        granted = self.service.grant_secondary_owner(self.primary, member["id"], "Covers while I travel")
+        self.assertEqual((granted["global_role"], granted["is_primary_owner"]), ("owner", 0))
+        [event] = self.user_events("secondary_owner_granted")
+        self.assertEqual((event["target_user_id"], event["actor_user_id"], event["reason"]),
+                         (member["id"], self.primary["id"], "Covers while I travel"))
+        self.assertEqual(json.loads(event["detail_json"])["prior_role"], "member")
+        self.assertIn("secondary_owner_granted", self.notified(granted))
+        # Their sessions go when access is removed; their project roles stay.
+        self.db.execute("INSERT INTO sessions VALUES('tok',?,'csrf','2026-01-01T00:00:00Z','2999-01-01T00:00:00Z')",
+                        (member["id"],))
+        revoked = self.service.revoke_secondary_owner(self.primary, member["id"], "Back from travel")
+        self.assertEqual((revoked["global_role"], revoked["is_primary_owner"]), ("member", 0))
+        [event] = self.user_events("secondary_owner_revoked")
+        detail = json.loads(event["detail_json"])
+        self.assertEqual((detail["restored_role"], detail["sessions_revoked"]), ("member", 1))
+        self.assertEqual(event["reason"], "Back from travel")
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM sessions WHERE user_id=?", (member["id"],)).fetchone()[0], 0)
+        self.assertEqual(self.db.execute("SELECT role FROM memberships WHERE user_id=?", (member["id"],)).fetchone()[0],
+                         "manager")
+        self.assertIn("secondary_owner_revoked", self.notified(revoked))
+        self.assertEqual(len(self.service.list_user_events(self.primary)), 2)
+
+    def test_revoke_restores_a_chairman_and_several_secondaries_are_allowed(self):
+        chairman = self.user("chair", "chairman")
+        self.service.grant_secondary_owner(self.primary, chairman["id"], "Board cover")
+        other = self.secondary("second")
+        owners = self.db.execute("SELECT COUNT(*) FROM users WHERE global_role='owner'").fetchone()[0]
+        self.assertEqual(owners, 3)
+        self.assertEqual(self.service.revoke_secondary_owner(self.primary, chairman["id"], "Done")["global_role"],
+                         "chairman")
+        self.assertEqual(self.service.get_user(other["id"])["global_role"], "owner")
+
+    def test_grant_and_revoke_input_errors(self):
+        member = self.user("target")
+        with self.assertRaises(ValueError):
+            self.service.grant_secondary_owner(self.primary, member["id"], "   ")
+        with self.assertRaises(KeyError):
+            self.service.grant_secondary_owner(self.primary, "no-such-user", "why")
+        secondary = self.secondary("already")
+        with self.assertRaises(ValueError):
+            self.service.grant_secondary_owner(self.primary, secondary["id"], "again")
+        with self.assertRaises(ValueError):
+            self.service.revoke_secondary_owner(self.primary, member["id"], "not an owner")
+        with self.assertRaises(ValueError):
+            self.service.revoke_secondary_owner(self.primary, self.primary["id"], "myself")
+        with self.assertRaises(ValueError):
+            self.service.revoke_secondary_owner(self.primary, secondary["id"], "  ")
+        with self.assertRaisesRegex(ValueError, "Remove their secondary owner access first"):
+            self.service.set_user_active(self.primary, secondary["id"], False)
+        inactive = self.user("gone")
+        self.service.set_user_active(self.primary, inactive["id"], False)
+        with self.assertRaises(ValueError):
+            self.service.grant_secondary_owner(self.primary, inactive["id"], "why")
+        self.assertEqual(self.user_events("secondary_owner_granted")[-1]["target_user_id"], secondary["id"])
+
+    def test_database_refuses_a_second_primary_and_a_primary_who_is_not_an_owner(self):
+        secondary = self.secondary("dup")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE users SET is_primary_owner=1 WHERE id=?", (secondary["id"],))
+        member = self.user("notowner")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE users SET is_primary_owner=1 WHERE id=?", (member["id"],))
+        self.db.execute("UPDATE users SET is_primary_owner=0 WHERE id=?", (self.primary["id"],))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE users SET is_primary_owner=1 WHERE id=?", (member["id"],))
+
+    def test_secondary_owner_cannot_change_owner_access_or_target_other_owners(self):
+        first, second = self.secondary("first"), self.secondary("second")
+        third = self.user("third")
+        project = self.service.create_project(self.primary, "Guarded")
+        attempts = {
+            "grant a third user": lambda: self.service.grant_secondary_owner(first, third["id"], "promote"),
+            "revoke another secondary": lambda: self.service.revoke_secondary_owner(first, second["id"], "demote"),
+            "revoke the primary": lambda: self.service.revoke_secondary_owner(first, self.primary["id"], "coup"),
+            "deactivate the primary": lambda: self.service.set_user_active(first, self.primary["id"], False),
+            "deactivate another secondary": lambda: self.service.set_user_active(first, second["id"], False),
+            "give the primary project access": lambda: self.service.grant_project_access(
+                first, project["id"], self.primary["id"], "viewer"),
+            "remove another secondary's project access": lambda: self.service.revoke_project_access(
+                first, project["id"], second["id"]),
+            "change their own project access": lambda: self.service.grant_project_access(
+                first, project["id"], first["id"], "manager"),
+        }
+        users_before = [tuple(r) for r in self.db.execute("SELECT * FROM users ORDER BY id")]
+        for name, attempt in attempts.items():
+            with self.subTest(attempt=name):
+                before = len(self.user_events("owner_change_blocked"))
+                with self.assertRaises(Forbidden):
+                    attempt()
+                blocked = self.user_events("owner_change_blocked")
+                self.assertEqual(len(blocked), before + 1)
+                self.assertEqual(blocked[-1]["actor_user_id"], first["id"])
+        self.assertEqual([tuple(r) for r in self.db.execute("SELECT * FROM users ORDER BY id")], users_before)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM memberships").fetchone()[0], 0)
+        self.assertEqual(self.notified(self.primary).count("owner_change_blocked"), len(attempts))
+        # The secondary still manages ordinary users.
+        self.assertEqual(self.service.set_user_active(first, third["id"], False)["active"], 0)
+        self.service.grant_project_access(first, project["id"], third["id"], "member")
+
+    def test_repeated_blocked_attempts_record_one_row_and_one_notice(self):
+        first, second = self.secondary("first"), self.secondary("second")
+        for _ in range(3):
+            with self.assertRaises(Forbidden):
+                self.service.set_user_active(first, second["id"], False)
+        self.assertEqual(len(self.user_events("owner_change_blocked")), 1)
+        self.assertEqual(self.notified(self.primary).count("owner_change_blocked"), 1)
+        with self.assertRaises(Forbidden):   # a different action is a new record
+            self.service.revoke_secondary_owner(first, second["id"], "demote")
+        self.assertEqual(len(self.user_events("owner_change_blocked")), 2)
+        # Blocked rows never push grants out of the owner-access history.
+        self.db.executemany(
+            "INSERT INTO user_events(id,target_user_id,event_type,actor_user_id,occurred_at,reason,detail_json)"
+            " VALUES(?,?,'owner_change_blocked',?,'2999-01-01T00:00:00Z',NULL,'{}')",
+            [(f"flood-{n}", second["id"], first["id"]) for n in range(300)],
+        )
+        kinds = [e["event_type"] for e in self.service.list_user_events(self.primary)]
+        self.assertEqual(kinds.count("secondary_owner_granted"), 2)
+        self.assertEqual(kinds.count("owner_change_blocked"), 50)
+
+    def test_user_changes_read_the_target_under_the_write_lock(self):
+        # A target must not become an owner between the guard's read and the write.
+        project = self.service.create_project(self.primary, "Raced")
+        calls = {
+            "set_user_active": lambda uid: self.service.set_user_active(self.primary, uid, False),
+            "grant_project_access": lambda uid: self.service.grant_project_access(
+                self.primary, project["id"], uid, "member"),
+            "revoke_project_access": lambda uid: self.service.revoke_project_access(self.primary, project["id"], uid),
+        }
+        real_get_user = self.service.get_user
+        for name, call in calls.items():
+            with self.subTest(call=name):
+                target = self.user(f"race-{name.replace('_', '-')}")
+                other = sqlite3.connect(Path(self.temp.name) / "test.sqlite3", timeout=0.1, isolation_level=None)
+                outcome = []
+
+                def racing_get_user(user_id):
+                    found = real_get_user(user_id)
+                    if user_id == target["id"] and not outcome:
+                        try:
+                            other.execute("UPDATE users SET global_role='owner' WHERE id=?", (user_id,))
+                            outcome.append("promoted in between")
+                        except sqlite3.OperationalError:
+                            outcome.append("locked out")
+                    return found
+
+                try:
+                    with patch.object(self.service, "get_user", racing_get_user):
+                        call(target["id"])
+                finally:
+                    other.close()
+                self.assertEqual(outcome, ["locked out"])
+                self.assertEqual(self.service.get_user(target["id"])["global_role"], "member")
+
+    def test_non_owners_cannot_grant_or_revoke_owner_access(self):
+        chairman, member = self.user("chair", "chairman"), self.user("member")
+        secondary = self.secondary("sec")
+        for actor in (chairman, member):
+            with self.subTest(actor=actor["email"]):
+                with self.assertRaises(Forbidden):
+                    self.service.grant_secondary_owner(actor, member["id"], "promote")
+                with self.assertRaises(Forbidden):
+                    self.service.revoke_secondary_owner(actor, secondary["id"], "demote")
+                with self.assertRaises(Forbidden):
+                    self.service.list_user_events(actor)
+        self.assertEqual(len(self.user_events("owner_change_blocked")), 4)
+        self.assertEqual(len(self.service.list_user_events(secondary)), len(self.user_events()))
+
+    def test_secondary_owner_has_ordinary_owner_powers_until_revoked(self):
+        secondary = self.secondary("deputy")
+        project = self.service.create_project(secondary, "Deputy's project")
+        created = self.service.create_user(secondary, "new@example.org", "New", "new person password", "member")
+        task = self.service.create_task(secondary, {"project_id": project["id"], "title": "Deliver"})
+        submission = self.service.submit_task(secondary, task["id"], "done")
+        self.service.accept_submission(secondary, submission["id"], "accepted")
+        self.service.close_project(secondary, project["id"], "finished")
+        self.service.grant_project_access(secondary, project["id"], created["id"], "viewer")
+        self.service.revoke_secondary_owner(self.primary, secondary["id"], "done")
+        demoted = self.service.get_user(secondary["id"])
+        with self.assertRaises(Forbidden):
+            self.service.create_project(demoted, "No longer allowed")
+
+    def test_owner_request_decisions_by_several_owners(self):
+        manager = self.user("pm")
+        project = self.service.create_project(self.primary, "Governed")
+        self.service.grant_project_access(self.primary, project["id"], manager["id"], "manager")
+        task = self.service.create_task(self.primary, {"project_id": project["id"], "title": "Protected"})
+
+        def file_request(actor, status):
+            current = self.service.get_task(self.primary, task["id"])
+            return self.service.update_task(actor, task["id"], {
+                "status": status, "reason": f"please {status}", "expected_revision": current["revision"],
+            })["request"]
+
+        # A secondary decides a Manager's request; a second decision is a conflict.
+        secondary = self.secondary("deputy")
+        request = file_request(manager, "cancelled")
+        self.service.decide_owner_action_request(secondary, request["id"], "rejected", "not now")
+        with self.assertRaises(Conflict):
+            self.service.decide_owner_action_request(self.primary, request["id"], "rejected", "also no")
+        # A Manager later made owner cannot approve or reject their own request; cancel is fine.
+        own = file_request(manager, "cancelled")
+        promoted = self.service.grant_secondary_owner(self.primary, manager["id"], "promoted")
+        for decision in ("approved", "rejected"):
+            with self.subTest(decision=decision), self.assertRaises(Forbidden):
+                self.service.decide_owner_action_request(promoted, own["id"], decision, "self")
+        self.assertEqual(self.service.decide_owner_action_request(promoted, own["id"], "cancelled", "withdrawn")
+                         ["request"]["status"], "cancelled")
+
+    def test_owner_notifications_reach_every_other_active_owner(self):
+        secondary = self.secondary("deputy")
+        manager = self.user("pm")
+        project = self.service.create_project(self.primary, "Noticed")
+        self.service.grant_project_access(self.primary, project["id"], manager["id"], "manager")
+        task = self.service.create_task(self.primary, {"project_id": project["id"], "title": "Watched"})
+
+        def task_changes(user):
+            return [n for n in self.service.list_notifications(user) if n["task_id"] == task["id"]]
+
+        # The primary's own creation notifies the secondary, not the primary.
+        self.assertEqual(len(task_changes(secondary)), 1)
+        self.assertEqual(task_changes(self.primary), [])
+        current = self.service.get_task(manager, task["id"])
+        self.service.update_task(manager, task["id"], {"title": "Watched 2", "expected_revision": current["revision"]})
+        self.assertEqual((len(task_changes(self.primary)), len(task_changes(secondary))), (1, 2))
+        current = self.service.get_task(secondary, task["id"])
+        self.service.update_task(secondary, task["id"], {"title": "Watched 3", "expected_revision": current["revision"]})
+        self.assertEqual((len(task_changes(self.primary)), len(task_changes(secondary))), (2, 2))
+
+    def test_template_owner_role_goes_to_the_acting_owner(self):
+        project = self.service.create_project(self.primary, "Recurring")
+        self.service.create_task(self.primary, {
+            "project_id": project["id"], "title": "Owner review", "owner_user_id": self.primary["id"]})
+        template = self.service.save_project_as_template(self.primary, project["id"], "Owner tmpl")
+        secondary = self.secondary("deputy")
+        created = self.service.create_project_from_template(secondary, template["id"], "Deputy's copy")
+        [task] = self.service.list_tasks(secondary, created["id"])
+        self.assertEqual(task["owner_user_id"], secondary["id"])
 
 
 if __name__ == "__main__":

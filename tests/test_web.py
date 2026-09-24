@@ -1371,6 +1371,74 @@ class AstraWebTests(unittest.TestCase):
         response, _ = self.request("GET", f"/api/tasks/{tid}/events", cookie=cookie)
         self.assertEqual(response.status, 403)
 
+    def test_secondary_owner_routes_enforce_primary_control_over_http(self):
+        # GTEYTG (Aly, ts 1790245584.314119): only the primary grants or removes owner
+        # access; a secondary cannot touch the primary or another secondary.
+        owner_cookie, owner_csrf = self._owner_session()
+        response, me = self.request("GET", "/api/me", cookie=owner_cookie)
+        self.assertEqual(me["user"]["is_primary_owner"], 1)
+        primary_id = me["user"]["id"]
+        ids = {}
+        for key, role in (("first", "member"), ("second", "member"), ("plain", "member"), ("chair", "chairman")):
+            _, created = self.request("POST", "/api/users", {
+                "email": f"{key}-owner@example.org", "display_name": key.title(),
+                "password": f"{key} password safe", "role": role,
+            }, cookie=owner_cookie, csrf=owner_csrf)
+            ids[key] = created["user"]["id"]
+        for key in ("first", "second"):
+            response, granted = self.request("POST", f"/api/users/{ids[key]}/secondary-owner",
+                                             {"reason": "cover"}, cookie=owner_cookie, csrf=owner_csrf)
+            self.assertEqual(response.status, 201)
+            self.assertEqual((granted["user"]["global_role"], granted["user"]["is_primary_owner"]), ("owner", 0))
+        response, _ = self.request("POST", f"/api/users/{ids['plain']}/secondary-owner", {"reason": " "},
+                                   cookie=owner_cookie, csrf=owner_csrf)
+        self.assertEqual(response.status, 400)
+        response, _ = self.request("POST", "/api/users/no-such-user/secondary-owner", {"reason": "x"},
+                                   cookie=owner_cookie, csrf=owner_csrf)
+        self.assertEqual(response.status, 404)
+        _, listed = self.request("GET", "/api/users", cookie=owner_cookie)
+        flags = {u["id"]: u["is_primary_owner"] for u in listed["users"]}
+        self.assertEqual((flags[primary_id], flags[ids["first"]], flags[ids["plain"]]), (1, 0, 0))
+
+        first_cookie, first_csrf = self._login_as("first-owner@example.org", "first password safe")
+        response, me = self.request("GET", "/api/me", cookie=first_cookie)
+        self.assertEqual((me["user"]["global_role"], me["user"]["is_primary_owner"]), ("owner", 0))
+        forbidden = [
+            ("POST", f"/api/users/{ids['plain']}/secondary-owner", {"reason": "promote"}),
+            ("DELETE", f"/api/users/{ids['second']}/secondary-owner", {"reason": "demote"}),
+            ("DELETE", f"/api/users/{primary_id}/secondary-owner", {"reason": "coup"}),
+            ("POST", f"/api/users/{primary_id}/active", {"active": False}),
+            ("POST", f"/api/users/{ids['second']}/active", {"active": False}),
+        ]
+        for method, path, body in forbidden:
+            with self.subTest(actor="secondary", method=method, path=path):
+                response, _ = self.request(method, path, body, cookie=first_cookie, csrf=first_csrf)
+                self.assertEqual(response.status, 403)
+        # A secondary still has ordinary Owner powers and can read the owner-access audit.
+        response, _ = self.request("POST", "/api/projects", {"name": "Deputy's"}, cookie=first_cookie, csrf=first_csrf)
+        self.assertEqual(response.status, 201)
+        response, audit = self.request("GET", "/api/user-events", cookie=first_cookie)
+        self.assertEqual(response.status, 200)
+        kinds = [e["event_type"] for e in audit["events"]]
+        self.assertEqual(kinds.count("secondary_owner_granted"), 2)
+        self.assertEqual(kinds.count("owner_change_blocked"), len(forbidden))
+
+        chair_cookie, chair_csrf = self._login_as("chair-owner@example.org", "chair password safe")
+        for method, path in (("POST", f"/api/users/{ids['plain']}/secondary-owner"),
+                             ("DELETE", f"/api/users/{ids['first']}/secondary-owner")):
+            with self.subTest(actor="chairman", method=method):
+                response, _ = self.request(method, path, {"reason": "x"}, cookie=chair_cookie, csrf=chair_csrf)
+                self.assertEqual(response.status, 403)
+        response, _ = self.request("GET", "/api/user-events", cookie=chair_cookie)
+        self.assertEqual(response.status, 403)
+
+        response, revoked = self.request("DELETE", f"/api/users/{ids['first']}/secondary-owner", {"reason": "back"},
+                                         cookie=owner_cookie, csrf=owner_csrf)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(revoked["user"]["global_role"], "member")
+        response, _ = self.request("GET", "/api/me", cookie=first_cookie)
+        self.assertEqual(response.status, 403, "a removed secondary's sessions are revoked")
+
     def test_task_detail_subtasks_carry_step_schedule_fields_over_http(self):
         # D73AQW: GET /api/tasks/{id} subtasks include the fields the Gantt step
         # tooltip and the detail dialog render (start, criticality, progress, owner id, parent).

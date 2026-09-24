@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -134,6 +135,19 @@ def stopped_before_step(connection, version):
     finally:
         connection.set_authorizer(None)
         connection.set_trace_callback(None)
+
+
+def legacy_user(connection, user_id, role="member"):
+    """A user row as a pre-v16 schema stores it (no is_primary_owner column), returned as
+    the actor dict the service expects. Service calls that read users.is_primary_owner
+    cannot run before v16, so old-schema fixtures write users directly (GTEYTG)."""
+    user = {"id": user_id, "email": f"secret-{user_id}@example.org", "display_name": f"Private {user_id}",
+            "global_role": role, "active": 1, "created_at": "2026-01-01T00:00:00Z", "is_primary_owner": 0}
+    connection.execute(
+        "INSERT INTO users(id,email,display_name,password_hash,global_role,created_at) VALUES(?,?,?,?,?,?)",
+        (user_id, user["email"], user["display_name"], "x", role, user["created_at"]),
+    )
+    return user
 
 
 def open_without_migrating(path):
@@ -481,7 +495,7 @@ class MigrationTests(unittest.TestCase):
     def submitted_task(self, connection):
         """One real task with one version-1 submission, written by the service."""
         service = AstraService(connection)
-        owner = service.create_initial_owner("owner@example.org", "Owner", "correct horse battery")
+        owner = legacy_user(connection, "legacy-owner", "owner")
         project = service.create_project(owner, "Migration")
         task = service.create_task(owner, {"project_id": project["id"], "title": "Deliverable"})
         service.submit_task(owner, task["id"], "first")
@@ -694,7 +708,7 @@ class PendingRequestIntentKeyTests(unittest.TestCase):
     def fixture(self, connection):
         """Owner, project and task created by the service; the task's id and revision."""
         service = AstraService(connection)
-        owner = service.create_initial_owner("owner@example.org", "Owner", "correct horse battery")
+        owner = legacy_user(connection, "legacy-owner", "owner")
         project = service.create_project(owner, "Intent key")
         task = service.create_task(owner, {"project_id": project["id"], "title": "Governed secret title"})
         return owner, project, task
@@ -904,8 +918,9 @@ class PendingRequestIntentKeyTests(unittest.TestCase):
         try:
             owner, project, task = self.fixture(connection)
             service = AstraService(connection)
-            manager = service.create_user(owner, "manager@example.org", "Manager", "manager password safe")
-            service.grant_project_access(owner, project["id"], manager["id"], "manager")
+            manager = legacy_user(connection, "legacy-manager")
+            connection.execute("INSERT INTO memberships VALUES(?,?,'manager','2026-01-01T00:00:00Z',?)",
+                               (project["id"], manager["id"], owner["id"]))
             payload_json = json.dumps(
                 {"expected_revision": task["revision"], "reason": "Manager recommendation", "status": "cancelled"},
                 sort_keys=True,
@@ -925,6 +940,208 @@ class PendingRequestIntentKeyTests(unittest.TestCase):
             self.assertEqual(retried["request"]["id"], "filed-before-upgrade")
             self.assertEqual(connection.execute(
                 "SELECT COUNT(*) FROM owner_action_requests WHERE status='pending'").fetchone()[0], 1)
+        finally:
+            connection.close()
+
+
+class PrimaryOwnerMigrationTests(unittest.TestCase):
+    """GTEYTG: schema 16 marks the one existing owner as the primary owner, adds the
+    user_events audit table, and refuses (changing nothing) a database with 2+ owners."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "astra.sqlite3"
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def raw(self):
+        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA journal_mode = WAL")
+        return connection
+
+    def version(self, connection):
+        return connection.execute("PRAGMA user_version").fetchone()[0]
+
+    def at_v15(self):
+        """A complete v15 database: v16's unique index is refused, so the step rolls back."""
+        connection = self.raw()
+        connection.set_authorizer(deny_create_index(db.V16_PRIMARY_OWNER_INDEX))
+        with self.assertRaises(sqlite3.DatabaseError):
+            db.migrate(connection)
+        connection.set_authorizer(None)
+        self.assertEqual(self.version(connection), 15)
+        return connection
+
+    def user_rows(self, connection):
+        return [tuple(r) for r in connection.execute("SELECT * FROM users ORDER BY id").fetchall()]
+
+    def test_fresh_database_has_the_primary_flag_its_index_and_user_events(self):
+        connection = db.connect(self.path)
+        try:
+            self.assertGreaterEqual(db.SCHEMA_VERSION, 16)
+            self.assertIn("is_primary_owner", table_columns(connection, "users"))
+            indexes = {r["name"]: (r["unique"], r["partial"]) for r in connection.execute("PRAGMA index_list(users)")}
+            self.assertEqual(indexes.get(db.V16_PRIMARY_OWNER_INDEX), (1, 1))
+            self.assertEqual(table_columns(connection, "user_events"),
+                             ["id", "target_user_id", "event_type", "actor_user_id", "occurred_at", "reason",
+                              "detail_json"])
+        finally:
+            connection.close()
+
+    def test_v15_single_owner_becomes_primary_and_matches_fresh_schema(self):
+        connection = self.at_v15()
+        try:
+            legacy_user(connection, "owner-1", "owner")
+            legacy_user(connection, "member-1", "member")
+            db.migrate(connection)
+            self.assertEqual(self.version(connection), db.SCHEMA_VERSION)
+            flags = dict(connection.execute("SELECT id,is_primary_owner FROM users").fetchall())
+            self.assertEqual(flags, {"owner-1": 1, "member-1": 0})
+            fresh = db.connect(Path(self.temp.name) / "fresh.sqlite3")
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
+    def test_v15_without_an_owner_migrates_and_the_first_owner_becomes_primary(self):
+        connection = self.at_v15()
+        try:
+            db.migrate(connection)
+            self.assertEqual(self.version(connection), db.SCHEMA_VERSION)
+            owner = AstraService(connection).create_initial_owner("o@example.org", "Owner", "correct horse battery")
+            self.assertEqual(owner["is_primary_owner"], 1)
+        finally:
+            connection.close()
+
+    def test_v15_with_two_owners_refuses_the_upgrade_without_touching_data(self):
+        connection = self.at_v15()
+        try:
+            legacy_user(connection, "owner-a", "owner")
+            legacy_user(connection, "owner-b", "owner")
+            schema_before, rows_before = schema_signature(connection), self.user_rows(connection)
+            with self.assertRaises(db.SchemaMigrationRefused) as refused:
+                db.migrate(connection)
+            message = str(refused.exception)
+            self.assertIn("schema 16", message)
+            self.assertIn("Nothing was changed", message)
+            self.assertIn("owner-a", message)
+            self.assertIn("owner-b", message)
+            self.assertNotIn("secret-", message, "emails must not be echoed")
+            self.assertNotIn("Private", message, "names must not be echoed")
+            self.assertEqual(self.version(connection), 15)
+            self.assertEqual(schema_signature(connection), schema_before)
+            self.assertEqual(self.user_rows(connection), rows_before)
+            self.assertFalse(connection.in_transaction)
+        finally:
+            connection.close()
+        with self.assertRaises(db.SchemaMigrationRefused):
+            db.connect(self.path)
+        repaired = self.raw()
+        try:
+            repaired.execute("UPDATE users SET global_role='member' WHERE id='owner-b'")
+        finally:
+            repaired.close()
+        reopened = db.connect(self.path)
+        try:
+            self.assertEqual(self.version(reopened), db.SCHEMA_VERSION)
+            self.assertEqual(reopened.execute("SELECT id FROM users WHERE is_primary_owner=1").fetchone()[0], "owner-a")
+        finally:
+            reopened.close()
+
+    def test_two_owners_in_an_older_database_refuse_before_any_step_runs(self):
+        connection = self.raw()
+        try:
+            connection.set_authorizer(deny_create_table(DENY_IMPORTS_TABLE))   # stop at v12
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(self.version(connection), 12)
+            legacy_user(connection, "owner-a", "owner")
+            legacy_user(connection, "owner-b", "owner")
+            schema_before = schema_signature(connection)
+            with self.assertRaises(db.SchemaMigrationRefused) as refused:
+                db.migrate(connection)
+            self.assertIn("owner-a", str(refused.exception))
+            self.assertEqual(self.version(connection), 12)
+            self.assertEqual(schema_signature(connection), schema_before, "no later step may have committed")
+            self.assertFalse(connection.in_transaction)
+        finally:
+            connection.close()
+
+    def test_second_owner_written_after_the_early_check_is_refused_inside_the_step(self):
+        connection = self.at_v15()
+        try:
+            legacy_user(connection, "owner-a", "owner")
+            real_refuse, calls = db._refuse_multiple_owners, []
+
+            def refuse_then_race(conn):
+                real_refuse(conn)
+                calls.append(1)
+                if len(calls) == 1:   # after migrate()'s early check, before the v16 step
+                    legacy_user(conn, "owner-b", "owner")
+
+            with patch.object(db, "_refuse_multiple_owners", refuse_then_race):
+                with self.assertRaises(db.SchemaMigrationRefused) as refused:
+                    db.migrate(connection)
+            self.assertEqual(len(calls), 1, "the early check passed; the step's own check refused")
+            self.assertIn("owner-b", str(refused.exception))
+            self.assertEqual(self.version(connection), 15)
+            self.assertNotIn("is_primary_owner", table_columns(connection, "users"))
+            self.assertFalse(connection.in_transaction)
+        finally:
+            connection.close()
+
+    def test_failure_late_in_the_v16_step_rolls_back_then_retries(self):
+        connection = self.at_v15()
+        try:
+            legacy_user(connection, "owner-1", "owner")
+            catalog_before, rows_before = full_catalog(connection), self.user_rows(connection)
+            connection.set_authorizer(deny_create_index(db.V16_PRIMARY_OWNER_INDEX))
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(self.version(connection), 15)
+            self.assertEqual(full_catalog(connection), catalog_before)
+            self.assertEqual(self.user_rows(connection), rows_before)
+            self.assertNotIn("is_primary_owner", table_columns(connection, "users"))
+            self.assertFalse(connection.in_transaction)
+            db.migrate(connection)
+            self.assertEqual(self.version(connection), db.SCHEMA_VERSION)
+            self.assertEqual(connection.execute("SELECT is_primary_owner FROM users").fetchone()[0], 1)
+        finally:
+            connection.close()
+
+    def test_concurrent_initial_owner_creation_makes_exactly_one_owner(self):
+        db.connect(self.path).close()
+        barrier, outcomes = threading.Barrier(2), []
+
+        def create(n):
+            connection = db.connect(self.path)
+            try:
+                barrier.wait()
+                AstraService(connection).create_initial_owner(f"o{n}@example.org", "Owner", "correct horse battery")
+                outcomes.append("created")
+            except ValueError:   # the check runs under the write lock, so no IntegrityError
+                outcomes.append("refused")
+            except sqlite3.IntegrityError:
+                outcomes.append("integrity")
+            finally:
+                connection.close()
+
+        threads = [threading.Thread(target=create, args=(n,)) for n in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertCountEqual(outcomes, ["created", "refused"])
+        connection = db.connect(self.path)
+        try:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM users WHERE global_role='owner'").fetchone()[0], 1)
         finally:
             connection.close()
 

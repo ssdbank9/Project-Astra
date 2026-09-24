@@ -8,7 +8,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 
 class SchemaMigrationRefused(RuntimeError):
@@ -99,6 +99,9 @@ def migrate(connection: sqlite3.Connection) -> None:
         # Likewise for v15: duplicate pending Owner requests are refused at the
         # starting version, before any step commits.
         _refuse_duplicate_pending_requests(connection)
+    if version < 16:
+        # Likewise for v16: more than one owner is refused before any step commits.
+        _refuse_multiple_owners(connection)
     for step_version, step in MIGRATION_STEPS:
         if version < step_version:
             with transaction(connection):
@@ -679,6 +682,57 @@ def _migrate_v15(connection: sqlite3.Connection) -> None:
     )
 
 
+V16_PRIMARY_OWNER_INDEX = "idx_users_primary_owner"
+
+
+def _refuse_multiple_owners(connection: sqlite3.Connection) -> None:
+    """Raise SchemaMigrationRefused if users holds more than one owner: v16 cannot tell
+    which of them is the primary owner. Lists user ids only (no emails or names). No
+    owner at all is fine: a fresh database migrates before its owner is created."""
+    if not _table_exists(connection, "users"):
+        return
+    ids = [row[0] for row in connection.execute(
+        "SELECT id FROM users WHERE global_role='owner' ORDER BY created_at, id").fetchall()]
+    if len(ids) < 2:
+        return
+    raise SchemaMigrationRefused(
+        f"Astra cannot upgrade this database to schema 16: it has {len(ids)} owner accounts and "
+        "schema 16 needs exactly one primary owner. Nothing was changed. Owner user ids: "
+        f"{', '.join(ids)}. To resolve: back up the database; keep the primary owner and set the "
+        "others to their earlier role (UPDATE users SET global_role='member' WHERE id=...); then "
+        "start Astra again and make them secondary owners from the People screen."
+    )
+
+
+def _migrate_v16(connection: sqlite3.Connection) -> None:
+    """v15 -> v16: primary and secondary owners (ticket GTEYTG).
+
+    Every owner keeps global_role='owner'; ``is_primary_owner`` marks the one who alone
+    may grant or remove owner access. The CHECK refuses a primary who is not an owner
+    and the partial unique index refuses a second primary. ``user_events`` records who
+    granted, removed or tried to change owner access. The single existing owner, if any,
+    becomes the primary; 2+ owners are refused before anything changes (probe repeated
+    here under the step's write lock). The unique index is created last.
+    """
+    _refuse_multiple_owners(connection)
+    _execute_statements(connection, f"""
+        ALTER TABLE users ADD COLUMN is_primary_owner INTEGER NOT NULL DEFAULT 0
+            CHECK(is_primary_owner IN (0,1) AND (is_primary_owner=0 OR global_role='owner'));
+        CREATE TABLE user_events (
+            id TEXT PRIMARY KEY,
+            target_user_id TEXT NOT NULL REFERENCES users(id),
+            event_type TEXT NOT NULL,
+            actor_user_id TEXT NOT NULL REFERENCES users(id),
+            occurred_at TEXT NOT NULL,
+            reason TEXT,
+            detail_json TEXT
+        );
+        CREATE INDEX idx_user_events_target ON user_events(target_user_id, occurred_at);
+        UPDATE users SET is_primary_owner=1 WHERE global_role='owner';
+        CREATE UNIQUE INDEX {V16_PRIMARY_OWNER_INDEX} ON users(is_primary_owner) WHERE is_primary_owner=1;
+    """)
+
+
 # The ordered schema history: (version, step). migrate() runs every step whose version
 # is above the database's user_version, each in its own transaction with its bump.
 # Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
@@ -698,4 +752,5 @@ MIGRATION_STEPS = (
     (13, _migrate_v13),
     (14, _migrate_v14),
     (15, _migrate_v15),
+    (16, _migrate_v16),
 )

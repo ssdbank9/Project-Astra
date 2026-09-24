@@ -1072,25 +1072,40 @@ async function removeDependency(e){
 
 async function openPeople(){
   try{
-    const [u,m]=await Promise.all([api("/api/users"),api("/api/memberships")]);
-    renderPeople(u.users,m.memberships);
+    const [u,m,h]=await Promise.all([api("/api/users"),api("/api/memberships"),api("/api/user-events")]);
+    renderPeople(u.users,m.memberships,h.events);
     const d=document.querySelector("#people-dialog");if(!d.open)d.showModal();
   }catch(err){document.querySelector("#people-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`}
 }
 
-function renderPeople(users,memberships){
+// GTEYTG: every owner has role "owner"; only the primary owner may give or remove owner access.
+const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change"};
+function renderPeople(users,memberships,ownerEvents){
+  const primary=!!state.user.is_primary_owner;
   const rows=users.map(u=>{
-    const toggle=u.global_role==="owner"?"":`<button type="button" class="link" data-toggle="${escapeHtml(u.id)}" data-active="${u.active?1:0}">${u.active?"Deactivate":"Reactivate"}</button>`;
-    return `<li><strong>${escapeHtml(u.display_name)}</strong> · ${escapeHtml(u.email)} · ${escapeHtml(u.global_role)}${u.active?"":' · <em>inactive</em>'} ${toggle}</li>`;
+    const isOwner=u.global_role==="owner",id=escapeHtml(u.id);
+    const role=isOwner?`<span class="badge" data-level="${u.is_primary_owner?"ok":"info"}">${u.is_primary_owner?"Primary owner":"Secondary owner"}</span>`:escapeHtml(u.global_role);
+    const toggle=isOwner?"":`<button type="button" class="link" data-toggle="${id}" data-active="${u.active?1:0}">${u.active?"Deactivate":"Reactivate"}</button>`;
+    const ownerAction=!primary||u.is_primary_owner?"":isOwner?`<button type="button" class="link" data-owner-revoke="${id}">Remove secondary owner</button>`
+      :u.active?`<button type="button" class="link" data-owner-grant="${id}">Make secondary owner</button>`:"";
+    return `<li><strong>${escapeHtml(u.display_name)}</strong> · ${escapeHtml(u.email)} · ${role}${u.active?"":' · <em>inactive</em>'} ${toggle} ${ownerAction}</li>`;
   }).join("");
-  const userOptions=users.filter(u=>u.active).map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.display_name)}</option>`).join("");
+  const ownerEventRow=e=>`<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(OWNER_EVENT_LABELS[e.event_type]||e.event_type)}: <strong>${escapeHtml(e.target_name)}</strong> by ${escapeHtml(e.actor_name)}${e.reason?` · ${escapeHtml(e.reason)}`:""}</li>`;
+  const blocked=e=>e.event_type==="owner_change_blocked";
+  const ownerHistory=(ownerEvents||[]).filter(e=>!blocked(e)).slice(0,20).map(ownerEventRow).join("")||"<li>No owner access changes yet.</li>";
+  const blockedHistory=(ownerEvents||[]).filter(blocked).slice(0,10).map(ownerEventRow).join("")||"<li>None.</li>";
+  // Only the primary may change an owner's project access, so others are not offered it.
+  const ownerIds=new Set(users.filter(u=>u.global_role==="owner").map(u=>u.id));
+  const userOptions=users.filter(u=>u.active&&(primary||!ownerIds.has(u.id))).map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.display_name)}</option>`).join("");
   const projectOptions=state.projects.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("");
-  const grants=memberships.map(m=>`<li>${escapeHtml(m.project_name)} · ${escapeHtml(m.user_name)} · ${escapeHtml(m.role)} <button type="button" class="link" data-revoke-project="${escapeHtml(m.project_id)}" data-revoke-user="${escapeHtml(m.user_id)}">Revoke</button></li>`).join("")||"<li>No access grants yet.</li>";
+  const grants=memberships.map(m=>`<li>${escapeHtml(m.project_name)} · ${escapeHtml(m.user_name)} · ${escapeHtml(m.role)} ${!primary&&ownerIds.has(m.user_id)?"":`<button type="button" class="link" data-revoke-project="${escapeHtml(m.project_id)}" data-revoke-user="${escapeHtml(m.user_id)}">Revoke</button>`}</li>`).join("")||"<li>No access grants yet.</li>";
   const entityRows=(state.entities||[]).map(e=>`<li><strong>${escapeHtml(e.name)}</strong>${e.active?"":' · <em>inactive</em>'} <button type="button" class="link" data-entity-toggle="${escapeHtml(e.id)}" data-active="${e.active?1:0}">${e.active?"Deactivate":"Reactivate"}</button></li>`).join("")||"<li>No entities yet.</li>";
   const filingProjectOptions=state.projects.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("");
   document.querySelector("#people-body").innerHTML=`
     <h2>People &amp; access</h2>
     <h3>Users</h3><ul class="people-list">${rows}</ul>
+    <h3>Owner access history</h3><ul class="people-list">${ownerHistory}</ul>
+    <h3>Blocked owner-access attempts</h3><ul class="people-list">${blockedHistory}</ul>
     <form id="add-user-form"><h3>Add a user</h3>
       <label>Email<input name="email" type="email" required></label>
       <label>Display name<input name="display_name" required></label>
@@ -1123,6 +1138,7 @@ function renderPeople(users,memberships){
   document.querySelector("#add-user-form").addEventListener("submit",submitAddUser);
   document.querySelector("#grant-form").addEventListener("submit",submitGrant);
   document.querySelectorAll("#people-body [data-toggle]").forEach(b=>b.addEventListener("click",toggleUserActive));
+  document.querySelectorAll("#people-body [data-owner-grant],#people-body [data-owner-revoke]").forEach(b=>b.addEventListener("click",changeOwnerAccess));
   document.querySelectorAll("#people-body [data-revoke-project]").forEach(b=>b.addEventListener("click",revokeAccess));
   document.querySelector("#add-entity-form").addEventListener("submit",submitAddEntity);
   document.querySelector("#seed-entities").addEventListener("click",seedEntities);
@@ -1255,6 +1271,13 @@ async function submitGrant(e){
 async function toggleUserActive(e){
   const b=e.target;
   try{await api(`/api/users/${b.dataset.toggle}/active`,{method:"POST",body:JSON.stringify({active:b.dataset.active!=="1"})});await load();await openPeople()}
+  catch(x){document.querySelector("#people-body").insertAdjacentHTML("afterbegin",`<p class="error">${escapeHtml(x.message)}</p>`)}
+}
+async function changeOwnerAccess(e){
+  const b=e.target,grant=!!b.dataset.ownerGrant;
+  const reason=prompt(grant?"Reason for giving this person full owner access:":"Reason for removing their owner access:","");
+  if(!reason||!reason.trim())return;
+  try{await api(`/api/users/${grant?b.dataset.ownerGrant:b.dataset.ownerRevoke}/secondary-owner`,{method:grant?"POST":"DELETE",body:JSON.stringify({reason})});await openPeople()}
   catch(x){document.querySelector("#people-body").insertAdjacentHTML("afterbegin",`<p class="error">${escapeHtml(x.message)}</p>`)}
 }
 async function revokeAccess(e){
