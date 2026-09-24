@@ -1,7 +1,7 @@
 ---
 id: 01M376111P0263F35XMW03G8EH
 title: Serialize task submissions and refuse submits against a changed task
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -32,8 +32,8 @@ commits:
   - 4d18dcb2885f5b78fc44578ee4d12e2675823d1f
   - dfccb39758853e5928d74bf2f735487e8460b58b
 created-at: 2026-09-23T13:07:06Z
-updated-at: 2026-09-23T19:09:50Z
-updated-by: Claude
+updated-at: 2026-09-23T19:50:47Z
+updated-by: Aly Jafferani
 claimed-by: vm-11750
 claimed-at: 2026-09-23T13:08:02Z
 outcome-what: "submit_task (src/astra/service.py) now re-reads the task inside BEGIN IMMEDIATE, refuses with Conflict (HTTP 409) when the revision changed since its permission check or the status is submitted/completed/cancelled/abandoned, allocates MAX(version)+1 under the lock, and guards its UPDATE with WHERE id=? AND revision=? AND status NOT IN (...) (Conflict on rowcount != 1). Schema v14 (src/astra/db.py _migrate_v14, SCHEMA_VERSION 14) adds UNIQUE index idx_submissions_task_version on task_submissions(task_id, version) and raises SchemaMigrationRefused, rolled back at v13 with nothing deleted, if duplicate pairs already exist. Four race regressions in tests/test_state_integrity.py, four migration tests in tests/test_db.py, README integrity paragraph. HTTP/UI contract unchanged: the submit body is still {note}."

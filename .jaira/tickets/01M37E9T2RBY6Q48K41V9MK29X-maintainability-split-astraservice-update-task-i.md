@@ -1,7 +1,7 @@
 ---
 id: 01M37E9T2RBY6Q48K41V9MK29X
 title: "Maintainability: split AstraService.update_task into policy, validation and persistence helpers"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -19,8 +19,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:31:43Z
-updated-at: 2026-09-23T19:13:15Z
-updated-by: Claude
+updated-at: 2026-09-23T19:51:10Z
+updated-by: Aly Jafferani
 claimed-by: vm-18061
 claimed-at: 2026-09-23T18:14:41Z
 outcome-what: "Independent review recorded: approve, no behaviour change, five low gaps plus no live browser acceptance"

@@ -1,7 +1,7 @@
 ---
 id: 01M37E4QWARNQTZ58YGS67T315
 title: Fault and retry tests for every legacy migration step v1-v12
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -20,8 +20,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:28:57Z
-updated-at: 2026-09-23T19:12:00Z
-updated-by: Claude
+updated-at: 2026-09-23T19:51:02Z
+updated-by: Aly Jafferani
 claimed-by: vm-22489
 claimed-at: 2026-09-23T16:46:25Z
 outcome-what: "Added tests/test_db.py test_every_legacy_step_rolls_back_a_mid_step_failure_and_retries_to_the_fresh_schema: for each legacy step v1-v12 (24 subTests) it builds a database at N-1, injects a fault after the step's first statement or at its PRAGMA user_version = N, asserts user_version N-1, an unchanged sqlite_master and no open transaction, then retries to v14 with a catalog equal to a fresh database. Helpers: full_catalog, deny_version_bump, stop_before_step, first_statement_then_fail. Test-only; src/ unchanged."

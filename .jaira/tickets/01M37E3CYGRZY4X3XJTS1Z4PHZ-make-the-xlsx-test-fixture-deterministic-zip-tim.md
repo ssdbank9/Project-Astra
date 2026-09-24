@@ -1,7 +1,7 @@
 ---
 id: 01M37E3CYGRZY4X3XJTS1Z4PHZ
 title: Make the xlsx test fixture deterministic (zip timestamps flake an import test)
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -20,8 +20,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:28:13Z
-updated-at: 2026-09-23T19:11:42Z
-updated-by: Claude
+updated-at: 2026-09-23T19:51:00Z
+updated-by: Aly Jafferani
 claimed-by: vm-29298
 claimed-at: 2026-09-23T15:41:51Z
 outcome-what: "Independent review approved"

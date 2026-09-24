@@ -1,7 +1,7 @@
 ---
 id: 01M37EBC38J3S424MAG239DNZT
 title: "Maintainability: replace the repeated migrate() version blocks with a step registry"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -19,8 +19,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:32:34Z
-updated-at: 2026-09-23T19:12:18Z
-updated-by: Claude
+updated-at: 2026-09-23T19:51:04Z
+updated-by: Aly Jafferani
 claimed-by: vm-17591
 claimed-at: 2026-09-23T16:33:48Z
 outcome-what: "Independent review approved"

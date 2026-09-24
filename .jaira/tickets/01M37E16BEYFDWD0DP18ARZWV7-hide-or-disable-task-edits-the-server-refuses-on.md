@@ -1,7 +1,7 @@
 ---
 id: 01M37E16BEYFDWD0DP18ARZWV7
 title: Hide or disable task edits the server refuses on closed and submitted tasks
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -21,8 +21,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:27:00Z
-updated-at: 2026-09-23T19:11:06Z
-updated-by: Claude
+updated-at: 2026-09-23T19:50:55Z
+updated-by: Aly Jafferani
 claimed-by: vm-28497
 claimed-at: 2026-09-23T15:40:31Z
 outcome-what: "Independent review approved ARZWV7 with five low findings; review fields recorded"

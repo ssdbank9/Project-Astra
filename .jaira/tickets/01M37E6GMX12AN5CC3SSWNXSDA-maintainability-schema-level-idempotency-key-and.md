@@ -1,7 +1,7 @@
 ---
 id: 01M37E6GMX12AN5CC3SSWNXSDA
 title: "Maintainability: schema-level idempotency key and indexed lookup for pending Owner requests"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -20,8 +20,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:29:55Z
-updated-at: 2026-09-23T19:12:56Z
-updated-by: Claude
+updated-at: 2026-09-23T19:51:08Z
+updated-by: Aly Jafferani
 claimed-by: vm-11138
 claimed-at: 2026-09-23T17:41:41Z
 outcome-what: "Independent review recorded"

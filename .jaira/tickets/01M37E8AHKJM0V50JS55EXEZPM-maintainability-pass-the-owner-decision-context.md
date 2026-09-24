@@ -1,7 +1,7 @@
 ---
 id: 01M37E8AHKJM0V50JS55EXEZPM
 title: "Maintainability: pass the Owner decision context explicitly instead of _active_owner_request_id"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -20,8 +20,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:30:54Z
-updated-at: 2026-09-23T19:12:36Z
-updated-by: Claude
+updated-at: 2026-09-23T19:51:06Z
+updated-by: Aly Jafferani
 claimed-by: vm-32730
 claimed-at: 2026-09-23T17:11:29Z
 outcome-what: "Independent review approved the explicit OwnerDecision refactor with three low findings recorded as gaps"

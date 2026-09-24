@@ -1,7 +1,7 @@
 ---
 id: 01M377HR1EE7K43QRNTQT8WHJR
 title: "Keep completed, cancelled and abandoned tasks immutable outside reopen"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -27,8 +27,8 @@ commits:
   - fc2a35a
   - 754cae7
 created-at: 2026-09-23T13:33:43Z
-updated-at: 2026-09-23T19:10:13Z
-updated-by: Claude
+updated-at: 2026-09-23T19:50:49Z
+updated-by: Aly Jafferani
 claimed-by: vm-28185
 claimed-at: 2026-09-23T13:34:25Z
 outcome-what: "Closed (completed, cancelled, abandoned) tasks now refuse set_parent, confirm_criticality, propose_schedule, approve_schedule_proposal, dependency add/remove as successor, and any status-unchanged update_task with 400 'reopen the task first', re-checked inside the write transaction (409 when the task closes mid-flight); import rows for them are skipped whole with W_CLOSED_TASK; docs, README and matrix updated."

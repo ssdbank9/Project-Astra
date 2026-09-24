@@ -1,7 +1,7 @@
 ---
 id: 01M37E291XMP18KQPDXV0D9Q3X
 title: "Owner inbox: show the requested status and reason, and reload the task after a 409"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -19,8 +19,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:27:36Z
-updated-at: 2026-09-23T19:11:24Z
-updated-by: Claude
+updated-at: 2026-09-23T19:50:58Z
+updated-by: Aly Jafferani
 claimed-by: vm-19186
 claimed-at: 2026-09-23T16:39:03Z
 outcome-what: "Independent review approved 0D9Q3X"

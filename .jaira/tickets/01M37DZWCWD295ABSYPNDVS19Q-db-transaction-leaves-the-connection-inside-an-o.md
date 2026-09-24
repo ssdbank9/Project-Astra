@@ -1,7 +1,7 @@
 ---
 id: 01M37DZWCWD295ABSYPNDVS19Q
 title: db.transaction() leaves the connection inside an open transaction when COMMIT fails
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -21,8 +21,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-23T15:26:18Z
-updated-at: 2026-09-23T19:10:32Z
-updated-by: Claude
+updated-at: 2026-09-23T19:50:51Z
+updated-by: Aly Jafferani
 claimed-by: vm-28526
 claimed-at: 2026-09-23T15:40:32Z
 outcome-what: "db.transaction() now rolls back (suppressing a secondary sqlite3.Error) and re-raises when connection.commit() fails; regression test with a deferred FK violation; README migration note extended"

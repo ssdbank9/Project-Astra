@@ -1,7 +1,7 @@
 ---
 id: 01M3549XTPENM6MSYCG2SRFCZD
 title: Harden task state integrity and idempotency
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Claude
@@ -19,10 +19,10 @@ commits:
   - 41deb62ff4a45ce869bfd6891b6a81fb4d972cd4
   - 87232633aeff02c30b1e93d067d73ea41f3ba6d4
 created-at: 2026-09-22T17:58:32Z
-updated-at: 2026-09-23T19:09:10Z
+updated-at: 2026-09-23T19:50:43Z
 claimed-by: vm-3302
 claimed-at: 2026-09-23T12:11:07Z
-updated-by: Claude
+updated-by: Aly Jafferani
 outcome-what: "Original change: revision-checked task writes (expected_revision, conditional UPDATE in BEGIN IMMEDIATE, 409), terminal-state immutability, single-winner lifecycle decisions, idempotent Owner requests with an approve/reject/cancel path, idempotent final-result events. Rework: R1 direct Owner actions resolve only same-intent pending requests; R2 approval records the Owner's decision note; R3 close_project approval re-checks residual work in its transaction; R4 update_task re-checks the active request in-transaction, unmark emits once, two-connection race tests; R5 residual status in close matching, Manager generic edits into governed targets refused (400), per-action race tests, flag-reset test; R6 (41dd6e2) a generic edit from completed/cancelled/abandoned to cancelled/abandoned/changes_requested is refused with 400 before any request for Owner and Manager alike, and the six per-action race tests reject at the approving connection's transaction entry."
 outcome-why: "The adversarial review reproduced lost updates, mutable accepted state, duplicate lifecycle events, duplicate unresolved approvals and duplicate audit events on a green suite. Reviews then found false approved audit events from reconciliation, a dropped Owner note, unchecked close approvals, approve-vs-reject races that committed and returned 500, untested guards, unapprovable Manager requests from terminal states (R5-1) and race tests that missed a guard moved just outside the lock (R5-2)."
 outcome-resolves: "DoD 1-6 hold at 41dd6e2: stale writes 409 without mutation; terminal edits require reopen; synchronized acceptance has one winner and one event; equivalent retries dedupe, decisions are Owner-only, stale and changed-close approvals refused, approvals racing a reject return 409 for every governed action (guards pinned at the lock, moved-guard mutation killed), direct actions reconcile only same-intent requests; final-result marking idempotent. Full tests/run.py 269/269, test_state_integrity 45/45, test_web 45/45, node --check, compileall and git diff --check pass. Final reviewer + skeptic at 9fb4328 and an independent R6 re-check approve; R5-3 closed by T8WHJR."

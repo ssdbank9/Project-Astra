@@ -1,7 +1,7 @@
 ---
 id: 01M3675JP3ADPB1KQ5R2A836XC
 title: Make legacy SQLite migrations atomic and retry-safe
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Claude
@@ -16,8 +16,8 @@ follows: 01M3549XTPENM6MSYCG2SRFCZD
 commits:
   - 3fd31ec0094798b867aadfa5e94a5de9fb9b7906
 created-at: 2026-09-23T04:07:50Z
-updated-at: 2026-09-23T19:09:30Z
-updated-by: Claude
+updated-at: 2026-09-23T19:50:45Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-33252
 claimed-at: 2026-09-23T04:17:12Z
 outcome-what: "Replaced every v1-v12 sqlite3.executescript migration call with complete-statement execution through connection.execute inside the existing per-version BEGIN IMMEDIATE transaction; documented the contract and added rollback, retry, parser, legacy-upgrade, and schema-equivalence regressions."
