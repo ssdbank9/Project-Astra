@@ -55,8 +55,9 @@ Locks so far:
   8-character minimum); pushed after independent review 8.
 - Lock #9: from `f8f0f69` (Gate 2 slices 1-3: 4T4DEA design foundation and self-hosted
   Inter, PZTYC9 shell frame with rail, top bar and hash router, DR3PKR docked task panel);
-  three commits, then independent review 9 ("request changes": sign-out leak H1, M1-M5,
-  L1-L10) and one fix commit; not yet pushed, fixes waiting for a focused re-review.
+  three commits, independent review 9 ("request changes": sign-out leak H1, M1-M5, L1-L10),
+  fix commit `c47062b`, a focused re-review ("approve with follow-ups"), N1-N3 fixed in
+  `03acafc`; the three tickets are in signoff; pushed after the re-review.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
 
@@ -93,7 +94,8 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   `Ran 438 tests`, `OK`. With XX9RFM (project close and date-change notices):
   `Ran 444 tests`, `OK`. With 3M2AYA (no sign-in lockout, in-app password reset,
   8-character minimum): `Ran 456 tests`, `OK`. With lock #9 (Gate 2 slices 1-3, no schema
-  change): `Ran 472 tests`, `OK`; with the review 9 fixes: `Ran 482 tests`, `OK`.
+  change): `Ran 472 tests`, `OK`; with the review 9 fixes: `Ran 482 tests`, `OK`; with the re-review
+  follow-ups N1-N3: `Ran 484 tests`, `OK`.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 
@@ -185,7 +187,7 @@ old handoff's top section marked superseded; (b) the jaira sync fix as local set
    previous thread: PR #4, then this branch into `main`, then the review-report branch;
    PR #4's tests will need `expected_revision` updates (unverified here).
 7. Adopt the Gate 2 shell (JQY55P / X8FNA5) (option 7). Slices 1-3 (foundation, shell
-   frame, task panel) were built under lock #9 as 4T4DEA, PZTYC9 and DR3PKR (review lane,
+   frame, task panel) were built under lock #9 as 4T4DEA, PZTYC9 and DR3PKR (signoff lane,
    related to X8FNA5 and JQY55P, which stay Aly's). Slices 4-7 (Command Center Home, project
    tabs and read-only board, My Work and Inbox pages, phone and accessibility pass) remain.
 8. The `tmp*` folders in Aly's checkout (option 8): `git status` there prints about 35

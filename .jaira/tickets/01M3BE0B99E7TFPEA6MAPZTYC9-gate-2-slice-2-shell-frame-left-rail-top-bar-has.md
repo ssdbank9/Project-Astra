@@ -1,7 +1,7 @@
 ---
 id: 01M3BE0B99E7TFPEA6MAPZTYC9
 title: "Gate 2 slice 2: shell frame (left rail, top bar, hash router, filters in the URL, toolbar into menus)"
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -29,17 +29,17 @@ related:
   - 01M3BDCQSRG5SDAJY6J54T4DEA
 commits: []
 created-at: 2026-09-25T04:43:30Z
-updated-at: 2026-09-25T06:11:04Z
+updated-at: 2026-09-25T07:13:04Z
 updated-by: Claude
 claimed-by: vm-5586
 claimed-at: 2026-09-25T04:43:42Z
 outcome-what: "Gate 2 shell frame: a left rail (Home, My Work, Inbox with unread badge, Projects, Capture; a bottom bar on phones), a sticky top bar (breadcrumb and title, search with Ctrl K or /, ? shortcut list, account menu with People for owners, Sign out, Sign out everywhere), a hash router (#/home, #/my-work, #/inbox, #/projects) using location.hash and history.replaceState only, Home filters in the link with removable chips, 'Showing X of Y' and Clear all; the toolbar keeps only filters and its buttons live in a keyboard-operable More menu; My Work groups my open tasks by due date; the Inbox is a page with Approve/Reject; Projects lists projects and opens one on Home; Capture reuses the task form with optional fields folded and a 'Show it' toast when filters hide the new task; amber and gray no longer used as text. After review 9: Review 9 fixes: sign-out reloads the page; the task panel sits below the top bar and is 380px at 1024-1279px; a filter picked with the panel open survives closing; malformed or non-id links are ignored and a failed load is not a sign-out; no page-wide single-key shortcuts (j/k only in the panel); Esc in a panel field keeps focus in the panel; j/k follow the screen's order; 44px phone targets; each fact shown once, steps and dependencies before Lifecycle; More menu is a sheet on phones; one muted grey token; action toasts stay until used; Clear all beside the chips; page title Home."
 outcome-why: "Every screen was a dialog over one dashboard with no links, 20 controls in one toolbar, sign-out buttons crowding the phone header, and an inbox that could not stay open. Aly accepted the rail Home/My Work/Inbox/Projects/Capture as the production spec, with Capture as quick-add through the existing endpoint (lock #9). After review 9: Independent review 9 returned request changes (session file lock9-review.md): a High cross-account leak on sign-out, the panel covering the top bar, a lost filter, a malformed-link sign-in loop, single-key shortcuts against WCAG 2.1.4, and missing behaviour tests."
 outcome-resolves: "All six DoD items ticked with proof; Ran 466 tests, OK; Chromium checks at 1440/1024/390: no sideways scroll, no CSP errors, filters survive reload and Back. After review 9: All DoD items ticked with corrected proofs; Ran 482 tests, OK; Chromium at 1440/1024/390: owner signs out and a member signs in with none of the owner's Inbox or panel on screen, account menu and search usable with a task open, filters kept, no CSP errors, no sideways scroll."
-review-summary: "Independent review 9 of 91bc390/08b926c/cf44fb6 (parent f8f0f69), 2026-09-25: static allowlist, font headers, genuine Inter 4.001 files, CSP, role gating and regression walk all correct; suite 472 OK; 15 of 22 mutations caught."
-review-verdict: "request changes: H1 sign-out leaves the previous user's Inbox and task panel; M1 panel covers the top bar at >=1024px; M2 filter set with the panel open lost on close; M3 malformed hash shows sign-in; M4 single-key shortcuts / ? j k without off switch (WCAG 2.1.4); M5 tests miss focus return, escaping, owner-only items, aria-expanded, token contrast; L1-L10 lows"
-review-gaps: "See session file lock9-review.md; all of H1, M1-M5 and L1-L10 are being fixed in one follow-up commit."
-review-check: Re-review of the fix commit.
+review-summary: "Review 9 (2026-09-25) of 91bc390/08b926c/cf44fb6: request changes (H1 sign-out leak, M1-M5, L1-L10). Fixed in c47062be15677f357a4e25a8fafbd73e69f0ccf5. Focused re-review of c47062b (session file lock9-rereview.md): approve with follow-ups; H1 and M1-M5 fixed with behaviour tests, three small new defects N1 (action toast followed you across screens), N2 (copy-link fallback toast timed out), N3 (44px targets only on phones). N1-N3 fixed in 03acafcf3ffccca9cce65495a4045abf1a3cc2eb with tests; Ran 484 tests, OK."
+review-verdict: "approve with follow-ups; review 9 request changes fixed in c47062be15677f357a4e25a8fafbd73e69f0ccf5, re-review approve with follow-ups, N1-N3 fixed in 03acafcf3ffccca9cce65495a4045abf1a3cc2eb, not re-reviewed"
+review-gaps: "Left for later: L4 and L5 partial (1024px screen behind the 380px panel is still about 516px; the Gantt legend orphans an item); the pre-existing Gantt project-flag contrast (.proj-flag, white on #d1495b, 4.36:1); Open full page still shown on phones where the panel is already full screen; a Manage rail entry so Import and Templates are reachable outside Home (later slice); no favicon (404 in the console)."
+review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 484 tests' and 'OK'. 2. Start Astra and sign in as the primary owner: a left rail (Home, My Work, Inbox, Projects, Capture) and a top bar with search and your initials. 3. On Home pick Criticality: Low and Open work only: chips appear under the filters with 'Showing X of Y' and Clear all; reload the page: the filters are still set. 4. Click a task link in the Gantt: it opens in a panel on the right, the Gantt stays usable, the top bar is still visible; press Esc: the panel closes and focus is back on the link. 5. Open a task, click Copy link, paste the link in a new tab: the same task opens. 6. Open Inbox with a task open, then Sign out from the account menu and sign in as a member: none of your Inbox or the task is on screen. 7. Resize to phone width: the rail is a bottom bar and a task fills the screen."
 ---
 
 # Gate 2 slice 2: shell frame (left rail, top bar, hash router, filters in the URL, toolbar into menus)

@@ -1,7 +1,7 @@
 ---
 id: 01M3BF5Z67ZKA6JJG020DR3PKR
 title: "Gate 2 slice 3: docked task side panel with its own link"
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -25,17 +25,17 @@ related:
   - 01M3BE0B99E7TFPEA6MAPZTYC9
 commits: []
 created-at: 2026-09-25T05:04:03Z
-updated-at: 2026-09-25T06:11:06Z
+updated-at: 2026-09-25T07:13:06Z
 updated-by: Claude
 claimed-by: vm-9335
 claimed-at: 2026-09-25T05:04:22Z
 outcome-what: "Task detail is now a panel docked on the right (460px, non-modal, the screen behind moves over and stays usable) instead of a modal dialog. It has its own link: ?task=<id> over the current screen or #/task/<id> as a full page, both surviving reload and Back/Forward, with Copy link and Open full page. Esc or x closes it (a first Esc only leaves a text field), focus moves into it on open and back to the opener on close, j/k step through the tasks of the screen behind, and below 1024px it is a full-screen sheet. It opens on project and status, the title, state chips with glyphs, a role line, six facts and section links, then the one Lifecycle block with today's button names. After review 9: Review 9 fixes: sign-out reloads the page; the task panel sits below the top bar and is 380px at 1024-1279px; a filter picked with the panel open survives closing; malformed or non-id links are ignored and a failed load is not a sign-out; no page-wide single-key shortcuts (j/k only in the panel); Esc in a panel field keeps focus in the panel; j/k follow the screen's order; 44px phone targets; each fact shown once, steps and dependencies before Lifecycle; More menu is a sheet on phones; one muted grey token; action toasts stay until used; Clear all beside the chips; page title Home."
 outcome-why: "The modal dialog blocked the Gantt, My Work and Inbox while a task was open, a task had no link, and the lifecycle actions sat halfway down. Aly asked for the Gate 2 docked panel (X8FNA5, lock #9); the design reference relayed by the coordinator set the anatomy. After review 9: Independent review 9 returned request changes (session file lock9-review.md): a High cross-account leak on sign-out, the panel covering the top bar, a lost filter, a malformed-link sign-in loop, single-key shortcuts against WCAG 2.1.4, and missing behaviour tests."
 outcome-resolves: "All five DoD items ticked with proof; Ran 472 tests, OK; Chromium checks at 1440/1024/390: reload, Back and Forward agree with the panel, Esc returns focus to the opener, no sideways scroll, no CSP errors. After review 9: All DoD items ticked with corrected proofs; Ran 482 tests, OK; Chromium at 1440/1024/390: owner signs out and a member signs in with none of the owner's Inbox or panel on screen, account menu and search usable with a task open, filters kept, no CSP errors, no sideways scroll."
-review-summary: "Independent review 9 of 91bc390/08b926c/cf44fb6 (parent f8f0f69), 2026-09-25: static allowlist, font headers, genuine Inter 4.001 files, CSP, role gating and regression walk all correct; suite 472 OK; 15 of 22 mutations caught."
-review-verdict: "request changes: H1 sign-out leaves the previous user's Inbox and task panel; M1 panel covers the top bar at >=1024px; M2 filter set with the panel open lost on close; M3 malformed hash shows sign-in; M4 single-key shortcuts / ? j k without off switch (WCAG 2.1.4); M5 tests miss focus return, escaping, owner-only items, aria-expanded, token contrast; L1-L10 lows"
-review-gaps: "See session file lock9-review.md; all of H1, M1-M5 and L1-L10 are being fixed in one follow-up commit."
-review-check: Re-review of the fix commit.
+review-summary: "Review 9 (2026-09-25) of 91bc390/08b926c/cf44fb6: request changes (H1 sign-out leak, M1-M5, L1-L10). Fixed in c47062be15677f357a4e25a8fafbd73e69f0ccf5. Focused re-review of c47062b (session file lock9-rereview.md): approve with follow-ups; H1 and M1-M5 fixed with behaviour tests, three small new defects N1 (action toast followed you across screens), N2 (copy-link fallback toast timed out), N3 (44px targets only on phones). N1-N3 fixed in 03acafcf3ffccca9cce65495a4045abf1a3cc2eb with tests; Ran 484 tests, OK."
+review-verdict: "approve with follow-ups; review 9 request changes fixed in c47062be15677f357a4e25a8fafbd73e69f0ccf5, re-review approve with follow-ups, N1-N3 fixed in 03acafcf3ffccca9cce65495a4045abf1a3cc2eb, not re-reviewed"
+review-gaps: "Left for later: L4 and L5 partial (1024px screen behind the 380px panel is still about 516px; the Gantt legend orphans an item); the pre-existing Gantt project-flag contrast (.proj-flag, white on #d1495b, 4.36:1); Open full page still shown on phones where the panel is already full screen; a Manage rail entry so Import and Templates are reachable outside Home (later slice); no favicon (404 in the console)."
+review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 484 tests' and 'OK'. 2. Start Astra and sign in as the primary owner: a left rail (Home, My Work, Inbox, Projects, Capture) and a top bar with search and your initials. 3. On Home pick Criticality: Low and Open work only: chips appear under the filters with 'Showing X of Y' and Clear all; reload the page: the filters are still set. 4. Click a task link in the Gantt: it opens in a panel on the right, the Gantt stays usable, the top bar is still visible; press Esc: the panel closes and focus is back on the link. 5. Open a task, click Copy link, paste the link in a new tab: the same task opens. 6. Open Inbox with a task open, then Sign out from the account menu and sign in as a member: none of your Inbox or the task is on screen. 7. Resize to phone width: the rail is a bottom bar and a task fills the screen."
 ---
 
 # Gate 2 slice 3: docked task side panel with its own link
