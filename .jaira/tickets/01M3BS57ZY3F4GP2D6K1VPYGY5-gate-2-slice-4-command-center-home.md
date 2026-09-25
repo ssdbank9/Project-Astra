@@ -1,7 +1,7 @@
 ---
 id: 01M3BS57ZY3F4GP2D6K1VPYGY5
 title: "Gate 2 slice 4: Command Center Home"
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -26,13 +26,17 @@ related:
   - 01M3BF5Z67ZKA6JJG020DR3PKR
 commits: []
 created-at: 2026-09-25T07:58:25Z
-updated-at: 2026-09-25T09:48:07Z
+updated-at: 2026-09-25T09:52:58Z
 updated-by: Claude
 claimed-by: vm-1430
 claimed-at: 2026-09-25T07:58:42Z
 outcome-what: "Home is the Command Center: six health tiles that each state their rule and time and open the matching filtered list (Awaiting Owner for owners only); Needs Owner decision with live Approve/Reject and Review; My next actions; At risk; a This week strip; Portfolio by entity; a clear empty state for a new install. The old dashboard (filters, Portfolio Gantt, schedule table, More menu) moved unchanged to #/portfolio under Projects, old #/home filter links redirect there, and a Risk filter plus 'No due date' back the tiles (also applied by Export CSV)."
 outcome-why: "Home showed four counters and a long filter bar; nothing said what needed a decision or what was at risk. Aly granted lock #10 for Gate 2 slices 4-6 (Slack ts 1790322792.679739)."
 outcome-resolves: "All six DoD items ticked with proof; Ran 486 tests, OK; Chromium 1440/1024/390 as owner, member and empty install without CSP errors or sideways scroll."
+review-summary: "Review 10 (2026-09-25, session file lock10-review.md) of 15562d8/90c650f/6e9d079 on 79d350d: approve with follow-ups, no High. Security held (owner-only items hidden and refused server-side for member, manager and chairman; every new text sink escaped; CSV formula guard), tile counts matched their lists and the export, all 11 statuses map to a column, board columns line up at every width. Two Mediums: M1 'today' on the Home strip and the calendar came from the browser's clock while due states use the project's timezone; M2 the This week strip covered days 0-6 while its link and the tile cover 0-7. Lows L1-L8 (unread-row link contrast, phone tap targets, 5 missed test experiments, unknown export risk named in the filename, stretched Home cards and repeated 'as of', UNRATED on every card, double portfolio fetch, an unused variable and an un-normalised project tab). All fixed in 7bfa045ea033dd3001c6e083d0fa9b01cbad9276 with behaviour tests where testable; Ran 503 tests, OK."
+review-gaps: "Left for later: I2 Divide by owner groups by display name, so two people with the same name share a lane (group by owner_user_id); the Home strip counts use each project's own timezone while its labels use the app timezone (Asia/Karachi), so a project in a far timezone can differ by a day at the edges; Divide by entity, a project Activity filter and 'since Monday' tile deltas are not built; the Gantt 'today' line and the portfolio 'As of' still read the browser clock (outside these slices); slice 7 (phone and accessibility pass) remains. The fix commit was not re-reviewed."
+review-verdict: "approve with follow-ups; M1-M2 and L1-L8 fixed in 7bfa045ea033dd3001c6e083d0fa9b01cbad9276, not re-reviewed"
+review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 503 tests' and 'OK'. 2. Start Astra and sign in as the primary owner: Home shows 'Counts as of HH:MM' once, then six tiles (Overdue, Blocked, Awaiting Owner, Due in 7 days, Critical path, Undated). 3. Note the Due in 7 days number, then add up the 8 bars of the This week card (Today plus 7 days): the two numbers are the same. 4. Click the Blocked tile: the Portfolio timeline opens filtered to blocked open work, with a chip for the filter. 5. Back on Home, in Needs Owner decision click Review: the task opens in the side panel; click Approve on a request: it leaves the list and the Awaiting Owner tile drops by one. 6. Sign in as a member: no Awaiting Owner tile and no Needs Owner decision card. 7. Change the computer's timezone to one far from Pakistan (for example Samoa) and reload Home: the first bar still says Today for Pakistan's date and the bars do not shift."
 ---
 
 # Gate 2 slice 4: Command Center Home

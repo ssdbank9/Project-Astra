@@ -1,7 +1,7 @@
 ---
 id: 01M3BVD71SMNH4E0M2CRFKVHH8
 title: "Gate 2 slice 6: My Work groups and calendar month view, Inbox polish"
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -27,13 +27,17 @@ related:
   - 01M3BSY3W3FH34MF87RACR121Z
 commits: []
 created-at: 2026-09-25T08:37:44Z
-updated-at: 2026-09-25T09:48:07Z
+updated-at: 2026-09-25T09:53:01Z
 updated-by: Claude
 claimed-by: vm-10500
 claimed-at: 2026-09-25T08:38:56Z
 outcome-what: "My Work List tab with five due groups, counts and a filter box; a Calendar tab with a Monday-first month grid (prev/today/next, my or all tasks, +N more folding, phone agenda); Inbox tabs Needs action/Unread/All with unread styling, Open task (marks read), Mark read and Mark all read"
 outcome-why: "Gate 2 slice 6 in Aly's lock #10: people need to see what is due by when, on a list or a month, and an inbox that puts decisions first and shows what is unread"
 outcome-resolves: FKVHH8 definition of done 1-5; Gate 2 slice 6 for X8FNA5/JQY55P
+review-summary: "Review 10 (2026-09-25, session file lock10-review.md) of 15562d8/90c650f/6e9d079 on 79d350d: approve with follow-ups, no High. Security held (owner-only items hidden and refused server-side for member, manager and chairman; every new text sink escaped; CSV formula guard), tile counts matched their lists and the export, all 11 statuses map to a column, board columns line up at every width. Two Mediums: M1 'today' on the Home strip and the calendar came from the browser's clock while due states use the project's timezone; M2 the This week strip covered days 0-6 while its link and the tile cover 0-7. Lows L1-L8 (unread-row link contrast, phone tap targets, 5 missed test experiments, unknown export risk named in the filename, stretched Home cards and repeated 'as of', UNRATED on every card, double portfolio fetch, an unused variable and an un-normalised project tab). All fixed in 7bfa045ea033dd3001c6e083d0fa9b01cbad9276 with behaviour tests where testable; Ran 503 tests, OK."
+review-gaps: "Left for later: I2 Divide by owner groups by display name, so two people with the same name share a lane (group by owner_user_id); the Home strip counts use each project's own timezone while its labels use the app timezone (Asia/Karachi), so a project in a far timezone can differ by a day at the edges; Divide by entity, a project Activity filter and 'since Monday' tile deltas are not built; the Gantt 'today' line and the portfolio 'As of' still read the browser clock (outside these slices); slice 7 (phone and accessibility pass) remains. The fix commit was not re-reviewed."
+review-verdict: "approve with follow-ups; M1-M2 and L1-L8 fixed in 7bfa045ea033dd3001c6e083d0fa9b01cbad9276, not re-reviewed"
+review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 503 tests' and 'OK'. 2. Sign in and open My Work: five groups Overdue, Today, This week, Later, No date, each with a count; a task due exactly 7 days from today is under This week. 3. Type part of a task name in the filter box: the groups narrow while you type. 4. Click Calendar: a month starting on Monday with today circled; Previous, Today and Next change the month and the address; a day with more than 3 tasks shows '+N more', and clicking it shows the rest. 5. Change the computer's timezone to Samoa and reload the calendar: today is still circled on Pakistan's date. 6. Narrow the window to phone width: the calendar becomes a list of the days that have work. 7. Open Inbox as the owner: tabs Needs action, Unread, All with counts; unread rows are tinted; click Open task on an unread row: the task opens and the Unread count drops by one; Mark all read empties Unread."
 ---
 
 # Gate 2 slice 6: My Work groups and calendar month view, Inbox polish

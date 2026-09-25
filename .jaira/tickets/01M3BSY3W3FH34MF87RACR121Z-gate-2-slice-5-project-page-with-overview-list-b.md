@@ -1,7 +1,7 @@
 ---
 id: 01M3BSY3W3FH34MF87RACR121Z
 title: "Gate 2 slice 5: project page with Overview, List, Board, Timeline and Activity tabs"
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -26,13 +26,17 @@ related:
   - 01M3BS57ZY3F4GP2D6K1VPYGY5
 commits: []
 created-at: 2026-09-25T08:12:00Z
-updated-at: 2026-09-25T09:48:07Z
+updated-at: 2026-09-25T09:52:59Z
 updated-by: Claude
 claimed-by: vm-4417
 claimed-at: 2026-09-25T08:12:20Z
 outcome-what: "Each project has a page at #/project/<id>/<tab>: Overview (facts, progress, next due), List (the schedule table), Board (read-only, 11 statuses in 7 columns, Accepted/Closed collapsed as Owner-decided, Divide by owner or criticality kept in the link), Timeline (the Gantt) and Activity (project history), with Add a task and owner-only Save as template and Close project. Cards, rows and bars open the task panel; Projects rows link to the page. The Gantt nodes move between the portfolio and the project page instead of being duplicated."
 outcome-why: "A project had no page, no board and no scoped Gantt; project history was a dialog. Aly decided the board is read-only with the 11 statuses mapped into 7 columns and swimlanes in scope (lock #10)."
 outcome-resolves: "All five DoD items ticked with proof; Ran 490 tests, OK; Chromium 1440/1024/390 as owner and member without CSP errors or page-level sideways scroll."
+review-summary: "Review 10 (2026-09-25, session file lock10-review.md) of 15562d8/90c650f/6e9d079 on 79d350d: approve with follow-ups, no High. Security held (owner-only items hidden and refused server-side for member, manager and chairman; every new text sink escaped; CSV formula guard), tile counts matched their lists and the export, all 11 statuses map to a column, board columns line up at every width. Two Mediums: M1 'today' on the Home strip and the calendar came from the browser's clock while due states use the project's timezone; M2 the This week strip covered days 0-6 while its link and the tile cover 0-7. Lows L1-L8 (unread-row link contrast, phone tap targets, 5 missed test experiments, unknown export risk named in the filename, stretched Home cards and repeated 'as of', UNRATED on every card, double portfolio fetch, an unused variable and an un-normalised project tab). All fixed in 7bfa045ea033dd3001c6e083d0fa9b01cbad9276 with behaviour tests where testable; Ran 503 tests, OK."
+review-gaps: "Left for later: I2 Divide by owner groups by display name, so two people with the same name share a lane (group by owner_user_id); the Home strip counts use each project's own timezone while its labels use the app timezone (Asia/Karachi), so a project in a far timezone can differ by a day at the edges; Divide by entity, a project Activity filter and 'since Monday' tile deltas are not built; the Gantt 'today' line and the portfolio 'As of' still read the browser clock (outside these slices); slice 7 (phone and accessibility pass) remains. The fix commit was not re-reviewed."
+review-verdict: "approve with follow-ups; M1-M2 and L1-L8 fixed in 7bfa045ea033dd3001c6e083d0fa9b01cbad9276, not re-reviewed"
+review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 503 tests' and 'OK'. 2. Sign in as the owner, open Projects and click a project: its page opens on Overview with tabs Overview, List, Board, Timeline, Activity. 3. Click Board: 7 columns (Draft, Ready, In progress, Blocked, Submitted, Accepted, Closed); Accepted and Closed are narrow and show a lock. 4. Set Divide by to Owner: each person gets a lane, and every lane's columns sit exactly under the column headers; scroll the board sideways: the lane names stay at the left. 5. A card without a criticality shows no 'Unrated' badge. 6. Click a card title: the task opens in the side panel. 7. Edit the address to end in /nope and press Enter: Overview opens and the address changes to /overview. 8. Sign in as a member: Save as template and Close project are not shown."
 ---
 
 # Gate 2 slice 5: project page with Overview, List, Board, Timeline and Activity tabs

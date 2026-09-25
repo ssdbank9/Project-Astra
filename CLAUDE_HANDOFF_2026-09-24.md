@@ -62,8 +62,9 @@ Locks so far:
   filter change): VPYGY5 Command Center Home (the filtered dashboard moves to
   `#/portfolio`), CR121Z project page with tabs and a read-only board with swimlanes,
   FKVHH8 My Work groups and month calendar plus Inbox tabs. Three commits, one per slice;
-  the three tickets are in review. Not yet pushed: waiting for an independent review and
-  Aly's word.
+  independent review 10 ("approve with follow-ups", no High: M1 browser-clock "today", M2
+  the This week strip against its tile, L1-L8), all fixed in `7bfa045` (not re-reviewed);
+  the three tickets are in signoff; pushed after review 10.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
 
@@ -102,7 +103,7 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   8-character minimum): `Ran 456 tests`, `OK`. With lock #9 (Gate 2 slices 1-3, no schema
   change): `Ran 472 tests`, `OK`; with the review 9 fixes: `Ran 482 tests`, `OK`; with the re-review
   follow-ups N1-N3: `Ran 484 tests`, `OK`. With lock #10 (Gate 2 slices 4-6, no schema
-  change): `Ran 498 tests`, `OK`.
+  change): `Ran 498 tests`, `OK`; with the review 10 fixes: `Ran 503 tests`, `OK`.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 
@@ -197,7 +198,7 @@ old handoff's top section marked superseded; (b) the jaira sync fix as local set
    frame, task panel) were built under lock #9 as 4T4DEA, PZTYC9 and DR3PKR (signoff lane,
    related to X8FNA5 and JQY55P, which stay Aly's). Slices 4-6 (Command Center Home, project
    tabs and read-only board, My Work and Inbox pages) were built under lock #10 as VPYGY5,
-   CR121Z and FKVHH8 (review lane, not yet pushed). Aly's lock #10 decisions: Approve and
+   CR121Z and FKVHH8 (signoff lane, pushed after review 10). Aly's lock #10 decisions: Approve and
    Reject stay live on Home; Workload is dropped; drag and drop, Undo, bulk select and WIP
    limits are not in these slices; swimlanes and the Calendar month view are. Slice 7 (phone
    and accessibility pass) remains.
