@@ -4,12 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Astra Project Tracker</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <section id="login" class="login-card">
+  <main id="login" class="login-card" aria-labelledby="login-title">
     <div class="brand">ASTRA</div>
-    <h1>Project command centre</h1>
+    <h1 id="login-title">Project command centre</h1>
     <p>Sign in to view your authorized projects, assignments, and deadlines.</p>
     <form id="login-form">
       <label>Email<input id="email" type="email" autocomplete="username" required></label>
@@ -17,7 +18,7 @@
       <button>Sign in</button>
       <div id="login-error" class="error"></div>
     </form>
-  </section>
+  </main>
   <div id="app" class="shell" hidden>
     <a class="skip-link" id="skip-link" href="#main">Skip to content</a>
     <nav class="rail" aria-label="Main">
@@ -45,7 +46,7 @@
     <main id="main" tabindex="-1">
       <section class="view" data-view="home" id="home-view" aria-labelledby="page-title">
         <div id="home-empty" hidden></div>
-        <p id="home-asof" class="fine home-asof"></p>
+        <div class="home-head"><p id="home-asof" class="fine home-asof"></p><a class="quiet button-link portfolio-link" id="home-gantt-link" href="#/portfolio">Portfolio Gantt ›</a></div>
         <div id="home-strip" class="health-strip" aria-label="Portfolio health"></div>
         <div class="home-grid" id="home-grid">
           <section class="card" id="home-decisions-card" aria-labelledby="home-decisions-title" hidden>
@@ -108,7 +109,7 @@
           </div>
         <div id="gantt-host">
         <div class="view-controls">
-          <div class="legend"><i class="overdue"></i>Overdue <i class="soon"></i>Due in 7 days <i class="scheduled"></i>Scheduled <i class="blocked"></i>Blocked <i class="undated"></i>Undated <i class="critical"></i>Critical path <i class="proj-start-key"></i>Project start <i class="proj-target-key"></i>Project target</div>
+          <div class="legend"><span class="key"><i class="overdue"></i>Overdue</span> <span class="key"><i class="soon"></i>Due in 7 days</span> <span class="key"><i class="scheduled"></i>Scheduled</span> <span class="key"><i class="blocked"></i>Blocked</span> <span class="key"><i class="undated"></i>Undated</span> <span class="key"><i class="critical"></i>Critical path</span> <span class="key"><i class="proj-start-key"></i>Project start</span> <span class="key"><i class="proj-target-key"></i>Project target</span></div>
           <label class="inline view-toggle"><input type="checkbox" id="view-table"> Schedule table</label>
         </div>
         <div id="bands" class="bands"></div>

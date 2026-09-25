@@ -91,8 +91,15 @@ This first vertical slice provides:
 - one visual system: the Inter typeface (4.001, SIL Open Font License) is served by Astra
   itself from `src/astra/static/fonts`, so the page makes no third-party requests and the
   Content-Security-Policy allows fonts from Astra only; every control shows a keyboard focus
-  ring, a reduced-motion setting switches animation off, and the page fits phone (390px) to
-  desktop (1440px) widths without sideways scrolling;
+  ring, a reduced-motion setting switches animation off, and the page fits phone (360px) to
+  desktop (1440px) widths without sideways scrolling. Below 1024px (phones and tablets) every
+  button, link and field is at least 44px tall and fields use 16px text, so iOS does not zoom
+  in; the phone bottom bar leaves room for the device's safe area and never covers content;
+  "Open full page" is hidden where the task panel already fills the screen. Each screen has
+  one heading 1 (the page title, which takes focus when the screen changes, so screen readers
+  announce it), a "Skip to content" link, navigation, main and panel landmarks, a name on
+  every control, and text contrast of 4.5:1 or better, including the Gantt project flags.
+  The browser tab shows a small Astra icon (`static/favicon.svg`);
 - a navigation shell: a left rail (Home, My Work, Inbox, Projects, Capture; a bottom bar on
   phones) and a top bar with the page title, search (`Ctrl K`, or `Cmd K` on a Mac) and an
   account menu (People and access for owners, Keyboard shortcuts, Sign out, Sign out
@@ -109,7 +116,8 @@ This first vertical slice provides:
   under More fields) and says so if the current filters hide it. Portfolio by entity, Final
   results, Templates, Import, Export CSV and, with one project selected, Project history,
   Save project as template and Close project are in the portfolio timeline's "More" menu;
-- a Command Center Home: six health tiles (Overdue, Blocked, Awaiting Owner for owners, Due in
+- a Command Center Home, with a "Portfolio Gantt ›" button at the top that opens the
+  portfolio timeline (`#/portfolio`, the filters, Portfolio Gantt and schedule table): six health tiles (Overdue, Blocked, Awaiting Owner for owners, Due in
   7 days, Critical path, Undated), each stating what it counts (one "Counts as of" time for
   the row), and each opening the matching filtered list; for owners, "Needs Owner decision" with working Approve and Reject
   and a Review button that opens the task; "My next actions" (Today, This week, Later); "At
@@ -128,7 +136,9 @@ This first vertical slice provides:
   Accepted and Closed are Owner-decided and start collapsed. Cards show the title, owner
   initials, due date, criticality when it is set (the task panel flags unrated work), "Waits on …", on hold, delayed, critical path and "Steps n
   of m done" (steps are counted on their parent, not drawn as cards). "Divide by" splits the
-  board into swimlanes by owner or criticality and is kept in the link. Status still changes
+  board into swimlanes by owner or criticality and is kept in the link; owner lanes are
+  one per person (by user id), so two people with the same name get separate lanes, marked
+  "(1 of 2)" and "(2 of 2)". Status still changes
   only through the task's own lifecycle actions. Every column keeps the same width in the
   header and in every swimlane; a wide board scrolls sideways inside its own frame;
 - My Work with two tabs. List (`#/my-work`) groups the open tasks you own into Overdue,
@@ -138,10 +148,11 @@ This first vertical slice provides:
   "Show" choice (my tasks, or all tasks you can see; `&scope=all`); a day with more than 3
   tasks shows 3 and "+N more", which opens the rest in place. On a phone the month is an
   agenda of the days that have work. Every row and calendar item opens the task panel.
-  "Today" on Home, in My Work and on the calendar is the server's date in the app's timezone
-  (Asia/Karachi, sent with `/api/tasks`; each project also carries its own `today`), and
-  each task's days until due are counted in its project's timezone, so a browser in another
-  timezone never moves work to another day;
+  "Today" on Home, in My Work, on the calendar and on the Gantt's today line is the server's
+  date in the app's timezone (Asia/Karachi, sent with `/api/tasks`; each project also carries
+  its own `today`), and each task's days until due are counted in its project's timezone, so
+  a browser in another timezone never moves work to another day. The portfolio timeline says
+  "Due dates as of <date> (Asia/Karachi)";
 - an Inbox with tabs: Needs action (owners only: the requests waiting for a decision, with
   working Approve and Reject), Unread and All, each with a count; `?tab=` keeps the choice.
   Owners land on Needs action while a request waits, everyone else on Unread while anything

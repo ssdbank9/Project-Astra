@@ -103,6 +103,22 @@ class AstraWebTests(unittest.TestCase):
         response = self.connection.getresponse()
         return response, response.read()
 
+    def test_favicon_is_a_small_svg_on_the_static_allowlist(self):
+        # 3C1Z74: no more favicon 404 in the console; the icon is one allowlisted SVG with no script.
+        response, body = self._get_bytes("/static/favicon.svg")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("Content-Type"), "image/svg+xml")
+        self.assertEqual(response.getheader("X-Content-Type-Options"), "nosniff")
+        self.assertIn("default-src 'self'", response.getheader("Content-Security-Policy"))
+        self.assertTrue(body.startswith(b"<svg "))
+        self.assertLess(len(body), 1024)
+        self.assertNotIn(b"<script", body.lower())
+        self.assertNotIn(b"href", body)
+        for path in ("/static/favicon.ico", "/static/Favicon.svg", "/static/favicon.svg/"):
+            self.assertEqual(self._get_bytes(path)[0].status, 404, path)
+        _, page = self._get_bytes("/")
+        self.assertIn(b'<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">', page)
+
     def test_inter_font_is_served_by_astra_with_strict_allowlist_and_caching(self):
         # 4T4DEA: the page needs no third-party origin; the versioned font files cache for a year.
         for name in ("inter-latin-4.001.woff2", "inter-latin-ext-4.001.woff2"):
@@ -1995,6 +2011,30 @@ class AstraFoundationStaticTests(unittest.TestCase):
         self.assertRegex(block, r"\.cal-nav \.button-link \{[^}]*min-height: 44px;")
         self.assertIn("#board-divide, #cal-scope { min-height: 44px; }", block)
 
+    def test_touch_widths_get_44px_targets_16px_fields_and_room_for_the_bottom_bar(self):
+        # 3C1Z74: one block for phones and tablets rather than per-screen rules.
+        block = self.css[self.css.index("/* 3C1Z74: touch widths"):]
+        block = block[block.index("@media (max-width: 1023px) {"):]
+        block = block[:block.index("\n}\n") if "\n}\n" in block else len(block)]
+        self.assertRegex(block, r"button:not\(\.step\)[^{]*\.tabs a, \.fine a,\s*input:not\(\[type=\"checkbox\"\]\)[^{]*select, textarea \{ min-height: 44px; \}")
+        self.assertIn("input, select, textarea, #search-box { font-size: 16px; }", block)
+        self.assertIn("#detail-full { display: none; }", block)
+        self.assertIn("env(safe-area-inset-bottom)", block)
+        phone = self.css[self.css.rindex("@media (max-width: 760px)"):]
+        self.assertIn(".shell { grid-template-columns: minmax(0, 1fr); padding-bottom: calc(72px + env(safe-area-inset-bottom)); }", self.css)
+        self.assertIn("env(safe-area-inset-bottom)", self.css[self.css.index(".rail { position: fixed;"):][:300])
+        self.assertTrue(phone)
+
+    def test_gantt_project_flags_meet_contrast(self):
+        # 3C1Z74: the target flag was white on #d1495b (4.36:1); it now uses --red.
+        root = self.css[self.css.index(":root {"):self.css.index("}\n* { box-sizing")]
+        tok = dict(re.findall(rf"--([a-z0-9-]+):\s*({HEX})", root, flags=re.I))
+        self.assertIn(".proj-flag.target { background: var(--red); }", self.css)
+        self.assertGreaterEqual(contrast_ratio("#FFFFFF", tok["red"]), 4.5)
+        self.assertGreaterEqual(contrast_ratio("#FFFFFF", "#7a5af5"), 4.5)  # .proj-flag.start
+        self.assertNotIn("#d1495b", self.css.lower())
+        self.assertIn(".brand { font-weight: 800; letter-spacing: .18em; color: var(--teal-dark); }", self.css)
+
     def test_toolbar_wraps_instead_of_scrolling_sideways(self):
         self.assertRegex(self.css, r"(?m)^\.toolbar \{[^}]*flex-wrap: wrap;")
         # PZTYC9: the header became the top bar; on phones it wraps the search onto its own row.
@@ -2045,7 +2085,7 @@ globalThis.history={replaceState(a,b,url){calls.push(["replace",url]);location.h
 // Seed what the menu wiring reads at load time.
 document.querySelector("#more-btn").setAttribute("aria-controls","more-menu");document.querySelector("#more-menu").hidden=true;
 document.querySelector("#detail-dialog").hidden=true;
-(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel,renderHome,boardColumn,renderBoard,renderProject,PROJECT_TABS,renderMyWork,calendarMonth,calExpanded,renderInbox};");
+(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel,renderHome,boardColumn,renderBoard,renderProject,PROJECT_TABS,renderMyWork,calendarMonth,calExpanded,renderInbox,renderGantt,asOfText};");
 const a=globalThis.__a,out={},tick=()=>new Promise(r=>setTimeout(r,0));
 const keydown=(key,target,extra={})=>{const e={key,target,ctrlKey:false,metaKey:false,altKey:false,defaultPrevented:false,prevented:false,preventDefault(){this.prevented=true;this.defaultPrevented=true},stopPropagation(){},...extra};(docListeners.keydown||[]).forEach(f=>f(e));return e.prevented};
 const U1="11111111-1111-4111-8111-111111111111",U2="22222222-2222-4222-8222-222222222222",U3="33333333-3333-4333-8333-333333333333";
@@ -2090,14 +2130,16 @@ if(mode==="board"){
   const statuses=["draft","assigned","in_progress","submitted","changes_requested","completed","on_hold","delayed","cancelled","abandoned","reopened"];
   out.columns=Object.fromEntries(statuses.map(st=>[st,a.boardColumn({status:st,is_blocked:false})]));
   out.blockedColumns=Object.fromEntries(statuses.map(st=>[st,a.boardColumn({status:st,is_blocked:true})]));
-  const T=o=>({project_id:U1,project_name:"P",status:"in_progress",due_state:"scheduled",days_to_due:9,due_date:"2026-10-04",owner_name:"Sara Khan",criticality:"high",...o});
-  const tasks=[T({id:"a",title:"Plan <img src=x onerror=alert(1)>",status:"draft",owner_name:"",criticality:null}),
+  const T=o=>({project_id:U1,project_name:"P",status:"in_progress",due_state:"scheduled",days_to_due:9,due_date:"2026-10-04",owner_name:"Sara Khan",owner_user_id:"u-sara",criticality:"high",...o});
+  const tasks=[T({id:"a",title:"Plan <img src=x onerror=alert(1)>",status:"draft",owner_name:"",owner_user_id:null,criticality:null}),
     T({id:"b",title:"Build",is_blocked:true,blocked_by:[{title:"Plan"}],is_critical_path:true}),
     T({id:"c",title:"Ship",status:"completed",due_state:"closed"}),T({id:"d",title:"Step one",parent_task_id:"b",status:"completed"}),
-    T({id:"e",title:"Step two",parent_task_id:"b"}),T({id:"f",title:"Drop",status:"cancelled",owner_name:"Omar Malik",criticality:"low"})];
+    T({id:"e",title:"Step two",parent_task_id:"b"}),T({id:"f",title:"Drop",status:"cancelled",owner_name:"Omar Malik",owner_user_id:"u-omar",criticality:"low"})];
   out.board=a.renderBoard(tasks,"");out.byOwner=a.renderBoard(tasks,"owner");out.byCrit=a.renderBoard(tasks,"criticality");
   out.emptyBoard=a.renderBoard([],"");
-  out.evilLanes=a.renderBoard([T({id:"z",title:"Z",owner_name:"<b>x</b>"})],"owner");
+  out.evilLanes=a.renderBoard([T({id:"z",title:"Z",owner_name:"<b>x</b>",owner_user_id:"u-x"})],"owner");
+  // 3C1Z74: two people with the same display name keep separate lanes.
+  out.sameName=a.renderBoard([T({id:"s1",title:"One",owner_user_id:"u-a"}),T({id:"s2",title:"Two",owner_user_id:"u-b"}),T({id:"s3",title:"Three",owner_user_id:"u-a"})],"owner");
   out.tabs=a.PROJECT_TABS.map(([k])=>k);
   out.routes=["#/project/"+U1+"/board?divide=owner","#/project/"+U1,"#/project/"+U1+"/nope","#/project/p1/board","#/my-work/calendar","#/my-work/other"]
     .map(h=>{const r=a.parseRoute(h);return [r.name,r.id,r.tab,r.path,r.params.toString()]});
@@ -2138,6 +2180,11 @@ if(mode==="work"){
   location.hash="#/my-work/calendar";a.renderMyWork(a.parseRoute(location.hash));out.calDefault=body();
   a.state.today="2026-10-01";a.renderMyWork(a.parseRoute(location.hash));out.calNewMonth=body();a.state.today="2026-09-25";
   a.state.tasks=[];a.renderMyWork(a.parseRoute("#/my-work"));out.emptyList=body();
+  // 3C1Z74: the Gantt today line and the portfolio "As of" follow the server's today (25 Sep), not the
+  // browser's clock (24 Sep). The project starts on 25 Sep, so its start line and the today line coincide.
+  a.state.projects=[{id:"p1",name:"P",start_date:"2026-09-25",target_date:"2026-10-20",entities:[]}];a.state.viewOverride="chart";a.state.timezone="Asia/Karachi";
+  try{a.renderGantt([T({id:"g1",title:"G",start_date:"2026-09-20",due_date:"2026-09-30"})]);out.gantt=document.querySelector("#gantt").innerHTML}catch(e){out.ganttError=String(e.stack)}
+  out.asOf=a.asOfText();a.state.viewOverride=null;
   const N=[{id:"n1",summary:"task assigned: Alpha",task_id:U1,task_title:"Alpha",created_at:new Date().toISOString(),read_at:null},
     {id:"n2",summary:"old <i>note</i>",task_id:null,task_title:null,created_at:"2026-01-02T10:00:00Z",read_at:"2026-01-03T00:00:00Z"}];
   const R=[{id:"r1",action:"close_project",project_name:"P",requested_by_name:"Mia",requested_at:"2026-09-24T10:00:00Z",reason:"done",payload:{}}];
@@ -2497,6 +2544,8 @@ class AstraProjectPageTests(unittest.TestCase):
         # Review L3: owner names can come from an import file, so lane names are escaped.
         self.assertIn('<h3 class="lane-head">&lt;b&gt;x&lt;/b&gt; <span class="count">1</span></h3>', self.out["evilLanes"])
         self.assertNotIn("<b>x</b>", self.out["evilLanes"])
+        # 3C1Z74: lanes are keyed by user id; two people named Sara Khan get two lanes.
+        self.assertEqual(lanes(self.out["sameName"]), [("Sara Khan (1 of 2)", "2"), ("Sara Khan (2 of 2)", "1")])
         # Review L6: an unrated card shows no rating badge; the task panel still flags it.
         self.assertNotIn("Unrated", self.out["board"].split("board-card", 1)[1].split("</article>", 1)[0])
         css = (STATIC / "style.css").read_text(encoding="utf-8")
@@ -2610,6 +2659,20 @@ class AstraMyWorkInboxTests(unittest.TestCase):
         self.assertEqual(len(re.findall(r'<li class="cal-day', feb)), 28)  # February 2027 is exactly four weeks
         self.assertNotIn("cal-day out", feb)
         self.assertIn("Nothing is due in February 2027.", feb)
+
+    def test_gantt_today_line_and_as_of_use_the_servers_today(self):
+        # 3C1Z74: the browser says 24 Sep (Pago Pago); the server's today is 25 Sep, the project's start.
+        self.assertNotIn("ganttError", self.out)
+        gantt = self.out["gantt"]
+        today = re.findall(r'class="today-line" data-x="([^"]+)"', gantt)
+        start = re.findall(r'class="proj-line start" data-x="([^"]+)"', gantt)
+        self.assertEqual(len(today), 1)
+        self.assertTrue(start)
+        self.assertAlmostEqual(float(today[0]), float(start[0]), places=6)
+        self.assertIn("25", self.out["asOf"])
+        self.assertIn("2026", self.out["asOf"])
+        self.assertTrue(self.out["asOf"].startswith("Due dates as of "))
+        self.assertTrue(self.out["asOf"].endswith("(Asia/Karachi)"))
 
     def test_phone_agenda_lists_only_days_with_work(self):
         agenda = self.out["month"].split('<ol class="cal-agenda"', 1)[1]

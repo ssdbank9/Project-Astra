@@ -2,7 +2,7 @@ const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:
 async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.error||"Request failed");err.status=response.status;throw err}return data}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
 function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);document.querySelector("#new-project").hidden=document.querySelector("#people").hidden=!isOwner();projectActions();refreshImportAccess()}
-async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.today=t.today||null;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
+async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.today=t.today||null;state.timezone=t.timezone||null;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
 function updateBell(){const n=state.unread||0,badge=document.querySelector("#unread-count"),inbox=document.querySelector("#inbox");badge.textContent=n;badge.hidden=!n;inbox.classList.toggle("has-unread",n>0);inbox.setAttribute("aria-label",n?`Inbox, ${n} unread`:"Inbox")}
 function fillFilters(){const pf=document.querySelector("#project-filter"),tp=document.querySelector('#task-form select[name="project_id"]');const selected=pf.value;pf.innerHTML='<option value="">All projects</option>';tp.innerHTML="";for(const p of state.projects){pf.add(new Option(p.status==="closed"?`${p.name} (closed)`:p.name,p.id));if(p.status!=="closed")tp.add(new Option(p.name,p.id))}pf.value=selected;const statuses=[...new Set(state.tasks.map(t=>t.status))].sort();document.querySelector("#status-filter").innerHTML='<option value="">All statuses</option>'+statuses.map(s=>`<option>${escapeHtml(s)}</option>`).join("");const ef=document.querySelector("#entity-filter"),efSel=ef.value;ef.innerHTML='<option value="">All entities</option>'+(state.entities||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`).join("");ef.value=efSel;fillPredecessors()}
 function projectEntityIds(projectId){const p=state.projects.find(p=>p.id===projectId);return new Set((p&&p.entities?p.entities:[]).map(e=>e.id))}
@@ -16,7 +16,7 @@ function render(){
   document.querySelector("#task-count").textContent=tasks.length;
   document.querySelector("#overdue-count").textContent=tasks.filter(t=>t.due_state==="overdue").length;
   document.querySelector("#attention-count").textContent=tasks.filter(t=>t.due_state==="undated").length;
-  document.querySelector("#as-of").textContent=`As of ${new Date().toLocaleString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`;
+  document.querySelector("#as-of").textContent=asOfText();
   renderBands(tasks);
   renderGantt(tasks);
   noteFilters(tasks.length);
@@ -170,11 +170,11 @@ function renderGantt(tasks){
   const markerFlags=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-flag ${m.kind}" data-x="${x}">${escapeHtml(m.label)}</span>`:""}).join("");
   const markerLines=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-line ${m.kind}" data-x="${x}"></span>`:""}).join("");
   // weekly calendar ticks
-  const ticks=[];const t0=new Date(min);t0.setHours(0,0,0,0);
+  // Task dates parse as UTC midnight, so ticks and the today line are in UTC too; today is the server's.
+  const ticks=[];const t0=new Date(min);t0.setUTCHours(0,0,0,0);
   for(let t=t0.getTime();t<=max.getTime();t+=7*86400000)ticks.push(new Date(t));
-  const now=new Date();now.setHours(0,0,0,0);
-  const todayPct=pct(now);const showToday=todayPct>=0&&todayPct<=100;
-  const axis=ticks.map(d=>`<span class="axis-tick" data-x="${pct(d)}"><b>${d.getDate()}</b> ${escapeHtml(d.toLocaleDateString(undefined,{month:"short"}))}</span>`).join("");
+  const todayPct=pct(Date.parse(appToday()));const showToday=todayPct>=0&&todayPct<=100;
+  const axis=ticks.map(d=>`<span class="axis-tick" data-x="${pct(d)}"><b>${d.getUTCDate()}</b> ${escapeHtml(d.toLocaleDateString(undefined,{month:"short",timeZone:"UTC"}))}</span>`).join("");
   const todayFlag=showToday?`<span class="today-flag" data-x="${todayPct}">Today</span>`:"";
   const header=`<div class="gantt-row gantt-head"><div class="task-name gantt-head-cap">Project / task</div><div class="task-meta gantt-head-cap">Owner · due · next action</div><div class="timeline axis">${axis}${markerLines}${markerFlags}${todayFlag}</div></div>`;
   const todayLine=showToday?`<span class="today-line" data-x="${todayPct}"></span>`:"";
@@ -492,6 +492,8 @@ function dueThisWeek(t){return t.days_to_due!=null&&t.days_to_due>=0&&t.days_to_
 function appToday(){return /^\d{4}-\d{2}-\d{2}$/.test(state.today||"")?state.today:dayKey(new Date())}
 function utcDay(key,plus=0){return new Date(Date.UTC(+key.slice(0,4),+key.slice(5,7)-1,+key.slice(8,10)+plus))}
 function utcKey(d){return d.toISOString().slice(0,10)}
+// 3C1Z74: the portfolio's "As of" names the server's date and timezone that due states are counted in.
+function asOfText(){return `Due dates as of ${fmtDay(appToday())}${state.timezone?` (${state.timezone})`:""}`}
 const WORK_GROUPS=[["overdue","Overdue"],["today","Today"],["week","This week"],["later","Later"],["undated","No date"]];
 const WORK_EMPTY={overdue:"Nothing overdue.",today:"Nothing due today.",week:"Nothing due in the next 7 days.",later:"Nothing due later.",undated:"Every task has a due date."};
 function workGroup(t){if(t.due_state==="overdue")return "overdue";if(t.due_state==="today")return "today";if(!t.due_date)return "undated";return dueThisWeek(t)?"week":"later"}
@@ -565,7 +567,7 @@ function calendarMonth(tasks,year,month,todayKey,scope){
   return `<div class="cal-bar"><h2 class="cal-title" id="cal-title">${title}</h2>
     <nav class="cal-nav" aria-label="Month"><a class="button-link quiet" href="${calHref(py,pm,scope)}"><span aria-hidden="true">‹</span> Previous</a><a class="button-link quiet" href="${calHref(+todayKey.slice(0,4),+todayKey.slice(5,7)-1,scope)}">Today</a><a class="button-link quiet" href="${calHref(ny,nm,scope)}">Next <span aria-hidden="true">›</span></a></nav>
     <label class="cal-scope">Show<select id="cal-scope"><option value="mine"${scope==="all"?"":" selected"}>My tasks</option><option value="all"${scope==="all"?" selected":""}>All tasks I can see</option></select></label></div>
-    <p class="fine cal-summary">${count} open task${count===1?"":"s"} due in ${MONTHS[month]}${undated?` · ${undated} with no due date (<a href="#/my-work">see List</a>)`:""}</p>
+    <p class="fine cal-summary">${count} open task${count===1?"":"s"} due in ${MONTHS[month]}${undated?` · ${undated} with no due date · <a href="#/my-work">See them in List</a>`:""}</p>
     <div class="cal-month" aria-labelledby="cal-title"><div class="cal-weekdays" aria-hidden="true">${WEEKDAYS.map(w=>`<span>${w.slice(0,3)}</span>`).join("")}</div><ol class="cal-grid">${cells}</ol></div>
     <ol class="cal-agenda" aria-labelledby="cal-title">${agenda||`<li><p class="empty-line">Nothing is due in ${title}.</p></li>`}</ol>`;
 }
@@ -620,11 +622,14 @@ function boardCard(t,kids){
 function renderBoard(tasks,divide){
   const ids=new Set(tasks.map(t=>t.id)),top=tasks.filter(t=>!t.parent_task_id||!ids.has(t.parent_task_id));
   const kidsOf=id=>tasks.filter(t=>t.parent_task_id===id);
-  const laneKey=divide==="owner"?t=>t.owner_name||"":divide==="criticality"?t=>t.criticality||"":()=>"";
+  // 3C1Z74: owner lanes are keyed by user id, so two people who share a display name get their own lanes.
+  const laneKey=divide==="owner"?t=>t.owner_user_id||"":divide==="criticality"?t=>t.criticality||"":()=>"";
+  const names=new Map(top.map(t=>[t.owner_user_id||"",t.owner_name||"Unassigned"]));
   let lanes=[...new Set(top.map(laneKey))];
   if(divide==="criticality")lanes.sort((a,b)=>CRIT_ORDER.indexOf(a)-CRIT_ORDER.indexOf(b));
-  else lanes.sort((a,b)=>(a===""?1:b===""?-1:a.localeCompare(b)));
-  const laneName=k=>divide==="owner"?(k||"Unassigned"):divide==="criticality"?(k?k.charAt(0).toUpperCase()+k.slice(1):"Unrated"):"";
+  else if(divide==="owner")lanes.sort((a,b)=>(a===""?1:b===""?-1:names.get(a).localeCompare(names.get(b))||a.localeCompare(b)));
+  const nth=k=>{const same=lanes.filter(x=>x&&names.get(x)===names.get(k));return same.length>1?` (${same.indexOf(k)+1} of ${same.length})`:""};
+  const laneName=k=>divide==="owner"?(k?names.get(k)+nth(k):"Unassigned"):divide==="criticality"?(k?k.charAt(0).toUpperCase()+k.slice(1):"Unrated"):"";
   const shut=key=>LOCKED_COLUMNS.includes(key)&&!boardExpanded.has(key);
   const count=key=>top.filter(t=>boardColumn(t)===key).length;
   const head=BOARD_COLUMNS.map(([key,label])=>{
@@ -681,7 +686,7 @@ function renderProject(r){
     return `${top} task${top===1?"":"s"}${steps?`, ${steps} step${steps===1?"":"s"}`:""}`})()].filter(Boolean).join(" · ");
   if(!slot.hidden){
     mountGantt(slot,r.tab==="list"||phoneMQ.matches?"table":"chart");
-    document.querySelector("#as-of").textContent=`As of ${new Date().toLocaleString()}`;
+    document.querySelector("#as-of").textContent=asOfText();
     renderBands(tasks);renderGantt(tasks);return;
   }
   if(r.tab==="board")body.innerHTML=`<div class="page-card board-card-wrap">${renderBoard(tasks,r.params.get("divide"))}</div>`;
@@ -738,7 +743,7 @@ function riskRank(t){return t.due_state==="overdue"?0:t.is_blocked?1:t.is_critic
 function renderHome(){
   const box=id=>document.querySelector(id),owner=isOwner(),tasks=state.tasks||[],projects=state.projects||[];
   const empty=!projects.length;
-  box("#home-empty").hidden=!empty;box("#home-strip").hidden=box("#home-grid").hidden=box("#home-portfolio-card").hidden=empty;
+  box("#home-empty").hidden=!empty;box("#home-strip").hidden=box("#home-grid").hidden=box("#home-portfolio-card").hidden=box("#home-gantt-link").hidden=empty;
   if(empty){
     box("#home-empty").innerHTML=`<div class="card empty-state"><h2>No projects yet</h2>${owner
       ?'<p>Start a project to see its health, decisions and deadlines here.</p><a class="button-link primary" href="#/projects">Go to Projects</a>'

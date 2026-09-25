@@ -65,6 +65,12 @@ Locks so far:
   independent review 10 ("approve with follow-ups", no High: M1 browser-clock "today", M2
   the This week strip against its tile, L1-L8), all fixed in `7bfa045` (not re-reviewed);
   the three tickets are in signoff; pushed after review 10.
+- Lock #11: from `46ec9f4` (Gate 2 slice 7, 3C1Z74: the phone and accessibility pass at
+  360/390/768/1024/1440 with a scratch Playwright audit, and the leftovers: Open full page
+  hidden on touch widths, board lanes by user id, the Gantt today line and portfolio As of
+  from the server's today, an SVG favicon, a visible Portfolio Gantt link on Home). One
+  commit; the ticket is in review. Not yet pushed: waiting for an independent review and
+  Aly's word.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
 
@@ -103,7 +109,8 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   8-character minimum): `Ran 456 tests`, `OK`. With lock #9 (Gate 2 slices 1-3, no schema
   change): `Ran 472 tests`, `OK`; with the review 9 fixes: `Ran 482 tests`, `OK`; with the re-review
   follow-ups N1-N3: `Ran 484 tests`, `OK`. With lock #10 (Gate 2 slices 4-6, no schema
-  change): `Ran 498 tests`, `OK`; with the review 10 fixes: `Ran 503 tests`, `OK`.
+  change): `Ran 498 tests`, `OK`; with the review 10 fixes: `Ran 503 tests`, `OK`. With lock #11
+  (Gate 2 slice 7, no schema change): `Ran 507 tests`, `OK`.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 
@@ -201,7 +208,8 @@ old handoff's top section marked superseded; (b) the jaira sync fix as local set
    CR121Z and FKVHH8 (signoff lane, pushed after review 10). Aly's lock #10 decisions: Approve and
    Reject stay live on Home; Workload is dropped; drag and drop, Undo, bulk select and WIP
    limits are not in these slices; swimlanes and the Calendar month view are. Slice 7 (phone
-   and accessibility pass) remains.
+   and accessibility pass, plus the review 9/10 leftovers) was built under lock #11 as
+   3C1Z74 (review lane, not yet pushed); with it Gate 2 is complete apart from signoff.
 8. The `tmp*` folders in Aly's checkout (option 8): `git status` there prints about 35
    "could not open directory 'tmpXXXX/': Permission denied" warnings; do not delete until
    checked.

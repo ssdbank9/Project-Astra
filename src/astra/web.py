@@ -27,7 +27,7 @@ CONTENT_SECURITY_POLICY = ("default-src 'self'; style-src 'self'; script-src 'se
                            "base-uri 'none'; frame-ancestors 'none'")
 # Only these files are served from static/. The Inter files carry their version in the name
 # (Inter 4.001, Google Fonts css2 v20 latin and latin-ext subsets), so they can be cached for a year.
-STATIC_FILES = {"index.html", "app.js", "style.css", "fonts/Inter-OFL.txt"}
+STATIC_FILES = {"index.html", "app.js", "style.css", "favicon.svg", "fonts/Inter-OFL.txt"}
 FONT_FILES = {"fonts/inter-latin-4.001.woff2", "fonts/inter-latin-ext-4.001.woff2"}
 
 
@@ -125,7 +125,8 @@ class AstraHandler(BaseHTTPRequestHandler):
                 q = parse_qs(urlparse(self.path).query)
                 project = q.get("project_id", [None])[0]
                 sort = q.get("sort", ["criticality"])[0]
-                return self._json({"tasks": self.service.list_tasks(user, project, sort), "today": self.service.app_today()})
+                return self._json({"tasks": self.service.list_tasks(user, project, sort), "today": self.service.app_today(),
+                                   "timezone": self.service.DEFAULT_TIMEZONE})
             if path == "/api/task-dependencies":
                 user, _ = self._require_user()
                 task_id = parse_qs(urlparse(self.path).query).get("task_id", [""])[0]
