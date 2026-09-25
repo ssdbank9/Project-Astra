@@ -93,6 +93,17 @@ This first vertical slice provides:
   Content-Security-Policy allows fonts from Astra only; every control shows a keyboard focus
   ring, a reduced-motion setting switches animation off, and the page fits phone (390px) to
   desktop (1440px) widths without sideways scrolling;
+- a navigation shell: a left rail (Home, My Work, Inbox, Projects, Capture; a bottom bar on
+  phones) and a top bar with the page title, search (`Ctrl K` or `/`; `?` lists the shortcuts)
+  and an account menu (People and access for owners, Sign out, Sign out everywhere). Each
+  screen has its own link (`#/home`, `#/my-work`, `#/inbox`, `#/projects`). The Home filters
+  live in that link, so reload, Back and a shared link keep them; active filters show as
+  removable chips beside "Showing X of Y", with Clear all. My Work lists your open tasks by
+  due date; the Inbox is a page (Approve and Reject work there); Projects lists the projects
+  you can see and opens one on Home; Capture adds a task with a title and project (the other
+  fields fold under More fields) and says so if the current filters hide it. Portfolio, Final
+  results, Templates, Import, Export CSV and, with one project selected, Project history,
+  Save project as template and Close project are in the Home "More" menu;
 - a final-results repository: the App Owner marks an accepted submission or an attachment
   by hand (acceptance alone adds nothing), and the Final results dialog filters by project,
   entity, type, marked date (from/to, whole days in UTC, both ends inclusive) and a search,

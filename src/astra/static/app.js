@@ -1,27 +1,19 @@
 const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality"};
 async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.error||"Request failed");err.status=response.status;throw err}return data}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
-function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=`${state.user.display_name} · ${state.user.global_role}`;const isOwner=state.user.global_role==="owner";document.querySelector("#new-project").hidden=!isOwner;document.querySelector("#people").hidden=!isOwner;document.querySelector("#close-project").hidden=!isOwner;document.querySelector("#save-template-btn").hidden=!isOwner;refreshImportAccess()}
-async function load(){const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;state.loads=(state.loads||0)+1;updateBell();fillFilters();render()}
-function updateBell(){document.querySelector("#unread-count").textContent=state.unread||0;document.querySelector("#inbox").classList.toggle("has-unread",(state.unread||0)>0)}
+function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);const isOwner=state.user.global_role==="owner";document.querySelector("#new-project").hidden=!isOwner;document.querySelector("#people").hidden=!isOwner;document.querySelector("#close-project").hidden=!isOwner;document.querySelector("#save-template-btn").hidden=!isOwner;refreshImportAccess()}
+async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
+function updateBell(){const n=state.unread||0,badge=document.querySelector("#unread-count"),inbox=document.querySelector("#inbox");badge.textContent=n;badge.hidden=!n;inbox.classList.toggle("has-unread",n>0);inbox.setAttribute("aria-label",n?`Inbox, ${n} unread`:"Inbox")}
 function fillFilters(){const pf=document.querySelector("#project-filter"),tp=document.querySelector('#task-form select[name="project_id"]');const selected=pf.value;pf.innerHTML='<option value="">All projects</option>';tp.innerHTML="";for(const p of state.projects){pf.add(new Option(p.status==="closed"?`${p.name} (closed)`:p.name,p.id));if(p.status!=="closed")tp.add(new Option(p.name,p.id))}pf.value=selected;const statuses=[...new Set(state.tasks.map(t=>t.status))].sort();document.querySelector("#status-filter").innerHTML='<option value="">All statuses</option>'+statuses.map(s=>`<option>${escapeHtml(s)}</option>`).join("");const ef=document.querySelector("#entity-filter"),efSel=ef.value;ef.innerHTML='<option value="">All entities</option>'+(state.entities||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`).join("");ef.value=efSel;fillPredecessors()}
 function projectEntityIds(projectId){const p=state.projects.find(p=>p.id===projectId);return new Set((p&&p.entities?p.entities:[]).map(e=>e.id))}
 function fillPredecessors(){const project=document.querySelector('#task-form select[name="project_id"]').value,select=document.querySelector('#task-form select[name="predecessor_task_id"]'),parent=document.querySelector('#task-form select[name="parent_task_id"]');select.innerHTML='<option value="">No predecessor</option>';parent.innerHTML='<option value="">No parent</option>';for(const task of state.tasks.filter(t=>t.project_id===project)){select.add(new Option(task.title,task.id));parent.add(new Option(task.title,task.id))}}
 function render(){
   // 5WZ4A8: project history is per project, so the button shows only when one project is selected.
   document.querySelector("#project-history-btn").hidden=!document.querySelector("#project-filter").value;
-  const project=document.querySelector("#project-filter").value,status=document.querySelector("#status-filter").value,
-    entity=document.querySelector("#entity-filter").value,crit=document.querySelector("#crit-filter").value,
-    band=document.querySelector("#band-filter").value,owner=document.querySelector("#owner-filter").value.toLowerCase(),
-    openOnly=document.querySelector("#open-only").checked;
-  const tasks=state.tasks.filter(t=>
-    (!project||t.project_id===project)&&
-    (!status||t.status===status)&&
-    (!entity||projectEntityIds(t.project_id).has(entity))&&
-    (!crit||(crit==="unrated"?!t.criticality:t.criticality===crit))&&
-    (!band||matchesBand(t,band))&&
-    (!owner||(t.owner_name||"").toLowerCase().includes(owner))&&
-    (!openOnly||!CLOSED_STATUSES.includes(t.status)));
+  // PZTYC9: the More menu offers project actions only while one project is selected.
+  const oneProject=!!document.querySelector("#project-filter").value,owner=!!state.user&&state.user.global_role==="owner";
+  document.querySelector("#close-project").hidden=document.querySelector("#save-template-btn").hidden=!(oneProject&&owner);
+  const tasks=visibleTasks();
   document.querySelector("#project-count").textContent=state.projects.length;
   document.querySelector("#task-count").textContent=tasks.length;
   document.querySelector("#overdue-count").textContent=tasks.filter(t=>t.due_state==="overdue").length;
@@ -29,6 +21,22 @@ function render(){
   document.querySelector("#as-of").textContent=`As of ${new Date().toLocaleString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`;
   renderBands(tasks);
   renderGantt(tasks);
+  noteFilters(tasks.length);
+}
+// The Home filters, applied to the loaded tasks (the same rules the export reuses on the server).
+function visibleTasks(){
+  const project=document.querySelector("#project-filter").value,status=document.querySelector("#status-filter").value,
+    entity=document.querySelector("#entity-filter").value,crit=document.querySelector("#crit-filter").value,
+    band=document.querySelector("#band-filter").value,owner=document.querySelector("#owner-filter").value.toLowerCase(),
+    openOnly=document.querySelector("#open-only").checked;
+  return state.tasks.filter(t=>
+    (!project||t.project_id===project)&&
+    (!status||t.status===status)&&
+    (!entity||projectEntityIds(t.project_id).has(entity))&&
+    (!crit||(crit==="unrated"?!t.criticality:t.criticality===crit))&&
+    (!band||matchesBand(t,band))&&
+    (!owner||(t.owner_name||"").toLowerCase().includes(owner))&&
+    (!openOnly||!CLOSED_STATUSES.includes(t.status)));
 }
 function matchesBand(t,band){
   if(band==="overdue")return t.due_state==="overdue";
@@ -328,6 +336,168 @@ function toggleMore(btn){const list=document.getElementById(btn.getAttribute("ar
   let resizeTimer;window.addEventListener("resize",()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(state.user)render()},150)});
 })();
 function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+// PZTYC9: the Gate 2 shell. A small hash router: #/home, #/my-work, #/inbox, #/projects. Moving between
+// screens assigns location.hash (a history entry and a hashchange of its own), and a filter edit rewrites
+// the Home link with history.replaceState, so nothing here needs pushState. Home filters ride in the query
+// (#/home?status=delayed&open=1), so reload, Back and a pasted link restore them.
+const VIEWS=["home","my-work","inbox","projects"];
+const VIEW_TITLES={home:["Home","Portfolio"],"my-work":["My Work","Assigned to me"],inbox:["Inbox","Needs action and activity"],projects:["Projects","All projects"]};
+const FILTER_PARAMS=[["project","#project-filter"],["status","#status-filter"],["entity","#entity-filter"],["crit","#crit-filter"],["due","#band-filter"],["owner","#owner-filter"],["sort","#sort-filter"]];
+function parseRoute(hash){
+  const raw=String(hash||"").replace(/^#\/?/,""),q=raw.indexOf("?");
+  const [name,id]=(q<0?raw:raw.slice(0,q)).split("/");
+  return {name:VIEWS.includes(name)?name:"home",id:id?decodeURIComponent(id):null,params:new URLSearchParams(q<0?"":raw.slice(q+1))};
+}
+function currentRoute(){return parseRoute(location.hash)}
+function filtersFromUrl(params){
+  for(const [key,sel] of FILTER_PARAMS){const el=document.querySelector(sel),v=params.get(key)||(key==="sort"?"criticality":"");if(el.value!==v)el.value=v}
+  document.querySelector("#open-only").checked=params.get("open")==="1";
+}
+function homeQuery(){
+  const p=new URLSearchParams();
+  for(const [key,sel] of FILTER_PARAMS){const v=document.querySelector(sel).value;if(v&&!(key==="sort"&&v==="criticality"))p.set(key,v)}
+  if(document.querySelector("#open-only").checked)p.set("open","1");
+  return p.toString();
+}
+function syncFilters(){
+  const q=homeQuery(),hash="#/home"+(q?"?"+q:"");
+  if(location.hash!==hash&&history.replaceState)history.replaceState(null,"",hash);
+  document.querySelector('[data-nav="home"]').setAttribute("href",hash);
+}
+function filtersChanged(){syncFilters();render();shellTitle(currentRoute())}
+function roleLabel(u){if(u.is_primary_owner)return "Primary owner";const r=String(u.global_role||"");return r.charAt(0).toUpperCase()+r.slice(1)}
+function shellTitle(r){
+  let [crumb,title]=VIEW_TITLES[r.name];
+  const pid=r.name==="home"&&document.querySelector("#project-filter").value,proj=pid&&state.projects.find(p=>p.id===pid);
+  if(proj){crumb="Home · Projects";title=proj.name}
+  document.querySelector("#crumb").textContent=crumb;document.querySelector("#page-title").textContent=title;document.title=`${title} · Astra`;
+}
+// Under the filters: "Showing X of Y" and one removable chip per active filter.
+function activeFilters(){
+  const chips=[];
+  for(const [key,sel] of FILTER_PARAMS){
+    const el=document.querySelector(sel);if(key==="sort"||!el.value)continue;
+    const label=el.labels&&el.labels[0]?el.labels[0].firstChild.textContent.trim():key;
+    const text=(el.selectedOptions&&el.selectedOptions[0]&&el.selectedOptions[0].textContent)||el.value;
+    chips.push([key,`${label}: ${text}`]);
+  }
+  if(document.querySelector("#open-only").checked)chips.push(["open","Open work only"]);
+  return chips;
+}
+function noteFilters(shown){
+  const chips=activeFilters(),total=state.tasks.length;
+  document.querySelector("#clear-filters").hidden=!chips.length;
+  document.querySelector("#filter-note").innerHTML=chips.length?`<span>Showing <strong>${shown} of ${total}</strong> task${total===1?"":"s"}</span>`+
+    chips.map(([key,text])=>`<button type="button" class="filter-chip" data-clear="${key}" aria-label="Remove filter ${escapeHtml(text)}">${escapeHtml(text)}<span aria-hidden="true">×</span></button>`).join(""):"";
+}
+function clearFilter(key){
+  if(key==="open")document.querySelector("#open-only").checked=false;
+  else{const f=FILTER_PARAMS.find(([k])=>k===key);if(f)document.querySelector(f[1]).value=""}
+  filtersChanged();
+  (document.querySelector("#filter-note .filter-chip")||document.querySelector("#project-filter")).focus();
+}
+function clearAllFilters(){filtersFromUrl(new URLSearchParams());const sorted=state.sort!=="criticality";state.sort="criticality";syncFilters();shellTitle(currentRoute());if(sorted)load();else render()}
+document.querySelector("#filter-note").addEventListener("click",e=>{const b=e.target.closest("[data-clear]");if(b)clearFilter(b.dataset.clear)});
+// A short notice at the bottom of the screen, with at most one action.
+let toastTimer=null;
+function showToast(text,actionLabel,action){
+  const box=document.querySelector("#toast");clearTimeout(toastTimer);
+  box.innerHTML=`<span>${escapeHtml(text)}</span>${actionLabel?`<button type="button" class="link" id="toast-action">${escapeHtml(actionLabel)}</button>`:""}`;
+  if(actionLabel)document.querySelector("#toast-action").addEventListener("click",()=>{box.innerHTML="";action()});
+  toastTimer=setTimeout(()=>{box.innerHTML=""},10000);
+}
+function applyRoute(moveFocus,fromLoad){
+  if(!state.user)return;
+  const r=currentRoute();
+  document.querySelectorAll("[data-view]").forEach(v=>{v.hidden=v.dataset.view!==r.name});
+  document.querySelectorAll("[data-nav]").forEach(a=>{if(a.dataset.nav===r.name)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current")});
+  if(r.name==="home"){
+    filtersFromUrl(r.params);
+    const sort=r.params.get("sort")==="due_date"?"due_date":"criticality";
+    if(sort!==state.sort){state.sort=sort;load();return}
+    document.querySelector('[data-nav="home"]').setAttribute("href",location.hash||"#/home");
+    render();
+  }else if(r.name==="my-work")renderMyWork();
+  else if(r.name==="projects")renderProjects();
+  else if(r.name==="inbox"&&(!fromLoad||state.inboxLoads===undefined))openInbox();
+  shellTitle(r);
+  if(moveFocus)document.querySelector("#page-title").focus();
+}
+window.addEventListener("hashchange",()=>{closeMenus();applyRoute(true)});
+// My Work: open tasks the signed-in person owns, soonest first, grouped by when they are due.
+const WORK_GROUPS=[["overdue","Overdue"],["today","Today"],["week","Next 7 days"],["later","Later"],["undated","No due date"]];
+function workGroup(t){if(t.due_state==="overdue")return "overdue";if(t.due_state==="today")return "today";if(!t.due_date)return "undated";return t.days_to_due!=null&&t.days_to_due<=7?"week":"later"}
+function workRow(t){
+  const group=workGroup(t);
+  return `<li class="work-row"><button type="button" class="link work-title" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>
+    <span class="work-meta">${escapeHtml(t.project_name||"")}${t.parent_title?` · step of ${escapeHtml(t.parent_title)}`:""} · ${escapeHtml(statusLabel(t.status))}</span>
+    <span class="due-chip" data-due="${group}">${escapeHtml(dueText(t)||"No due date")}</span></li>`;
+}
+function renderMyWork(){
+  const me=state.user&&state.user.id;
+  const mine=state.tasks.filter(t=>t.owner_user_id===me&&!CLOSED_STATUSES.includes(t.status))
+    .sort((a,b)=>String(a.due_date||"9999").localeCompare(String(b.due_date||"9999")));
+  const groups=WORK_GROUPS.map(([key,label])=>{const rows=mine.filter(t=>workGroup(t)===key);
+    return rows.length?`<h3>${label} <span class="count">${rows.length}</span></h3><ul class="work-list">${rows.map(workRow).join("")}</ul>`:""}).join("");
+  document.querySelector("#my-work-body").innerHTML=`<h2>Open work you own <span class="count">${mine.length}</span></h2>`+
+    (groups||`<p class="empty">Nothing is assigned to you right now. Tasks you own show up here, soonest first.</p>`);
+}
+// Projects: every project the person can see; a row opens it on Home (its own workspace comes later).
+function renderProjects(){
+  const rows=state.projects.map(p=>{
+    const tasks=state.tasks.filter(t=>t.project_id===p.id),open=tasks.filter(t=>!CLOSED_STATUSES.includes(t.status)).length,overdue=tasks.filter(t=>t.due_state==="overdue").length;
+    const ents=(p.entities||[]).map(e=>e.name).join(", ");
+    return `<li><a class="project-row" href="#/home?project=${encodeURIComponent(p.id)}"><span class="project-name">${escapeHtml(p.name)}${p.status==="closed"?' <span class="badge" data-level="info">Closed</span>':""}</span>
+      <span class="work-meta">${ents?escapeHtml(ents)+" · ":""}${open} open task${open===1?"":"s"}${p.target_date?` · target ${escapeHtml(fmtDay(p.target_date))}`:""}</span>
+      ${overdue?`<span class="due-chip" data-due="overdue">${overdue} overdue</span>`:""}</a></li>`;
+  }).join("");
+  document.querySelector("#projects-body").innerHTML=`<h2>Projects <span class="count">${state.projects.length}</span></h2>`+
+    (rows?`<ul class="project-list">${rows}</ul>`:`<p class="empty">No projects yet.${state.user&&state.user.global_role==="owner"?" Use New project to start one.":" You see a project once you are added to it."}</p>`);
+}
+document.querySelector("#my-work-body").addEventListener("click",e=>{const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail)});
+// Capture: the task form with the optional fields folded away; the Home project filter is preselected.
+function openCapture(){
+  const form=document.querySelector("#task-form"),project=form.querySelector('select[name="project_id"]'),pid=document.querySelector("#project-filter").value;
+  if(pid&&[...project.options].some(o=>o.value===pid))project.value=pid;
+  fillPredecessors();fillAssignees(project.value,form.querySelector('select[name="owner_user_id"]'));
+  form.querySelector(".error").textContent="";
+  document.querySelector("#task-dialog").showModal();
+}
+// Menus (More, account): a button with aria-expanded and a list of menuitems. Arrow keys move, Escape
+// closes and gives focus back to the button, a click outside closes, and choosing an item closes it first.
+function closeMenus(except){document.querySelectorAll(".menu:not([hidden])").forEach(m=>{if(m===except)return;m.hidden=true;const b=document.querySelector(`[aria-controls="${m.id}"]`);if(b)b.setAttribute("aria-expanded","false")})}
+function wireMenu(buttonId){
+  const btn=document.querySelector(buttonId),menu=document.querySelector("#"+btn.getAttribute("aria-controls"));
+  const items=()=>[...menu.querySelectorAll('[role="menuitem"]')].filter(i=>!i.hidden);
+  const open=focusFirst=>{closeMenus(menu);menu.hidden=false;btn.setAttribute("aria-expanded","true");if(focusFirst)items()[0]?.focus()};
+  const close=refocus=>{menu.hidden=true;btn.setAttribute("aria-expanded","false");if(refocus)btn.focus()};
+  btn.addEventListener("click",e=>menu.hidden?open(e.detail===0):close(false));
+  btn.addEventListener("keydown",e=>{if(e.key==="ArrowDown"){e.preventDefault();open(true)}});
+  menu.addEventListener("click",e=>{if(e.target.closest('[role="menuitem"]'))close(true)},true);
+  menu.addEventListener("keydown",e=>{
+    const list=items(),i=list.indexOf(document.activeElement);
+    if(e.key==="Escape"){e.preventDefault();e.stopPropagation();close(true)}
+    else if(e.key==="Tab")close(false);
+    else if(["ArrowDown","ArrowUp","Home","End"].includes(e.key)&&list.length){e.preventDefault();
+      const next=e.key==="Home"?0:e.key==="End"?list.length-1:(i+(e.key==="ArrowDown"?1:-1)+list.length)%list.length;list[next].focus()}
+  });
+}
+wireMenu("#more-btn");wireMenu("#user-menu-btn");
+// The skip link moves focus without touching the hash, which the router owns.
+document.querySelector("#skip-link").addEventListener("click",e=>{e.preventDefault();document.querySelector("#main").focus()});
+document.addEventListener("click",e=>{if(!e.target.closest(".menu-wrap"))closeMenus()});
+document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;const menu=document.querySelector(".menu:not([hidden])");if(!menu)return;
+  const btn=document.querySelector(`[aria-controls="${menu.id}"]`),held=menu.contains(document.activeElement)||document.activeElement===btn;closeMenus();if(held&&btn)btn.focus()});
+// Ctrl/Cmd+K or / jumps to search and ? lists the shortcuts. Single keys never fire while typing in a field
+// or while a dialog is open.
+function focusSearch(){const box=document.querySelector("#search-box");box.focus();box.select()}
+document.addEventListener("keydown",e=>{
+  if(!state.user)return;
+  if((e.ctrlKey||e.metaKey)&&!e.altKey&&String(e.key).toLowerCase()==="k"){e.preventDefault();focusSearch();return}
+  if(e.ctrlKey||e.metaKey||e.altKey||e.defaultPrevented||e.target.closest("input,textarea,select,[contenteditable]")||document.querySelector("dialog[open]"))return;
+  if(e.key==="/"){e.preventDefault();focusSearch()}
+  else if(e.key==="?"){e.preventDefault();document.querySelector("#keys-dialog").showModal()}
+});
 document.querySelector("#login-form").addEventListener("submit",async e=>{e.preventDefault();try{const data=await api("/api/login",{method:"POST",body:JSON.stringify({email:e.target.querySelector("#email").value,password:e.target.querySelector("#password").value})});Object.assign(state,data);showApp();await load()}catch(err){document.querySelector("#login-error").textContent=err.message}});
 document.querySelector("#logout").onclick=async()=>{await api("/api/logout",{method:"POST",body:"{}"});state.user=state.csrf=null;showLogin()};
 document.querySelector("#logout-all").onclick=async()=>{await api("/api/logout-all",{method:"POST",body:"{}"});state.user=state.csrf=null;showLogin()};
@@ -344,10 +514,12 @@ document.querySelector("#close-project").onclick=async()=>{
     }else{alert(err.message)}
   }
 };
-for(const id of ["project-filter","status-filter","entity-filter","crit-filter","band-filter"]){document.querySelector(`#${id}`).onchange=render}document.querySelector("#open-only").onchange=render;document.querySelector("#owner-filter").oninput=render;
+// PZTYC9: a filter change rewrites the Home link (replaceState, so Back leaves the screen) and re-renders.
+for(const id of ["project-filter","status-filter","entity-filter","crit-filter","band-filter"]){document.querySelector(`#${id}`).onchange=filtersChanged}document.querySelector("#open-only").onchange=filtersChanged;document.querySelector("#owner-filter").oninput=filtersChanged;
 // QY0WG2: changing the sort re-fetches the list in the chosen server-side order.
-document.querySelector("#sort-filter").onchange=e=>{state.sort=e.target.value;load()};
-document.querySelector("#new-project").onclick=()=>document.querySelector("#project-dialog").showModal();document.querySelector("#new-task").onclick=()=>document.querySelector("#task-dialog").showModal();
+document.querySelector("#sort-filter").onchange=e=>{state.sort=e.target.value;syncFilters();load()};
+document.querySelector("#clear-filters").onclick=()=>{clearAllFilters();document.querySelector("#project-filter").focus()};
+document.querySelector("#new-project").onclick=()=>document.querySelector("#project-dialog").showModal();document.querySelector("#new-task").onclick=openCapture;
 document.querySelector("#portfolio-btn").onclick=openPortfolio;
 // 5WZ4A8: project history (schedule changes, closure, imports, owner-action decisions).
 // ZSZ9T2/K62ZAP: the server sends only schedule changes, closure and their own events to anyone
@@ -544,7 +716,6 @@ async function openSearch(q){
 }
 document.querySelector('#task-form select[name="project_id"]').onchange=e=>{fillPredecessors();fillAssignees(e.target.value,document.querySelector('#task-form select[name="owner_user_id"]'))};
 document.querySelector("#people").onclick=openPeople;
-document.querySelector("#inbox").onclick=openInbox;
 async function openInbox(){
   try{
     const [data,ownerQueue]=await Promise.all([
@@ -553,7 +724,6 @@ async function openInbox(){
     ]);
     state.notifications=data.notifications;state.unread=data.unread;updateBell();
     renderInbox(data.notifications,ownerQueue.requests);
-    const d=document.querySelector("#inbox-dialog");if(!d.open)d.showModal();
   }catch(err){document.querySelector("#inbox-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`}
 }
 function renderInbox(items,requests=[]){
@@ -566,8 +736,8 @@ function renderInbox(items,requests=[]){
   state.ownerRequests=requests;state.inboxLoads=state.loads;
   const requestRows=requests.map(r=>`<li class="unread owner-request"><strong>${escapeHtml(requestTitle(r))}</strong>${requestDetail(r)}
     <small>Requested by ${escapeHtml(r.requested_by_name)} · ${escapeHtml(new Date(r.requested_at).toLocaleString())}${r.task_id?` · <button type="button" class="link" data-detail="${escapeHtml(r.task_id)}">Open task</button>`:""}</small><div class="actions"><button type="button" data-request-decision="approved" data-request-id="${escapeHtml(r.id)}">Approve</button><button type="button" class="quiet" data-request-decision="rejected" data-request-id="${escapeHtml(r.id)}">Reject</button><button type="button" class="quiet" data-request-decision="cancelled" data-request-id="${escapeHtml(r.id)}">Cancel request</button></div></li>`).join("")||"<li>No pending Owner requests.</li>";
-  document.querySelector("#inbox-body").innerHTML=`<h2>Needs action</h2><div class="error" id="inbox-error" role="alert" tabindex="-1"></div><ul class="people-list">${requestRows}</ul><h2>Activity</h2>
-    <div class="actions"><button type="button" id="read-all" class="quiet">Mark all read</button></div>
+  document.querySelector("#inbox-body").innerHTML=`<h2>Needs action</h2><div class="error" id="inbox-error" role="alert" tabindex="-1"></div><ul class="people-list">${requestRows||'<li class="muted">Nothing is waiting for your decision.</li>'}</ul>
+    <div class="section-head"><h2>Activity</h2><button type="button" id="read-all" class="quiet">Mark all read</button></div>
     <ul class="people-list">${rows}</ul>`;
   document.querySelector("#read-all").addEventListener("click",markAllRead);
   document.querySelectorAll("#inbox-body [data-read]").forEach(b=>b.addEventListener("click",()=>markRead(b.dataset.read)));
@@ -610,7 +780,7 @@ function requestConflictText(id,decision){
     :`“${requestTitle(r)}” could not be ${decision}: it changed since you opened it. The inbox now shows the latest.`;
 }
 // Open task stacks the task over the inbox; if anything was saved there, show the inbox as it is now on Close.
-document.querySelector("#detail-dialog").addEventListener("close",()=>{if(document.querySelector("#inbox-dialog").open&&state.inboxLoads!==state.loads)openInbox()});
+document.querySelector("#detail-dialog").addEventListener("close",()=>{if(currentRoute().name==="inbox"&&state.inboxLoads!==state.loads)openInbox()});
 async function decideOwnerRequest(id,decision){
   const reason=prompt(decision==="approved"?"Decision note (optional)":`Reason this request is ${decision}:`);
   if(reason===null)return;
@@ -638,7 +808,7 @@ async function fillAssignees(projectId,select,selectedId){
   }catch{}
 }
 document.querySelector("#project-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{await api("/api/projects",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load()}catch(err){e.target.querySelector(".error").textContent=err.message}});
-document.querySelector("#task-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{await api("/api/tasks",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load()}catch(err){e.target.querySelector(".error").textContent=err.message}});
+document.querySelector("#task-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{const {task}=await api("/api/tasks",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load();if(task&&currentRoute().name==="home"&&!visibleTasks().some(t=>t.id===task.id))showToast(`“${task.title}” was added · the current filters hide it`,"Show it",clearAllFilters)}catch(err){e.target.querySelector(".error").textContent=err.message}});
 const STATUSES=["draft","assigned","in_progress","submitted","changes_requested","completed","on_hold","delayed","cancelled","abandoned","reopened"];
 const CRITICALITIES=[["","Unrated"],["critical","Critical"],["high","High"],["normal","Normal"],["low","Low"]];
 const GOVERNED=["submitted","completed","on_hold","reopened"];

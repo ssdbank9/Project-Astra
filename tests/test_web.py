@@ -1913,7 +1913,143 @@ class AstraFoundationStaticTests(unittest.TestCase):
 
     def test_toolbar_wraps_instead_of_scrolling_sideways(self):
         self.assertRegex(self.css, r"(?m)^\.toolbar \{[^}]*flex-wrap: wrap;")
-        self.assertRegex(self.css, r"(?m)^header \{[^}]*flex-wrap: wrap;")
+        # PZTYC9: the header became the top bar; on phones it wraps the search onto its own row.
+        phone = self.css[self.css.rindex("@media (max-width: 760px)"):]
+        self.assertRegex(phone, r"\.topbar \{[^}]*flex-wrap: wrap;")
+
+
+# PZTYC9: the shell's router is run under node with the same minimal globals as the other drivers
+# (location.hash and history.replaceState only; no pushState), so it has to work without them.
+ROUTER_DRIVER = r"""
+const fs=require("fs");
+const src=fs.readFileSync(process.argv[2],"utf8");
+const store={};
+function el(){
+  const t={innerHTML:"",textContent:"",value:"",checked:false,hidden:false,style:{},dataset:{},_attrs:{}};
+  t.setAttribute=(k,v)=>{t._attrs[k]=String(v)};t.getAttribute=k=>t._attrs[k]??null;t.removeAttribute=k=>{delete t._attrs[k]};
+  t.addEventListener=()=>{};t.classList={add(){},remove(){},toggle(){},contains(){return false}};
+  return new Proxy(t,{get(o,k){if(k===Symbol.toPrimitive)return()=>"";if(k in o)return o[k];return function(){return el()}}});
+}
+globalThis.document={querySelector(s){return store[s]||(store[s]=el())},querySelectorAll(){return[]},
+  getElementById(s){return document.querySelector("#"+s)},createElement(){return el()},addEventListener(){},body:el(),documentElement:el()};
+const listeners={};globalThis.window=globalThis;globalThis.addEventListener=(k,f)=>{listeners[k]=f};
+globalThis.localStorage={getItem(){return null},setItem(){}};
+globalThis.fetch=()=>new Promise(()=>{});
+globalThis.Option=function(t,v){return{text:t,value:v}};
+const replaced=[];
+globalThis.location={hash:"",search:""};globalThis.history={replaceState(a,b,url){replaced.push(url);location.hash=url}};
+(0,eval)(src+";globalThis.__r={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state};");
+const r=globalThis.__r,out={};
+out.parsed=["","#","#/","#/home","#/my-work","#/inbox","#/projects","#/nope","#main","#/home?status=delayed&open=1","#/task/a%2Fb"]
+  .map(h=>{const p=r.parseRoute(h);return [p.name,p.id,p.params.toString()]});
+r.filtersFromUrl(new URLSearchParams("project=p1&status=delayed&entity=e1&crit=unrated&due=7&owner=Sara%20K&sort=due_date&open=1"));
+out.values=["#project-filter","#status-filter","#entity-filter","#crit-filter","#band-filter","#owner-filter","#sort-filter"].map(s=>document.querySelector(s).value);
+out.open=document.querySelector("#open-only").checked;
+out.query=r.homeQuery();
+r.syncFilters();
+out.replaced=replaced.slice();out.hash=location.hash;
+out.homeHref=document.querySelector('[data-nav="home"]').getAttribute("href");
+r.filtersFromUrl(new URLSearchParams(""));
+out.cleared=r.homeQuery();
+out.sortDefault=document.querySelector("#sort-filter").value;
+out.hashchange=typeof listeners.hashchange;
+out.pushState=typeof history.pushState;
+r.state.user=null;out.noUser=r.applyRoute(true)===undefined;
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")
+class AstraShellRouterTests(unittest.TestCase):
+    """PZTYC9: one link per screen, and the Home filters survive reload, Back and a pasted link."""
+
+    @classmethod
+    def setUpClass(cls):
+        with tempfile.TemporaryDirectory() as tmp:
+            driver = Path(tmp) / "router.js"
+            driver.write_text(ROUTER_DRIVER, encoding="utf-8")
+            result = subprocess.run(["node", str(driver), str(STATIC / "app.js")],
+                                    capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise AssertionError(result.stderr)
+        cls.out = json.loads(result.stdout)
+        cls.js = (STATIC / "app.js").read_text(encoding="utf-8")
+        cls.html = (STATIC / "index.html").read_text(encoding="utf-8")
+
+    def test_routes_parse_and_unknown_hashes_fall_back_to_home(self):
+        self.assertEqual(self.out["parsed"], [
+            ["home", None, ""], ["home", None, ""], ["home", None, ""], ["home", None, ""],
+            ["my-work", None, ""], ["inbox", None, ""], ["projects", None, ""], ["home", None, ""],
+            ["home", None, ""], ["home", None, "status=delayed&open=1"], ["home", "a/b", ""]])
+
+    def test_filters_round_trip_through_the_url_with_replace_state(self):
+        self.assertEqual(self.out["values"], ["p1", "delayed", "e1", "unrated", "7", "Sara K", "due_date"])
+        self.assertTrue(self.out["open"])
+        query = "project=p1&status=delayed&entity=e1&crit=unrated&due=7&owner=Sara+K&sort=due_date&open=1"
+        self.assertEqual(self.out["query"], query)
+        self.assertEqual(self.out["replaced"], ["#/home?" + query])
+        self.assertEqual(self.out["homeHref"], "#/home?" + query)
+        # Defaults are left out of the link: no filters and the default sort make a bare #/home.
+        self.assertEqual(self.out["cleared"], "")
+        self.assertEqual(self.out["sortDefault"], "criticality")
+
+    def test_router_needs_no_push_state(self):
+        self.assertEqual(self.out["pushState"], "undefined")
+        self.assertEqual(self.out["hashchange"], "function")
+        self.assertTrue(self.out["noUser"])
+        self.assertNotRegex(self.js, r"\.pushState\(")
+        self.assertIn('window.addEventListener("hashchange",()=>{closeMenus();applyRoute(true)});', self.js)
+
+    def test_shell_landmarks_rail_top_bar_and_menus(self):
+        html = self.html
+        self.assertIn('<nav class="rail" aria-label="Main">', html)
+        for href, label in (("#/home", "Home"), ("#/my-work", "My Work"), ("#/inbox", "Inbox"), ("#/projects", "Projects")):
+            self.assertRegex(html, rf'<a class="rail-item" href="{href}" data-nav="{href[2:]}"[^>]*>.*?<span>{label}</span>')
+        self.assertRegex(html, r'<button type="button" class="rail-item" id="new-task">.*?<span>Capture</span></button>')
+        self.assertIn('<a class="skip-link" id="skip-link" href="#main">Skip to content</a>', html)
+        self.assertIn('<main id="main" tabindex="-1">', html)
+        self.assertIn('aria-keyshortcuts="Control+K /"', html)
+        self.assertIn('<dialog id="keys-dialog"', html)
+        self.assertIn('<div id="toast" class="toast" role="status" aria-live="polite"></div>', html)
+        user_menu = html[html.index('id="user-menu"'):]
+        user_menu = user_menu[:user_menu.index("</div>\n      </div>")]
+        for item in ('id="people"', 'id="logout"', 'id="logout-all"'):
+            self.assertIn(item, user_menu)
+        more = html[html.index('id="more-menu"'):]
+        more = more[:more.index("</div>")]
+        for item in ("portfolio-btn", "final-results-btn", "templates-btn", "import-btn", "export-btn",
+                     "project-history-btn", "save-template-btn", "close-project"):
+            self.assertIn(f'role="menuitem" id="{item}"', more)
+        # The filter bar keeps only filters and Clear filters.
+        toolbar = html[html.index('<section class="toolbar"'):]
+        toolbar = toolbar[:toolbar.index("</section>")]
+        self.assertEqual(re.findall(r"<button[^>]*id=\"([^\"]+)\"", toolbar), ["clear-filters"])
+        # The inbox is a page; the new project button lives on the Projects page.
+        self.assertNotIn('id="inbox-dialog"', html)
+        self.assertRegex(html, r'data-view="inbox"[^>]*><div id="inbox-body"')
+        self.assertRegex(html, r'data-view="projects"[^>]*>\s*<div class="page-actions"><button type="button" id="new-project" hidden>')
+        self.assertIn("Portfolio Gantt", html)
+
+    def test_views_capture_and_menu_behaviour_are_wired(self):
+        js = self.js
+        self.assertIn("const mine=state.tasks.filter(t=>t.owner_user_id===me&&!CLOSED_STATUSES.includes(t.status))", js)
+        self.assertIn('href="#/home?project=${encodeURIComponent(p.id)}"', js)
+        self.assertIn('document.querySelector("#new-task").onclick=openCapture;', js)
+        self.assertIn('if(pid&&[...project.options].some(o=>o.value===pid))project.value=pid;', js)
+        self.assertIn('showToast(`“${task.title}” was added · the current filters hide it`,"Show it",clearAllFilters)', js)
+        # Active filters show as removable chips next to "Showing X of Y"; single keys never fire while typing.
+        self.assertIn('class="filter-chip" data-clear="${key}" aria-label="Remove filter ${escapeHtml(text)}"', js)
+        self.assertIn("<span>Showing <strong>${shown} of ${total}</strong> task", js)
+        self.assertIn('e.target.closest("input,textarea,select,[contenteditable]")||document.querySelector("dialog[open]")', js)
+        self.assertIn('if(e.key==="Escape"){e.preventDefault();e.stopPropagation();close(true)}', js)
+        self.assertIn('menu.addEventListener("click",e=>{if(e.target.closest(\'[role="menuitem"]\'))close(true)},true);', js)
+        self.assertIn('(e.ctrlKey||e.metaKey)&&!e.altKey&&String(e.key).toLowerCase()==="k"', js)
+        # Capture reuses the one create form; optional fields fold away.
+        self.assertIn('<h2 id="task-dialog-title">Capture a task</h2>', self.html)
+        self.assertIn('<details class="more-fields"><summary>More fields</summary>', self.html)
+        # Approve/Reject stay live on the Inbox page.
+        self.assertIn('data-request-decision="approved"', js)
+        self.assertIn("Nothing is waiting for your decision.", js)
 
 
 # ARZWV7: renderDetail is run under node against a permissive DOM stub, so these tests read the
@@ -2077,9 +2213,10 @@ globalThis.__run=async(sc)=>{
   const target=pick?document.querySelectorAll("["+pick[0]+"]").find(n=>n.dataset[key]===pick[1])
     :document.querySelector(sc.submit||sc.button);
   if(sc.closeDetail){ // Close on a task opened from the inbox; loadsSince says whether anything was saved meanwhile
-    const inbox=document.querySelector("#inbox-dialog");inbox.open=true;state.loads+=sc.closeDetail.loadsSince;calls.length=0;
+    // PZTYC9: the inbox is a page now (#/inbox), not a dialog under the task.
+    location.hash="#/inbox";state.loads+=sc.closeDetail.loadsSince;calls.length=0;
     const handlers=document.querySelector("#detail-dialog")._l.close||[];await Promise.all(handlers.map(f=>f()));
-    inbox.open=false;return {calls,threw:null,handlers:handlers.length,messages:{}};
+    location.hash="";return {calls,threw:null,handlers:handlers.length,messages:{}};
   }
   if(!target)return {missing:true};
   await new Promise(r=>setTimeout(r,0));calls.length=0;

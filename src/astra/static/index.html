@@ -18,42 +18,65 @@
       <div id="login-error" class="error"></div>
     </form>
   </section>
-  <div id="app" hidden>
-    <header>
-      <div><span class="brand">ASTRA</span><span class="subtitle">Portfolio control</span></div>
-      <div><button id="inbox" class="quiet">🔔 <span id="unread-count">0</span></button><span id="user-name"></span><button id="logout" class="quiet">Sign out</button><button id="logout-all" class="quiet">Sign out everywhere</button></div>
+  <div id="app" class="shell" hidden>
+    <a class="skip-link" id="skip-link" href="#main">Skip to content</a>
+    <nav class="rail" aria-label="Main">
+      <span class="rail-brand" aria-hidden="true">ASTRA</span>
+      <a class="rail-item" href="#/home" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></a>
+      <a class="rail-item" href="#/my-work" data-nav="my-work"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/></svg><span>My Work</span></a>
+      <a class="rail-item" href="#/inbox" data-nav="inbox" id="inbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13.5 6.5 5h11l2.5 8.5V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13.5h4.5l1.5 2.5h4l1.5-2.5H20"/></svg><span>Inbox</span><b id="unread-count" class="rail-badge" aria-hidden="true" hidden>0</b></a>
+      <a class="rail-item" href="#/projects" data-nav="projects"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg><span>Projects</span></a>
+      <button type="button" class="rail-item" id="new-task"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Capture</span></button>
+    </nav>
+    <header class="topbar">
+      <div class="topbar-title"><div class="crumb" id="crumb">Portfolio</div><h1 id="page-title" tabindex="-1">Home</h1></div>
+      <div class="jump"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="search-box" type="search" placeholder="Search tasks and projects" aria-label="Search tasks and projects" aria-keyshortcuts="Control+K /"><kbd>Ctrl K</kbd></div>
+      <div class="menu-wrap">
+        <button type="button" class="avatar" id="user-menu-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="user-menu" aria-label="Account menu"><span id="user-initials"></span></button>
+        <div class="menu menu-right" id="user-menu" role="menu" aria-labelledby="user-menu-btn" hidden>
+          <div class="menu-head"><strong id="user-name"></strong><span id="user-role"></span></div>
+          <button type="button" role="menuitem" id="people" hidden>People and access</button>
+          <button type="button" role="menuitem" id="logout">Sign out</button>
+          <button type="button" role="menuitem" id="logout-all">Sign out everywhere</button>
+        </div>
+      </div>
     </header>
-    <main>
-      <section class="summary">
-        <div><strong id="project-count">0</strong><span>Projects</span></div>
-        <div><strong id="task-count">0</strong><span>Visible tasks</span></div>
-        <div><strong id="overdue-count">0</strong><span>Overdue</span></div>
-        <div><strong id="attention-count">0</strong><span>Need dates</span></div>
-      </section>
-      <section class="toolbar">
-        <label>Project<select id="project-filter"><option value="">All projects</option></select></label>
-        <label>Status<select id="status-filter"><option value="">All statuses</option></select></label>
-        <label>Entity<select id="entity-filter"><option value="">All entities</option></select></label>
-        <label>Criticality<select id="crit-filter"><option value="">All criticality</option><option value="critical">Critical</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option><option value="unrated">Unrated</option></select></label>
-        <label>Due within<select id="band-filter"><option value="">Any time</option><option value="overdue">Overdue</option><option value="today">Today</option><option value="7">Next 7 days</option><option value="14">Next 14 days</option><option value="30">Next 30 days</option></select></label>
-        <label>Owner<input id="owner-filter" placeholder="Filter by person"></label>
-        <label>Sort by<select id="sort-filter"><option value="criticality">Criticality</option><option value="due_date">Due date</option></select></label>
-        <label class="inline"><input type="checkbox" id="open-only"> Open work only</label>
-        <label>Search<input id="search-box" placeholder="Tasks & projects — Enter"></label>
-        <button id="new-project">New project</button>
-        <button id="new-task">New task</button>
-        <button id="people" hidden>People</button>
-        <button id="close-project" class="quiet" hidden>Close project</button>
-        <button id="project-history-btn" class="quiet" hidden>Project history</button>
-        <button id="portfolio-btn" class="quiet">Portfolio</button>
-        <button id="templates-btn" class="quiet">Templates</button>
-        <button id="import-btn" class="quiet" hidden>Import</button>
-        <button id="final-results-btn" class="quiet">Final results</button>
-        <button id="save-template-btn" class="quiet" hidden>Save project as template</button>
-        <button id="export-btn" class="quiet">Export CSV</button>
-      </section>
-      <section class="panel">
-        <div class="panel-title"><h2>Portfolio Gantt</h2><span id="as-of"></span></div>
+    <main id="main" tabindex="-1">
+      <section class="view" data-view="home" aria-labelledby="page-title">
+        <section class="summary" aria-label="Summary">
+          <div><strong id="project-count">0</strong><span>Projects</span></div>
+          <div><strong id="task-count">0</strong><span>Visible tasks</span></div>
+          <div><strong id="overdue-count">0</strong><span>Overdue</span></div>
+          <div><strong id="attention-count">0</strong><span>Need dates</span></div>
+        </section>
+        <section class="toolbar" aria-label="Filters">
+          <label>Project<select id="project-filter"><option value="">All projects</option></select></label>
+          <label>Status<select id="status-filter"><option value="">All statuses</option></select></label>
+          <label>Entity<select id="entity-filter"><option value="">All entities</option></select></label>
+          <label>Criticality<select id="crit-filter"><option value="">All criticality</option><option value="critical">Critical</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option><option value="unrated">Unrated</option></select></label>
+          <label>Due within<select id="band-filter"><option value="">Any time</option><option value="overdue">Overdue</option><option value="today">Today</option><option value="7">Next 7 days</option><option value="14">Next 14 days</option><option value="30">Next 30 days</option></select></label>
+          <label>Owner<input id="owner-filter" placeholder="Filter by person"></label>
+          <label>Sort by<select id="sort-filter"><option value="criticality">Criticality</option><option value="due_date">Due date</option></select></label>
+          <label class="inline"><input type="checkbox" id="open-only"> Open work only</label>
+          <button type="button" id="clear-filters" class="link" hidden>Clear all</button>
+        </section>
+        <div id="filter-note" class="filter-note" role="status"></div>
+        <section class="panel">
+          <div class="panel-title"><h2>Portfolio Gantt</h2><span id="as-of"></span>
+            <div class="menu-wrap">
+              <button type="button" class="quiet menu-btn" id="more-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu">More<span aria-hidden="true"> ▾</span></button>
+              <div class="menu menu-right" id="more-menu" role="menu" aria-labelledby="more-btn" hidden>
+                <button type="button" role="menuitem" id="portfolio-btn">Portfolio by entity</button>
+                <button type="button" role="menuitem" id="final-results-btn">Final results</button>
+                <button type="button" role="menuitem" id="templates-btn">Templates</button>
+                <button type="button" role="menuitem" id="import-btn" hidden>Import from Excel or CSV</button>
+                <button type="button" role="menuitem" id="export-btn">Export CSV</button>
+                <button type="button" role="menuitem" id="project-history-btn" hidden>Project history</button>
+                <button type="button" role="menuitem" id="save-template-btn" hidden>Save project as template</button>
+                <button type="button" role="menuitem" id="close-project" hidden>Close project</button>
+              </div>
+            </div>
+          </div>
         <div class="view-controls">
           <div class="legend"><i class="overdue"></i>Overdue <i class="soon"></i>Due in 7 days <i class="scheduled"></i>Scheduled <i class="blocked"></i>Blocked <i class="undated"></i>Undated <i class="critical"></i>Critical path <i class="proj-start-key"></i>Project start <i class="proj-target-key"></i>Project target</div>
           <label class="inline view-toggle"><input type="checkbox" id="view-table"> Schedule table</label>
@@ -62,15 +85,21 @@
         <div id="gantt"></div>
         <div id="schedule-table" hidden></div>
         <div class="legend step-legend" id="step-legend" hidden><span class="legend-cap">Steps inside a task bar (colour = step number):</span> <i class="sw step-c1" aria-hidden="true">1</i>Step 1 <i class="sw step-c2" aria-hidden="true">2</i>Step 2 <i class="sw step-c3" aria-hidden="true">3</i>Step 3 <i class="sw step-c4" aria-hidden="true">4</i>Step 4 <i class="sw step-c5" aria-hidden="true">5</i>Step 5 <i class="sw step-c6" aria-hidden="true">6</i>Step 6 <i class="sw step-c7" aria-hidden="true">7</i>Step 7 <span class="legend-cap">· 8+ repeats the colours with a doubled stripe · ✓ completed · × cancelled · ∥ on hold (hatched) · +N not drawn at this scale (too small or overlapping) · dashed track end = step runs past the parent's dates · dashed chip = steps need dates</span></div>
-        <div id="gantt-live" class="sr-only" aria-live="polite"></div>
+          <div id="gantt-live" class="sr-only" aria-live="polite"></div>
+        </section>
+      </section>
+      <section class="view" data-view="my-work" aria-labelledby="page-title" hidden><div id="my-work-body" class="page-card"></div></section>
+      <section class="view" data-view="inbox" aria-labelledby="page-title" hidden><div id="inbox-body" class="page-card"></div></section>
+      <section class="view" data-view="projects" aria-labelledby="page-title" hidden>
+        <div class="page-actions"><button type="button" id="new-project" hidden>New project</button></div>
+        <div id="projects-body" class="page-card"></div>
       </section>
     </main>
   </div>
   <dialog id="project-dialog"><form method="dialog" id="project-form"><h2>Create project</h2><label>Name<input name="name" required></label><label>Description<textarea name="description"></textarea></label><div class="actions"><button value="cancel" class="quiet">Cancel</button><button value="default">Create</button></div><div class="error"></div></form></dialog>
-  <dialog id="task-dialog"><form method="dialog" id="task-form"><h2>Create task</h2><label>Project<select name="project_id" required></select></label><label>Task title<input name="title" required></label><label>Owner<select name="owner_user_id"><option value="">Unassigned</option></select></label><div class="grid"><label>Start date<input name="start_date" type="date"></label><label>Due date<input name="due_date" type="date"></label><label>Criticality<select name="criticality"><option value="">Unrated</option><option value="critical">Critical</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select></label><label>Progress<input name="progress" type="number" min="0" max="100"></label></div><label>Depends on (finish-to-start)<select name="predecessor_task_id"><option value="">No predecessor</option></select></label><label>Parent task (optional)<select name="parent_task_id"><option value="">No parent</option></select></label><label>Description<textarea name="description"></textarea></label><div class="actions"><button value="cancel" class="quiet">Cancel</button><button value="default">Create</button></div><div class="error"></div></form></dialog>
+  <dialog id="task-dialog" aria-labelledby="task-dialog-title"><form method="dialog" id="task-form"><h2 id="task-dialog-title">Capture a task</h2><label>Task title<input name="title" required></label><div class="grid"><label>Project<select name="project_id" required></select></label><label>Due date<input name="due_date" type="date"></label></div><details class="more-fields"><summary>More fields</summary><label>Owner<select name="owner_user_id"><option value="">Unassigned</option></select></label><div class="grid"><label>Start date<input name="start_date" type="date"></label><label>Criticality<select name="criticality"><option value="">Unrated</option><option value="critical">Critical</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select></label><label>Progress<input name="progress" type="number" min="0" max="100"></label></div><label>Depends on (finish-to-start)<select name="predecessor_task_id"><option value="">No predecessor</option></select></label><label>Parent task (optional)<select name="parent_task_id"><option value="">No parent</option></select></label><label>Description<textarea name="description"></textarea></label></details><div class="actions"><button value="cancel" class="quiet">Cancel</button><button value="default">Add task</button></div><div class="error"></div></form></dialog>
   <dialog id="detail-dialog"><div id="detail-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
   <dialog id="people-dialog"><div id="people-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
-  <dialog id="inbox-dialog"><div id="inbox-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
   <dialog id="search-dialog"><div id="search-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
   <dialog id="project-history-dialog"><div id="project-history-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
   <dialog id="portfolio-dialog"><div id="portfolio-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
@@ -88,6 +117,12 @@
     <div id="import-body" class="import-body" aria-live="polite"></div>
     <form method="dialog" class="detail-close"><button value="cancel" class="quiet" id="import-close">Close</button></form>
   </dialog>
+  <dialog id="keys-dialog" aria-labelledby="keys-title"><div class="dialog-body"><h2 id="keys-title">Keyboard shortcuts</h2><dl class="keys">
+    <dt><kbd>Ctrl</kbd> <kbd>K</kbd> or <kbd>/</kbd></dt><dd>Search tasks and projects</dd>
+    <dt><kbd>Esc</kbd></dt><dd>Close a menu or dialog</dd>
+    <dt><kbd>?</kbd></dt><dd>Show these shortcuts</dd>
+  </dl><p class="fine">Single keys work only when you are not typing in a field.</p></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="step-tip" role="tooltip" hidden></div>
   <script src="/static/app.js"></script>
 </body>
