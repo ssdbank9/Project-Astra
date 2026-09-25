@@ -1,6 +1,6 @@
 # Astra Governed Drag-and-Drop Contract
 
-Status: approved design baseline; production implementation not started  
+Status: approved design baseline; board, Gantt, locks, bulk and WIP limits built in lock #12\
 Decision owner: Aly Jafferani, App Owner  
 Decision source: Jaira tickets `JQY55P` and `AX572Q`  
 Prototype: `design/astra-drag-drop-prototype.html`
@@ -127,7 +127,13 @@ No client preview is authority. Every commit recalculates against current data.
   present; the preview shows the result before confirmation.
 - Changes affecting dependencies, protected milestones, the critical path,
   downstream commitments or project completion require an impact panel.
-- Manager changes with protected impact become Owner approval requests.
+- Managers confirm impact moves themselves, and the Owners are notified (Aly's later
+  Gantt decision on JQY55P, which supersedes the earlier "Owner approval request" rule).
+  Astra records the confirmation as `schedule_impact_confirmed` with the move, and does
+  so on every path that changes dates (Gantt, task panel, API). Downstream tasks stay
+  fixed in this version; offering to move them is not built.
+- A finish-to-start link is broken only when the successor starts before the day the
+  predecessor is due. A successor starting on the predecessor's due day is allowed.
 - Invalid dates, locked baselines, missing permission and graph cycles block the
   drop with an explanation.
 - Critical tasks, milestones and connectors have an accessible visual treatment;

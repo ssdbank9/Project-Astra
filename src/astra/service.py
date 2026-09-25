@@ -104,6 +104,9 @@ BOARD_DEPENDENCY_GATED = frozenset({"progress", "submitted", "accepted"})
 # server accepts the Undo a little longer so a click at 15 s still lands.
 BOARD_UNDO_SOURCE_STATUSES = frozenset({"draft", "assigned", "in_progress", "delayed"})
 BOARD_UNDO_SECONDS = 15
+# Review 12a M1: a task waiting on an unfinished predecessor may not move into these on any
+# path (board, panel, API); a manager is refused, an owner confirms an override.
+DEPENDENCY_GATED_STATUSES = {"in_progress": "In progress", "submitted": "Submitted", "completed": "Accepted"}
 BOARD_UNDO_GRACE_SECONDS = 5
 # X07XV4: a task lock is a renewable lease (owner decision, multi-user locks and lock
 # expiry). The client renews every 20 seconds while a drag or the edit form is in use.
@@ -124,6 +127,7 @@ LOCK_GUARDED_KINDS = frozenset({
     "task_on_hold", "schedule_proposed", "schedule_revised", "schedule_proposal_rejected", "parent_changed",
     "dependency_added", "dependency_removed", "dependency_override", "criticality_changed",
     "attachment_added", "attachment_removed", "final_result_marked", "final_result_unmarked",
+    "reviewer_added", "reviewer_removed",
 })
 # Owner decision Item 2 on 6G89SJ: the App Owner hears of every attachment removal outcome,
 # including their own, so a single-owner install is told too. Other owner actions are
@@ -247,6 +251,12 @@ class Forbidden(PermissionError):
 
 class Conflict(ValueError):
     """The requested write was based on state that is no longer current."""
+
+
+class RuleRefusal(ValueError):
+    """Review 12a L4: a server rule refused the change (a dependency, a work-in-progress
+    limit). Boards audit and notice these and Forbidden; plain validation goes back to the
+    actor only."""
 
 
 class TaskLocked(Conflict):
@@ -1133,6 +1143,8 @@ class AstraService:
             self._ensure_baseline(task_id)
             task = self.get_task(actor, task_id)
             self._event(task_id, actor["id"], "task_created", None, task, payload.get("reason"))
+            self._write_audit_events(task_id, actor["id"], self._wip_entry_gate(
+                actor, project_id, task_id, None, payload.get("override_wip") is True))
             if predecessor_task_id:
                 self.db.execute(
                     "INSERT INTO task_dependencies VALUES(?,?,?)",
@@ -1153,14 +1165,71 @@ class AstraService:
     # closed-task check before the reason rules), so each helper runs its checks in the
     # original order and update_task calls them in that order.
     def update_task(self, actor: dict, task_id: str, payload: dict,
-        *, owner_decision: OwnerDecision | None = None,
+        *, owner_decision: OwnerDecision | None = None, move_kind: str | None = None,
+        audit_events: list | None = None,
     ) -> dict:
+        """``move_kind`` ("board" or "gantt") marks an ordinary move that may be undone; it is
+        a keyword the board and Gantt paths pass, never read from the request payload.
+        ``audit_events`` are written in the same transaction as the change."""
         before, expected_revision = self._authorize_task_update(actor, task_id, payload)
         fields = self._validate_task_update(before, payload)
+        events = list(audit_events or [])
+        override_dependencies = payload.get("override_dependencies") is True
+        if fields["status_changed"]:
+            # An early answer; the rule is evaluated again, and recorded, inside the write.
+            self._dependency_gate(actor, before, fields["status"], override_dependencies, owner_decision)
         request = self._route_protected_status_update(actor, before, fields)
         if request is not None:
             return request
-        return self._write_task_update(actor, task_id, before, fields, expected_revision, owner_decision)
+        # Review 12b L2: a date change with consequences asks first on every path (panel, API,
+        # Gantt); the confirmation is recorded with the change and the other owners are told.
+        events += self._date_impact_gate(actor, before, fields, payload.get("confirmed") is True, owner_decision)
+        return self._write_task_update(actor, task_id, before, fields, expected_revision, owner_decision,
+                                       move_kind=move_kind, audit_events=events,
+                                       override_dependencies=override_dependencies,
+                                       override_wip=payload.get("override_wip") is True)
+
+    def _date_impact_gate(self, actor: dict, before: dict, fields: dict, confirmed: bool,
+                          owner_decision: OwnerDecision | None = None) -> list:
+        start, due = fields["start_date"], fields["due_date"]
+        if owner_decision or (start, due) == (before.get("start_date"), before.get("due_date")):
+            return []
+        listed = next((t for t in self.list_tasks(actor, before["project_id"]) if t["id"] == before["id"]), None)
+        if not listed:
+            return []
+        target = self.db.execute("SELECT target_date FROM projects WHERE id=?", (before["project_id"],)).fetchone()
+        listed["project_target_date"] = target["target_date"] if target else None
+        impact = self._schedule_impact(listed, start, due)
+        if not impact:
+            return []
+        if not confirmed:
+            raise NeedsConfirmation(f"Moving “{before['title']}” has consequences; confirm to go ahead.", "impact", impact)
+        return [("schedule_impact_confirmed", None, {"impact": impact}, "; ".join(impact))]
+
+    def _dependency_gate(self, actor: dict, task: dict, status: str, override: bool,
+                         owner_decision: OwnerDecision | None = None) -> list:
+        """Review 12a M1 (JQY55P: only an owner may override dependency requirements).
+        Returns the dependency_override event to write with the change, if any."""
+        if status not in DEPENDENCY_GATED_STATUSES or task["status"] in REOPEN_ONLY_STATUSES:
+            return []
+        probe = dict(task)
+        self._add_dependency_state([probe])
+        waits = [p["title"] for p in probe["blocked_by"]]
+        if not waits:
+            return []
+        names, label = ", ".join(waits), DEPENDENCY_GATED_STATUSES[status]
+        if actor["global_role"] != "owner":
+            raise RuleRefusal(f"“{task['title']}” waits on {names}; it can move to {label} once that is completed. "
+                              "Only an owner may override a dependency.")
+        if not (override or owner_decision):
+            raise NeedsConfirmation(f"“{task['title']}” waits on {names}. Move it to {label} anyway?",
+                                    "dependencies", waits)
+        return [("dependency_override", {"blocked_by": waits}, {"status": status},
+                 f"Moved to {label} while waiting on {names}")]
+
+    def _write_audit_events(self, task_id: str, actor_id: str, events: list | None) -> None:
+        for kind, before, after, reason in events or []:
+            self._event(task_id, actor_id, kind, before, after, reason)
 
     def _authorize_task_update(self, actor: dict, task_id: str, payload: dict) -> tuple[dict, int]:
         """Load the task, require task-management access and an up-to-date expected_revision."""
@@ -1280,21 +1349,33 @@ class AstraService:
 
     def _write_task_update(
         self, actor: dict, task_id: str, before: dict, fields: dict, expected_revision: int,
-        owner_decision: OwnerDecision | None,
+        owner_decision: OwnerDecision | None, *, move_kind: str | None = None, audit_events: list | None = None,
+        override_dependencies: bool = False, override_wip: bool = False,
     ) -> dict:
         """The single write transaction: every guard that must see committed state runs
         inside it, under the write lock, not before it."""
         with transaction(self.db):
-            return self._apply_task_update(actor, task_id, before, fields, expected_revision, owner_decision)
+            return self._apply_task_update(actor, task_id, before, fields, expected_revision, owner_decision,
+                                           move_kind=move_kind, audit_events=audit_events,
+                                           override_dependencies=override_dependencies, override_wip=override_wip)
 
     def _apply_task_update(
         self, actor: dict, task_id: str, before: dict, fields: dict, expected_revision: int,
-        owner_decision: OwnerDecision | None, *, notify: bool = True,
+        owner_decision: OwnerDecision | None, *, notify: bool = True, move_kind: str | None = None,
+        audit_events: list | None = None, override_dependencies: bool = False, override_wip: bool = False,
+        check_wip: bool = True,
     ) -> dict:
         """The body of one task update; the caller holds the transaction (XV92JJ: a bulk
         change writes many of these in one)."""
         # An approval re-checks, under the write lock, that its request is still pending.
         self._assert_active_request_revision(before, owner_decision)
+        # Review 12c L1: the dependency and work-in-progress rules are evaluated here, under the
+        # write lock, so nothing that changed since a preview or a board load slips through.
+        rule_events = []
+        from_column = None
+        if fields["status_changed"]:
+            rule_events += self._dependency_gate(actor, before, fields["status"], override_dependencies, owner_decision)
+            from_column = self._top_column(actor, before["project_id"], task_id) if check_wip else None
         cursor = self.db.execute(
             """UPDATE tasks SET title=?,description=?,owner_user_id=?,status=?,criticality=?,start_date=?,due_date=?,
                progress=?,updated_at=?,revision=revision+1 WHERE id=? AND revision=?""",
@@ -1307,7 +1388,13 @@ class AstraService:
             raise Conflict("Task revision conflict: the task changed before this update could be saved.")
         self._ensure_baseline(task_id)
         after = self.get_task(actor, task_id)
-        self._event(task_id, actor["id"], "task_updated", before, after, fields["reason"], notify=notify)
+        # Review 12a L1: an undoable move is marked in the event itself, not by its reason text.
+        self._event(task_id, actor["id"], "task_updated", before, {**after, "move_kind": move_kind} if move_kind else after,
+                    fields["reason"], notify=notify)
+        if fields["status_changed"] and check_wip:
+            rule_events += self._wip_entry_gate(actor, before["project_id"], task_id, from_column, override_wip,
+                                                owner_decision)
+        self._write_audit_events(task_id, actor["id"], list(audit_events or []) + rule_events)
         if fields["status_changed"]:
             self._resolve_pending_requests(
                 actor,
@@ -2096,13 +2183,17 @@ class AstraService:
             ).fetchone()
         )
 
-    def submit_task(self, actor: dict, task_id: str, note: str = "") -> dict:
+    def submit_task(self, actor: dict, task_id: str, note: str = "", *, expected_revision: int | None = None,
+                    override_dependencies: bool = False, override_wip: bool = False,
+                    audit_events: list | None = None) -> dict:
         task = self.get_task(actor, task_id)
         if not self._may_submit(actor, task):
             raise Forbidden("You are not authorized to submit this task.")
         if task["status"] in UNSUBMITTABLE_STATUSES:
             raise ValueError(f"A {task['status']} task cannot be submitted; reopen it first if needed.")
-        expected_revision = task["revision"]
+        self._dependency_gate(actor, task, "submitted", override_dependencies)  # early answer; re-run in the write
+        # Review 12a L2: the board's revision is the one compared under the write lock.
+        expected_revision = task["revision"] if expected_revision is None else expected_revision
         submission_id = new_id()
         timestamp = now_text()
         note = str(note).strip()
@@ -2122,6 +2213,9 @@ class AstraService:
                 raise Conflict(f"Submission conflict: the task is now {current['status']}.")
             if not (self.can_view_project(actor, current["project_id"]) and self._may_submit(actor, current)):
                 raise Conflict("Submission conflict: your access to this task changed before it could be submitted.")
+            events = list(audit_events or []) + self._dependency_gate(
+                actor, self.get_task(actor, task_id), "submitted", override_dependencies)
+            from_column = self._top_column(actor, current["project_id"], task_id)
             version = self.db.execute(
                 "SELECT COALESCE(MAX(version),0) m FROM task_submissions WHERE task_id=?", (task_id,)
             ).fetchone()["m"] + 1
@@ -2140,15 +2234,20 @@ class AstraService:
             )
             self._event(task_id, actor["id"], "task_submitted", None,
                         {"submission_id": submission_id, "version": version, "note": note}, None)
+            events += self._wip_entry_gate(actor, current["project_id"], task_id, from_column, override_wip)
+            self._write_audit_events(task_id, actor["id"], events)
         return self.get_submission(actor, submission_id)
 
     def accept_submission(self, actor: dict, submission_id: str, decision_note: str = "", checklist=None,
-        *, owner_decision: OwnerDecision | None = None,
+        *, owner_decision: OwnerDecision | None = None, expected_revision: int | None = None,
+        override_dependencies: bool = False,
     ) -> dict:
         submission = self.get_submission(actor, submission_id)
         task = self.get_task(actor, submission["task_id"])
         if submission["status"] != "submitted":
             raise ValueError("Only a pending submission can be accepted.")
+        if actor["global_role"] == "owner":  # early answer; re-run in the write
+            self._dependency_gate(actor, task, "completed", override_dependencies, owner_decision)
         if actor["global_role"] != "owner":
             return self._request_protected_action(
                 actor,
@@ -2161,7 +2260,7 @@ class AstraService:
         timestamp = now_text()
         decision_note = str(decision_note).strip()
         checklist_text = json.dumps(checklist, default=str, sort_keys=True) if checklist else None
-        expected_task_revision = task["revision"]
+        expected_task_revision = task["revision"] if expected_revision is None else expected_revision
         with transaction(self.db):
             # Re-read after the write lock is held. Two Owner requests may both have
             # observed "submitted" before entering this transaction; only the first
@@ -2173,6 +2272,7 @@ class AstraService:
             self._assert_active_request_revision(task, owner_decision)
             if submission["status"] != "submitted" or task["status"] != "submitted":
                 raise Conflict("Submission decision conflict: this submission is no longer pending.")
+            events = self._dependency_gate(actor, task, "completed", override_dependencies, owner_decision)
             cursor = self.db.execute(
                 "UPDATE task_submissions SET status='accepted', decided_by=?, decided_at=?, decision_note=?, checklist=?"
                 " WHERE id=? AND status='submitted'",
@@ -2190,6 +2290,7 @@ class AstraService:
             self._event(task["id"], actor["id"], "submission_accepted", {"status": task["status"]},
                         {"submission_id": submission_id, "version": submission["version"], "status": "completed"},
                         decision_note or None)
+            self._write_audit_events(task["id"], actor["id"], events)
             self._resolve_pending_requests(
                 actor,
                 "accept_submission",
@@ -2207,7 +2308,7 @@ class AstraService:
         return self.get_submission(actor, submission_id)
 
     def request_changes(self, actor: dict, submission_id: str, reason: str,
-        *, owner_decision: OwnerDecision | None = None,
+        *, owner_decision: OwnerDecision | None = None, override_wip: bool = False,
     ) -> dict:
         submission = self.get_submission(actor, submission_id)
         task = self.get_task(actor, submission["task_id"])
@@ -2230,6 +2331,7 @@ class AstraService:
             self._assert_active_request_revision(task, owner_decision)
             if submission["status"] != "submitted" or task["status"] != "submitted":
                 raise Conflict("Submission decision conflict: this submission is no longer pending.")
+            from_column = self._top_column(actor, task["project_id"], task["id"])
             cursor = self.db.execute(
                 "UPDATE task_submissions SET status='changes_requested', decided_by=?, decided_at=?, decision_note=?"
                 " WHERE id=? AND status='submitted'",
@@ -2246,6 +2348,8 @@ class AstraService:
                 raise Conflict("Submission decision conflict: the task changed before the decision was saved.")
             self._event(task["id"], actor["id"], "changes_requested", None,
                         {"submission_id": submission_id, "version": submission["version"]}, reason)
+            self._write_audit_events(task["id"], actor["id"], self._wip_entry_gate(
+                actor, task["project_id"], task["id"], from_column, override_wip, owner_decision))
             self._resolve_pending_requests(
                 actor,
                 "request_changes",
@@ -2259,7 +2363,8 @@ class AstraService:
         return self.get_submission(actor, submission_id)
 
     def reopen_task(self, actor: dict, task_id: str, reason: str, new_due_date,
-        *, owner_decision: OwnerDecision | None = None,
+        *, owner_decision: OwnerDecision | None = None, expected_revision: int | None = None,
+        audit_events: list | None = None, override_wip: bool = False,
     ) -> dict:
         task = self.get_task(actor, task_id)
         if task["status"] not in {"completed", "cancelled", "abandoned"}:
@@ -2278,9 +2383,10 @@ class AstraService:
         before = {"status": task["status"], "due_date": task.get("due_date")}
         with transaction(self.db):
             current = self.get_task(actor, task_id)
-            if current["revision"] != task["revision"]:
+            if current["revision"] != (task["revision"] if expected_revision is None else expected_revision):
                 raise Conflict("Task revision conflict: the task changed before reopening began.")
             self._assert_active_request_revision(current, owner_decision)
+            from_column = self._top_column(actor, task["project_id"], task_id)
             # accepted_submission_id is retained so the prior accepted version stays visible.
             cursor = self.db.execute(
                 "UPDATE tasks SET status='reopened', due_date=?, updated_at=?, revision=revision+1"
@@ -2291,6 +2397,8 @@ class AstraService:
                 raise Conflict("Task revision conflict: the task changed before it could be reopened.")
             self._event(task_id, actor["id"], "task_reopened", before,
                         {"status": "reopened", "due_date": new_due}, reason)
+            self._write_audit_events(task_id, actor["id"], list(audit_events or []) + self._wip_entry_gate(
+                actor, task["project_id"], task_id, from_column, override_wip, owner_decision))
             self._resolve_pending_requests(
                 actor,
                 "reopen_task",
@@ -2319,7 +2427,8 @@ class AstraService:
         return self.get_task(actor, task_id)
 
     def set_on_hold(self, actor: dict, task_id: str, reason: str, checkpoint_date, hold_owner_id=None,
-        *, owner_decision: OwnerDecision | None = None,
+        *, owner_decision: OwnerDecision | None = None, expected_revision: int | None = None,
+        audit_events: list | None = None, override_wip: bool = False,
     ) -> dict:
         task = self.get_task(actor, task_id)
         if task["status"] in REOPEN_ONLY_STATUSES:
@@ -2348,11 +2457,12 @@ class AstraService:
         timestamp = now_text()
         with transaction(self.db):
             current = self.get_task(actor, task_id)
-            if current["revision"] != task["revision"]:
+            if current["revision"] != (task["revision"] if expected_revision is None else expected_revision):
                 raise Conflict("Task revision conflict: the task changed before the hold began.")
             self._assert_active_request_revision(current, owner_decision)
             if current["status"] in REOPEN_ONLY_STATUSES:
                 raise Conflict(f"A {current['status']} task must be reopened before it can be put on hold.")
+            from_column = self._top_column(actor, task["project_id"], task_id)
             cursor = self.db.execute(
                 "UPDATE tasks SET status='on_hold', owner_user_id=?, updated_at=?, revision=revision+1"
                 " WHERE id=? AND revision=?",
@@ -2367,6 +2477,8 @@ class AstraService:
             )
             self._event(task_id, actor["id"], "task_on_hold", {"status": task["status"]},
                         {"status": "on_hold", "checkpoint_date": checkpoint, "owner_user_id": hold_owner}, reason)
+            self._write_audit_events(task_id, actor["id"], list(audit_events or []) + self._wip_entry_gate(
+                actor, task["project_id"], task_id, from_column, override_wip, owner_decision))
             self._resolve_pending_requests(
                 actor,
                 "set_on_hold",
@@ -2423,9 +2535,9 @@ class AstraService:
         source = self.board_column(task)
         try:
             return self._move_task(actor, task, source, target, payload)
-        except Conflict:
-            raise  # stale board or a confirmation to ask for: not a refused attempt
-        except (ValueError, Forbidden) as exc:
+        except (Forbidden, RuleRefusal) as exc:
+            # Review 12a L4: permission and rule refusals are audited and noticed; a stale
+            # board, a confirmation to ask for or plain validation goes back to the actor only.
             self._audit_board_block(actor, task, source, target, str(exc))
             raise
 
@@ -2438,21 +2550,18 @@ class AstraService:
             raise ValueError("An integer expected_revision is required to move a task.")
         if expected != task["revision"]:
             raise Conflict("This task changed since the board was loaded; reload the board and try again.")
-        if target == source:
+        # Review 12a I1: a card that sits in Blocked only because it waits on a predecessor
+        # may still be put on hold from the board.
+        if target == source and not (target == "blocked" and task["status"] != "on_hold"):
             raise ValueError(f"“{title}” is already in {BOARD_COLUMN_LABELS[target]}.")
-        is_owner = actor["global_role"] == "owner"
-        override = False
         waits_on = [p["title"] for p in task.get("blocked_by") or []]
-        if target in BOARD_DEPENDENCY_GATED and waits_on and task["status"] not in REOPEN_ONLY_STATUSES:
-            names = ", ".join(waits_on)
-            if not is_owner:
-                raise ValueError(f"“{title}” waits on {names}; it can move to {BOARD_COLUMN_LABELS[target]} once "
-                                 "that is completed. Only an owner may override a dependency.")
-            if not payload.get("override_dependencies"):
-                raise NeedsConfirmation(f"“{title}” waits on {names}. Move it to {BOARD_COLUMN_LABELS[target]} anyway?",
-                                        "dependencies", waits_on)
-            override = True
-        wip_over = self._wip_gate(actor, task["project_id"], target, 1, payload)
+        override = payload.get("override_dependencies") is True
+        # The dependency gate is the server's own rule on every path (review 12a M1); the
+        # board passes the owner's override down, and the override is recorded with the move.
+        # The work-in-progress limit is checked by each write, in its own transaction (review 12c
+        # L1, L4); the board passes the owner's confirmation down.
+        wip = payload.get("override_wip") is True
+        extra = []
         reason = str(payload.get("reason", "")).strip()
         auto_reason = f"Board move: {BOARD_COLUMN_LABELS[source]} → {BOARD_COLUMN_LABELS[target]}"
         undo = None
@@ -2462,80 +2571,96 @@ class AstraService:
                 if not reason or not payload.get("new_due_date"):
                     raise NeedsConfirmation(f"Moving a {task['status']} task back into work reopens it: give a reason "
                                             "and a revised due date.", "reopen")
-                outcome = self.reopen_task(actor, task_id, reason, payload.get("new_due_date"))
+                outcome = self.reopen_task(actor, task_id, reason, payload.get("new_due_date"),
+                                           expected_revision=expected, audit_events=extra, override_wip=wip)
             elif status == task["status"]:
                 raise ValueError(f"“{title}” is already {status.replace('_', ' ')}; it shows under "
                                  f"{BOARD_COLUMN_LABELS[source]} because it waits on {', '.join(waits_on)}.")
             else:
+                undoable = task["status"] in BOARD_UNDO_SOURCE_STATUSES and not reason
                 outcome = self.update_task(actor, task_id, {"status": status, "expected_revision": expected,
-                                                            "reason": reason or auto_reason})
-                if "request" not in outcome and task["status"] in BOARD_UNDO_SOURCE_STATUSES and not reason:
+                                                            "reason": reason or auto_reason,
+                                                            "override_dependencies": override, "override_wip": wip},
+                                           move_kind="board" if undoable else None, audit_events=extra)
+                if "request" not in outcome and undoable:
                     undo = {"event_id": self._latest_event_id(task_id, actor["id"], "task_updated"),
                             "seconds": BOARD_UNDO_SECONDS}
         elif target == "blocked":
             if not reason or not payload.get("checkpoint_date"):
                 raise NeedsConfirmation("Blocked means on hold: give a reason and a follow-up checkpoint date.", "hold")
             outcome = self.set_on_hold(actor, task_id, reason, payload.get("checkpoint_date"),
-                                       payload.get("owner_user_id") or None)
+                                       payload.get("owner_user_id") or None, expected_revision=expected,
+                                       audit_events=extra, override_wip=wip)
         elif target == "submitted":
-            if not payload.get("confirmed"):
+            if payload.get("confirmed") is not True:
                 raise NeedsConfirmation(f"Submit “{title}” for review?", "submit")
-            outcome = {"submission": self.submit_task(actor, task_id, str(payload.get("note", "")))}
+            outcome = {"submission": self.submit_task(actor, task_id, str(payload.get("note", "")),
+                                                      expected_revision=expected, override_dependencies=override,
+                                                      override_wip=wip, audit_events=extra)}
         elif target == "accepted":
             pending = self.db.execute(
                 "SELECT id, version FROM task_submissions WHERE task_id=? AND status='submitted'"
                 " ORDER BY version DESC LIMIT 1", (task_id,)).fetchone()
             if task["status"] != "submitted" or not pending:
                 raise ValueError(f"Only a submitted task can be accepted; submit “{title}” for review first.")
-            if not payload.get("confirmed"):
+            if payload.get("confirmed") is not True:
                 raise NeedsConfirmation(f"Accept submission v{pending['version']} of “{title}”?", "accept")
-            outcome = self.accept_submission(actor, pending["id"], str(payload.get("note", "")))
+            outcome = self.accept_submission(actor, pending["id"], str(payload.get("note", "")),
+                                             expected_revision=expected, override_dependencies=override)
         else:  # closed
             status = payload.get("status")
             if status not in ("cancelled", "abandoned") or not reason:
                 raise NeedsConfirmation("Closing a task needs Cancelled or Abandoned and a reason.", "close")
             outcome = self.update_task(actor, task_id, {"status": status, "expected_revision": expected,
-                                                        "reason": reason})
+                                                        "reason": reason}, audit_events=extra)
         if isinstance(outcome, dict) and "request" in outcome:
             return {"request": outcome["request"]}
-        if override:
-            with transaction(self.db):
-                self._event(task_id, actor["id"], "dependency_override", {"blocked_by": waits_on},
-                            {"column": target}, reason or auto_reason)
-        if wip_over:
-            with transaction(self.db):
-                self._event(task_id, actor["id"], "wip_limit_override", {"column": target, **wip_over},
-                            {"column": target}, wip_over["message"])
+        # Review 12a L3: a card that changes column is appended there (unranked) unless the
+        # board sends its place; ranks belong to a column.
+        with transaction(self.db):
+            self.db.execute("UPDATE tasks SET board_rank=NULL WHERE id=?", (task_id,))
         result = {"task": self.get_task(actor, task_id)}
         if undo and undo["event_id"]:
             result["undo"] = undo
         return result
 
-    # What each kind of ordinary move changed, keyed by the reason prefix it records.
-    UNDO_FIELDS = {"Board move: ": ("status",), "Gantt drag: ": ("start_date", "due_date")}
+    # What each kind of ordinary move changed, keyed by the marker its event carries.
+    UNDO_FIELDS = {"board": ("status",), "gantt": ("start_date", "due_date")}
 
     def undo_move(self, actor: dict, task_id: str, payload: dict) -> dict:
         """A new audited change that reverses one ordinary board move or Gantt drag by the
         same person, through the same rules. Refused when the task changed since or the
         window passed, so a later change is never reversed blindly (owner decision: Undo
-        and recovery)."""
+        and recovery). Only events the board or Gantt marked as undoable qualify (review
+        12a L1): a panel edit is never undone here, whatever its reason says."""
         event = self.db.execute(
             "SELECT * FROM task_events WHERE id=? AND task_id=?", (str(payload.get("event_id", "")), task_id)
         ).fetchone()
-        prefix = next((p for p in self.UNDO_FIELDS if str(event["reason"] or "").startswith(p)), None) if event else None
-        if not event or event["event_type"] != "task_updated" or event["actor_user_id"] != actor["id"] or not prefix:
+        after = json.loads(event["after_json"] or "{}") if event else {}
+        before = json.loads(event["before_json"] or "{}") if event else {}
+        kind = after.get("move_kind")
+        if not event or event["event_type"] != "task_updated" or event["actor_user_id"] != actor["id"] \
+                or kind not in self.UNDO_FIELDS \
+                or (kind == "board" and before.get("status") not in BOARD_UNDO_SOURCE_STATUSES):
             raise ValueError("There is no move of yours to undo here.")
-        before, after = json.loads(event["before_json"]), json.loads(event["after_json"])
         age = (datetime.now(timezone.utc) - datetime.fromisoformat(event["occurred_at"])).total_seconds()
         if age > BOARD_UNDO_SECONDS + BOARD_UNDO_GRACE_SECONDS:
             raise ValueError("The Undo window has passed; move the task back instead.")
         task = self.get_task(actor, task_id)
-        fields = self.UNDO_FIELDS[prefix]
+        fields = self.UNDO_FIELDS[kind]
         if task["revision"] != after["revision"] or any(task[f] != after[f] for f in fields):
             raise Conflict("The task changed after your move, so it was not undone; check its history first.")
+        what = str(event["reason"] or "").split(": ", 1)[-1]
+        # An Undo back into a column at its work-in-progress limit meets the same check as a
+        # move, inside the write: a manager is refused, an owner confirms (override_wip).
         return self.update_task(actor, task_id, {
             **{f: before[f] for f in fields}, "expected_revision": task["revision"],
-            "reason": f"Undo of {event['reason'][len(prefix):]} (event {event['id']})",
+            "reason": f"Undo of {what} (event {event['id']})",
+            # Putting a card back where it was is not a new dependency override by a manager;
+            # an owner's Undo keeps the owner's earlier decision (recorded again if it applies).
+            "override_dependencies": actor["global_role"] == "owner",
+            "confirmed": payload.get("confirmed") is True,
+            "override_wip": payload.get("override_wip") is True,
         })
 
     def reorder_board(self, actor: dict, project_id: str, column: str, task_ids: list) -> list[str]:
@@ -2558,13 +2683,21 @@ class AstraService:
                     raise KeyError("Task not found in this project.")
                 if self.board_column(current) != column:
                     raise Conflict("The board changed since it was loaded; reload the board and try again.")
-            before = [t["id"] for t in sorted((t for t in tasks if t["id"] in set(task_ids)),
-                                             key=lambda t: (t.get("board_rank") is None, t.get("board_rank") or 0))]
-            for rank, tid in enumerate(task_ids, start=1):
+                # A reorder writes no task event, so the lease is checked here: a task someone
+                # else is changing refuses the whole reorder, and nothing is written.
+                self._assert_task_unlocked(tid, actor["id"])
+            # Review 12a L3: the whole column is renumbered, the sent ids first and the rest of
+            # the column after them in their current order, so ranks never tie.
+            top_ids = {t["id"] for t in tasks}
+            in_column = [t for t in tasks if self.board_column(t) == column and t.get("parent_task_id") not in top_ids]
+            current = [t["id"] for t in sorted(in_column, key=lambda t: (t.get("board_rank") is None,
+                                                                        t.get("board_rank") or 0))]
+            after = list(task_ids) + [tid for tid in current if tid not in set(task_ids)]
+            for rank, tid in enumerate(after, start=1):
                 self.db.execute("UPDATE tasks SET board_rank=? WHERE id=?", (float(rank), tid))
             self._project_event(project_id, actor["id"], "board_reordered",
-                                {"column": column, "before": before, "after": list(task_ids)}, None)
-        return list(task_ids)
+                                {"column": column, "before": current, "after": after}, None)
+        return after
 
     # ---- X07XV4: task locks (renewable leases) ----
 
@@ -2584,9 +2717,14 @@ class AstraService:
     def _add_lock_state(self, tasks: list[dict]) -> None:
         if not tasks:
             return
-        rows = self.db.execute(
-            "SELECT l.task_id, l.holder_user_id, u.display_name holder_name, l.kind, l.expires_at"
-            " FROM task_locks l JOIN users u ON u.id=l.holder_user_id WHERE l.expires_at>?", (now_text(),)).fetchall()
+        try:
+            rows = self.db.execute(
+                "SELECT l.task_id, l.holder_user_id, u.display_name holder_name, l.kind, l.expires_at"
+                " FROM task_locks l JOIN users u ON u.id=l.holder_user_id WHERE l.expires_at>?", (now_text(),)).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table: task_locks" not in str(exc):  # a database the migration tests hold below v19
+                raise
+            rows = []
         locks = {r["task_id"]: dict(r) for r in rows}
         for task in tasks:
             task["lock"] = locks.get(task["id"])
@@ -2632,8 +2770,8 @@ class AstraService:
         expires = (datetime.now(timezone.utc) + timedelta(seconds=LOCK_LEASE_SECONDS)).isoformat()
         with transaction(self.db):
             cursor = self.db.execute(
-                "UPDATE task_locks SET expires_at=? WHERE task_id=? AND holder_user_id=? AND token=?",
-                (expires, task_id, actor["id"], str(token)))
+                "UPDATE task_locks SET expires_at=? WHERE task_id=? AND holder_user_id=? AND token=? AND expires_at>?",
+                (expires, task_id, actor["id"], str(token), now_text()))
             if cursor.rowcount != 1:
                 lock = self._active_lock(task_id)
                 if lock:
@@ -2706,9 +2844,7 @@ class AstraService:
         task = self.get_task(actor, task_id)
         try:
             return self._reschedule_task(actor, task, payload)
-        except Conflict:
-            raise  # stale chart, a lock, or an impact to confirm: not a refused attempt
-        except (ValueError, Forbidden) as exc:
+        except (Forbidden, RuleRefusal) as exc:  # as on the board (review 12a L4)
             with transaction(self.db):
                 self._event(task_id, actor["id"], "gantt_move_blocked",
                             {"start_date": task.get("start_date"), "due_date": task.get("due_date")},
@@ -2738,22 +2874,23 @@ class AstraService:
         target = self.db.execute("SELECT target_date FROM projects WHERE id=?", (task["project_id"],)).fetchone()
         listed["project_target_date"] = target["target_date"] if target else None
         impact = self._schedule_impact(listed, start, due)
-        if impact and not payload.get("confirmed"):
+        confirmed = payload.get("confirmed") is True
+        if impact and not confirmed:
             raise NeedsConfirmation(f"Moving “{title}” has consequences; confirm to go ahead.", "impact", impact)
         parts = []
         if start != task.get("start_date"):
             parts.append(f"start {task.get('start_date') or 'none'} → {start or 'none'}")
         if due != task.get("due_date"):
             parts.append(f"due {task.get('due_date') or 'none'} → {due}")
+        # update_task records the confirmed consequences with the move, in its transaction; a
+        # move with consequences is not an ordinary move, so it carries no Undo mark.
         outcome = self.update_task(actor, task_id, {"start_date": start, "due_date": due, "expected_revision": expected,
-                                                    "reason": "Gantt drag: " + ", ".join(parts)})
+                                                    "reason": "Gantt drag: " + ", ".join(parts), "confirmed": confirmed},
+                                   move_kind=None if impact else "gantt")
         if isinstance(outcome, dict) and "request" in outcome:
             return {"request": outcome["request"]}
         moved_event = self._latest_event_id(task_id, actor["id"], "task_updated")
         if impact:
-            with transaction(self.db):
-                self._event(task_id, actor["id"], "schedule_impact_confirmed", None,
-                            {"impact": impact, "event_id": moved_event}, "; ".join(impact))
             return {"task": self.get_task(actor, task_id), "impact": impact}
         return {"task": self.get_task(actor, task_id), "undo": {"event_id": moved_event, "seconds": BOARD_UNDO_SECONDS}}
 
@@ -2769,35 +2906,59 @@ class AstraService:
             return {}
         return {r["column_key"]: r["max_tasks"] for r in rows}
 
+    @staticmethod
+    def _wip_value(max_tasks) -> int | None:
+        """Review 12c L6: a whole number from 1 to 999 (or its digits as text), or empty for none."""
+        if max_tasks is None or max_tasks == "":
+            return None
+        if isinstance(max_tasks, bool) or not (isinstance(max_tasks, int) or
+                                               (isinstance(max_tasks, str) and max_tasks.strip().isdigit())):
+            raise ValueError("A limit is a whole number from 1 to 999, or empty for none.")
+        limit = int(max_tasks)
+        if limit == 0:
+            return None
+        if not 1 <= limit <= 999:
+            raise ValueError("A limit is a whole number from 1 to 999, or empty for none.")
+        return limit
+
     def set_wip_limit(self, actor: dict, project_id: str, column: str, max_tasks, reason: str = "") -> dict:
-        """Only an owner configures a column's limit (owner decision: workflow configuration
-        authority). Every change is kept in project history as wip_limit_changed."""
+        return self.set_wip_limits(actor, project_id, {column: max_tasks}, reason, refuse_unchanged=True)
+
+    def set_wip_limits(self, actor: dict, project_id: str, limits, reason: str = "", *,
+                       refuse_unchanged: bool = False) -> dict:
+        """Only an owner configures column limits (owner decision: workflow configuration
+        authority). All the columns sent change in one transaction, and each changed column is
+        kept in project history as wip_limit_changed."""
         if not self.can_view_project(actor, project_id):
             raise KeyError("Project not found.")
         if actor["global_role"] != "owner":
             raise Forbidden("Only an owner can set work-in-progress limits.")
-        if column not in WIP_COLUMNS:
-            raise ValueError("A limit can be set on Draft, Ready, In progress, Blocked or Submitted.")
-        if max_tasks in (None, "", 0, "0"):
-            limit = None
-        else:
-            try:
-                limit = int(max_tasks)
-            except (TypeError, ValueError):
-                raise ValueError("A limit is a whole number from 1 to 999, or empty for none.") from None
-            if isinstance(max_tasks, bool) or not 1 <= limit <= 999:
-                raise ValueError("A limit is a whole number from 1 to 999, or empty for none.")
+        if not isinstance(limits, dict) or not limits:
+            raise ValueError("Send the limits as column: number (or empty for none).")
+        wanted = {}
+        for column, value in limits.items():
+            if column not in WIP_COLUMNS:
+                raise ValueError("A limit can be set on Draft, Ready, In progress, Blocked or Submitted.")
+            wanted[column] = self._wip_value(value)
         with transaction(self.db):
-            before = self.wip_limits(project_id).get(column)
-            if before == limit:
-                raise ValueError(f"{BOARD_COLUMN_LABELS[column]} already has {'no limit' if limit is None else f'a limit of {limit}'}.")
-            if limit is None:
-                self.db.execute("DELETE FROM wip_limits WHERE project_id=? AND column_key=?", (project_id, column))
-            else:
-                self.db.execute("INSERT OR REPLACE INTO wip_limits VALUES(?,?,?,?,?)",
-                                (project_id, column, limit, actor["id"], now_text()))
-            self._project_event(project_id, actor["id"], "wip_limit_changed",
-                                {"column": column, "before": before, "after": limit}, str(reason or "").strip() or None)
+            current = self.wip_limits(project_id)
+            changed = {c: v for c, v in wanted.items() if current.get(c) != v}
+            if refuse_unchanged and not changed:
+                column, limit = next(iter(wanted.items()))
+                raise ValueError(f"{BOARD_COLUMN_LABELS[column]} already has "
+                                 f"{'no limit' if limit is None else f'a limit of {limit}'}.")
+            for column in WIP_COLUMNS:
+                if column not in changed:
+                    continue
+                limit = changed[column]
+                if limit is None:
+                    self.db.execute("DELETE FROM wip_limits WHERE project_id=? AND column_key=?", (project_id, column))
+                else:
+                    self.db.execute("INSERT OR REPLACE INTO wip_limits VALUES(?,?,?,?,?)",
+                                    (project_id, column, limit, actor["id"], now_text()))
+                self._project_event(project_id, actor["id"], "wip_limit_changed",
+                                    {"column": column, "before": current.get(column), "after": limit},
+                                    str(reason or "").strip() or None)
         return self.wip_limits(project_id)
 
     def _column_counts(self, actor: dict, project_id: str) -> dict:
@@ -2812,6 +2973,13 @@ class AstraService:
             counts[column] = counts.get(column, 0) + 1
         return counts
 
+    @staticmethod
+    def _wip_over(target: str, count: int, limit: int, incoming: int) -> dict:
+        label = BOARD_COLUMN_LABELS[target]
+        return {"count": count, "limit": limit, "incoming": incoming,
+                "message": (f"{label} is at its work-in-progress limit: {count} of {limit}, and this would make "
+                            f"{count + incoming}. Finish or move work out of {label} first; only an owner may go over it.")}
+
     def _wip_state(self, actor: dict, project_id: str, target: str, incoming: int) -> dict | None:
         limit = self.wip_limits(project_id).get(target)
         if not limit or incoming <= 0:
@@ -2819,23 +2987,56 @@ class AstraService:
         count = self._column_counts(actor, project_id).get(target, 0)
         if count + incoming <= limit:
             return None
-        label = BOARD_COLUMN_LABELS[target]
-        return {"count": count, "limit": limit, "incoming": incoming,
-                "message": (f"{label} is at its work-in-progress limit: {count} of {limit}, and this would make "
-                            f"{count + incoming}. Finish or move work out of {label} first; only an owner may go over it.")}
+        return self._wip_over(target, count, limit, incoming)
+
+    @staticmethod
+    def _wip_decide(actor: dict, target: str, over: dict, override: bool) -> None:
+        """Anyone but an owner is refused; an owner confirms going over the limit."""
+        if actor["global_role"] != "owner":
+            raise RuleRefusal(over["message"])
+        if not override:
+            raise NeedsConfirmation(f"{BOARD_COLUMN_LABELS[target]} would hold {over['count'] + over['incoming']} tasks, "
+                                    f"over its limit of {over['limit']}. Go over the limit?", "wip", [over["message"]])
 
     def _wip_gate(self, actor: dict, project_id: str, target: str, incoming: int, payload: dict) -> dict | None:
-        """Refuse a move over a column's limit; an owner may confirm an override. Returns
-        the override to audit, or None when the move is within the limit."""
+        """Pre-write form, for the bulk preview: the override to audit, or None."""
         over = self._wip_state(actor, project_id, target, incoming)
-        if not over:
-            return None
-        if actor["global_role"] != "owner":
-            raise ValueError(over["message"])
-        if not payload.get("override_wip"):
-            raise NeedsConfirmation(f"{BOARD_COLUMN_LABELS[target]} would hold {over['count'] + incoming} tasks, "
-                                    f"over its limit of {over['limit']}. Go over the limit?", "wip", [over["message"]])
+        if over:
+            self._wip_decide(actor, target, over, payload.get("override_wip") is True)
         return over
+
+    def _top_column(self, actor: dict, project_id: str, task_id: str) -> str | None:
+        """The board column a top-level task shows in, or None for a step or a new task."""
+        tasks = self.list_tasks(actor, project_id)
+        ids = {t["id"] for t in tasks}
+        task = next((t for t in tasks if t["id"] == task_id), None)
+        if not task or task.get("parent_task_id") in ids:
+            return None
+        return self.board_column(task)
+
+    def _wip_entry_gate(self, actor: dict, project_id: str, task_id: str, from_column: str | None,
+                        override: bool, owner_decision=None) -> list:
+        """Review 12c M1: the work-in-progress limit is a rule of every status-changing write a
+        person makes. Called inside the write transaction after the row changed: if the task
+        now sits in a different column that is over its limit, anyone but an owner is refused
+        and an owner confirms (an owner's approval of a request counts as the confirmation).
+        Entry into Blocked caused by a dependency is not refused: nobody moved the card.
+        Returns the wip_limit_override event to write in the same transaction."""
+        tasks = self.list_tasks(actor, project_id)
+        ids = {t["id"] for t in tasks}
+        task = next((t for t in tasks if t["id"] == task_id), None)
+        if not task or task.get("parent_task_id") in ids:
+            return []
+        target = self.board_column(task)
+        if target == from_column or target not in WIP_COLUMNS or (target == "blocked" and task["status"] != "on_hold"):
+            return []
+        limit = self.wip_limits(project_id).get(target)
+        count = sum(1 for t in tasks if t.get("parent_task_id") not in ids and self.board_column(t) == target)
+        if not limit or count <= limit:
+            return []
+        over = self._wip_over(target, count - 1, limit, 1)
+        self._wip_decide(actor, target, over, override or owner_decision is not None)
+        return [("wip_limit_override", {"column": target, **over}, {"column": target}, over["message"])]
 
     # ---- XV92JJ: bulk changes ----
 
@@ -2903,11 +3104,15 @@ class AstraService:
                     why = "has no due date"
                 else:
                     shift = lambda d: (date.fromisoformat(d) + timedelta(days=value)).isoformat() if d else None
-                    change = {"due_date": shift(task["due_date"]), "start_date": shift(task.get("start_date"))}
-                    hits = self._schedule_impact({**task, "project_target_date": target_date},
-                                                 change["start_date"], change["due_date"])
-                    if hits:
-                        impact.append({"id": task_id, "title": task["title"], "impact": hits})
+                    try:
+                        change = {"due_date": shift(task["due_date"]), "start_date": shift(task.get("start_date"))}
+                    except OverflowError:
+                        why, change = "the new date is out of range", None
+                    if change:
+                        hits = self._schedule_impact({**task, "project_target_date": target_date},
+                                                     change["start_date"], change["due_date"])
+                        if hits:
+                            impact.append({"id": task_id, "title": task["title"], "impact": hits})
             if change is not None:
                 try:
                     self._validate_task_update(task, {**change, "reason": reason})
@@ -2947,6 +3152,10 @@ class AstraService:
                 raise TaskLocked(f"Nothing was changed: {len(held)} of the tasks {'is' if len(held) == 1 else 'are'} "
                                  f"being changed by someone else ({names}). Try again when they finish.", held[0][1])
             for task_id in task_ids:
+                # Review 12c L2: a task you already hold (your open edit form, say) is covered by
+                # that lease; the bulk never replaces or releases it.
+                if self._active_lock(task_id):
+                    continue
                 self.db.execute("INSERT OR REPLACE INTO task_locks VALUES(?,?,?,?,?,?)",
                                 (task_id, actor["id"], "bulk", token, stamp.isoformat(), expires))
 
@@ -2955,27 +3164,58 @@ class AstraService:
             self.db.execute("DELETE FROM task_locks WHERE token=? AND kind='bulk'", (token,))
 
     def _write_bulk(self, actor: dict, project_id: str, bulk_id: str, kind: str, rows: list, reason: str,
-                    detail: dict, notice: str) -> list:
+                    detail: dict, notice: str, *, override_wip: bool = False, recheck=None) -> list:
         """One transaction: every task write, then one project event that lists them. Any
-        failure rolls every task back."""
+        failure rolls every task back. ``recheck`` runs first inside the transaction, after the
+        leases are held, so a plan that drifted since the preview is refused (review 12c L1).
+        The work-in-progress rule is checked for the columns the tasks end in, and a confirmed
+        override is recorded in the same transaction (review 12c M1, L4)."""
         token = uuid4().hex
         self._take_bulk_leases(actor, [r["id"] for r in rows], token)
         try:
             written = []
             with transaction(self.db):
+                if recheck:
+                    recheck()
+                start_columns = {r["id"]: self._top_column(actor, project_id, r["id"]) for r in rows}
                 for row in rows:
                     before = self.get_task(actor, row["id"])
                     if before["revision"] != row["revision"]:
                         raise Conflict(f"“{before['title']}” changed since the preview; nothing was changed. "
                                        "Preview again.")
                     fields = self._validate_task_update(before, {**row["change"], "reason": reason})
-                    after = self._apply_task_update(actor, row["id"], before, fields, row["revision"], None, notify=False)
+                    after = self._apply_task_update(actor, row["id"], before, fields, row["revision"], None, notify=False,
+                                                    check_wip=False)
                     written.append({"id": row["id"], "title": before["title"], "before_revision": before["revision"],
                                     "after_revision": after["revision"],
                                     "before": {k: before[k] for k in row["change"]},
                                     "after": {k: after[k] for k in row["change"]}})
-                self._project_event(project_id, actor["id"], kind, {**detail, "bulk_id": bulk_id, "tasks": written},
+                entered: dict[str, int] = {}
+                for row in rows:
+                    column = self._top_column(actor, project_id, row["id"])
+                    task = self.get_task(actor, row["id"])
+                    if column and column != start_columns[row["id"]] and column in WIP_COLUMNS \
+                            and not (column == "blocked" and task["status"] != "on_hold"):
+                        entered[column] = entered.get(column, 0) + 1
+                counts = self._column_counts(actor, project_id) if entered else {}
+                limits = self.wip_limits(project_id) if entered else {}
+                overs = []
+                for column, incoming in sorted(entered.items()):
+                    limit = limits.get(column)
+                    if limit and counts.get(column, 0) > limit:
+                        over = self._wip_over(column, counts[column] - incoming, limit, incoming)
+                        self._wip_decide(actor, column, over, override_wip)
+                        overs.append((column, over))
+                self._project_event(project_id, actor["id"], kind,
+                                    {**detail, "bulk_id": bulk_id, "tasks": written,
+                                     "wip_override": [o["message"] for _, o in overs] or None},
                                     reason, notice=notice)
+                who = self._actor_name(actor)
+                for column, over in overs:
+                    self._project_event(project_id, actor["id"], "wip_limit_override",
+                                        {"column": column, "count": over["count"], "limit": over["limit"],
+                                         "incoming": over["incoming"], "bulk_id": bulk_id}, over["message"],
+                                        notice=f"work-in-progress limit overridden: {BOARD_COLUMN_LABELS[column]} · by {who}")
             return written
         finally:
             self._release_bulk_leases(token)
@@ -2986,28 +3226,37 @@ class AstraService:
         if plan["blocked"]:
             names = "; ".join(f"“{b['title']}” {b['reason']}" for b in plan["blocked"])
             raise ValueError(f"Nothing was changed. Remove the blocked tasks first: {names}.")
-        expected = payload.get("expected_revisions") or {}
+        expected = payload.get("expected_revisions")
+        # Review 12c L3: the revisions the preview returned, as a mapping of task id to integer.
+        if not isinstance(expected, dict) or not all(
+                isinstance(v, int) and not isinstance(v, bool) for v in expected.values()):
+            raise ValueError("Send expected_revisions as the preview returned them: task id to revision number.")
         for item in plan["ok"]:
             if expected.get(item["id"]) != item["revision"]:
                 raise Conflict(f"“{item['title']}” changed since the preview; nothing was changed. Preview again.")
+        # Review 12c L5: schedule consequences are confirmed, as on the Gantt.
+        if plan["impact"] and payload.get("confirmed") is not True:
+            raise NeedsConfirmation(f"{len(plan['impact'])} of these tasks have schedule consequences; confirm to go ahead.",
+                                    "impact", [f"{i['title']}: {' '.join(i['impact'])}" for i in plan["impact"]])
         wip = plan["wip"]
         if wip:
             self._wip_gate(actor, project_id, wip["column"], wip["incoming"], payload)
+        previewed = ([i["id"] for i in plan["ok"]], bool(wip))
+
+        def recheck():
+            again = self._bulk_plan(actor, project_id, payload)
+            if again["blocked"] or [i["id"] for i in again["ok"]] != previewed[0] or bool(again["wip"]) != previewed[1]:
+                raise Conflict("The tasks changed since the preview (something is now blocked or a limit changed); "
+                               "nothing was changed. Preview again.")
         bulk_id = uuid4().hex
         n = len(plan["ok"])
         who = self._actor_name(actor)
         notice = f"bulk change: {n} task{'s' if n != 1 else ''} · {plan['summary']} · by {who}"
         if plan["impact"]:
             notice += f" · {len(plan['impact'])} with schedule consequences"
-        detail = {"action": plan["action"], "value": plan["value"], "impact": plan["impact"],
-                  "wip_override": wip["message"] if wip else None}
-        written = self._write_bulk(actor, project_id, bulk_id, "bulk_change", plan["ok"], plan["reason"], detail, notice)
-        if wip:
-            with transaction(self.db):
-                self._project_event(project_id, actor["id"], "wip_limit_override",
-                                    {"column": wip["column"], "count": wip["count"], "limit": wip["limit"],
-                                     "incoming": wip["incoming"], "bulk_id": bulk_id}, wip["message"],
-                                    notice=f"work-in-progress limit overridden: {BOARD_COLUMN_LABELS[wip['column']]} · by {who}")
+        detail = {"action": plan["action"], "value": plan["value"], "impact": plan["impact"]}
+        written = self._write_bulk(actor, project_id, bulk_id, "bulk_change", plan["ok"], plan["reason"], detail, notice,
+                                   override_wip=payload.get("override_wip") is True, recheck=recheck)
         return {"bulk_id": bulk_id, "tasks": written, "summary": plan["summary"],
                 "undo": {"bulk_id": bulk_id, "seconds": BOARD_UNDO_SECONDS}}
 
@@ -3042,7 +3291,7 @@ class AstraService:
         reason = f"Undo of bulk change ({row['reason'][len('Bulk change: '):]})"
         written = self._write_bulk(actor, project_id, uuid4().hex, "bulk_change_undone", rows, reason,
                                    {"undoes": bulk_id}, f"bulk change undone: {n} task{'s' if n != 1 else ''} · by "
-                                   f"{self._actor_name(actor)}")
+                                   f"{self._actor_name(actor)}", override_wip=payload.get("override_wip") is True)
         return {"tasks": written}
 
     def list_subtasks(self, actor: dict, task_id: str) -> list[dict]:
@@ -3070,7 +3319,7 @@ class AstraService:
             current = parent
         return ancestors
 
-    def set_parent(self, actor: dict, task_id: str, parent_task_id) -> dict:
+    def set_parent(self, actor: dict, task_id: str, parent_task_id, *, override_wip: bool = False) -> dict:
         task = self.get_task(actor, task_id)
         if not self.can_manage_project(actor, task["project_id"]):
             raise Forbidden("Task-management access denied.")
@@ -3089,11 +3338,15 @@ class AstraService:
         before = {"parent_task_id": task.get("parent_task_id")}
         with transaction(self.db):
             self._refuse_closed_in_transaction(task_id)
+            from_column = self._top_column(actor, task["project_id"], task_id)
             self.db.execute(
                 "UPDATE tasks SET parent_task_id=?, updated_at=?, revision=revision+1 WHERE id=?",
                 (parent_task_id, timestamp, task_id),
             )
             self._event(task_id, actor["id"], "parent_changed", before, {"parent_task_id": parent_task_id}, None)
+            # A step promoted to top level enters its board column (review 12c M1).
+            self._write_audit_events(task_id, actor["id"], self._wip_entry_gate(
+                actor, task["project_id"], task_id, from_column, override_wip))
         return self.get_task(actor, task_id)
 
     def confirm_criticality(self, actor: dict, task_id: str, criticality, reason,
@@ -3149,10 +3402,14 @@ class AstraService:
         self._validate_assignee(task["project_id"], user_id)
         with transaction(self.db):
             self._refuse_closed_in_transaction(task_id)
-            self.db.execute(
+            cursor = self.db.execute(
                 "INSERT OR IGNORE INTO task_reviewers VALUES(?,?,?,?,?)",
                 (task_id, user_id, role, now_text(), actor["id"]),
             )
+            # Review 12b M1: reviewers are governance data, so the change is a task event (audited,
+            # and refused under someone else's lease).
+            if cursor.rowcount == 1:
+                self._event(task_id, actor["id"], "reviewer_added", None, {"user_id": user_id, "role": role}, None)
 
     def remove_task_reviewer(self, actor: dict, task_id: str, user_id: str, role: str) -> None:
         task = self.get_task(actor, task_id)
@@ -3161,9 +3418,11 @@ class AstraService:
         self._refuse_closed(task)
         with transaction(self.db):
             self._refuse_closed_in_transaction(task_id)
-            self.db.execute(
+            cursor = self.db.execute(
                 "DELETE FROM task_reviewers WHERE task_id=? AND user_id=? AND role=?", (task_id, user_id, role)
             )
+            if cursor.rowcount == 1:
+                self._event(task_id, actor["id"], "reviewer_removed", {"user_id": user_id, "role": role}, None, None)
 
     def list_task_reviewers(self, actor: dict, task_id: str) -> list[dict]:
         self.get_task(actor, task_id)
@@ -4130,6 +4389,8 @@ class AstraService:
         }
         with transaction(self.db):
             self._refuse_closed_in_transaction(successor_task_id)
+            # Review 12b M1: a new link changes what the predecessor's holder is moving, too.
+            self._assert_task_unlocked(predecessor_task_id, actor["id"])
             existing = self.db.execute(
                 """SELECT 1 FROM task_dependencies
                    WHERE predecessor_task_id=? AND successor_task_id=?""",
@@ -4180,6 +4441,7 @@ class AstraService:
         }
         with transaction(self.db):
             self._refuse_closed_in_transaction(successor_task_id)
+            self._assert_task_unlocked(predecessor_task_id, actor["id"])
             self.db.execute(
                 """DELETE FROM task_dependencies
                    WHERE predecessor_task_id=? AND successor_task_id=?""",

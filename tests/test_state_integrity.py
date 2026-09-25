@@ -1517,8 +1517,10 @@ class AstraStateIntegrityTests(unittest.TestCase):
             self.service.add_task_reviewer(self.owner, task["id"], manager["id"], "reviewer")
             proposal = self.service.propose_schedule(self.owner, task["id"], "2027-01-04", "2027-01-08", "planned move")
             if status == "completed":
-                submission = self.service.submit_task(manager, task["id"], "done")
-                self.service.accept_submission(self.owner, submission["id"], "accepted")
+                # Review 12a M1: the task waits on the open neighbour, so only an owner can
+                # take it through submission and acceptance, confirming the override.
+                submission = self.service.submit_task(self.owner, task["id"], "done", override_dependencies=True)
+                self.service.accept_submission(self.owner, submission["id"], "accepted", override_dependencies=True)
             else:
                 current = self.service.get_task(self.owner, task["id"])
                 self.service.update_task(self.owner, task["id"], {
@@ -1647,7 +1649,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
         def accept(service):
             submission = service.db.execute(
                 "SELECT id FROM task_submissions WHERE task_id=? AND status='submitted'", (task_id,)).fetchone()
-            service.accept_submission(self.owner, submission["id"], "accepted")
+            service.accept_submission(self.owner, submission["id"], "accepted", override_dependencies=True)
 
         return {"cancelled": cancel, "completed": accept}
 
@@ -1678,7 +1680,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
                     self.service.add_task_dependency(self.owner, neighbour["id"], task["id"])
                     self.service.add_task_reviewer(self.owner, task["id"], manager["id"], "reviewer")
                     if closed_as == "completed":
-                        self.service.submit_task(self.owner, task["id"], "ready")
+                        self.service.submit_task(self.owner, task["id"], "ready", override_dependencies=True)  # review 12a M1
                     events_before = [e["event_type"] for e in self.service.task_events(self.owner, task["id"])]
                     interleaved, close_first = self._close_between_precheck_and_write(
                         task, self._closers(task["id"])[closed_as])

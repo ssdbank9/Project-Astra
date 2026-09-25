@@ -386,8 +386,12 @@ class AstraHandler(BaseHTTPRequestHandler):
                 if verb == "undo":
                     return self._json(self.service.bulk_undo(user, project_id, payload))
             if path.startswith("/api/projects/") and path.endswith("/wip-limits") and path.count("/") == 4:
-                limits = self.service.set_wip_limit(user, path.split("/")[3], str(payload.get("column", "")),
-                                                    payload.get("max_tasks"), payload.get("reason", ""))
+                if "limits" in payload:  # the Limits dialog: every column in one request (review 12c L6)
+                    limits = self.service.set_wip_limits(user, path.split("/")[3], payload.get("limits"),
+                                                         payload.get("reason", ""))
+                else:
+                    limits = self.service.set_wip_limit(user, path.split("/")[3], str(payload.get("column", "")),
+                                                        payload.get("max_tasks"), payload.get("reason", ""))
                 return self._json({"wip_limits": limits})
             if path.startswith("/api/projects/") and path.endswith("/board-order") and path.count("/") == 4:
                 order = self.service.reorder_board(user, path.split("/")[3], str(payload.get("column", "")),
@@ -395,16 +399,20 @@ class AstraHandler(BaseHTTPRequestHandler):
                 return self._json({"order": order})
             if path.startswith("/api/tasks/") and path.endswith("/submit"):
                 task_id = path.split("/")[3]
-                submission = self.service.submit_task(user, task_id, payload.get("note", ""))
+                submission = self.service.submit_task(user, task_id, payload.get("note", ""),
+                                                      override_dependencies=payload.get("override_dependencies") is True,
+                                                      override_wip=payload.get("override_wip") is True)
                 return self._json({"submission": submission}, HTTPStatus.CREATED)
             if path.startswith("/api/tasks/") and path.endswith("/reopen"):
                 task_id = path.split("/")[3]
-                outcome = self.service.reopen_task(user, task_id, payload.get("reason", ""), payload.get("new_due_date"))
+                outcome = self.service.reopen_task(user, task_id, payload.get("reason", ""), payload.get("new_due_date"),
+                                                   override_wip=payload.get("override_wip") is True)
                 return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"task": outcome})
             if path.startswith("/api/tasks/") and path.endswith("/hold"):
                 task_id = path.split("/")[3]
                 outcome = self.service.set_on_hold(
-                    user, task_id, payload.get("reason", ""), payload.get("checkpoint_date"), payload.get("owner_user_id")
+                    user, task_id, payload.get("reason", ""), payload.get("checkpoint_date"), payload.get("owner_user_id"),
+                    override_wip=payload.get("override_wip") is True,
                 )
                 return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"task": outcome})
             if path.startswith("/api/tasks/") and path.endswith("/criticality"):
@@ -416,7 +424,8 @@ class AstraHandler(BaseHTTPRequestHandler):
                 return self._json({"task": task})
             if path.startswith("/api/tasks/") and path.endswith("/parent"):
                 task_id = path.split("/")[3]
-                task = self.service.set_parent(user, task_id, payload.get("parent_task_id"))
+                task = self.service.set_parent(user, task_id, payload.get("parent_task_id"),
+                                               override_wip=payload.get("override_wip") is True)
                 return self._json({"task": task})
             if path.startswith("/api/tasks/") and path.endswith("/schedule-proposals"):
                 task_id = path.split("/")[3]
@@ -435,12 +444,14 @@ class AstraHandler(BaseHTTPRequestHandler):
             if path.startswith("/api/submissions/") and path.endswith("/accept"):
                 submission_id = path.split("/")[3]
                 outcome = self.service.accept_submission(
-                    user, submission_id, payload.get("decision_note", ""), payload.get("checklist")
+                    user, submission_id, payload.get("decision_note", ""), payload.get("checklist"),
+                    override_dependencies=payload.get("override_dependencies") is True,
                 )
                 return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"submission": outcome})
             if path.startswith("/api/submissions/") and path.endswith("/request-changes"):
                 submission_id = path.split("/")[3]
-                outcome = self.service.request_changes(user, submission_id, payload.get("reason", ""))
+                outcome = self.service.request_changes(user, submission_id, payload.get("reason", ""),
+                                                       override_wip=payload.get("override_wip") is True)
                 return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"submission": outcome})
             if path == "/api/task-reviewers":
                 self.service.add_task_reviewer(

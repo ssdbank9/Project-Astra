@@ -2356,7 +2356,8 @@ class AstraCoreTests(unittest.TestCase):
         self.service._project_event(project["id"], self.owner["id"], "import_committed",
                                     {"filename": "secret-payload.xlsx"}, None)
         self.service._project_event(project["id"], self.owner["id"], "project_closed", None, None)
-        all_task = list(ordinary + hidden) + list(own.values())
+        # Review 12b M1: the approver added above is a reviewer_added row, manager-level history.
+        all_task = list(ordinary + hidden) + list(own.values()) + ["reviewer_added"]
         all_project = ["import_committed", "project_closed"] + ["protected_action_blocked"] * len(own)
         # Order-independent: back-to-back rows can share a timestamp on coarse clocks.
         for key, actor in (("owner", self.owner), ("chairman", people["chairman"]), ("manager", people["manager"])):

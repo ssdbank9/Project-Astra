@@ -56,7 +56,11 @@ This first vertical slice provides:
   status it asks for (and the status it moves from, when recorded), the requester's reason, and
   an Open task link; an accepted version is immutable
   and can only be superseded after an explicit reopen with a revised timeline; on-hold work
-  requires a reason plus a mandatory follow-up checkpoint; and project closure is a separate
+  requires a reason plus a mandatory follow-up checkpoint; a task that waits on an unfinished
+  predecessor cannot move to In progress, be submitted or be accepted on any path (board, task
+  panel or API): anyone but an owner is refused with "waits on …", and an owner confirms an
+  override, recorded as `dependency_override` in the same transaction and noticed to the other
+  owners; and project closure is a separate
   App Owner-only event, with exceptional closure preserving a residual-work snapshot rather
   than silently completing unfinished tasks;
 - attachment-link and final-result mutations (add/remove, mark/unmark) are App Owner-only,
@@ -155,16 +159,19 @@ This first vertical slice provides:
   on hold (reason, checkpoint and responsible owner); Submitted submits it; Accepted accepts
   the pending submission; Closed cancels or abandons it (with a reason); dragging a closed or
   accepted card back into work reopens it (reason and revised due date). A manager's protected
-  drop files the existing Owner request instead (HTTP 202), and a card that waits on an
-  unfinished predecessor cannot go to In progress, Submitted or Accepted: a manager's drop is
-  refused with "waits on …", an owner confirms an override that is recorded as
-  `dependency_override`. A refused drop snaps back with the server's reason, and every refusal
-  is recorded as `board_move_blocked` and noticed to the owners (under the blocked-notice cap).
-  An ordinary move among Draft, Ready and In progress, and a reorder, shows Undo for 15 seconds:
-  Undo is a new audited change ("Undo of Draft → Ready (event …)"), refused once the task has
-  changed again or 20 seconds have passed, and never rewrites history. Every card also has a
-  "Move to…" menu (keyboard: Enter opens it, arrows move, Escape closes; up and down move the
-  card in its column). Phones never drag: a swipe scrolls and the menu moves work. The API is
+  drop files the existing Owner request instead (HTTP 202). A card moved to another column is
+  appended there unless it is dropped before a card; a reorder renumbers the whole column. A
+  refused drop snaps back with the server's reason. Permission refusals and rule refusals (a
+  dependency, a work-in-progress limit) are recorded as `board_move_blocked` and noticed to the
+  owners (under the blocked-notice cap); plain slips ("already in Ready") go back to the person
+  only. An ordinary move among Draft, Ready and In progress, and a reorder, shows Undo for 15
+  seconds: Undo is a new audited change ("Undo of Draft → Ready (event …)"), refused once the
+  task has changed again or 20 seconds have passed, and never rewrites history; only moves the
+  board itself marked as undoable qualify, whatever a reason says. Every card also has a
+  "Move to…" menu (keyboard: Enter opens it, arrows move, Escape closes and returns focus; up
+  and down move the card in its column; a card in Blocked only because it waits on a
+  predecessor also offers "Put on hold…"). With swimlanes, dropping into another lane changes
+  status, not owner. Phones never drag: a swipe scrolls and the menu moves work. The API is
   `POST /api/tasks/<id>/board-move`, `POST /api/tasks/<id>/undo-move` and
   `POST /api/projects/<id>/board-order`;
 - task locks (schema v19, `task_locks`). Only one person changes a task at a time. A board or
@@ -173,8 +180,12 @@ This first vertical slice provides:
   idle form lets go after a minute) and released on drop, cancel, save or close. While someone
   else holds one, every write to that task (edit, board move, hold, submit, decisions,
   dependencies, criticality, files, dates) is refused with HTTP 409 naming the holder and the
-  time the lease runs out; the check sits inside the write transaction, so the final write
-  always revalidates. Board cards show a lock chip and the task panel a banner with who and
+  time the lease runs out (shown in local time); the check sits inside the write transaction,
+  so the final write always revalidates. Reviewer and approver changes (`reviewer_added`,
+  `reviewer_removed`, now task events) and links from a locked predecessor are refused too.
+  A lease that has run out cannot be renewed; the browser takes a new one, or says so and
+  reloads. A drag of a task whose Edit form you are using borrows that lease and leaves it. A board reorder that includes a task someone else holds is refused the same
+  way, and nothing is written. Board cards show a lock chip and the task panel a banner with who and
   until when (as of the last load). Any active owner may Force unlock, which is recorded as
   `task_lock_forced` and noticed to the holder and the other owners. API:
   `POST /api/tasks/<id>/lock` (`kind` drag|edit|bulk), `/lock/renew` and `/lock/release`
@@ -183,12 +194,16 @@ This first vertical slice provides:
   left or right end to change the start or the due date, with a live tip of the new dates. The
   task panel's date fields remain the keyboard and phone route (phones and touch never drag
   bars). The server validates the dates (real dates, start not after due) and refuses with the
-  reason; refusals are recorded as `gantt_move_blocked`. An ordinary move applies at once with a
+  reason; a refused permission is recorded as `gantt_move_blocked`. An ordinary move applies at once with a
   system reason ("Gantt drag: start … → …, due … → …") and a 15-second Undo. A move that
   breaks a finish-to-start link either way, touches a task on the critical path, or puts the due
   date past the project target (there are no milestones; the target stands in) first shows what
   it affects and applies only when confirmed; the confirmation is recorded as
-  `schedule_impact_confirmed` and the other owners are told. Tasks that follow are not moved.
+  `schedule_impact_confirmed` in the same transaction as the move and the other owners are
+  told. The same rule applies when dates change in the task panel or through the API. A
+  finish-to-start link is broken only when the successor starts before the predecessor's
+  due day, so a task due 12 Oct followed by one starting 12 Oct does not ask. Tasks that
+  follow are not moved. Only an ordinary move (no consequences) offers Undo.
   API: `POST /api/tasks/<id>/reschedule` (`start_date`, `due_date`, `expected_revision`,
   `confirmed`);
 - bulk changes on a project's Board and List for owners and the project's managers: tick
@@ -201,16 +216,28 @@ This first vertical slice provides:
   nothing: bulk locks are taken for every task first (if anyone else holds one, nothing starts
   and the holders are named), then every write, one `bulk_change` project event listing the
   tasks and a `task_updated` event per task share one transaction, and the other owners get one
-  notice. Undo (15 seconds) restores every task, or none if any changed since
+  notice. The plan is rebuilt inside the write, after the locks are held, and anything that
+  drifted since the preview (a task now blocked, a limit now reached) refuses the whole change.
+  A bulk never replaces your own lock on a task you are already editing. A due-date shift
+  with schedule consequences applies only with `confirmed` (the reviewed preview sends it).
+  Undo (15 seconds) restores every task, or none if any changed since
   (`bulk_change_undone`). API: `POST /api/projects/<id>/bulk/preview`, `/bulk/apply`
   (`expected_revisions` from the preview) and `/bulk/undo`;
 - work-in-progress limits (schema v20, `wip_limits`): an owner sets an optional limit per open
   board column per project (Limits… on the board; Draft, Ready, In progress, Blocked,
-  Submitted), recorded as `wip_limit_changed` in the project history. Column heads show
-  "n / limit". A board move or bulk status change that would put more top-level open tasks in
-  a column than its limit is refused with the reason; an owner may go over it after a confirm,
-  recorded as `wip_limit_override` and noticed to the other owners. Leaving a column is never
-  limited. API: `POST /api/projects/<id>/wip-limits` (`column`, `max_tasks` or empty to clear);
+  Submitted), recorded as `wip_limit_changed` in the project history (one row per changed
+  column; the dialog saves every column in one request, whole numbers 1 to 999 only). Column
+  heads show "n / limit". The limit is a rule of every status-changing write a person makes:
+  a board move, a bulk change or its Undo, a board Undo, the task panel's status, hold,
+  submit, reopen and request-changes actions, creating a task and promoting a step to top
+  level. Whatever would put more top-level open tasks in a column than its limit is refused
+  with the reason for anyone but an owner; an owner may go over it after a confirm, and an
+  owner's approval of a request counts as that confirm. Going over is recorded as
+  `wip_limit_override` in the same transaction and noticed to the other owners. Leaving a
+  column is never limited. A card that enters Blocked because of a dependency (a link added,
+  a predecessor reopened) is not refused, since nobody moved it: the column simply shows
+  over its limit. API: `POST /api/projects/<id>/wip-limits` (`limits`: column to number or
+  empty, or `column` and `max_tasks`);
 - My Work with two tabs. List (`#/my-work`) groups the open tasks you own into Overdue,
   Today, This week (due within the next 7 days, day 7 included, as on Home), Later and No date, each with a
   count, soonest first, with a filter box. Calendar (`#/my-work/calendar?month=YYYY-MM`) is a

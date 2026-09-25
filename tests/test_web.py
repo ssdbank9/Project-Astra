@@ -1675,7 +1675,8 @@ class AstraWebTests(unittest.TestCase):
         other_task = service.create_task(owner, {"project_id": other["id"], "title": "Elsewhere"})
         service._event(other_task["id"], users["approver"], "protected_action_blocked", None,
                        {"note": "elsewhere"}, None, notify=False)
-        every = ["task_created", "task_updated", "protected_action_requested", "protected_action_rejected",
+        # Review 12b M1: adding the approver is now a task event; like approvals it is manager-level history.
+        every = ["task_created", "reviewer_added", "task_updated", "protected_action_requested", "protected_action_rejected",
                  "final_result_mark_blocked", "import_key_assigned", "protected_action_requested"]
         ordinary = ["task_created", "task_updated"]
         expected = {"owner": every, "chairman": every, "manager": every, "member": ordinary, "viewer": ordinary,
@@ -1854,6 +1855,39 @@ class AstraGovernedDragWebTests(unittest.TestCase):
         response, _ = self.request("POST", f"/api/tasks/{task['id']}/board-move",
                                    {"to_column": "ready", "expected_revision": rev}, cookie=cookie)
         self.assertEqual(response.status, 403)
+
+    def test_review_12a_dependency_rule_in_the_panel_over_http(self):
+        (ocookie, ocsrf), (cookie, csrf), pid, task = self._project_with_manager()
+        _, first = self.request("POST", "/api/tasks", {"project_id": pid, "title": "First"}, cookie=ocookie, csrf=ocsrf)
+        response, _ = self.request("POST", "/api/task-dependencies", {"predecessor_task_id": first["task"]["id"],
+                                   "successor_task_id": task["id"]}, cookie=ocookie, csrf=ocsrf)
+        self.assertIn(response.status, (200, 201))
+        _, detail = self.request("GET", f"/api/tasks/{task['id']}", cookie=cookie)
+        body = {"status": "in_progress", "reason": "start", "expected_revision": detail["task"]["revision"]}
+        response, refused = self.request("POST", f"/api/tasks/{task['id']}", body, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 400)
+        self.assertIn("Only an owner may override a dependency", refused["error"])
+        response, ask = self.request("POST", f"/api/tasks/{task['id']}", body, cookie=ocookie, csrf=ocsrf)
+        self.assertEqual((response.status, ask["confirm"], ask["impact"]), (409, "dependencies", ["First"]))
+        response, done = self.request("POST", f"/api/tasks/{task['id']}", {**body, "override_dependencies": True},
+                                      cookie=ocookie, csrf=ocsrf)
+        self.assertEqual(response.status, 200)
+        response, submit = self.request("POST", f"/api/tasks/{task['id']}/submit", {"note": "done"}, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 400)
+
+    def test_review_12c_limits_in_one_request_and_strict_revisions_over_http(self):
+        (ocookie, ocsrf), (cookie, csrf), pid, task = self._project_with_manager()
+        response, saved = self.request("POST", f"/api/projects/{pid}/wip-limits",
+                                       {"limits": {"ready": 2, "progress": "3"}, "reason": "plan"}, cookie=ocookie, csrf=ocsrf)
+        self.assertEqual((response.status, saved["wip_limits"]), (200, {"ready": 2, "progress": 3}))
+        response, bad = self.request("POST", f"/api/projects/{pid}/wip-limits", {"limits": {"ready": 2.5}},
+                                     cookie=ocookie, csrf=ocsrf)
+        self.assertEqual(response.status, 400)
+        response, bad = self.request("POST", f"/api/projects/{pid}/bulk/apply",
+                                     {"task_ids": [task["id"]], "action": "status", "value": "ready",
+                                      "expected_revisions": [1]}, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 400)
+        self.assertIn("expected_revisions", bad["error"])
 
     def test_bulk_change_and_wip_limits_over_http(self):
         (ocookie, ocsrf), (cookie, csrf), pid, task = self._project_with_manager()
@@ -2231,7 +2265,7 @@ globalThis.history={replaceState(a,b,url){calls.push(["replace",url]);location.h
 // Seed what the menu wiring reads at load time.
 document.querySelector("#more-btn").setAttribute("aria-controls","more-menu");document.querySelector("#more-menu").hidden=true;
 document.querySelector("#detail-dialog").hidden=true;
-(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel,renderHome,boardColumn,renderBoard,renderProject,PROJECT_TABS,renderMyWork,calendarMonth,calExpanded,renderInbox,renderGantt,asOfText,bulk};");
+(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel,renderHome,boardColumn,renderBoard,renderProject,PROJECT_TABS,renderMyWork,calendarMonth,calExpanded,renderInbox,renderGantt,asOfText,bulk,gdrag,leases,phoneMQ};");
 const a=globalThis.__a,out={},tick=()=>new Promise(r=>setTimeout(r,0));
 const keydown=(key,target,extra={})=>{const e={key,target,ctrlKey:false,metaKey:false,altKey:false,defaultPrevented:false,prevented:false,preventDefault(){this.prevented=true;this.defaultPrevented=true},stopPropagation(){},...extra};(docListeners.keydown||[]).forEach(f=>f(e));return e.prevented};
 const U1="11111111-1111-4111-8111-111111111111",U2="22222222-2222-4222-8222-222222222222",U3="33333333-3333-4333-8333-333333333333";
@@ -2310,6 +2344,7 @@ if(mode==="board"){
 }
 if(mode==="drag"){
   // JN1QYG: movable cards, the saved order, the dialog each column needs, and the move/Undo round trip.
+  const realAskMove=askMove;
   const T=o=>({project_id:U1,project_name:"P",status:"draft",due_state:"scheduled",days_to_due:9,due_date:"2026-10-04",owner_name:"Sara",owner_user_id:"u-sara",criticality:"high",revision:3,...o});
   a.state.user={id:"u1",display_name:"PM",global_role:"member"};
   a.state.projects=[{id:U1,name:"P",status:"active",entities:[],can_manage:true}];
@@ -2344,8 +2379,26 @@ if(mode==="drag"){
   await saveColumnOrder(U1,"draft",["c","b","a"],true);out.orderPosts=posts.splice(0);
   await document.querySelector("#toast-action")._listeners.click.at(-1)();for(let i=0;i<10;i++)await new Promise(r=>realST(r,0));out.orderUndoPosts=posts.splice(0);
   globalThis.setTimeout=realST;
-  const btn={dataset:{moveMenu:"a"},setAttribute(){},getBoundingClientRect:()=>({left:10,bottom:20})};
-  openMoveMenu(btn);out.menu=document.querySelector("#move-menu").innerHTML;
+  const attrs={};const btn={dataset:{moveMenu:"a"},isConnected:true,setAttribute(k,v){attrs[k]=v},getBoundingClientRect:()=>({left:10,bottom:20}),focus(){globalThis.__focused="opener"}};
+  openMoveMenu(btn);out.menu=document.querySelector("#move-menu").innerHTML;out.openedExpanded=attrs["aria-expanded"];
+  // Review 12a L6/L7: Escape closes the menu and puts focus back on the button that opened it;
+  // closing it from elsewhere resets that same button.
+  const menuEl=document.querySelector("#move-menu");globalThis.__focused=null;
+  menuEl._listeners.keydown[0]({key:"Escape",preventDefault(){},stopPropagation(){},currentTarget:menuEl});
+  out.escape={hidden:menuEl.hidden,focused:globalThis.__focused,expanded:attrs["aria-expanded"]};
+  menuEl.id="move-menu";openMoveMenu(btn);globalThis.document.querySelectorAll=sel=>sel===".menu:not([hidden])"?[menuEl]:[];
+  closeMenus();out.closedElsewhere=attrs["aria-expanded"];globalThis.document.querySelectorAll=()=>[];
+  // Review 12a I1: a card in Blocked only because of a dependency offers Put on hold.
+  a.state.tasks=[...tasks,T({id:"w",title:"W",is_blocked:true,blocked_by:[{title:"A"}]})];
+  openMoveMenu({...btn,dataset:{moveMenu:"w"}});out.waitingMenu=menuEl.innerHTML;a.state.tasks=tasks;
+  // Review 12a L7: the dialog escapes the title.
+  realAskMove("hold",{title:'<img src=x onerror="globalThis.__xss=1">',project_id:U1,owner_user_id:"u-sara"},"blocked");
+  out.escapedDialog=document.querySelector("#move-form").innerHTML;
+  // Review 12a M1: the panel's dependency confirm retries with the override, or sends nothing more.
+  const sent=[];let calls=0;
+  const send=async more=>{sent.push(more);if(!calls++){const e=new Error("waits");e.status=409;e.confirm="dependencies";e.impact=["A"];throw e}return {task:{}}};
+  globalThis.askMove=async()=>({override_dependencies:true});out.panelConfirm=[await withDependencyConfirm({title:"T"},"in_progress",send),sent.slice()];
+  calls=0;sent.length=0;globalThis.askMove=async()=>null;out.panelCancel=[await withDependencyConfirm({title:"T"},"in_progress",send),sent.slice()];
   process.stdout.write(JSON.stringify(out));return;
 }
 if(mode==="gantt"){
@@ -2366,7 +2419,7 @@ if(mode==="gantt"){
   globalThis.fetch=async(u,opt)=>{posts.push([u,opt&&opt.body?JSON.parse(opt.body):null]);const r=reply(u)||{};const status=r.status||200;return {ok:status<400,status,json:async()=>r.body||{}}};
   globalThis.load=async()=>{posts.push(["load"])};
   const timers=[],realST=globalThis.setTimeout;globalThis.setTimeout=(f,ms)=>{timers.push(ms);return 0};
-  const intervals=[];globalThis.setInterval=(f,ms)=>{intervals.push(ms);return intervals.length};globalThis.clearInterval=()=>{};
+  const realAskMove=askMove;const intervals=[];globalThis.setInterval=(f,ms)=>{intervals.push(ms);return intervals.length};globalThis.clearInterval=()=>{};
   const flush=async()=>{for(let i=0;i<10;i++)await new Promise(r=>realST(r,0))};
   reply=u=>u.endsWith("/reschedule")?{body:{task:{...t,start_date:"2026-10-08",due_date:"2026-10-11"},undo:{event_id:"ev9",seconds:15}}}:null;
   await rescheduleTask(t,barDates(t,null,3),3);
@@ -2385,7 +2438,32 @@ if(mode==="gantt"){
   const held={holder_user_id:"u-sara",holder_name:"Sara <K>",kind:"edit",expires_at:"2026-09-25T10:00:30+00:00"};
   reply=u=>u.endsWith("/lock")?{status:409,body:{error:"busy",lock:held}}:null;
   const refused=await takeLease("g1","edit");out.refusedLease=[refused.ok,refused.err.lock.holder_name];posts.splice(0);
+  // Review 12b L1: a drag borrows your edit lease and leaves it alone; each caller releases its own kind.
+  reply=u=>u.endsWith("/lock")?{body:{lock:{token:"tokE",seconds:60}}}:null;
+  await takeLease("g1","edit");out.borrow=await takeLease("g1","drag");await dropLease("g1","drag");
+  out.afterDragDrop=[a.leases.has("g1"),posts.filter(p=>p[0].endsWith("/lock/release")).length];
+  // Closing the panel releases the edit lease (review 12b L9).
+  const panel=document.querySelector("#detail-dialog");panel.hidden=false;a.panelState.shown="g1";a.closePanel(true);await flush();
+  out.closeReleased=[a.leases.has("g1"),posts.splice(0).filter(p=>p[0].endsWith("/lock/release")).map(p=>p[1])];
+  // rescheduleTask releases the drag lease it ran under.
+  reply=u=>u.endsWith("/lock")?{body:{lock:{token:"tokD",seconds:60}}}:u.endsWith("/reschedule")?{body:{task:t,undo:{event_id:"ev10",seconds:15}}}:null;
+  await takeLease("g1","drag");await rescheduleTask(t,barDates(t,null,1),1);
+  out.reschedReleased=[a.leases.has("g1"),posts.splice(0).filter(p=>p[0].endsWith("/lock/release")).map(p=>p[1])];
+  // Review 12b L8: the tip counts the change applied (a start drag clamped at the due date is +3, not +30).
+  out.clampedTip=dateTip(t,barDates(t,"start",30),appliedDays(t,barDates(t,"start",30)));
+  // Review 12b I6: a lock refusal from the server reads in local time, as the toast does.
+  reply=()=>({status:409,body:{error:"“T” is being changed by Sara (an edit); their lock runs out at 10:00:30 UTC unless they keep working.",lock:held}});
+  try{await api(taskApi("g1"),{method:"POST",body:"{}"})}catch(err){out.lockMessage=[err.message,lockTime(held)]}
   globalThis.setTimeout=realST;
+  // Review 12b L9: touch and phones never start a bar drag; a mouse on a wide screen does.
+  const barStub={dataset:{drag:"g1",x:"10",w:"4"},closest:sel=>sel===".timeline"?{getBoundingClientRect:()=>({width:700})}:null};
+  const down=pointerType=>{a.gdrag.bar=null;document.querySelector("#gantt")._listeners.pointerdown[0]({target:{closest:sel=>sel==="[data-drag]"?barStub:null},button:0,pointerType,clientX:5,pointerId:1});return !!a.gdrag.bar};
+  document.querySelector("#gantt").dataset.span="8380800000";
+  out.startDrag={mouse:down("mouse"),touch:down("touch")};const setPhone=v=>Object.defineProperty(a.phoneMQ,"matches",{value:v,configurable:true,writable:true});
+  setPhone(true);out.startDrag.phone=down("mouse");setPhone(false);a.gdrag.bar=null;
+  // The impact dialog escapes what it lists.
+  const dlg=document.querySelector("#move-dialog");dlg.showModal=()=>{};
+  realAskMove("impact",t,null,{impact:['<img src=x onerror="globalThis.__xss=3">'],dates:barDates(t,"end",2)});out.impactDialog=document.querySelector("#move-form").innerHTML;
   out.banner=lockBanner(held,"",true);out.bannerNoForce=lockBanner(held,"",false);
   out.chipOther=boardCard(T({id:"c1",title:"Card",lock:held}),[],true);
   out.chipMine=boardCard(T({id:"c2",title:"Card",lock:{...held,holder_user_id:"u1"}}),[],true);
@@ -2428,6 +2506,11 @@ if(mode==="bulk"){
   globalThis.setTimeout=realST;
   // The preview dialog: blocked items, no Apply until they are removed; a limit a manager cannot pass.
   globalThis.askBulk=realAskBulk;
+  // Review 12c I1: selected tasks the filters hide are counted in the bar.
+  location.hash="#/project/"+U1+"/list";a.bulk.ids=new Set(["a","b"]);a.bulk.pid=U1;
+  const barEl=document.querySelector("#bulk-bar");barEl.hidden=true;barEl.innerHTML="";
+  const countEl={textContent:""};barEl.querySelector=sel=>sel==="#bulk-count"?countEl:{addEventListener(){},value:"status",set innerHTML(v){}};
+  renderBulkBar();out.hiddenNote=countEl.textContent;
   const dlg=document.querySelector("#move-dialog");dlg.showModal=()=>{};dlg.close=()=>{};
   askBulk({...plan,wip:null,blocked:[{id:"c",title:"C <x>",reason:"is already Ready"}],counts:{ok:2,blocked:1}});out.dialogBlocked=document.querySelector("#move-form").innerHTML;
   askBulk({...plan,wip:{...plan.wip,can_override:false}});out.dialogWipManager=document.querySelector("#move-form").innerHTML;
@@ -2941,6 +3024,16 @@ class AstraBoardDragDriverTests(unittest.TestCase):
             {"to_column": "ready", "expected_revision": 3, "override_dependencies": True},
             {"to_column": "ready", "expected_revision": 3, "override_dependencies": True, "override_wip": True}])
 
+    def test_review_12a_menu_focus_expanded_state_hold_item_and_escaping(self):
+        self.assertEqual(self.out["openedExpanded"], "true")
+        self.assertEqual(self.out["escape"], {"hidden": True, "focused": "opener", "expanded": "false"})
+        self.assertEqual(self.out["closedElsewhere"], "false")
+        self.assertTrue(self.out["waitingMenu"].startswith('<button type="button" role="menuitem" data-move-to="blocked">Put on hold'))
+        self.assertIn("&lt;img src=x onerror=&quot;globalThis.__xss=1&quot;&gt;", self.out["escapedDialog"])
+        self.assertNotIn("<img", self.out["escapedDialog"])
+        self.assertEqual(self.out["panelConfirm"], [{"task": {}}, [{}, {"override_dependencies": True}]])
+        self.assertEqual(self.out["panelCancel"], [None, [{}]])
+
     def test_reorder_saves_and_undo_restores_the_previous_order(self):
         url = "/api/projects/11111111-1111-4111-8111-111111111111/board-order"
         self.assertEqual(self.out["orderPosts"], [[url, {"column": "draft", "task_ids": ["c", "b", "a"]}]])
@@ -3014,11 +3107,24 @@ class AstraGanttDragDriverTests(unittest.TestCase):
         self.assertIn("keeps its dates: The start date (2026-10-20) would be after the due date", self.out["refusedToast"])
 
     def test_a_lease_is_taken_once_renewed_every_20_seconds_and_released(self):
-        self.assertEqual((self.out["take"], self.out["again"]), ({"ok": True}, {"ok": True}))
+        self.assertEqual((self.out["take"], self.out["again"]), ({"ok": True}, {"ok": True, "borrowed": False}))
         self.assertEqual(self.out["intervals"], [20000])
         self.assertEqual(self.out["leasePosts"], [["/api/tasks/g1/lock", {"kind": "drag"}],
                                                   ["/api/tasks/g1/lock/release", {"token": "tok1"}]])
         self.assertEqual(self.out["refusedLease"], [False, "Sara <K>"])
+
+    def test_review_12b_leases_tip_lock_time_touch_and_escaping(self):
+        self.assertEqual(self.out["borrow"], {"ok": True, "borrowed": True})
+        self.assertEqual(self.out["afterDragDrop"], [True, 0])  # the edit lease is still held
+        self.assertEqual(self.out["closeReleased"], [False, [{"token": "tokE"}]])
+        self.assertEqual(self.out["reschedReleased"], [False, [{"token": "tokD"}]])
+        self.assertEqual(self.out["clampedTip"], "Start Oct 8 (+3 days)")
+        message, local = self.out["lockMessage"]
+        self.assertIn(f"runs out at {local} unless", message)
+        self.assertNotIn("UTC", message)
+        self.assertEqual(self.out["startDrag"], {"mouse": True, "touch": False, "phone": False})
+        self.assertIn("&lt;img src=x onerror=&quot;globalThis.__xss=3&quot;&gt;", self.out["impactDialog"])
+        self.assertNotIn("<img", self.out["impactDialog"])
 
     def test_others_see_who_holds_a_lock_and_owners_can_force_it(self):
         self.assertIn("Sara &lt;K&gt; is changing this task (an edit)", self.out["banner"])
@@ -3055,7 +3161,8 @@ class AstraBulkDriverTests(unittest.TestCase):
         posts = [p for p in self.out["applyPosts"] if p[0] != "load" and "import" not in p[0]]
         self.assertEqual(posts[0][1], {"task_ids": ["a", "b"], "action": "status", "value": "ready"})
         self.assertEqual(posts[1][1], {"task_ids": ["a", "b"], "action": "status", "value": "ready",
-                                       "expected_revisions": {"a": 3, "b": 4}, "override_wip": True})
+                                       "expected_revisions": {"a": 3, "b": 4}, "override_wip": True,
+                                       "confirmed": False})
         self.assertIn("Changed 2 tasks: status to Ready.", self.out["applyToast"])
         self.assertEqual(self.out["timers"], [15000])
         self.assertEqual(self.out["cleared"], 0)
@@ -3069,6 +3176,14 @@ class AstraBulkDriverTests(unittest.TestCase):
     def test_a_refused_apply_says_nothing_changed_once(self):
         self.assertIn("“A” changed since the preview; nothing was changed. Preview again.", self.out["refusedToast"])
         self.assertEqual(self.out["refusedToast"].lower().count("nothing was changed"), 1)
+
+    def test_the_bar_counts_selected_tasks_the_filters_hide(self):
+        self.assertEqual(self.out["hiddenNote"], "2 selected · 2 hidden by filters")
+
+    def test_the_limits_dialog_saves_every_column_in_one_request(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn('body:JSON.stringify({limits:Object.fromEntries(changed.map(k=>[k,data[k]||null])),reason:data.reason})', js)
+        self.assertNotIn("for(const k of changed)await api", js)
 
     def test_the_preview_withholds_apply_until_it_can_succeed(self):
         blocked = self.out["dialogBlocked"]

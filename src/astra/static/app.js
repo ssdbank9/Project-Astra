@@ -1,5 +1,5 @@
 const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality"};
-async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.error||"Request failed");err.status=response.status;err.confirm=data.confirm;err.impact=data.impact;err.lock=data.lock;throw err}return data}
+async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.lock&&data.error?data.error.replace(/at \d{2}:\d{2}:\d{2} UTC/,`at ${lockTime(data.lock)}`):data.error||"Request failed");err.status=response.status;err.confirm=data.confirm;err.impact=data.impact;err.lock=data.lock;throw err}return data}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
 function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);document.querySelector("#new-project").hidden=document.querySelector("#people").hidden=!isOwner();projectActions();refreshImportAccess()}
 async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.today=t.today||null;state.timezone=t.timezone||null;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
@@ -190,7 +190,7 @@ function renderGantt(tasks){
   const header=`<div class="gantt-row gantt-head"><div class="task-name gantt-head-cap">Project / task</div><div class="task-meta gantt-head-cap">Owner · due · next action</div><div class="timeline axis">${axis}${markerLines}${markerFlags}${todayFlag}</div></div>`;
   const todayLine=showToday?`<span class="today-line" data-x="${todayPct}"></span>`:"";
   // Pixel estimate of the timeline column (grid: 260px name, 210px meta, rest timeline).
-  const tlw=Math.max(700,(el.clientWidth||1180)-470);
+  const tlw=Math.max(700,(+el.clientWidth||1180)-470);
   const stepButton=(k,g)=>{
     const m=stepIndex.get(k.id);const closed=CLOSED_STATUSES.includes(k.status);
     const cls=["step",`step-c${stepHue(m.idx)}`,m.idx>STEP_HUES?"wrap":"",g.lane?"lane-2":"",closed?"done":"",k.status==="on_hold"?"hold":"",k.is_critical_path?"crit":"",g.solo?"solo":""].filter(Boolean).join(" ");
@@ -258,12 +258,13 @@ function renderGantt(tasks){
         // In the meta column the list follows its button, so the disclosure stays adjacent in Tab order.
         if(place===" in-meta")metaMore=`<br>${moreBtn}${moreList}`;
         if(!ownDates)derived=`<br><span class="chip derived">Dates from steps</span>`;
-        const drag=ownDates&&canDragBar(t)?` data-drag="${id}"`:"",grips=drag?GRIPS:"";
+        const drag=ownDates&&canDragBar(t)?` data-drag="${id}"`:"",grips=drag&&width/100*tlw>=24?GRIPS:"";
         bar=`<div class="bar track ${cls}${tall?" lanes-2":""}${expanded?" is-expanded":""}" role="group" tabindex="0" data-detail="${id}"${drag} ${tipAttrs(t,null,kids.length,overruns)} data-x="${left}" data-w="${width}">${extBefore}${extAfter}${segs}${more}${grips}</div>${place===" in-meta"?"":moreList}`;
       }
       else if(isStep){bar=stepButton(t,{lane:0,px:width/100*tlw,x:left,w:Math.min(100-left,width),solo:true})}
       else{const drag=canDragBar(t)&&!isStep?` data-drag="${id}"`:"";
-        bar=`<button type="button" class="bar plain ${cls}" data-detail="${id}"${drag} ${tipAttrs(t,null,0)} data-x="${left}" data-w="${width}"><span class="bar-label">${escapeHtml(t.title)}</span>${drag?GRIPS:""}</button>`}
+        // Review 12b L8: a bar narrower than about 24px has no grips, so its middle still moves it.
+        bar=`<button type="button" class="bar plain ${cls}" data-detail="${id}"${drag} ${tipAttrs(t,null,0)} data-x="${left}" data-w="${width}"><span class="bar-label">${escapeHtml(t.title)}</span>${drag&&width/100*tlw>=24?GRIPS:""}</button>`}
     }
     const blocked=t.is_blocked?`<br><span class="blocked-text">Blocked by ${escapeHtml(t.blocked_by.map(item=>item.title).join(", "))}</span>`:"";
     const cp=t.is_critical_path?`<br><span class="cp-text">On critical path</span>`:"";
@@ -670,7 +671,7 @@ function renderBoard(tasks,divide){
   }).join("");
   const opts=[["","None"],["owner","Owner"],["criticality","Criticality"]].map(([v,l])=>`<option value="${v}"${v===(divide||"")?" selected":""}>${l}</option>`).join("");
   return `<div class="board-bar"><label class="inline">Divide by <select id="board-divide">${opts}</select></label>${movable&&isOwner()?'<button type="button" class="quiet" id="wip-settings">Limits…</button>':""}
-      <span class="work-meta">${top.length} task${top.length===1?"":"s"} · steps show on their parent · ${movable?'<span class="drag-only">drag a card or </span>use Move to…; ordinary moves can be undone for 15 seconds':"read-only for your role"}</span></div>
+      <span class="work-meta">${top.length} task${top.length===1?"":"s"} · steps show on their parent · ${movable?'<span class="drag-only">drag a card or </span>use Move to…; ordinary moves can be undone for 15 seconds':"read-only for your role"}${movable&&divide?" · Dropping into another lane changes status, not owner.":""}</span></div>
     ${top.length?`<div class="board${LOCKED_COLUMNS.filter(shut).map(k=>" shut-"+k).join("")}" role="region" aria-label="Board" tabindex="0"><div class="board-cols board-head">${head}</div>${laneRows}</div>`
       :'<p class="empty-line">No tasks in this project yet. Use Add a task to start.</p>'}`;
 }
@@ -784,7 +785,7 @@ function askMove(kind,t,column,err){
       `${reason("Reason")}<label>New due date<input name="new_due_date" type="date" required min="${today}"></label>`,"Reopen"],
     submit:["Submit for review",`Submit ${name} for review?`,`<label>Note (optional)<textarea name="note"></textarea></label>`,"Submit"],
     accept:["Accept submission",`Accept the submission of ${name}?`,`<label>Decision note (optional)<textarea name="note"></textarea></label>`,"Accept"],
-    impact:["Confirm the new dates",`New dates for ${name}: ${escapeHtml(err&&err.dates?dateTip(t,err.dates,Math.round((Date.parse(err.dates.due_date)-Date.parse(t.due_date))/DAY)):"")}. This move has consequences:`,
+    impact:["Confirm the new dates",`${err&&err.dates&&err.dates.due_date&&t.due_date?`New dates for ${name}: ${escapeHtml(dateTip(t,err.dates,appliedDays(t,err.dates)))}. `:`New dates for ${name}. `}This change has consequences:`,
       `<ul class="impact-list">${((err&&err.impact)||[]).map(i=>`<li>${escapeHtml(i)}</li>`).join("")}</ul><p class="muted">Tasks that follow are not moved for you. The other owners are told once you confirm.</p>`,"Move anyway"],
     unlock:["Force unlock",`${escapeHtml(err&&err.lock?lockText(err.lock):"")} Unlocking lets others change ${name} now; anything they have not saved will be refused, and they are told.`,
       `<label>Reason (optional)<input name="reason" autocomplete="off"></label>`,"Unlock"],
@@ -804,6 +805,7 @@ function askMove(kind,t,column,err){
       done(data)};
     f.querySelector("[data-move-cancel]").onclick=()=>done(null);
     d.addEventListener("close",()=>done(null),{once:true});
+    clearToast();   // review 12b L8: an earlier Undo notice never shows behind the dialog
     d.showModal();(f.querySelector("input:not([type=radio]),textarea")||f.querySelector('button[type="submit"]'))?.focus();
   });
 }
@@ -825,13 +827,14 @@ async function moveCard(t,column,beforeId=null){
     }
     if(out.request){showToast(`Sent to an owner for approval: “${t.title}” to ${COL_LABEL[column]}.`);await load();return}
     const moved=out.task;Object.assign(t,moved);
-    if(boardColumn(t)===column){   // land where it was dropped; from the menu or a column head, at the end
+    // Review 12a L3: dropped before a card, it takes that place; otherwise the server appends it.
+    if(beforeId&&boardColumn(t)===column){
       const order=columnOrder(pid,column,t.id),at=beforeId?order.indexOf(beforeId):-1;
       order.splice(at<0?order.length:at,0,t.id);
       try{await saveColumnOrder(pid,column,order,false)}catch{}
     }
     const landed=boardColumn(t),waits=(t.blocked_by||[]).map(p=>p.title).join(", ");
-    const text=`Moved “${t.title}” from ${COL_LABEL[from]} to ${COL_LABEL[column]}.`+(landed==="blocked"&&column!=="blocked"&&waits?` It shows under Blocked until ${waits} is completed.`:"");
+    const text=(from===column?`Put “${t.title}” on hold.`:`Moved “${t.title}” from ${COL_LABEL[from]} to ${COL_LABEL[column]}.`)+(landed==="blocked"&&column!=="blocked"&&waits?` It shows under Blocked until ${waits} is completed.`:"");
     if(out.undo)showToast(text,"Undo",()=>undoMove(t,out.undo.event_id,from,fromOrder),false,out.undo.seconds*1000);else showToast(text);
     boardAnnounce(text);
   }catch(err){
@@ -842,7 +845,9 @@ async function moveCard(t,column,beforeId=null){
 }
 async function undoMove(t,eventId,from,fromOrder){
   try{
-    await api(`/api/tasks/${encodeURIComponent(t.id)}/undo-move`,{method:"POST",body:JSON.stringify({event_id:eventId})});
+    // The column it goes back to may be at its work-in-progress limit: an owner confirms going over it.
+    const done=await withConfirms(t,from,more=>api(`/api/tasks/${encodeURIComponent(t.id)}/undo-move`,{method:"POST",body:JSON.stringify({event_id:eventId,...more})}));
+    if(!done){showToast("Undo cancelled; the move stands.");await load();return}
     // Put the card back where it was in its column too (best effort: skipped if that column changed meanwhile).
     if(fromOrder&&fromOrder.length>1)try{await api(`/api/projects/${encodeURIComponent(t.project_id)}/board-order`,{method:"POST",body:JSON.stringify({column:from,task_ids:fromOrder})})}catch{}
     showToast(`Move undone: “${t.title}” is back.`)}
@@ -859,6 +864,7 @@ function startDrag(x,y){
   drag.card.classList.add("is-dragging");document.body.classList.add("board-dragging");
   try{drag.card.setPointerCapture(drag.pointer)}catch{}
   drag.lease=takeLease(drag.id,"drag");
+  if(drag.touch)document.addEventListener("touchmove",holdTouchScroll,{passive:false});
   boardAnnounce(`Dragging “${drag.title}”. Drop it on a column, or press Escape to cancel.`);
   dragTo(x,y);
 }
@@ -879,14 +885,15 @@ function endDrag(drop){
   if(drag.ghost)drag.ghost.remove();
   if(drag.card)drag.card.classList.remove("is-dragging");
   document.body.classList.remove("board-dragging");clearDropMarks();
+  document.removeEventListener("touchmove",holdTouchScroll,{passive:false});
   drag.card=null;drag.active=false;drag.ghost=null;
   if(!active)return;
   drag.suppressClick=true;setTimeout(()=>{drag.suppressClick=false},0);
   const t=state.tasks.find(x=>x.id===id),lease=drag.lease;drag.lease=null;
-  if(!drop||!over||!t){boardAnnounce("Move cancelled.");lease?.then(()=>dropLease(id));return}
+  if(!drop||!over||!t){boardAnnounce("Move cancelled.");lease?.then(()=>dropLease(id,"drag"));return}
   lease.then(got=>{
     if(!got.ok){const text=leaseRefusal(t,got.err);showToast(text,null,null,true);boardAnnounce(text);return load()}
-    return Promise.resolve(placeDrop(t,over,before)).finally(()=>dropLease(id));
+    return Promise.resolve(placeDrop(t,over,before)).finally(()=>dropLease(id,"drag"));
   },()=>placeDrop(t,over,before));
 }
 function placeDrop(t,over,before){
@@ -918,7 +925,9 @@ document.addEventListener("pointermove",e=>{
 });
 document.addEventListener("pointerup",e=>{if(drag.card&&e.pointerId===drag.pointer)endDrag(true)});
 document.addEventListener("pointercancel",e=>{if(drag.card&&e.pointerId===drag.pointer)endDrag(false)});
-document.addEventListener("touchmove",e=>{if(drag.active)e.preventDefault()},{passive:false});
+// Review 12a L6: the non-passive touchmove listener exists only while a touch drag is active,
+// so ordinary scrolling never waits on it.
+const holdTouchScroll=e=>e.preventDefault();
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&drag.active){e.preventDefault();endDrag(false)}});
 boardBody.addEventListener("click",e=>{if(drag.suppressClick){e.preventDefault();e.stopPropagation()}},true);
 // The Move to menu: the same moves from the keyboard, a screen reader or a phone.
@@ -926,6 +935,8 @@ function openMoveMenu(btn){
   const menu=document.querySelector("#move-menu"),t=state.tasks.find(x=>x.id===btn.dataset.moveMenu);if(!t)return;
   const col=boardColumn(t),order=columnOrder(t.project_id,col),at=order.indexOf(t.id);
   const items=BOARD_COLUMNS.filter(([k])=>k!==col).map(([k,l])=>`<button type="button" role="menuitem" data-move-to="${k}">Move to ${l}</button>`);
+  // Review 12a I1: a card in Blocked only because it waits on a predecessor can still be put on hold.
+  if(col==="blocked"&&t.status!=="on_hold")items.unshift('<button type="button" role="menuitem" data-move-to="blocked">Put on hold…</button>');
   if(at>=0&&at<order.length-1)items.unshift('<button type="button" role="menuitem" data-move-to="down">Move down in this column</button>');
   if(at>0)items.unshift('<button type="button" role="menuitem" data-move-to="up">Move up in this column</button>');
   menu.innerHTML=items.join("");menu.dataset.task=t.id;
@@ -959,21 +970,33 @@ const leases=new Map();
 function lockedByOther(t){return !!(t&&t.lock&&state.user&&t.lock.holder_user_id!==state.user.id)}
 function lockTime(lock){try{return new Date(lock.expires_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})}catch{return lock.expires_at}}
 function lockText(lock){return `${lock.holder_name} is changing this task (${{drag:"a drag",edit:"an edit",bulk:"a bulk change"}[lock.kind]||lock.kind}); their lock runs out at ${lockTime(lock)} unless they keep working.`}
+// Review 12b L1: a drag of a task whose edit form you are using borrows that edit lease and
+// leaves it alone afterwards; each caller releases only the kind of lease it took.
 async function takeLease(id,kind){
-  const held=leases.get(id);if(held){held.last=Date.now();return {ok:true}}
+  const held=leases.get(id);if(held){held.last=Date.now();return {ok:true,borrowed:held.kind!==kind}}
   try{
     const {lock}=await api(taskApi(id,"/lock"),{method:"POST",body:JSON.stringify({kind})});
     const lease={token:lock.token,kind,last:Date.now(),timer:null};
-    lease.timer=setInterval(async()=>{
-      if(kind==="edit"&&Date.now()-lease.last>60000)return dropLease(id);   // an idle form lets go
-      try{await api(taskApi(id,"/lock/renew"),{method:"POST",body:JSON.stringify({token:lease.token})})}
-      catch(err){clearInterval(lease.timer);leases.delete(id);if(kind==="edit")showLockBanner(err.lock,err.message)}
-    },20000);
+    lease.timer=setInterval(()=>renewLease(id,lease),20000);
     leases.set(id,lease);return {ok:true};
   }catch(err){if(err.status===409)return {ok:false,err};throw err}
 }
-async function dropLease(id){
-  const lease=leases.get(id);if(!lease)return;leases.delete(id);clearInterval(lease.timer);
+async function renewLease(id,lease){
+  if(lease.kind==="edit"&&Date.now()-lease.last>60000)return dropLease(id,"edit");   // an idle form lets go
+  try{await api(taskApi(id,"/lock/renew"),{method:"POST",body:JSON.stringify({token:lease.token})})}
+  catch(err){
+    // Review 12b L3: a lease that ran out is not revived by renewing; take a new one, or say so and reload.
+    clearInterval(lease.timer);leases.delete(id);
+    const again=await takeLease(id,lease.kind).catch(()=>({ok:false,err}));
+    if(again.ok)return;
+    const why=(again.err&&again.err.lock)?lockText(again.err.lock):"Your lock on this task has ended.";
+    showToast(`Your changes to this task are no longer protected: ${why} The task has been reloaded.`,null,null,true);
+    if(lease.kind==="edit")showLockBanner(again.err&&again.err.lock,again.err&&again.err.message);
+    await load();if(detailTaskId===id&&panelState.shown===id)await openDetail(id);
+  }
+}
+async function dropLease(id,kind){
+  const lease=leases.get(id);if(!lease||(kind&&lease.kind!==kind))return;leases.delete(id);clearInterval(lease.timer);
   try{await api(taskApi(id,"/lock/release"),{method:"POST",body:JSON.stringify({token:lease.token})})}catch{}
 }
 function leaseRefusal(t,err){return err.lock?`Not moved: “${t.title}” is in use. ${lockText(err.lock)} Try again then, or ask an owner to unlock it.`:`Not moved: ${err.message}`}
@@ -1035,7 +1058,14 @@ function endBarDrag(){
   g.bar.style.left=`${g.x0}%`;g.bar.style.width=`${g.w0}%`;
   const done={...g};gdrag.bar=null;gdrag.active=false;return done;
 }
+// Review 12b L8: the tip and toast count the change that will be applied, not the pointer's days.
+function appliedDays(t,dates){
+  const due=Math.round((Date.parse(dates.due_date)-Date.parse(t.due_date))/DAY);
+  const start=dates.start_date&&t.start_date?Math.round((Date.parse(dates.start_date)-Date.parse(t.start_date))/DAY):0;
+  return due||start;
+}
 async function rescheduleTask(t,dates,days){
+  days=appliedDays(t,dates);
   const send=more=>api(taskApi(t.id,"/reschedule"),{method:"POST",body:JSON.stringify({...dates,expected_revision:t.revision,...more})});
   try{
     let out;
@@ -1048,14 +1078,15 @@ async function rescheduleTask(t,dates,days){
     if(out.request){showToast(`Sent to an owner for approval: new dates for “${t.title}”.`);return}
     const text=`Moved “${t.title}”: ${dateTip(t,dates,days)}.`+(out.impact?" The other owners have been told.":"");
     if(out.undo)showToast(text,"Undo",async()=>{
-      try{await api(taskApi(t.id,"/undo-move"),{method:"POST",body:JSON.stringify({event_id:out.undo.event_id})});showToast(`Dates restored for “${t.title}”.`)}
+      try{const done=await withConfirms(t,null,more=>api(taskApi(t.id,"/undo-move"),{method:"POST",body:JSON.stringify({event_id:out.undo.event_id,...more})}),{dates:{start_date:t.start_date,due_date:t.due_date}});
+        showToast(done?`Dates restored for “${t.title}”.`:"Undo cancelled; the new dates stand.")}
       catch(err){showToast(`The move was not undone: ${err.message}`,null,null,true)}
       await load();
     },false,out.undo.seconds*1000);
     else showToast(text);
     announce(text);
   }catch(err){showToast(`“${t.title}” keeps its dates: ${err.message}`,null,null,true);announce(err.message)}
-  finally{await dropLease(t.id);await load()}
+  finally{await dropLease(t.id,"drag");await load()}
 }
 const ganttEl=document.querySelector("#gantt");
 ganttEl.addEventListener("pointerdown",e=>{
@@ -1077,7 +1108,7 @@ document.addEventListener("pointermove",e=>{
   if(g.edge==="start"){const cut=Math.min(d,g.w0-g.dayPct);left=g.x0+cut;width=g.w0-cut}
   else if(g.edge==="end")width=Math.max(g.dayPct,g.w0+d);else left=g.x0+d;
   g.bar.style.left=`${left}%`;g.bar.style.width=`${width}%`;
-  g.next=barDates(g.t,g.edge,g.days);showDragTip(e.clientX,e.clientY,dateTip(g.t,g.next,g.days));
+  g.next=barDates(g.t,g.edge,g.days);showDragTip(e.clientX,e.clientY,dateTip(g.t,g.next,appliedDays(g.t,g.next)));
 });
 document.addEventListener("pointerup",async e=>{
   if(!gdrag.bar||e.pointerId!==gdrag.pointer)return;
@@ -1085,11 +1116,11 @@ document.addEventListener("pointerup",async e=>{
   gdrag.suppressClick=true;setTimeout(()=>{gdrag.suppressClick=false},0);
   const got=await g.lease;
   if(got&&!got.ok){showToast(leaseRefusal(g.t,got.err),null,null,true);return load()}
-  if(!g.days||(g.next.start_date===g.t.start_date&&g.next.due_date===g.t.due_date)){await dropLease(g.t.id);return}
+  if(!g.days||(g.next.start_date===g.t.start_date&&g.next.due_date===g.t.due_date)){await dropLease(g.t.id,"drag");return}
   await rescheduleTask(g.t,g.next,g.days);
 });
-document.addEventListener("pointercancel",e=>{if(gdrag.bar&&e.pointerId===gdrag.pointer){const g=endBarDrag();if(g&&g.active)g.lease?.then(()=>dropLease(g.t.id))}});
-document.addEventListener("keydown",e=>{if(e.key==="Escape"&&gdrag.active){e.preventDefault();const g=endBarDrag();announce("Move cancelled.");g.lease?.then(()=>dropLease(g.t.id))}});
+document.addEventListener("pointercancel",e=>{if(gdrag.bar&&e.pointerId===gdrag.pointer){const g=endBarDrag();if(g&&g.active)g.lease?.then(()=>dropLease(g.t.id,"drag"))}});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&gdrag.active){e.preventDefault();const g=endBarDrag();announce("Move cancelled.");g.lease?.then(()=>dropLease(g.t.id,"drag"))}});
 ganttEl.addEventListener("click",e=>{if(gdrag.suppressClick){e.preventDefault();e.stopPropagation()}},true);
 // XV92JJ: bulk changes. On a project's Board and List, owners and the project's managers tick tasks
 // (Shift-click for a range, Space to toggle, Shift+Arrow to extend in the list), then change status,
@@ -1142,7 +1173,9 @@ function renderBulkBar(){
     bar.querySelector("#bulk-clear").addEventListener("click",()=>{clearBulk();document.querySelector("[data-pick]")?.focus()});
     bar.hidden=false;document.body.classList.add("has-bulk-bar");
   }
-  bar.querySelector("#bulk-count").textContent=`${n} selected`;
+  // Review 12c I1: say when some of the selection is hidden by the current filters.
+  const shown=new Set([...document.querySelectorAll("[data-pick]")].map(b=>b.dataset.pick)),hidden=[...bulk.ids].filter(id=>!shown.has(id)).length;
+  bar.querySelector("#bulk-count").textContent=`${n} selected`+(hidden?` · ${hidden} hidden by filters`:"");
 }
 function fillBulkValue(pid){
   const slot=document.querySelector("#bulk-value");
@@ -1162,8 +1195,9 @@ async function reviewBulk(pid){
   const answer=await askBulk(plan);if(!answer)return;
   if(answer.drop){plan.blocked.forEach(b=>bulk.ids.delete(b.id));syncPicks();if(bulk.ids.size)return reviewBulk(pid);return}
   try{
+    // The reviewed preview is the confirmation of its schedule consequences (review 12c L5).
     const out=await api(`/api/projects/${encodeURIComponent(pid)}/bulk/apply`,{method:"POST",body:JSON.stringify({...payload,
-      expected_revisions:Object.fromEntries(plan.ok.map(i=>[i.id,i.revision])),override_wip:!!answer.override_wip})});
+      expected_revisions:Object.fromEntries(plan.ok.map(i=>[i.id,i.revision])),override_wip:!!answer.override_wip,confirmed:plan.impact.length>0})});
     const n=out.tasks.length,text=`Changed ${n} task${n===1?"":"s"}: ${out.summary}.`;
     clearBulk();
     showToast(text,"Undo",async()=>{
@@ -1210,10 +1244,12 @@ async function openWipSettings(pid){
   f.onsubmit=async e=>{
     e.preventDefault();const data=Object.fromEntries(new FormData(f));
     const changed=WIP_COLUMNS.filter(k=>String(limits[k]??"")!==String(data[k]||""));
+    if(!changed.length){d.close();showToast("No limits changed.");return}
+    // Review 12c L6: every column in one request and one transaction; whole numbers only.
     try{
-      for(const k of changed)await api(`/api/projects/${encodeURIComponent(pid)}/wip-limits`,{method:"POST",body:JSON.stringify({column:k,max_tasks:data[k]?Number(data[k]):null,reason:data.reason})});
-      d.close();showToast(changed.length?`Saved ${changed.length} limit${changed.length===1?"":"s"}.`:"No limits changed.");await load();
-    }catch(err){f.querySelector("#move-error").textContent=err.message;await load()}
+      await api(`/api/projects/${encodeURIComponent(pid)}/wip-limits`,{method:"POST",body:JSON.stringify({limits:Object.fromEntries(changed.map(k=>[k,data[k]||null])),reason:data.reason})});
+      d.close();showToast(`Saved ${changed.length} limit${changed.length===1?"":"s"}.`);await load();
+    }catch(err){f.querySelector("#move-error").textContent=err.message}
   };
   d.showModal();f.querySelector("input")?.focus();
 }
@@ -1333,7 +1369,9 @@ function openCapture(pidArg){
 }
 // Menus (More, account): a button with aria-expanded and a list of menuitems. Arrow keys move, Escape
 // closes and gives focus back to the button, a click outside closes, and choosing an item closes it first.
-function closeMenus(except){document.querySelectorAll(".menu:not([hidden])").forEach(m=>{if(m===except)return;m.hidden=true;const b=document.querySelector(`[aria-controls="${m.id}"]`);if(b)b.setAttribute("aria-expanded","false")})}
+function closeMenus(except){document.querySelectorAll(".menu:not([hidden])").forEach(m=>{if(m===except)return;m.hidden=true;
+  // Every card's Move to button controls #move-menu; the one that opened it is the one to reset (review 12a L6).
+  const b=m.id==="move-menu"?drag.menuButton:document.querySelector(`[aria-controls="${m.id}"]`);if(b)b.setAttribute("aria-expanded","false")})}
 function wireMenu(buttonId){
   const btn=document.querySelector(buttonId),menu=document.querySelector("#"+btn.getAttribute("aria-controls"));
   const items=()=>[...menu.querySelectorAll('[role="menuitem"]')].filter(i=>!i.hidden);
@@ -1701,14 +1739,14 @@ async function fillAssignees(projectId,select,selectedId){
   }catch{}
 }
 document.querySelector("#project-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{await api("/api/projects",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load()}catch(err){e.target.querySelector(".error").textContent=err.message}});
-document.querySelector("#task-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{const {task}=await api("/api/tasks",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load();if(task&&currentRoute().name==="portfolio"&&!visibleTasks().some(t=>t.id===task.id))showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnPortfolio)}catch(err){e.target.querySelector(".error").textContent=err.message}});
+document.querySelector("#task-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{const data=Object.fromEntries(new FormData(e.target));const out=await withConfirms({title:data.title||"the new task"},COLUMN_OF_STATUS[data.status]||"draft",more=>api("/api/tasks",{method:"POST",body:JSON.stringify({...data,...more})}));if(!out)return;const {task}=out;e.target.reset();e.target.closest("dialog").close();await load();if(task&&currentRoute().name==="portfolio"&&!visibleTasks().some(t=>t.id===task.id))showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnPortfolio)}catch(err){e.target.querySelector(".error").textContent=err.message}});
 const STATUSES=["draft","assigned","in_progress","submitted","changes_requested","completed","on_hold","delayed","cancelled","abandoned","reopened"];
 const CRITICALITIES=[["","Unrated"],["critical","Critical"],["high","High"],["normal","Normal"],["low","Low"]];
 const GOVERNED=["submitted","completed","on_hold","reopened"];
 // ARZWV7: a closed task is a fixed record; a Manager may only ask to move it back into ordinary work
 // (service.py REOPEN_ONLY_STATUSES / REOPEN_EQUIVALENT_STATUSES). UI hints only — the server decides.
 const BACK_TO_WORK=["draft","assigned","in_progress","delayed"];
-const EVENT_LABELS={board_move_blocked:"Board move refused",dependency_override:"Dependency overridden",wip_limit_override:"Work-in-progress limit overridden",task_lock_forced:"Lock forced open",gantt_move_blocked:"Date drag refused",schedule_impact_confirmed:"Date change with consequences confirmed",import_committed:"Import committed",task_created:"Task created",task_updated:"Task updated",dependency_added:"Dependency added",dependency_removed:"Dependency removed",task_submitted:"Work submitted",submission_accepted:"Submission accepted",changes_requested:"Changes requested",task_reopened:"Task reopened",task_on_hold:"Put on hold",criticality_changed:"Criticality changed",parent_changed:"Parent changed",schedule_proposed:"Schedule change proposed",schedule_revised:"Schedule revised",schedule_proposal_rejected:"Schedule proposal rejected",attachment_added:"Attachment linked",attachment_removed:"Attachment link removed"};
+const EVENT_LABELS={reviewer_added:"Reviewer added",reviewer_removed:"Reviewer removed",board_move_blocked:"Board move refused",dependency_override:"Dependency overridden",wip_limit_override:"Work-in-progress limit overridden",task_lock_forced:"Lock forced open",gantt_move_blocked:"Date drag refused",schedule_impact_confirmed:"Date change with consequences confirmed",import_committed:"Import committed",task_created:"Task created",task_updated:"Task updated",dependency_added:"Dependency added",dependency_removed:"Dependency removed",task_submitted:"Work submitted",submission_accepted:"Submission accepted",changes_requested:"Changes requested",task_reopened:"Task reopened",task_on_hold:"Put on hold",criticality_changed:"Criticality changed",parent_changed:"Parent changed",schedule_proposed:"Schedule change proposed",schedule_revised:"Schedule revised",schedule_proposal_rejected:"Schedule proposal rejected",attachment_added:"Attachment linked",attachment_removed:"Attachment link removed"};
 const DIFF_FIELDS=[["title","Title"],["status","Status"],["criticality","Criticality"],["start_date","Start date"],["due_date","Due date"],["progress","Progress"],["description","Description"]];
 let detailTaskId=null;
 
@@ -1727,7 +1765,7 @@ document.querySelector("#gantt").addEventListener("click",e=>{
 document.querySelector("#schedule-table").addEventListener("click",e=>{const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail)});
 
 async function openDetail(taskId){
-  if(detailTaskId&&detailTaskId!==taskId&&leases.get(detailTaskId)?.kind==="edit")dropLease(detailTaskId);
+  if(detailTaskId&&detailTaskId!==taskId&&leases.get(detailTaskId)?.kind==="edit")dropLease(detailTaskId,"edit");
   detailTaskId=taskId;
   try{
     const [d,ev]=await Promise.all([api(taskApi(taskId)),api(taskApi(taskId,"/events"))]);
@@ -1763,7 +1801,7 @@ function closePanel(fromRoute){
   const panel=document.querySelector("#detail-dialog");
   if(panel.hidden)return;
   panel.hidden=true;panelState.shown=null;
-  for(const [id,l] of leases)if(l.kind==="edit")dropLease(id);
+  for(const [id,l] of leases)if(l.kind==="edit")dropLease(id,"edit");
   document.querySelector("#app").classList.remove("panel-open","task-page");
   syncPanelInert();
   panel.dispatchEvent(new Event("close"));
@@ -2028,7 +2066,9 @@ function buildSubtasks(task,closed){
 async function submitParent(e){
   e.preventDefault();const err=document.querySelector("#parent-error");err.textContent="";
   const parent_task_id=e.target.querySelector('select[name="parent_task_id"]').value;
-  try{await api(taskApi(detailTaskId,"/parent"),{method:"POST",body:JSON.stringify({parent_task_id})});await load();await openDetail(detailTaskId)}
+  try{const t=panelState.task||{title:""};
+    const out=await withConfirms(t,boardColumn(t),more=>api(taskApi(detailTaskId,"/parent"),{method:"POST",body:JSON.stringify({parent_task_id,...more})}));
+    if(!out)return;await load();await openDetail(detailTaskId)}
   catch(x){err.textContent=x.message}
 }
 
@@ -2108,11 +2148,13 @@ async function lifecycleAction(e,task){
   const body=Object.fromEntries(new FormData(form));
   try{
     let outcome;
-    if(kind==="submit")outcome=await api(taskApi(task.id,"/submit"),{method:"POST",body:JSON.stringify(body)});
-    else if(kind==="accept")outcome=await api(`/api/submissions/${form.dataset.sid}/accept`,{method:"POST",body:JSON.stringify(body)});
-    else if(kind==="changes")outcome=await api(`/api/submissions/${form.dataset.sid}/request-changes`,{method:"POST",body:JSON.stringify(body)});
-    else if(kind==="reopen")outcome=await api(taskApi(task.id,"/reopen"),{method:"POST",body:JSON.stringify(body)});
-    else if(kind==="hold")outcome=await api(taskApi(task.id,"/hold"),{method:"POST",body:JSON.stringify(body)});
+    if(kind==="submit")outcome=await withDependencyConfirm(task,"submitted",more=>api(taskApi(task.id,"/submit"),{method:"POST",body:JSON.stringify({...body,...more})}));
+    else if(kind==="accept")outcome=await withDependencyConfirm(task,"completed",more=>api(`/api/submissions/${form.dataset.sid}/accept`,{method:"POST",body:JSON.stringify({...body,...more})}));
+    // Review 12c M1: every status change meets the work-in-progress limit, so these confirm too.
+    else if(kind==="changes")outcome=await withConfirms(task,"progress",more=>api(`/api/submissions/${form.dataset.sid}/request-changes`,{method:"POST",body:JSON.stringify({...body,...more})}));
+    else if(kind==="reopen")outcome=await withConfirms(task,"progress",more=>api(taskApi(task.id,"/reopen"),{method:"POST",body:JSON.stringify({...body,...more})}));
+    else if(kind==="hold")outcome=await withConfirms(task,"blocked",more=>api(taskApi(task.id,"/hold"),{method:"POST",body:JSON.stringify({...body,...more})}));
+    if(!outcome)return;   // an owner cancelled the dependency confirm
     await load();await openDetail(task.id);
     if(outcome?.request){const current=document.querySelector("#lifecycle-error");current.style.color="#0c7c86";current.textContent="Owner request created; accepted live state is unchanged."}
   }catch(x){if(x.status===409)return reloadTaskAfterConflict(task.id,"lifecycle-error",x.message);err.textContent=x.message}
@@ -2198,6 +2240,27 @@ function renderEvent(ev){
 
 function safeParse(text){try{return text?JSON.parse(text):{}}catch{return{}}}
 
+// Review 12a M1: the panel meets the same dependency rule as the board. An owner confirms the
+// override (recorded and noticed); a manager sees the server's refusal.
+const STATUS_COLUMN={in_progress:"progress",submitted:"submitted",completed:"accepted"};
+const COLUMN_OF_STATUS={draft:"draft",assigned:"ready",in_progress:"progress",delayed:"progress",on_hold:"blocked",submitted:"submitted"};
+// Review 12b L2: the same loop answers a date change's consequences ("impact") and a
+// work-in-progress limit ("wip"), each confirmed once, in turn.
+const CONFIRM_FLAGS={dependencies:"override_dependencies",wip:"override_wip",impact:"confirmed"};
+async function withConfirms(task,column,send,extra){
+  let more={};
+  for(;;){
+    try{return await send(more)}
+    catch(err){
+      const flag=CONFIRM_FLAGS[err.confirm];
+      if(err.status!==409||!flag||more[flag])throw err;
+      const ok=await askMove(err.confirm,task||{title:""},column,{...err,...(extra||{})});
+      if(!ok)return null;
+      more={...more,...ok};
+    }
+  }
+}
+function withDependencyConfirm(task,status,send,extra){return withConfirms(task,STATUS_COLUMN[status]||COLUMN_OF_STATUS[status]||"progress",send,extra)}
 async function submitDetailEdit(e,{statusLocked=false}={}){
   e.preventDefault();
   const form=e.target,error=document.querySelector("#detail-edit-error");error.textContent="";
@@ -2205,8 +2268,10 @@ async function submitDetailEdit(e,{statusLocked=false}={}){
   if(statusLocked)delete body.status; // shown for context only; Accept or Request changes moves it
   body.expected_revision=Number(body.expected_revision);
   try{
-    const outcome=await api(taskApi(detailTaskId),{method:"POST",body:JSON.stringify(body)});
-    await dropLease(detailTaskId);
+    const outcome=await withDependencyConfirm(panelState.task,body.status,more=>api(taskApi(detailTaskId),{method:"POST",body:JSON.stringify({...body,...more})}),
+      {dates:{start_date:body.start_date||null,due_date:body.due_date||null}});
+    if(!outcome)return;
+    await dropLease(detailTaskId,"edit");
     await load();await openDetail(detailTaskId);
     if(outcome.request){const current=document.querySelector("#detail-edit-error");current.style.color="#0c7c86";current.textContent="Owner request created; accepted live state is unchanged."}
   }catch(err){if(err.status===409)return reloadTaskAfterConflict(detailTaskId,"detail-edit-error",err.message);error.textContent=err.message}
