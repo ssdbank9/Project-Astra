@@ -1,5 +1,5 @@
 const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality"};
-async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.error||"Request failed");err.status=response.status;err.confirm=data.confirm;err.impact=data.impact;throw err}return data}
+async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.error||"Request failed");err.status=response.status;err.confirm=data.confirm;err.impact=data.impact;err.lock=data.lock;throw err}return data}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
 function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);document.querySelector("#new-project").hidden=document.querySelector("#people").hidden=!isOwner();projectActions();refreshImportAccess()}
 async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.today=t.today||null;state.timezone=t.timezone||null;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
@@ -145,6 +145,7 @@ function applyGeometry(root){root.querySelectorAll("[data-x]").forEach(n=>{n.sty
 const FOCUS_ATTRS=["data-detail","data-more","data-expand"],FOCUS_KINDS=["step","track","chip","link","expand","step-more"];
 function focusKeyIn(root){const a=document.activeElement;if(!a||!root.contains(a))return null;const attr=FOCUS_ATTRS.find(x=>a.hasAttribute(x));if(!attr)return null;const kind=FOCUS_KINDS.find(k=>a.classList.contains(k));return `${kind?"."+kind:""}[${attr}="${CSS.escape(a.getAttribute(attr))}"]`}
 function restoreFocus(root,sel){if(!sel)return;const n=root.querySelector(sel);if(n&&!n.closest("[hidden]"))n.focus({preventScroll:true})}
+const GRIPS='<i class="bar-grip start" data-edge="start" aria-hidden="true"></i><i class="bar-grip end" data-edge="end" aria-hidden="true"></i>';
 function renderGantt(tasks){
   const el=document.querySelector("#gantt"),tableEl=document.querySelector("#schedule-table");
   const focusKey=focusKeyIn(el);
@@ -174,7 +175,7 @@ function renderGantt(tasks){
   let min=dateVals.length?new Date(Math.min(...dateVals)):new Date();
   let max=dateVals.length?new Date(Math.max(...dateVals)):new Date(min.getTime()+86400000*30);
   min.setDate(min.getDate()-3);max.setDate(max.getDate()+3);
-  const span=Math.max(1,max-min);
+  const span=Math.max(1,max-min);el.dataset.span=String(span);
   const pct=d=>(d-min)/span*100;
   const inRange=x=>x>=0&&x<=100;
   const markerFlags=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-flag ${m.kind}" data-x="${x}">${escapeHtml(m.label)}</span>`:""}).join("");
@@ -257,10 +258,12 @@ function renderGantt(tasks){
         // In the meta column the list follows its button, so the disclosure stays adjacent in Tab order.
         if(place===" in-meta")metaMore=`<br>${moreBtn}${moreList}`;
         if(!ownDates)derived=`<br><span class="chip derived">Dates from steps</span>`;
-        bar=`<div class="bar track ${cls}${tall?" lanes-2":""}${expanded?" is-expanded":""}" role="group" tabindex="0" data-detail="${id}" ${tipAttrs(t,null,kids.length,overruns)} data-x="${left}" data-w="${width}">${extBefore}${extAfter}${segs}${more}</div>${place===" in-meta"?"":moreList}`;
+        const drag=ownDates&&canDragBar(t)?` data-drag="${id}"`:"",grips=drag?GRIPS:"";
+        bar=`<div class="bar track ${cls}${tall?" lanes-2":""}${expanded?" is-expanded":""}" role="group" tabindex="0" data-detail="${id}"${drag} ${tipAttrs(t,null,kids.length,overruns)} data-x="${left}" data-w="${width}">${extBefore}${extAfter}${segs}${more}${grips}</div>${place===" in-meta"?"":moreList}`;
       }
       else if(isStep){bar=stepButton(t,{lane:0,px:width/100*tlw,x:left,w:Math.min(100-left,width),solo:true})}
-      else{bar=`<button type="button" class="bar plain ${cls}" data-detail="${id}" ${tipAttrs(t,null,0)} data-x="${left}" data-w="${width}"><span class="bar-label">${escapeHtml(t.title)}</span></button>`}
+      else{const drag=canDragBar(t)&&!isStep?` data-drag="${id}"`:"";
+        bar=`<button type="button" class="bar plain ${cls}" data-detail="${id}"${drag} ${tipAttrs(t,null,0)} data-x="${left}" data-w="${width}"><span class="bar-label">${escapeHtml(t.title)}</span>${drag?GRIPS:""}</button>`}
     }
     const blocked=t.is_blocked?`<br><span class="blocked-text">Blocked by ${escapeHtml(t.blocked_by.map(item=>item.title).join(", "))}</span>`:"";
     const cp=t.is_critical_path?`<br><span class="cp-text">On critical path</span>`:"";
@@ -630,6 +633,7 @@ function boardCard(t,kids,movable){
   if(t.is_critical_path&&!CLOSED_STATUSES.includes(t.status))tags.push('<span class="tag" data-tone="red">◆ Critical path</span>');
   if(col==="accepted")tags.push('<span class="tag" data-tone="green">✓ Accepted</span>');
   if(col==="closed")tags.push(`<span class="tag">× ${escapeHtml(statusLabel(t.status))}</span>`);
+  if(lockedByOther(t))tags.push(`<span class="tag lock-chip" data-tone="amber">🔒 ${escapeHtml(t.lock.holder_name)}<span class="sr-only"> is changing this task</span></span>`);
   const due=CLOSED_STATUSES.includes(t.status)?"":`<span class="due-chip" data-due="${workGroup(t)}">${escapeHtml(dueText(t)||"No due date")}</span>`;
   const id=escapeHtml(t.id),move=movable?`<button type="button" class="link card-move" data-move-menu="${id}" aria-haspopup="menu" aria-expanded="false" aria-controls="move-menu" aria-label="Move “${escapeHtml(t.title)}” to…">Move to…</button>`:"";
   return `<article class="board-card"${movable?` data-card="${id}"`:""}><button type="button" class="link card-title" data-detail="${id}">${escapeHtml(t.title)}</button>
@@ -774,6 +778,10 @@ function askMove(kind,t,column,err){
       `${reason("Reason")}<label>New due date<input name="new_due_date" type="date" required min="${today}"></label>`,"Reopen"],
     submit:["Submit for review",`Submit ${name} for review?`,`<label>Note (optional)<textarea name="note"></textarea></label>`,"Submit"],
     accept:["Accept submission",`Accept the submission of ${name}?`,`<label>Decision note (optional)<textarea name="note"></textarea></label>`,"Accept"],
+    impact:["Confirm the new dates",`New dates for ${name}: ${escapeHtml(err&&err.dates?dateTip(t,err.dates,Math.round((Date.parse(err.dates.due_date)-Date.parse(t.due_date))/DAY)):"")}. This move has consequences:`,
+      `<ul class="impact-list">${((err&&err.impact)||[]).map(i=>`<li>${escapeHtml(i)}</li>`).join("")}</ul><p class="muted">Tasks that follow are not moved for you. The other owners are told once you confirm.</p>`,"Move anyway"],
+    unlock:["Force unlock",`${escapeHtml(err&&err.lock?lockText(err.lock):"")} Unlocking lets others change ${name} now; anything they have not saved will be refused, and they are told.`,
+      `<label>Reason (optional)<input name="reason" autocomplete="off"></label>`,"Unlock"],
     dependencies:["Override dependency",`${name} waits on ${escapeHtml(((err&&err.impact)||[]).join(", "))}. Move it to ${COL_LABEL[column]} anyway? The override is recorded and the other owners are told.`,"","Move anyway"],
   }[kind];
   f.innerHTML=`<h2 id="move-dialog-title">${view[0]}</h2><p>${view[1]}</p>${view[2]}<div class="error" id="move-error" role="alert"></div><div class="actions"><button type="button" class="quiet" data-move-cancel>Cancel</button><button type="submit">${view[3]}</button></div>`;
@@ -782,6 +790,8 @@ function askMove(kind,t,column,err){
     let settled=false;const done=v=>{if(settled)return;settled=true;if(d.open)d.close();resolve(v)};
     f.onsubmit=e=>{e.preventDefault();const data=Object.fromEntries(new FormData(f));
       if(kind==="dependencies")return done({override_dependencies:true});
+      if(kind==="impact")return done({confirmed:true});
+      if(kind==="unlock")return done({reason:data.reason||""});
       if(kind==="submit"||kind==="accept")return done({confirmed:true,note:data.note||""});
       done(data)};
     f.querySelector("[data-move-cancel]").onclick=()=>done(null);
@@ -821,7 +831,7 @@ async function moveCard(t,column,beforeId=null){
 }
 async function undoMove(t,eventId,from,fromOrder){
   try{
-    await api(`/api/tasks/${encodeURIComponent(t.id)}/board-undo`,{method:"POST",body:JSON.stringify({event_id:eventId})});
+    await api(`/api/tasks/${encodeURIComponent(t.id)}/undo-move`,{method:"POST",body:JSON.stringify({event_id:eventId})});
     // Put the card back where it was in its column too (best effort: skipped if that column changed meanwhile).
     if(fromOrder&&fromOrder.length>1)try{await api(`/api/projects/${encodeURIComponent(t.project_id)}/board-order`,{method:"POST",body:JSON.stringify({column:from,task_ids:fromOrder})})}catch{}
     showToast(`Move undone: “${t.title}” is back.`)}
@@ -837,6 +847,7 @@ function startDrag(x,y){
   drag.ghost=ghost;drag.ox=x-r.left;drag.oy=y-r.top;document.body.appendChild(ghost);
   drag.card.classList.add("is-dragging");document.body.classList.add("board-dragging");
   try{drag.card.setPointerCapture(drag.pointer)}catch{}
+  drag.lease=takeLease(drag.id,"drag");
   boardAnnounce(`Dragging “${drag.title}”. Drop it on a column, or press Escape to cancel.`);
   dragTo(x,y);
 }
@@ -860,15 +871,22 @@ function endDrag(drop){
   drag.card=null;drag.active=false;drag.ghost=null;
   if(!active)return;
   drag.suppressClick=true;setTimeout(()=>{drag.suppressClick=false},0);
-  const t=state.tasks.find(x=>x.id===id);
-  if(!drop||!over||!t){boardAnnounce("Move cancelled.");return}
+  const t=state.tasks.find(x=>x.id===id),lease=drag.lease;drag.lease=null;
+  if(!drop||!over||!t){boardAnnounce("Move cancelled.");lease?.then(()=>dropLease(id));return}
+  lease.then(got=>{
+    if(!got.ok){const text=leaseRefusal(t,got.err);showToast(text,null,null,true);boardAnnounce(text);return load()}
+    return Promise.resolve(placeDrop(t,over,before)).finally(()=>dropLease(id));
+  },()=>placeDrop(t,over,before));
+}
+function placeDrop(t,over,before){
   const column=over.dataset.col;
   if(column===boardColumn(t)){
     if(over.classList.contains("col-head"))return;
     const was=columnOrder(t.project_id,column),order=columnOrder(t.project_id,column,t.id),at=before?order.indexOf(before):-1;order.splice(at<0?order.length:at,0,t.id);
     if(order.join()===was.join())return;
-    saveColumnOrder(t.project_id,column,order,true).then(load,err=>{showToast(`The order was not saved: ${err.message}`,null,null,true);load()});
-  }else moveCard(t,column,over.classList.contains("col-head")?null:before);
+    return saveColumnOrder(t.project_id,column,order,true).then(load,err=>{showToast(`The order was not saved: ${err.message}`,null,null,true);load()});
+  }
+  return moveCard(t,column,over.classList.contains("col-head")?null:before);
 }
 const boardBody=document.querySelector("#project-body");
 boardBody.addEventListener("pointerdown",e=>{
@@ -923,6 +941,145 @@ document.querySelector("#move-menu").addEventListener("keydown",e=>{
   else if(e.key==="ArrowDown"||e.key==="ArrowUp"){e.preventDefault();list[(i+(e.key==="ArrowDown"?1:list.length-1))%list.length]?.focus()}
   else if(e.key==="Home"||e.key==="End"){e.preventDefault();list[e.key==="Home"?0:list.length-1]?.focus()}
 });
+// X07XV4: task locks are renewable leases. A drag or the edit form takes one; it is renewed every
+// 20 seconds while in use and released on drop, cancel, save or close. The server refuses anyone
+// else's write while a lease lives, and an abandoned one runs out after 60 seconds.
+const leases=new Map();
+function lockedByOther(t){return !!(t&&t.lock&&state.user&&t.lock.holder_user_id!==state.user.id)}
+function lockTime(lock){try{return new Date(lock.expires_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})}catch{return lock.expires_at}}
+function lockText(lock){return `${lock.holder_name} is changing this task (${{drag:"a drag",edit:"an edit",bulk:"a bulk change"}[lock.kind]||lock.kind}); their lock runs out at ${lockTime(lock)} unless they keep working.`}
+async function takeLease(id,kind){
+  const held=leases.get(id);if(held){held.last=Date.now();return {ok:true}}
+  try{
+    const {lock}=await api(taskApi(id,"/lock"),{method:"POST",body:JSON.stringify({kind})});
+    const lease={token:lock.token,kind,last:Date.now(),timer:null};
+    lease.timer=setInterval(async()=>{
+      if(kind==="edit"&&Date.now()-lease.last>60000)return dropLease(id);   // an idle form lets go
+      try{await api(taskApi(id,"/lock/renew"),{method:"POST",body:JSON.stringify({token:lease.token})})}
+      catch(err){clearInterval(lease.timer);leases.delete(id);if(kind==="edit")showLockBanner(err.lock,err.message)}
+    },20000);
+    leases.set(id,lease);return {ok:true};
+  }catch(err){if(err.status===409)return {ok:false,err};throw err}
+}
+async function dropLease(id){
+  const lease=leases.get(id);if(!lease)return;leases.delete(id);clearInterval(lease.timer);
+  try{await api(taskApi(id,"/lock/release"),{method:"POST",body:JSON.stringify({token:lease.token})})}catch{}
+}
+function leaseRefusal(t,err){return err.lock?`Not moved: “${t.title}” is in use. ${lockText(err.lock)} Try again then, or ask an owner to unlock it.`:`Not moved: ${err.message}`}
+function touchLease(id){const l=leases.get(id);if(l)l.last=Date.now()}
+function lockBanner(lock,message,canForce){
+  return `<div class="lock-banner" role="status"><span>🔒 ${escapeHtml(message||lockText(lock))} Your changes wait until then.</span>${canForce?'<button type="button" class="quiet" id="force-unlock">Force unlock</button>':""}</div>`;
+}
+function showLockBanner(lock,message){
+  const slot=document.querySelector("#lock-slot");if(!slot)return;
+  slot.innerHTML=lockBanner(lock,message,!!(panelState.task&&panelState.task.permissions&&panelState.task.permissions.can_force_unlock&&lock));
+}
+async function forceUnlock(task){
+  const answer=await askMove("unlock",task,null,{lock:task.lock});if(!answer)return;
+  try{await api(taskApi(task.id,"/lock/force"),{method:"POST",body:JSON.stringify(answer)});showToast(`Unlocked “${task.title}”; ${task.lock?task.lock.holder_name:"the holder"} has been told.`)}
+  catch(err){showToast(`Not unlocked: ${err.message}`,null,null,true)}
+  await load();await openDetail(task.id);
+}
+document.querySelector("#detail-body").addEventListener("click",e=>{if(e.target.closest("#force-unlock")&&panelState.task)forceUnlock(panelState.task)});
+// The panel's edit form takes an edit lease as soon as someone types in it.
+function wireEditLease(task){
+  const form=document.querySelector("#detail-edit");
+  if(!form||!task.permissions||!task.permissions.can_edit_ordinary)return;
+  let asked=false;
+  form.addEventListener("input",async()=>{
+    if(leases.has(task.id))return touchLease(task.id);
+    if(asked)return;asked=true;
+    const got=await takeLease(task.id,"edit");asked=false;
+    if(!got.ok)showLockBanner(got.err.lock,got.err.message);
+  });
+}
+
+// X07XV4: Gantt bars move by dragging (both dates) or by their ends (start or due). Owners and the
+// project's managers only; phones and touch use the task panel's date fields. Positions change
+// through CSSOM (the CSP forbids inline style attributes); the server decides, and a move with
+// consequences asks first.
+const gdrag={bar:null};
+const DAY=86400000;
+function canDragBar(t){return canMoveOnBoard(t.project_id)&&!CLOSED_STATUSES.includes(t.status)&&!!t.due_date&&!phoneMQ.matches}
+const iso=ms=>new Date(ms).toISOString().slice(0,10);
+const shortDate=v=>new Date(Date.parse(v)).toLocaleDateString(undefined,{day:"numeric",month:"short",timeZone:"UTC"});
+function barDates(t,edge,days){
+  const due0=Date.parse(t.due_date),start0=t.start_date?Date.parse(t.start_date):null;
+  let start=start0,due=due0;
+  if(edge==="start")start=Math.min((start0??due0)+days*DAY,due0);
+  else if(edge==="end")due=Math.max(due0+days*DAY,start0??-Infinity);
+  else{due=due0+days*DAY;if(start0!=null)start=start0+days*DAY}
+  return {start_date:start==null?null:iso(start),due_date:iso(due)};
+}
+function dateTip(t,next,days){
+  const parts=[];if(next.start_date&&next.start_date!==t.start_date)parts.push(`Start ${shortDate(next.start_date)}`);
+  if(next.due_date!==t.due_date)parts.push(`Due ${shortDate(next.due_date)}`);
+  return parts.length?`${parts.join(" · ")} (${days>0?"+":""}${days} day${Math.abs(days)===1?"":"s"})`:"No change";
+}
+function showDragTip(x,y,text){const tip=document.querySelector("#drag-tip");tip.textContent=text;tip.hidden=false;
+  tip.style.left=`${Math.min(x+14,(window.innerWidth||1024)-tip.offsetWidth-8)}px`;tip.style.top=`${Math.max(8,y-40)}px`}
+function endBarDrag(){
+  const g=gdrag;if(!g.bar)return null;
+  g.bar.classList.remove("is-dragging");document.body.classList.remove("bar-dragging");document.querySelector("#drag-tip").hidden=true;
+  g.bar.style.left=`${g.x0}%`;g.bar.style.width=`${g.w0}%`;
+  const done={...g};gdrag.bar=null;gdrag.active=false;return done;
+}
+async function rescheduleTask(t,dates,days){
+  const send=more=>api(taskApi(t.id,"/reschedule"),{method:"POST",body:JSON.stringify({...dates,expected_revision:t.revision,...more})});
+  try{
+    let out;
+    try{out=await send({})}
+    catch(err){
+      if(err.status!==409||err.confirm!=="impact")throw err;
+      const ok=await askMove("impact",t,null,{impact:err.impact,dates});if(!ok){announce("Move cancelled.");return}
+      out=await send(ok);
+    }
+    if(out.request){showToast(`Sent to an owner for approval: new dates for “${t.title}”.`);return}
+    const text=`Moved “${t.title}”: ${dateTip(t,dates,days)}.`+(out.impact?" The other owners have been told.":"");
+    if(out.undo)showToast(text,"Undo",async()=>{
+      try{await api(taskApi(t.id,"/undo-move"),{method:"POST",body:JSON.stringify({event_id:out.undo.event_id})});showToast(`Dates restored for “${t.title}”.`)}
+      catch(err){showToast(`The move was not undone: ${err.message}`,null,null,true)}
+      await load();
+    },false,out.undo.seconds*1000);
+    else showToast(text);
+    announce(text);
+  }catch(err){showToast(`“${t.title}” keeps its dates: ${err.message}`,null,null,true);announce(err.message)}
+  finally{await dropLease(t.id);await load()}
+}
+const ganttEl=document.querySelector("#gantt");
+ganttEl.addEventListener("pointerdown",e=>{
+  const bar=e.target.closest("[data-drag]");
+  if(!bar||e.button>0||e.pointerType==="touch"||e.target.closest(".step,.step-more"))return;
+  const t=state.tasks.find(x=>x.id===bar.dataset.drag);if(!t||!canDragBar(t))return;
+  const tl=bar.closest(".timeline");
+  Object.assign(gdrag,{bar,t,x:e.clientX,pointer:e.pointerId,edge:e.target.closest("[data-edge]")?.dataset.edge||null,
+    x0:+bar.dataset.x,w0:+bar.dataset.w,dayPct:DAY/(+ganttEl.dataset.span)*100,px:tl.getBoundingClientRect().width,days:0,active:false,lease:null});
+});
+document.addEventListener("pointermove",e=>{
+  const g=gdrag;if(!g.bar||e.pointerId!==g.pointer)return;
+  const dx=e.clientX-g.x;
+  if(!g.active){if(Math.abs(dx)<5)return;g.active=true;hideTip();g.bar.classList.add("is-dragging");document.body.classList.add("bar-dragging");
+    try{g.bar.setPointerCapture(g.pointer)}catch{};g.lease=takeLease(g.t.id,"drag")}
+  e.preventDefault();
+  g.days=Math.round(dx/(g.px*g.dayPct/100));
+  const d=g.days*g.dayPct;let left=g.x0,width=g.w0;
+  if(g.edge==="start"){const cut=Math.min(d,g.w0-g.dayPct);left=g.x0+cut;width=g.w0-cut}
+  else if(g.edge==="end")width=Math.max(g.dayPct,g.w0+d);else left=g.x0+d;
+  g.bar.style.left=`${left}%`;g.bar.style.width=`${width}%`;
+  g.next=barDates(g.t,g.edge,g.days);showDragTip(e.clientX,e.clientY,dateTip(g.t,g.next,g.days));
+});
+document.addEventListener("pointerup",async e=>{
+  if(!gdrag.bar||e.pointerId!==gdrag.pointer)return;
+  const g=endBarDrag();if(!g.active)return;
+  gdrag.suppressClick=true;setTimeout(()=>{gdrag.suppressClick=false},0);
+  const got=await g.lease;
+  if(got&&!got.ok){showToast(leaseRefusal(g.t,got.err),null,null,true);return load()}
+  if(!g.days||(g.next.start_date===g.t.start_date&&g.next.due_date===g.t.due_date)){await dropLease(g.t.id);return}
+  await rescheduleTask(g.t,g.next,g.days);
+});
+document.addEventListener("pointercancel",e=>{if(gdrag.bar&&e.pointerId===gdrag.pointer){const g=endBarDrag();if(g&&g.active)g.lease?.then(()=>dropLease(g.t.id))}});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&gdrag.active){e.preventDefault();const g=endBarDrag();announce("Move cancelled.");g.lease?.then(()=>dropLease(g.t.id))}});
+ganttEl.addEventListener("click",e=>{if(gdrag.suppressClick){e.preventDefault();e.stopPropagation()}},true);
 document.querySelector("#project-capture").addEventListener("click",()=>openCapture(currentRoute().id));
 document.querySelector("#project-save-template").addEventListener("click",()=>saveProjectAsTemplate(currentRoute().id));
 document.querySelector("#project-close").addEventListener("click",()=>closeProject(currentRoute().id));
@@ -1428,6 +1585,7 @@ document.querySelector("#gantt").addEventListener("click",e=>{
 document.querySelector("#schedule-table").addEventListener("click",e=>{const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail)});
 
 async function openDetail(taskId){
+  if(detailTaskId&&detailTaskId!==taskId&&leases.get(detailTaskId)?.kind==="edit")dropLease(detailTaskId);
   detailTaskId=taskId;
   try{
     const [d,ev]=await Promise.all([api(taskApi(taskId)),api(taskApi(taskId,"/events"))]);
@@ -1463,6 +1621,7 @@ function closePanel(fromRoute){
   const panel=document.querySelector("#detail-dialog");
   if(panel.hidden)return;
   panel.hidden=true;panelState.shown=null;
+  for(const [id,l] of leases)if(l.kind==="edit")dropLease(id);
   document.querySelector("#app").classList.remove("panel-open","task-page");
   syncPanelInert();
   panel.dispatchEvent(new Event("close"));
@@ -1620,6 +1779,7 @@ function renderDetail(task,events){
     <h2 id="detail-heading" tabindex="-1">${escapeHtml(task.title)}</h2>
     <div class="tags">${stateTags({...listed,...task,is_blocked:listed.is_blocked,is_critical_path:listed.is_critical_path,days_to_due:listed.days_to_due})}</div>
     <p class="role-line">${escapeHtml(roleLine(perms))}</p>
+    <div id="lock-slot">${lockedByOther(task)?lockBanner(task.lock,"",perms.can_force_unlock):""}</div>
     <div class="facts">${facts}</div>
     <div class="panel-sections" role="group" aria-label="Jump to a section">${[["desc","Details"],["subtasks","Steps"],["deps","Dependencies"],["attachments","Files"],["history","History"]].map(([c,l])=>`<button type="button" class="link" data-jump="${c}">${l}</button>`).join("")}</div>
     ${closedNote}
@@ -1647,6 +1807,7 @@ function renderDetail(task,events){
   document.querySelector("#detail-body").querySelectorAll("[data-remove-pred]").forEach(b=>b.addEventListener("click",removeDependency));
   fillAssignees(task.project_id,document.querySelector('#detail-edit select[name="owner_user_id"]'),task.owner_user_id);
   wireLifecycle(task);
+  wireEditLease(task);
   wireReviewers(task);
   wireAttachments(task);
   document.querySelector("#save-task-template").addEventListener("click",()=>saveTaskAsTemplate(task.id));
@@ -1903,6 +2064,7 @@ async function submitDetailEdit(e,{statusLocked=false}={}){
   body.expected_revision=Number(body.expected_revision);
   try{
     const outcome=await api(taskApi(detailTaskId),{method:"POST",body:JSON.stringify(body)});
+    await dropLease(detailTaskId);
     await load();await openDetail(detailTaskId);
     if(outcome.request){const current=document.querySelector("#detail-edit-error");current.style.color="#0c7c86";current.textContent="Owner request created; accepted live state is unchanged."}
   }catch(err){if(err.status===409)return reloadTaskAfterConflict(detailTaskId,"detail-edit-error",err.message);error.textContent=err.message}

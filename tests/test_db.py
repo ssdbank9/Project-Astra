@@ -1290,5 +1290,77 @@ class BoardRankMigrationTests(unittest.TestCase):
         finally:
             connection.close()
 
+
+class TaskLockMigrationTests(unittest.TestCase):
+    """X07XV4: schema 19 adds task_locks, one renewable lease per task."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "astra.sqlite3"
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def at_v18(self):
+        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.set_authorizer(deny_create_index(db.V19_TASK_LOCKS_HOLDER_INDEX))
+        with self.assertRaises(sqlite3.DatabaseError):
+            db.migrate(connection)
+        connection.set_authorizer(None)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 18)
+        return connection
+
+    def test_fresh_database_has_task_locks(self):
+        connection = db.connect(self.path)
+        try:
+            self.assertGreaterEqual(db.SCHEMA_VERSION, 19)
+            self.assertEqual(table_columns(connection, "task_locks"),
+                             ["task_id", "holder_user_id", "kind", "token", "acquired_at", "expires_at"])
+            connection.execute(
+                "INSERT INTO users(id,email,display_name,password_hash,global_role,created_at,is_primary_owner)"
+                " VALUES('owner-1','o@example.org','Owner','x','owner','2026-01-01T00:00:00Z',1)")
+            connection.execute("INSERT INTO projects(id,name,created_at,created_by) VALUES('p1','P','2026-01-01','owner-1')")
+            connection.execute("INSERT INTO tasks(id,project_id,title,status,created_at,created_by,updated_at)"
+                               " VALUES('t1','p1','T','draft','2026-01-01','owner-1','2026-01-01')")
+            with self.assertRaises(sqlite3.IntegrityError):  # the kind is one of three
+                connection.execute("INSERT INTO task_locks VALUES('t1','owner-1','peek','k','a','b')")
+            connection.execute("INSERT INTO task_locks VALUES('t1','owner-1','edit','k','a','b')")
+            with self.assertRaises(sqlite3.IntegrityError):  # one lease per task
+                connection.execute("INSERT INTO task_locks VALUES('t1','owner-1','drag','k2','a','b')")
+        finally:
+            connection.close()
+
+    def test_v18_upgrades_to_the_fresh_schema(self):
+        connection = self.at_v18()
+        try:
+            self.assertNotIn("task_locks", [r[0] for r in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")])
+            db.migrate(connection)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+            fresh = db.connect(Path(self.temp.name) / "fresh.sqlite3")
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
+    def test_failure_in_the_v19_step_rolls_back_then_retries(self):
+        connection = self.at_v18()
+        try:
+            catalog_before = full_catalog(connection)
+            connection.set_authorizer(deny_create_index(db.V19_TASK_LOCKS_HOLDER_INDEX))
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(full_catalog(connection), catalog_before)
+            db.migrate(connection)
+            self.assertIn("task_id", table_columns(connection, "task_locks"))
+        finally:
+            connection.close()
+
+
 if __name__ == "__main__":
     unittest.main()

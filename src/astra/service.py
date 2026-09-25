@@ -87,7 +87,7 @@ BLOCKED_NOTICE_CAP = 5
 BLOCKED_NOTICE_KINDS = frozenset({
     "attachment_add_blocked", "attachment_removal_blocked", "final_result_mark_blocked",
     "final_result_unmark_blocked", "protected_action_blocked", "owner_change_blocked",
-    "board_move_blocked",
+    "board_move_blocked", "gantt_move_blocked",
 })
 
 # JN1QYG (owner decision 2026-09-19, Kanban dragging): the board's seven columns. Each
@@ -105,6 +105,20 @@ BOARD_DEPENDENCY_GATED = frozenset({"progress", "submitted", "accepted"})
 BOARD_UNDO_SOURCE_STATUSES = frozenset({"draft", "assigned", "in_progress", "delayed"})
 BOARD_UNDO_SECONDS = 15
 BOARD_UNDO_GRACE_SECONDS = 5
+# X07XV4: a task lock is a renewable lease (owner decision, multi-user locks and lock
+# expiry). The client renews every 20 seconds while a drag or the edit form is in use.
+LOCK_LEASE_SECONDS = 60
+LOCK_KINDS = {"drag": "a drag", "edit": "an edit", "bulk": "a bulk change"}
+# The task events that change a task. While someone else holds an unexpired lease, _event
+# refuses these inside the write transaction, so every write path is covered and the
+# final write revalidates. Audit-only kinds (blocked attempts, requests, creation,
+# task_lock_forced) are never refused.
+LOCK_GUARDED_KINDS = frozenset({
+    "task_updated", "task_submitted", "submission_accepted", "changes_requested", "task_reopened",
+    "task_on_hold", "schedule_proposed", "schedule_revised", "schedule_proposal_rejected", "parent_changed",
+    "dependency_added", "dependency_removed", "dependency_override", "criticality_changed",
+    "attachment_added", "attachment_removed", "final_result_marked", "final_result_unmarked",
+})
 # Owner decision Item 2 on 6G89SJ: the App Owner hears of every attachment removal outcome,
 # including their own, so a single-owner install is told too. Other owner actions are
 # still not self-notified (Z24KVH).
@@ -227,6 +241,15 @@ class Forbidden(PermissionError):
 
 class Conflict(ValueError):
     """The requested write was based on state that is no longer current."""
+
+
+class TaskLocked(Conflict):
+    """X07XV4: someone else holds an unexpired lease on the task. The web layer answers
+    409 with ``lock`` (holder, kind and expiry) so the client can say who and until when."""
+
+    def __init__(self, message: str, lock: dict):
+        super().__init__(message)
+        self.lock = lock
 
 
 class NeedsConfirmation(Conflict):
@@ -1359,6 +1382,7 @@ class AstraService:
             result.append(item)
         self._add_dependency_state(result)
         self._add_critical_path(result)
+        self._add_lock_state(result)
         for item in result:
             item["next_action"] = self._next_action(item)
         return result
@@ -1567,7 +1591,9 @@ class AstraService:
             "can_decide_protected": is_owner,
             "can_manage_files": is_owner,
             "can_read_files": True,
+            "can_force_unlock": is_owner,
         }
+        task["lock"] = self._active_lock(task_id)
         task["due_state"] = self._due_state(
             task.get("due_date"), task["status"], self._today_in_timezone(task.get("project_timezone"))
         )
@@ -2465,26 +2491,31 @@ class AstraService:
             result["undo"] = undo
         return result
 
-    def undo_board_move(self, actor: dict, task_id: str, payload: dict) -> dict:
-        """A new audited change that reverses one ordinary board move by the same person,
-        through the same rules. Refused when the task changed since or the window passed,
-        so a later change is never reversed blindly (owner decision: Undo and recovery)."""
+    # What each kind of ordinary move changed, keyed by the reason prefix it records.
+    UNDO_FIELDS = {"Board move: ": ("status",), "Gantt drag: ": ("start_date", "due_date")}
+
+    def undo_move(self, actor: dict, task_id: str, payload: dict) -> dict:
+        """A new audited change that reverses one ordinary board move or Gantt drag by the
+        same person, through the same rules. Refused when the task changed since or the
+        window passed, so a later change is never reversed blindly (owner decision: Undo
+        and recovery)."""
         event = self.db.execute(
             "SELECT * FROM task_events WHERE id=? AND task_id=?", (str(payload.get("event_id", "")), task_id)
         ).fetchone()
-        if not event or event["event_type"] != "task_updated" or event["actor_user_id"] != actor["id"] \
-                or not str(event["reason"] or "").startswith("Board move: "):
-            raise ValueError("There is no board move of yours to undo here.")
+        prefix = next((p for p in self.UNDO_FIELDS if str(event["reason"] or "").startswith(p)), None) if event else None
+        if not event or event["event_type"] != "task_updated" or event["actor_user_id"] != actor["id"] or not prefix:
+            raise ValueError("There is no move of yours to undo here.")
         before, after = json.loads(event["before_json"]), json.loads(event["after_json"])
         age = (datetime.now(timezone.utc) - datetime.fromisoformat(event["occurred_at"])).total_seconds()
         if age > BOARD_UNDO_SECONDS + BOARD_UNDO_GRACE_SECONDS:
-            raise ValueError("The Undo window has passed; move the task back on the board instead.")
+            raise ValueError("The Undo window has passed; move the task back instead.")
         task = self.get_task(actor, task_id)
-        if task["revision"] != after["revision"] or task["status"] != after["status"]:
+        fields = self.UNDO_FIELDS[prefix]
+        if task["revision"] != after["revision"] or any(task[f] != after[f] for f in fields):
             raise Conflict("The task changed after your move, so it was not undone; check its history first.")
         return self.update_task(actor, task_id, {
-            "status": before["status"], "expected_revision": task["revision"],
-            "reason": f"Undo of {event['reason'][len('Board move: '):]} (event {event['id']})",
+            **{f: before[f] for f in fields}, "expected_revision": task["revision"],
+            "reason": f"Undo of {event['reason'][len(prefix):]} (event {event['id']})",
         })
 
     def reorder_board(self, actor: dict, project_id: str, column: str, task_ids: list) -> list[str]:
@@ -2514,6 +2545,197 @@ class AstraService:
             self._project_event(project_id, actor["id"], "board_reordered",
                                 {"column": column, "before": before, "after": list(task_ids)}, None)
         return list(task_ids)
+
+    # ---- X07XV4: task locks (renewable leases) ----
+
+    def _active_lock(self, task_id: str) -> dict | None:
+        try:
+            row = self.db.execute(
+                "SELECT l.task_id, l.holder_user_id, u.display_name holder_name, l.kind, l.acquired_at, l.expires_at"
+                " FROM task_locks l JOIN users u ON u.id=l.holder_user_id WHERE l.task_id=? AND l.expires_at>?",
+                (task_id, now_text())).fetchone()
+        except sqlite3.OperationalError as exc:
+            # A database the migration tests hold below schema 19 has no locks to honour.
+            if "no such table: task_locks" not in str(exc):
+                raise
+            return None
+        return dict(row) if row else None
+
+    def _add_lock_state(self, tasks: list[dict]) -> None:
+        if not tasks:
+            return
+        rows = self.db.execute(
+            "SELECT l.task_id, l.holder_user_id, u.display_name holder_name, l.kind, l.expires_at"
+            " FROM task_locks l JOIN users u ON u.id=l.holder_user_id WHERE l.expires_at>?", (now_text(),)).fetchall()
+        locks = {r["task_id"]: dict(r) for r in rows}
+        for task in tasks:
+            task["lock"] = locks.get(task["id"])
+
+    @staticmethod
+    def _lock_message(title: str, lock: dict) -> str:
+        return (f"“{title}” is being changed by {lock['holder_name']} ({LOCK_KINDS[lock['kind']]}); their lock "
+                f"runs out at {lock['expires_at'][11:19]} UTC unless they keep working. Try again then, "
+                "or ask an owner to unlock it.")
+
+    def _assert_task_unlocked(self, task_id: str, actor_id: str) -> None:
+        lock = self._active_lock(task_id)
+        if lock and lock["holder_user_id"] != actor_id:
+            row = self.db.execute("SELECT title FROM tasks WHERE id=?", (task_id,)).fetchone()
+            raise TaskLocked(self._lock_message(row["title"] if row else task_id, lock), lock)
+
+    def acquire_task_lock(self, actor: dict, task_id: str, kind: str) -> dict:
+        """Take (or keep) the lease on a task for a drag, the edit form or a bulk change.
+        Only people who may change the task take one; someone else's live lease refuses."""
+        if kind not in LOCK_KINDS:
+            raise ValueError("Unknown lock kind.")
+        task = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Only an owner or a manager of this project can change this task.")
+        stamp = datetime.now(timezone.utc)
+        expires = (stamp + timedelta(seconds=LOCK_LEASE_SECONDS)).isoformat()
+        with transaction(self.db):
+            lock = self._active_lock(task_id)
+            if lock and lock["holder_user_id"] != actor["id"]:
+                raise TaskLocked(self._lock_message(task["title"], lock), lock)
+            mine = self.db.execute("SELECT token FROM task_locks WHERE task_id=? AND holder_user_id=? AND expires_at>?",
+                                   (task_id, actor["id"], stamp.isoformat())).fetchone()
+            token = mine["token"] if mine else uuid4().hex
+            self.db.execute("INSERT OR REPLACE INTO task_locks VALUES(?,?,?,?,?,?)",
+                            (task_id, actor["id"], kind, token, stamp.isoformat(), expires))
+        return {"task_id": task_id, "token": token, "kind": kind, "expires_at": expires,
+                "seconds": LOCK_LEASE_SECONDS}
+
+    def renew_task_lock(self, actor: dict, task_id: str, token: str) -> dict:
+        """Extend your own lease. A lease that is gone (released, expired and retaken, or
+        force-unlocked by an owner) is not silently taken back: the client stops."""
+        self.get_task(actor, task_id)
+        expires = (datetime.now(timezone.utc) + timedelta(seconds=LOCK_LEASE_SECONDS)).isoformat()
+        with transaction(self.db):
+            cursor = self.db.execute(
+                "UPDATE task_locks SET expires_at=? WHERE task_id=? AND holder_user_id=? AND token=?",
+                (expires, task_id, actor["id"], str(token)))
+            if cursor.rowcount != 1:
+                lock = self._active_lock(task_id)
+                if lock:
+                    row = self.db.execute("SELECT title FROM tasks WHERE id=?", (task_id,)).fetchone()
+                    raise TaskLocked(self._lock_message(row["title"], lock), lock)
+                raise Conflict("Your lock on this task has ended (it expired or an owner unlocked it); "
+                               "reload the task before changing it.")
+        return {"task_id": task_id, "token": str(token), "expires_at": expires, "seconds": LOCK_LEASE_SECONDS}
+
+    def release_task_lock(self, actor: dict, task_id: str, token: str) -> dict:
+        self.get_task(actor, task_id)
+        with transaction(self.db):
+            cursor = self.db.execute("DELETE FROM task_locks WHERE task_id=? AND holder_user_id=? AND token=?",
+                                     (task_id, actor["id"], str(token)))
+        return {"released": cursor.rowcount == 1}
+
+    def force_unlock_task(self, actor: dict, task_id: str, reason: str = "") -> dict:
+        """Any active owner may break someone's lease. Audited as task_lock_forced; the
+        holder and the other owners are told (owner decision: multi-user locks)."""
+        task = self.get_task(actor, task_id)
+        if actor["global_role"] != "owner":
+            raise Forbidden("Only an owner can unlock a task someone else is changing.")
+        reason = str(reason or "").strip() or "Unlocked by an owner"
+        with transaction(self.db):
+            lock = self._active_lock(task_id)
+            if not lock:
+                raise ValueError("Nobody holds a lock on this task now.")
+            self.db.execute("DELETE FROM task_locks WHERE task_id=?", (task_id,))
+            before = {k: lock[k] for k in ("holder_user_id", "holder_name", "kind", "expires_at")}
+            event_id = self._event(task_id, actor["id"], "task_lock_forced", before, None, reason)
+            if lock["holder_user_id"] != actor["id"]:
+                self._notify(lock["holder_user_id"], event_id, task_id, "task_lock_forced",
+                             f"task lock forced: {task['title']} · by {actor['display_name']} · {reason}",
+                             actor_id=actor["id"])
+        return {"released": True, "holder_user_id": lock["holder_user_id"]}
+
+    # ---- X07XV4: Gantt date drag ----
+
+    def _schedule_impact(self, task: dict, start: str | None, due: str | None) -> list[str]:
+        """What a date move touches: a finish-to-start link it breaks (either way), the
+        critical path, or the project target (there are no milestones; the target stands
+        in). Only links whose date on this task changed count, so an old overlap that the
+        move leaves alone does not ask again."""
+        impact = []
+        start_changed, due_changed = start != task.get("start_date"), due != task.get("due_date")
+        begins = start or due
+        rows = self.db.execute(
+            """SELECT d.predecessor_task_id pid, d.successor_task_id sid, p.title ptitle, p.due_date pdue,
+                      s.title stitle, COALESCE(s.start_date, s.due_date) sbegin
+               FROM task_dependencies d JOIN tasks p ON p.id=d.predecessor_task_id JOIN tasks s ON s.id=d.successor_task_id
+               WHERE d.predecessor_task_id=? OR d.successor_task_id=? ORDER BY p.title, s.title""",
+            (task["id"], task["id"])).fetchall()
+        for r in rows:
+            if r["sid"] == task["id"] and (start_changed or due_changed) and begins and r["pdue"] and begins < r["pdue"]:
+                impact.append(f"It would start on {begins}, before {r['ptitle']} is due ({r['pdue']}).")
+            if r["pid"] == task["id"] and due_changed and due and r["sbegin"] and r["sbegin"] < due:
+                impact.append(f"{r['stitle']} starts on {r['sbegin']}, before this is due ({due}); "
+                              "it is not moved for you.")
+        if task.get("is_critical_path") and (start_changed or due_changed):
+            impact.append("It is on the critical path, so the project end date may move.")
+        target = task.get("project_target_date")
+        if due_changed and due and target and due > target:
+            impact.append(f"The new due date is after the project target ({target}).")
+        return impact
+
+    def reschedule_task(self, actor: dict, task_id: str, payload: dict) -> dict:
+        """A Gantt bar drag or resize: new start and due dates through update_task.
+        Ordinary moves apply with Undo; a move with impact asks first, and the confirmed
+        move is recorded as schedule_impact_confirmed so the other owners are told."""
+        task = self.get_task(actor, task_id)
+        try:
+            return self._reschedule_task(actor, task, payload)
+        except Conflict:
+            raise  # stale chart, a lock, or an impact to confirm: not a refused attempt
+        except (ValueError, Forbidden) as exc:
+            with transaction(self.db):
+                self._event(task_id, actor["id"], "gantt_move_blocked",
+                            {"start_date": task.get("start_date"), "due_date": task.get("due_date")},
+                            {"start_date": payload.get("start_date"), "due_date": payload.get("due_date")}, str(exc))
+            raise
+
+    def _reschedule_task(self, actor: dict, task: dict, payload: dict) -> dict:
+        task_id, title = task["id"], task["title"]
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Only an owner or a manager of this project can move its dates.")
+        expected = payload.get("expected_revision")
+        if isinstance(expected, bool) or not isinstance(expected, int):
+            raise ValueError("An integer expected_revision is required to move a task.")
+        if expected != task["revision"]:
+            raise Conflict("This task changed since the chart was loaded; reload it and try again.")
+        try:
+            start, due = self._date(payload.get("start_date")), self._date(payload.get("due_date"))
+        except ValueError:
+            raise ValueError("Dates must be real calendar dates (YYYY-MM-DD).") from None
+        if not due:
+            raise ValueError(f"“{title}” needs a due date to sit on the chart.")
+        if start and start > due:
+            raise ValueError(f"The start date ({start}) would be after the due date ({due}).")
+        if (start, due) == (task.get("start_date"), task.get("due_date")):
+            raise ValueError(f"“{title}” already has these dates.")
+        listed = next(t for t in self.list_tasks(actor, task["project_id"]) if t["id"] == task_id)
+        target = self.db.execute("SELECT target_date FROM projects WHERE id=?", (task["project_id"],)).fetchone()
+        listed["project_target_date"] = target["target_date"] if target else None
+        impact = self._schedule_impact(listed, start, due)
+        if impact and not payload.get("confirmed"):
+            raise NeedsConfirmation(f"Moving “{title}” has consequences; confirm to go ahead.", "impact", impact)
+        parts = []
+        if start != task.get("start_date"):
+            parts.append(f"start {task.get('start_date') or 'none'} → {start or 'none'}")
+        if due != task.get("due_date"):
+            parts.append(f"due {task.get('due_date') or 'none'} → {due}")
+        outcome = self.update_task(actor, task_id, {"start_date": start, "due_date": due, "expected_revision": expected,
+                                                    "reason": "Gantt drag: " + ", ".join(parts)})
+        if isinstance(outcome, dict) and "request" in outcome:
+            return {"request": outcome["request"]}
+        moved_event = self._latest_event_id(task_id, actor["id"], "task_updated")
+        if impact:
+            with transaction(self.db):
+                self._event(task_id, actor["id"], "schedule_impact_confirmed", None,
+                            {"impact": impact, "event_id": moved_event}, "; ".join(impact))
+            return {"task": self.get_task(actor, task_id), "impact": impact}
+        return {"task": self.get_task(actor, task_id), "undo": {"event_id": moved_event, "seconds": BOARD_UNDO_SECONDS}}
 
     def list_subtasks(self, actor: dict, task_id: str) -> list[dict]:
         # D73AQW: the Gantt step segments, their tooltip and the detail dialog's
@@ -3706,7 +3928,9 @@ class AstraService:
         return tasks
 
     def _event(self, task_id: str, actor_id: str, kind: str, before: dict | None, after: dict | None, reason: str | None,
-               *, notify: bool = True) -> None:
+               *, notify: bool = True) -> str:
+        if kind in LOCK_GUARDED_KINDS:
+            self._assert_task_unlocked(task_id, actor_id)
         event_id = new_id()
         self.db.execute(
             "INSERT INTO task_events VALUES(?,?,?,?,?,?,?,?)",
@@ -3720,6 +3944,7 @@ class AstraService:
                 detail = after or before or {}
                 subject = detail.get("display_name") or detail.get("title")
             self._notify_owner(event_id, task_id, actor_id, kind, subject)
+        return event_id
 
     def _notify_owner(self, event_id: str, task_id: str, actor_id: str, kind: str, subject: str | None = None) -> None:
         # Durable record for the owners of every task change made by someone else.

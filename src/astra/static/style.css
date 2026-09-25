@@ -228,6 +228,23 @@ body.board-dragging, body.board-dragging * { cursor: grabbing; user-select: none
 .drop-marker { flex: none; height: 4px; border-radius: 2px; background: var(--teal); }
 .card-move { align-self: flex-start; font-size: var(--fs-small); }
 @media (max-width: 760px) { .drag-only { display: none; } }   /* phones move work from the menu */
+/* X07XV4: locks and Gantt bar dragging */
+.lock-chip { font-weight: 650; }
+.lock-banner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: var(--space-2) 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--amber); border-radius: var(--radius-sm); background: var(--chip-amber-bg); color: var(--ink); font-size: var(--fs-small); }
+.lock-banner span { flex: 1 1 220px; }
+.bar[data-drag] { cursor: grab; touch-action: pan-y; }
+.bar-grip { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+.bar-grip.start { left: 0; }
+.bar-grip.end { right: 0; }
+.bar[data-drag]:hover .bar-grip, .bar.is-dragging .bar-grip { background: #ffffff55; }
+.bar.is-dragging { z-index: 6; cursor: grabbing; box-shadow: 0 0 0 2px var(--focus), var(--shadow-2); }
+body.bar-dragging, body.bar-dragging * { cursor: grabbing; user-select: none; }
+body.bar-dragging #step-tip { display: none; }
+.drag-tip { position: fixed; top: 0; left: 0; z-index: 76; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--ink); color: #fff; font-size: var(--fs-small); font-weight: 600; pointer-events: none; box-shadow: var(--shadow-2); white-space: nowrap; }
+.drag-tip[hidden] { display: none; }
+.impact-list { margin: 0 0 var(--space-2); padding-left: 1.2em; }
+.impact-list li { margin: 4px 0; }
+@media (max-width: 760px) { .bar-grip { display: none; } .bar[data-drag] { cursor: pointer; } }
 .move-menu { position: fixed; top: 0; left: 0; z-index: 72; max-width: calc(100vw - 16px); }
 #move-form fieldset.choice { display: flex; gap: 18px; margin: 12px 0; padding: 0; border: 0; }
 #move-form fieldset.choice legend { margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-2); }

@@ -1835,7 +1835,7 @@ class AstraGovernedDragWebTests(unittest.TestCase):
                                        cookie=cookie, csrf=csrf)
         self.assertEqual(response.status, 200)
         self.assertEqual(moved["task"]["status"], "in_progress")
-        response, undone = self.request("POST", f"/api/tasks/{task['id']}/board-undo",
+        response, undone = self.request("POST", f"/api/tasks/{task['id']}/undo-move",
                                         {"event_id": moved["undo"]["event_id"]}, cookie=cookie, csrf=csrf)
         self.assertEqual((response.status, undone["task"]["status"]), (200, "draft"))
         # A dialog target answers 409 with what to confirm; a manager's close files a request (202).
@@ -1854,6 +1854,53 @@ class AstraGovernedDragWebTests(unittest.TestCase):
         response, _ = self.request("POST", f"/api/tasks/{task['id']}/board-move",
                                    {"to_column": "ready", "expected_revision": rev}, cookie=cookie)
         self.assertEqual(response.status, 403)
+
+    def test_locks_and_gantt_reschedule_over_http(self):
+        (ocookie, ocsrf), (cookie, csrf), pid, task = self._project_with_manager()
+        tid = task["id"]
+        response, got = self.request("POST", f"/api/tasks/{tid}/lock", {"kind": "edit"}, cookie=cookie, csrf=csrf)
+        self.assertEqual((response.status, got["lock"]["seconds"]), (200, 60))
+        # The owner's write is refused with who holds the lock and until when.
+        response, refused = self.request("POST", f"/api/tasks/{tid}", {"title": "Owner rename",
+                                         "expected_revision": task["revision"]}, cookie=ocookie, csrf=ocsrf)
+        self.assertEqual(response.status, 409)
+        self.assertEqual((refused["lock"]["holder_name"], refused["lock"]["kind"]), ("PM", "edit"))
+        self.assertIn("is being changed by PM", refused["error"])
+        response, _ = self.request("POST", f"/api/tasks/{tid}/lock/force", {"reason": "urgent"}, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 403)  # only an owner force-unlocks
+        response, _ = self.request("POST", f"/api/tasks/{tid}/lock/force", {"reason": "urgent"}, cookie=ocookie, csrf=ocsrf)
+        self.assertEqual(response.status, 200)
+        response, ended = self.request("POST", f"/api/tasks/{tid}/lock/renew", {"token": got["lock"]["token"]},
+                                       cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 409)
+        self.assertIn("has ended", ended["error"])
+        # A Gantt drag: ordinary moves apply with Undo; one past the project target asks first.
+        self.request("POST", f"/api/projects/{pid}/schedule", {"start_date": "2026-10-01", "target_date": "2026-12-31",
+                                                               "reason": "Plan"}, cookie=ocookie, csrf=ocsrf)
+        response, detail = self.request("GET", f"/api/tasks/{tid}", cookie=cookie)
+        rev = detail["task"]["revision"]
+        response, moved = self.request("POST", f"/api/tasks/{tid}/reschedule",
+                                       {"start_date": "2026-10-05", "due_date": "2026-10-09", "expected_revision": rev},
+                                       cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 200)
+        response, undone = self.request("POST", f"/api/tasks/{tid}/undo-move", {"event_id": moved["undo"]["event_id"]},
+                                        cookie=cookie, csrf=csrf)
+        self.assertEqual((response.status, undone["task"]["due_date"]), (200, None))
+        rev = undone["task"]["revision"]
+        response, ask = self.request("POST", f"/api/tasks/{tid}/reschedule",
+                                     {"due_date": "2027-01-10", "expected_revision": rev}, cookie=cookie, csrf=csrf)
+        self.assertEqual((response.status, ask["confirm"]), (409, "impact"))
+        self.assertTrue(any("after the project target (2026-12-31)" in i for i in ask["impact"]))
+        response, done = self.request("POST", f"/api/tasks/{tid}/reschedule",
+                                      {"due_date": "2027-01-10", "expected_revision": rev, "confirmed": True},
+                                      cookie=cookie, csrf=csrf)
+        self.assertEqual((response.status, done["task"]["due_date"]), (200, "2027-01-10"))
+        self.assertNotIn("undo", done)
+        response, bad = self.request("POST", f"/api/tasks/{tid}/reschedule",
+                                     {"start_date": "2027-02-01", "due_date": "2027-01-10",
+                                      "expected_revision": done["task"]["revision"]}, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 400)
+        self.assertIn("after the due date", bad["error"])
 
 
 class AstraStaticAssetTests(unittest.TestCase):
@@ -2265,6 +2312,49 @@ if(mode==="drag"){
   globalThis.setTimeout=realST;
   const btn={dataset:{moveMenu:"a"},setAttribute(){},getBoundingClientRect:()=>({left:10,bottom:20})};
   openMoveMenu(btn);out.menu=document.querySelector("#move-menu").innerHTML;
+  process.stdout.write(JSON.stringify(out));return;
+}
+if(mode==="gantt"){
+  // X07XV4: draggable bars, the date maths, the reschedule round trip and the lease helpers.
+  const T=o=>({project_id:U1,project_name:"P",status:"in_progress",due_state:"scheduled",days_to_due:9,owner_name:"Sara",owner_user_id:"u-sara",criticality:"high",revision:3,start_date:"2026-10-05",due_date:"2026-10-08",...o});
+  a.state.user={id:"u1",display_name:"PM",global_role:"member"};a.state.today="2026-09-25";
+  a.state.projects=[{id:U1,name:"P",status:"active",entities:[],can_manage:true,start_date:"2026-10-01",target_date:"2026-12-31"}];
+  const tasks=[T({id:"g1",title:"Move <me>"}),T({id:"g2",title:"Closed",status:"completed"}),T({id:"g3",title:"Undated",start_date:null,due_date:null})];
+  a.state.tasks=tasks;a.state.viewOverride="chart";
+  a.renderGantt(tasks);out.canDrag=document.querySelector("#gantt").innerHTML;
+  a.state.projects[0].can_manage=false;a.renderGantt(tasks);out.cannotDrag=document.querySelector("#gantt").innerHTML;a.state.projects[0].can_manage=true;
+  out.span=document.querySelector("#gantt").dataset.span;
+  const t=tasks[0];
+  out.dates={move:barDates(t,null,3),start:barDates(t,"start",2),startClamp:barDates(t,"start",9),end:barDates(t,"end",-1),endClamp:barDates(t,"end",-9),
+    noStart:barDates({...t,start_date:null},null,2),growStart:barDates({...t,start_date:null},"start",-2)};
+  out.tips=[dateTip(t,barDates(t,null,3),3),dateTip(t,barDates(t,"end",-1),-1),dateTip(t,{start_date:t.start_date,due_date:t.due_date},0)];
+  const posts=[];let reply=()=>null;
+  globalThis.fetch=async(u,opt)=>{posts.push([u,opt&&opt.body?JSON.parse(opt.body):null]);const r=reply(u)||{};const status=r.status||200;return {ok:status<400,status,json:async()=>r.body||{}}};
+  globalThis.load=async()=>{posts.push(["load"])};
+  const timers=[],realST=globalThis.setTimeout;globalThis.setTimeout=(f,ms)=>{timers.push(ms);return 0};
+  const intervals=[];globalThis.setInterval=(f,ms)=>{intervals.push(ms);return intervals.length};globalThis.clearInterval=()=>{};
+  const flush=async()=>{for(let i=0;i<10;i++)await new Promise(r=>realST(r,0))};
+  reply=u=>u.endsWith("/reschedule")?{body:{task:{...t,start_date:"2026-10-08",due_date:"2026-10-11"},undo:{event_id:"ev9",seconds:15}}}:null;
+  await rescheduleTask(t,barDates(t,null,3),3);
+  out.movePosts=posts.splice(0);out.moveToast=document.querySelector("#toast").innerHTML;out.timers=timers.splice(0);
+  await document.querySelector("#toast-action")._listeners.click.at(-1)();await flush();out.undoPosts=posts.splice(0);
+  let n=0;reply=u=>u.endsWith("/reschedule")?(n++?{body:{task:t,impact:["It is on the critical path."]}}:{status:409,body:{error:"Consequences.",confirm:"impact",impact:["It is on the critical path."]}}):null;
+  const asked=[];globalThis.askMove=async(kind,task,col,err)=>{asked.push([kind,err.impact,err.dates]);return {confirmed:true}};
+  await rescheduleTask(t,barDates(t,"end",20),20);out.impactPosts=posts.splice(0);out.asked=asked;out.impactToast=document.querySelector("#toast").innerHTML;
+  globalThis.askMove=async()=>null;n=0;await rescheduleTask(t,barDates(t,"end",20),20);out.cancelPosts=posts.splice(0);
+  reply=u=>u.endsWith("/reschedule")?{status:400,body:{error:"The start date (2026-10-20) would be after the due date (2026-10-10)."}}:null;
+  await rescheduleTask(t,barDates(t,null,1),1);out.refusedToast=document.querySelector("#toast").innerHTML;posts.splice(0);
+  // Leases: take, keep, renew timer, release; a refused one names the holder.
+  reply=u=>u.endsWith("/lock")?{body:{lock:{token:"tok1",seconds:60}}}:null;
+  out.take=await takeLease("g1","drag");out.again=await takeLease("g1","drag");out.intervals=intervals.slice();
+  await dropLease("g1");out.leasePosts=posts.splice(0);
+  const held={holder_user_id:"u-sara",holder_name:"Sara <K>",kind:"edit",expires_at:"2026-09-25T10:00:30+00:00"};
+  reply=u=>u.endsWith("/lock")?{status:409,body:{error:"busy",lock:held}}:null;
+  const refused=await takeLease("g1","edit");out.refusedLease=[refused.ok,refused.err.lock.holder_name];posts.splice(0);
+  globalThis.setTimeout=realST;
+  out.banner=lockBanner(held,"",true);out.bannerNoForce=lockBanner(held,"",false);
+  out.chipOther=boardCard(T({id:"c1",title:"Card",lock:held}),[],true);
+  out.chipMine=boardCard(T({id:"c2",title:"Card",lock:{...held,holder_user_id:"u1"}}),[],true);
   process.stdout.write(JSON.stringify(out));return;
 }
 if(mode==="work"){
@@ -2744,7 +2834,7 @@ class AstraBoardDragDriverTests(unittest.TestCase):
         self.assertIn("Moved “C” from Draft to Ready.", self.out["moveToast"])
         self.assertIn('id="toast-action">Undo</button>', self.out["moveToast"])
         self.assertIn(15000, self.out["toastTimers"])
-        self.assertEqual(self.out["undoPosts"][0], ["/api/tasks/c/board-undo", {"event_id": "ev1"}])
+        self.assertEqual(self.out["undoPosts"][0], ["/api/tasks/c/undo-move", {"event_id": "ev1"}])
         # ...and the card goes back to its old place in Draft.
         self.assertEqual(self.out["undoPosts"][1], ["/api/projects/11111111-1111-4111-8111-111111111111/board-order",
                                                     {"column": "draft", "task_ids": ["b", "a", "c"]}])
@@ -2792,6 +2882,67 @@ class AstraBoardDragDriverTests(unittest.TestCase):
         self.assertLess(menu.index('data-move-to="down"'), menu.index('data-move-to="ready"'))
         self.assertNotIn('data-move-to="draft"', menu)  # its own column is not offered
         self.assertEqual(menu.count('role="menuitem"'), 8)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")
+class AstraGanttDragDriverTests(unittest.TestCase):
+    """X07XV4: draggable Gantt bars, their date maths, the reschedule round trip and leases."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out = _run_shell_driver("gantt")
+
+    def test_only_open_dated_bars_of_a_managed_project_are_draggable(self):
+        self.assertEqual(self.out["canDrag"].count('data-drag="g1"'), 1)
+        self.assertEqual(self.out["canDrag"].count("data-drag="), 1)  # not the closed or the undated task
+        self.assertIn('<i class="bar-grip start" data-edge="start" aria-hidden="true"></i>', self.out["canDrag"])
+        self.assertNotIn("data-drag", self.out["cannotDrag"])
+        self.assertNotIn("bar-grip", self.out["cannotDrag"])
+        self.assertNotIn("style=", self.out["canDrag"])
+        self.assertGreater(int(self.out["span"]), 0)
+
+    def test_moving_and_resizing_shift_the_right_dates_and_never_invert_them(self):
+        d = self.out["dates"]
+        self.assertEqual(d["move"], {"start_date": "2026-10-08", "due_date": "2026-10-11"})
+        self.assertEqual(d["start"], {"start_date": "2026-10-07", "due_date": "2026-10-08"})
+        self.assertEqual(d["startClamp"], {"start_date": "2026-10-08", "due_date": "2026-10-08"})
+        self.assertEqual(d["end"], {"start_date": "2026-10-05", "due_date": "2026-10-07"})
+        self.assertEqual(d["endClamp"], {"start_date": "2026-10-05", "due_date": "2026-10-05"})
+        self.assertEqual(d["noStart"], {"start_date": None, "due_date": "2026-10-10"})
+        self.assertEqual(d["growStart"], {"start_date": "2026-10-06", "due_date": "2026-10-08"})
+        self.assertEqual(self.out["tips"], ["Start Oct 8 · Due Oct 11 (+3 days)", "Due Oct 7 (-1 day)", "No change"])
+
+    def test_an_ordinary_drag_posts_the_dates_and_offers_undo(self):
+        self.assertEqual(self.out["movePosts"][0], ["/api/tasks/g1/reschedule", {
+            "start_date": "2026-10-08", "due_date": "2026-10-11", "expected_revision": 3}])
+        self.assertIn('id="toast-action">Undo</button>', self.out["moveToast"])
+        self.assertIn(15000, self.out["timers"])
+        self.assertEqual(self.out["undoPosts"][0], ["/api/tasks/g1/undo-move", {"event_id": "ev9"}])
+
+    def test_a_drag_with_consequences_asks_then_retries_confirmed(self):
+        moves = [p[1] for p in self.out["impactPosts"] if p[0].endswith("/reschedule")]
+        self.assertEqual([m.get("confirmed") for m in moves], [None, True])
+        self.assertEqual(self.out["asked"][0][:2], ["impact", ["It is on the critical path."]])
+        self.assertIn("The other owners have been told.", self.out["impactToast"])
+        self.assertNotIn("Undo", self.out["impactToast"])
+        self.assertEqual(len([p for p in self.out["cancelPosts"] if p[0].endswith("/reschedule")]), 1)
+
+    def test_a_refused_drag_keeps_the_dates_and_says_why(self):
+        self.assertIn("keeps its dates: The start date (2026-10-20) would be after the due date", self.out["refusedToast"])
+
+    def test_a_lease_is_taken_once_renewed_every_20_seconds_and_released(self):
+        self.assertEqual((self.out["take"], self.out["again"]), ({"ok": True}, {"ok": True}))
+        self.assertEqual(self.out["intervals"], [20000])
+        self.assertEqual(self.out["leasePosts"], [["/api/tasks/g1/lock", {"kind": "drag"}],
+                                                  ["/api/tasks/g1/lock/release", {"token": "tok1"}]])
+        self.assertEqual(self.out["refusedLease"], [False, "Sara <K>"])
+
+    def test_others_see_who_holds_a_lock_and_owners_can_force_it(self):
+        self.assertIn("Sara &lt;K&gt; is changing this task (an edit)", self.out["banner"])
+        self.assertIn('id="force-unlock">Force unlock</button>', self.out["banner"])
+        self.assertNotIn("force-unlock", self.out["bannerNoForce"])
+        self.assertIn('class="tag lock-chip" data-tone="amber">🔒 Sara &lt;K&gt;', self.out["chipOther"])
+        self.assertNotIn("lock-chip", self.out["chipMine"])  # your own lease is not a warning
 
 
 @unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")

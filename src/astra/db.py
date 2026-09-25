@@ -8,7 +8,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 
 class SchemaMigrationRefused(RuntimeError):
@@ -765,6 +765,30 @@ def _migrate_v18(connection: sqlite3.Connection) -> None:
     """)
 
 
+V19_TASK_LOCKS_HOLDER_INDEX = "idx_task_locks_holder"
+
+
+def _migrate_v19(connection: sqlite3.Connection) -> None:
+    """v18 -> v19: task locks as renewable leases (ticket X07XV4).
+
+    One row per locked task: who holds it, why (a board or Gantt drag, the task panel's
+    edit form, or a bulk change), a token for the holder's own renew and release, and
+    when the lease runs out. A row past ``expires_at`` is no lock at all; it is replaced
+    or deleted on the next acquire. Nothing existing changes.
+    """
+    _execute_statements(connection, f"""
+        CREATE TABLE task_locks (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+            holder_user_id TEXT NOT NULL REFERENCES users(id),
+            kind TEXT NOT NULL CHECK (kind IN ('drag','edit','bulk')),
+            token TEXT NOT NULL,
+            acquired_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        );
+        CREATE INDEX {V19_TASK_LOCKS_HOLDER_INDEX} ON task_locks(holder_user_id);
+    """)
+
+
 # The ordered schema history: (version, step). migrate() runs every step whose version
 # is above the database's user_version, each in its own transaction with its bump.
 # Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
@@ -787,4 +811,5 @@ MIGRATION_STEPS = (
     (16, _migrate_v16),
     (17, _migrate_v17),
     (18, _migrate_v18),
+    (19, _migrate_v19),
 )

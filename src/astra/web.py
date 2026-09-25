@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from .auth import dummy_password_hash, new_token, token_digest, verify_password
 from .db import connect, database_path
 from .importer import FORMULA_PREFIXES, ImportConflict, ImportTooLarge
-from .service import AstraService, Conflict, Forbidden, NeedsConfirmation, now_text
+from .service import AstraService, Conflict, Forbidden, NeedsConfirmation, TaskLocked, now_text
 
 
 SESSION_COOKIE = "astra_session"
@@ -361,8 +361,22 @@ class AstraHandler(BaseHTTPRequestHandler):
             if path.startswith("/api/tasks/") and path.endswith("/board-move") and path.count("/") == 4:
                 outcome = self.service.move_task(user, path.split("/")[3], payload)
                 return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json(outcome)
-            if path.startswith("/api/tasks/") and path.endswith("/board-undo") and path.count("/") == 4:
-                return self._json({"task": self.service.undo_board_move(user, path.split("/")[3], payload)})
+            if path.startswith("/api/tasks/") and path.endswith("/reschedule") and path.count("/") == 4:
+                outcome = self.service.reschedule_task(user, path.split("/")[3], payload)
+                return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json(outcome)
+            if path.startswith("/api/tasks/") and path.endswith("/lock") and path.count("/") == 4:
+                return self._json({"lock": self.service.acquire_task_lock(user, path.split("/")[3],
+                                                                          str(payload.get("kind", "")))})
+            if path.startswith("/api/tasks/") and path.count("/") == 5 and path.split("/")[4] == "lock":
+                task_id, verb = path.split("/")[3], path.split("/")[5]
+                if verb == "renew":
+                    return self._json({"lock": self.service.renew_task_lock(user, task_id, payload.get("token", ""))})
+                if verb == "release":
+                    return self._json(self.service.release_task_lock(user, task_id, payload.get("token", "")))
+                if verb == "force":
+                    return self._json(self.service.force_unlock_task(user, task_id, payload.get("reason", "")))
+            if path.startswith("/api/tasks/") and path.endswith("/undo-move") and path.count("/") == 4:
+                return self._json({"task": self.service.undo_move(user, path.split("/")[3], payload)})
             if path.startswith("/api/projects/") and path.endswith("/board-order") and path.count("/") == 4:
                 order = self.service.reorder_board(user, path.split("/")[3], str(payload.get("column", "")),
                                                    payload.get("task_ids"))
@@ -730,6 +744,8 @@ class AstraHandler(BaseHTTPRequestHandler):
     def _error(self, exc: Exception):
         if isinstance(exc, Forbidden):
             return self._json({"error": str(exc)}, HTTPStatus.FORBIDDEN)
+        if isinstance(exc, TaskLocked):
+            return self._json({"error": str(exc), "lock": exc.lock}, HTTPStatus.CONFLICT)
         if isinstance(exc, NeedsConfirmation):
             return self._json({"error": str(exc), "confirm": exc.confirm, "impact": exc.impact}, HTTPStatus.CONFLICT)
         if isinstance(exc, (Conflict, ImportConflict)):

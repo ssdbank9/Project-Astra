@@ -165,8 +165,32 @@ This first vertical slice provides:
   changed again or 20 seconds have passed, and never rewrites history. Every card also has a
   "Move to…" menu (keyboard: Enter opens it, arrows move, Escape closes; up and down move the
   card in its column). Phones never drag: a swipe scrolls and the menu moves work. The API is
-  `POST /api/tasks/<id>/board-move`, `POST /api/tasks/<id>/board-undo` and
+  `POST /api/tasks/<id>/board-move`, `POST /api/tasks/<id>/undo-move` and
   `POST /api/projects/<id>/board-order`;
+- task locks (schema v19, `task_locks`). Only one person changes a task at a time. A board or
+  Gantt drag takes a drag lock, and typing in the task panel's Edit form takes an edit lock. A
+  lock is a 60-second lease, renewed every 20 seconds while the drag or the form is in use (an
+  idle form lets go after a minute) and released on drop, cancel, save or close. While someone
+  else holds one, every write to that task (edit, board move, hold, submit, decisions,
+  dependencies, criticality, files, dates) is refused with HTTP 409 naming the holder and the
+  time the lease runs out; the check sits inside the write transaction, so the final write
+  always revalidates. Board cards show a lock chip and the task panel a banner with who and
+  until when (as of the last load). Any active owner may Force unlock, which is recorded as
+  `task_lock_forced` and noticed to the holder and the other owners. API:
+  `POST /api/tasks/<id>/lock` (`kind` drag|edit|bulk), `/lock/renew` and `/lock/release`
+  (`token`), and `/lock/force` (owners, optional `reason`);
+- Gantt date drag for owners and the project's managers: drag a bar to move both dates, or its
+  left or right end to change the start or the due date, with a live tip of the new dates. The
+  task panel's date fields remain the keyboard and phone route (phones and touch never drag
+  bars). The server validates the dates (real dates, start not after due) and refuses with the
+  reason; refusals are recorded as `gantt_move_blocked`. An ordinary move applies at once with a
+  system reason ("Gantt drag: start … → …, due … → …") and a 15-second Undo. A move that
+  breaks a finish-to-start link either way, touches a task on the critical path, or puts the due
+  date past the project target (there are no milestones; the target stands in) first shows what
+  it affects and applies only when confirmed; the confirmation is recorded as
+  `schedule_impact_confirmed` and the other owners are told. Tasks that follow are not moved.
+  API: `POST /api/tasks/<id>/reschedule` (`start_date`, `due_date`, `expected_revision`,
+  `confirmed`);
 - My Work with two tabs. List (`#/my-work`) groups the open tasks you own into Overdue,
   Today, This week (due within the next 7 days, day 7 included, as on Home), Later and No date, each with a
   count, soonest first, with a filter box. Calendar (`#/my-work/calendar?month=YYYY-MM`) is a
@@ -270,7 +294,8 @@ Back up `astra.sqlite3`, set every owner except the primary back to their earlie
 (`UPDATE users SET global_role='member' WHERE id=...`), start Astra again, and make them
 secondary owners from the People screen.
 
-Schema 18 adds `tasks.board_rank` (a nullable
+Schema 19 adds `task_locks` (one lease per task: holder, kind, token, acquired and expiry
+times; an expired row is no lock and is replaced on the next acquire). Schema 18 adds `tasks.board_rank` (a nullable
 number; a task without one sorts after the ranked cards of its column) and the index
 `idx_tasks_board_rank` on `(project_id, board_rank)`. Nothing existing is rewritten.
 
