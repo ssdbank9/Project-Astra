@@ -43,7 +43,34 @@
       </div>
     </header>
     <main id="main" tabindex="-1">
-      <section class="view" data-view="home" aria-labelledby="page-title">
+      <section class="view" data-view="home" id="home-view" aria-labelledby="page-title">
+        <div id="home-empty" hidden></div>
+        <div id="home-strip" class="health-strip" aria-label="Portfolio health"></div>
+        <div class="home-grid" id="home-grid">
+          <section class="card" id="home-decisions-card" aria-labelledby="home-decisions-title" hidden>
+            <div class="card-head"><h2 id="home-decisions-title">Needs Owner decision</h2><a class="card-link" href="#/inbox">Open Inbox ›</a></div>
+            <div class="error" id="home-decision-error" role="alert" tabindex="-1"></div>
+            <div id="home-decisions"></div>
+          </section>
+          <section class="card" aria-labelledby="home-next-title">
+            <div class="card-head"><h2 id="home-next-title">My next actions</h2><a class="card-link" href="#/my-work">My Work ›</a></div>
+            <div id="home-next"></div>
+          </section>
+          <section class="card" aria-labelledby="home-risk-title">
+            <div class="card-head"><h2 id="home-risk-title">At risk</h2><a class="card-link" href="#/portfolio?risk=atrisk&amp;open=1">All at-risk work ›</a></div>
+            <div id="home-risk"></div>
+          </section>
+          <section class="card" aria-labelledby="home-week-title">
+            <div class="card-head"><h2 id="home-week-title">This week</h2><a class="card-link" href="#/portfolio?due=7&amp;open=1">Due in 7 days ›</a></div>
+            <div id="home-week"></div>
+          </section>
+        </div>
+        <section class="card" id="home-portfolio-card" aria-labelledby="home-portfolio-title">
+          <div class="card-head"><h2 id="home-portfolio-title">Portfolio by entity</h2><a class="card-link portfolio-link" href="#/portfolio">Portfolio timeline ›</a></div>
+          <div id="home-portfolio"></div>
+        </section>
+      </section>
+      <section class="view" data-view="portfolio" aria-labelledby="page-title" hidden>
         <section class="summary" aria-label="Summary">
           <div><strong id="project-count">0</strong><span>Projects</span></div>
           <div><strong id="task-count">0</strong><span>Visible tasks</span></div>
@@ -55,7 +82,8 @@
           <label>Status<select id="status-filter"><option value="">All statuses</option></select></label>
           <label>Entity<select id="entity-filter"><option value="">All entities</option></select></label>
           <label>Criticality<select id="crit-filter"><option value="">All criticality</option><option value="critical">Critical</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option><option value="unrated">Unrated</option></select></label>
-          <label>Due within<select id="band-filter"><option value="">Any time</option><option value="overdue">Overdue</option><option value="today">Today</option><option value="7">Next 7 days</option><option value="14">Next 14 days</option><option value="30">Next 30 days</option></select></label>
+          <label>Due within<select id="band-filter"><option value="">Any time</option><option value="overdue">Overdue</option><option value="today">Today</option><option value="7">Next 7 days</option><option value="14">Next 14 days</option><option value="30">Next 30 days</option><option value="undated">No due date</option></select></label>
+          <label>Risk<select id="risk-filter"><option value="">Any</option><option value="atrisk">At risk (any of these)</option><option value="blocked">Blocked</option><option value="critical">On the critical path</option></select></label>
           <label>Owner<input id="owner-filter" placeholder="Filter by person"></label>
           <label>Sort by<select id="sort-filter"><option value="criticality">Criticality</option><option value="due_date">Due date</option></select></label>
           <label class="inline"><input type="checkbox" id="open-only"> Open work only</label>
@@ -91,7 +119,7 @@
       <section class="view" data-view="my-work" aria-labelledby="page-title" hidden><div id="my-work-body" class="page-card"></div></section>
       <section class="view" data-view="inbox" aria-labelledby="page-title" hidden><div id="inbox-body" class="page-card"></div></section>
       <section class="view" data-view="projects" aria-labelledby="page-title" hidden>
-        <div class="page-actions"><button type="button" id="new-project" hidden>New project</button></div>
+        <div class="page-actions"><a class="quiet button-link portfolio-link" href="#/portfolio">Portfolio timeline</a><button type="button" id="new-project" hidden>New project</button></div>
         <div id="projects-body" class="page-card"></div>
       </section>
       <aside id="detail-dialog" class="task-panel" aria-labelledby="detail-heading" hidden>

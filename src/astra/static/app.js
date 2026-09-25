@@ -1,7 +1,7 @@
 const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality"};
 async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.error||"Request failed");err.status=response.status;throw err}return data}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
-function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);const isOwner=state.user.global_role==="owner";document.querySelector("#new-project").hidden=!isOwner;document.querySelector("#people").hidden=!isOwner;projectActions();refreshImportAccess()}
+function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);document.querySelector("#new-project").hidden=document.querySelector("#people").hidden=!isOwner();projectActions();refreshImportAccess()}
 async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
 function updateBell(){const n=state.unread||0,badge=document.querySelector("#unread-count"),inbox=document.querySelector("#inbox");badge.textContent=n;badge.hidden=!n;inbox.classList.toggle("has-unread",n>0);inbox.setAttribute("aria-label",n?`Inbox, ${n} unread`:"Inbox")}
 function fillFilters(){const pf=document.querySelector("#project-filter"),tp=document.querySelector('#task-form select[name="project_id"]');const selected=pf.value;pf.innerHTML='<option value="">All projects</option>';tp.innerHTML="";for(const p of state.projects){pf.add(new Option(p.status==="closed"?`${p.name} (closed)`:p.name,p.id));if(p.status!=="closed")tp.add(new Option(p.name,p.id))}pf.value=selected;const statuses=[...new Set(state.tasks.map(t=>t.status))].sort();document.querySelector("#status-filter").innerHTML='<option value="">All statuses</option>'+statuses.map(s=>`<option>${escapeHtml(s)}</option>`).join("");const ef=document.querySelector("#entity-filter"),efSel=ef.value;ef.innerHTML='<option value="">All entities</option>'+(state.entities||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`).join("");ef.value=efSel;fillPredecessors()}
@@ -26,13 +26,17 @@ function projectActions(){
   const oneProject=!!document.querySelector("#project-filter").value,owner=!!state.user&&state.user.global_role==="owner";
   document.querySelector("#close-project").hidden=document.querySelector("#save-template-btn").hidden=!(oneProject&&owner);
 }
-// The Home filters, applied to the loaded tasks (the same rules the export reuses on the server).
+// VPYGY5: the Risk filter behind the Home tiles (service.py export_tasks applies the same rules).
+function isAtRisk(t){return t.due_state==="overdue"||!!t.is_blocked||!!t.is_critical_path||t.status==="delayed"}
+function matchesRisk(t,risk){return risk==="blocked"?!!t.is_blocked:risk==="critical"?!!t.is_critical_path:risk==="atrisk"?isAtRisk(t):true}
+// The portfolio filters, applied to the loaded tasks (the same rules the export reuses on the server).
 function visibleTasks(){
   const project=document.querySelector("#project-filter").value,status=document.querySelector("#status-filter").value,
     entity=document.querySelector("#entity-filter").value,crit=document.querySelector("#crit-filter").value,
     band=document.querySelector("#band-filter").value,owner=document.querySelector("#owner-filter").value.toLowerCase(),
-    openOnly=document.querySelector("#open-only").checked;
+    openOnly=document.querySelector("#open-only").checked,risk=document.querySelector("#risk-filter").value;
   return state.tasks.filter(t=>
+    (!risk||matchesRisk(t,risk))&&
     (!project||t.project_id===project)&&
     (!status||t.status===status)&&
     (!entity||projectEntityIds(t.project_id).has(entity))&&
@@ -42,6 +46,7 @@ function visibleTasks(){
     (!openOnly||!CLOSED_STATUSES.includes(t.status)));
 }
 function matchesBand(t,band){
+  if(band==="undated")return t.due_state==="undated";
   if(band==="overdue")return t.due_state==="overdue";
   if(band==="today")return t.due_state==="today";
   const n=Number(band);
@@ -343,9 +348,11 @@ function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":
 // screens assigns location.hash (a history entry and a hashchange of its own), and a filter edit rewrites
 // the Home link with history.replaceState, so nothing here needs pushState. Home filters ride in the query
 // (#/home?status=delayed&open=1), so reload, Back and a pasted link restore them.
-const VIEWS=["home","my-work","inbox","projects"];
-const VIEW_TITLES={home:["All projects","Home"],"my-work":["My Work","Assigned to me"],inbox:["Inbox","Needs action and activity"],projects:["Projects","All projects"],task:["Task","Task"]};
-const FILTER_PARAMS=[["project","#project-filter"],["status","#status-filter"],["entity","#entity-filter"],["crit","#crit-filter"],["due","#band-filter"],["owner","#owner-filter"],["sort","#sort-filter"]];
+const VIEWS=["home","portfolio","my-work","inbox","projects"];
+// The rail item a screen belongs to (the portfolio timeline sits under Projects).
+const NAV_OF={portfolio:"projects"};
+const VIEW_TITLES={home:["Home","Command Center"],portfolio:["Projects","Portfolio timeline"],"my-work":["My Work","Assigned to me"],inbox:["Inbox","Needs action and activity"],projects:["Projects","All projects"],task:["Task","Task"]};
+const FILTER_PARAMS=[["project","#project-filter"],["status","#status-filter"],["entity","#entity-filter"],["crit","#crit-filter"],["due","#band-filter"],["risk","#risk-filter"],["owner","#owner-filter"],["sort","#sort-filter"]];
 // Task ids are UUIDs; anything else in a link is ignored rather than sent to the server.
 const TASK_ID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isTaskId(id){return typeof id==="string"&&TASK_ID.test(id)}
@@ -368,20 +375,22 @@ function homeQuery(){
   return p.toString();
 }
 function syncFilters(){
-  const q=homeQuery(),hash="#/home"+(q?"?"+q:""),task=currentRoute().params.get("task"),full=task?routeHash(parseRoute(hash),task):hash;
+  const q=homeQuery(),hash="#/portfolio"+(q?"?"+q:""),task=currentRoute().params.get("task"),full=task?routeHash(parseRoute(hash),task):hash;
   // A filter changed while a task is open: closing must keep it, so the panel no longer goes Back to the
   // entry from before it opened; it strips ?task from this link instead.
   if(location.hash!==full){if(history.replaceState)history.replaceState(null,"",full);if(task)panelState.pushed=null}
   panelState.rendered=hash;
-  document.querySelector('[data-nav="home"]').setAttribute("href",hash);
+  setPortfolioLinks(hash);
 }
+// Every "Portfolio timeline" link returns to the filters last used there.
+function setPortfolioLinks(hash){state.portfolioHash=hash;document.querySelectorAll(".portfolio-link").forEach(a=>a.setAttribute("href",hash))}
 function filtersChanged(){syncFilters();render();shellTitle(currentRoute())}
 function roleLabel(u){if(u.is_primary_owner)return "Primary owner";const r=String(u.global_role||"");return r.charAt(0).toUpperCase()+r.slice(1)}
 function shellTitle(r){
   let [crumb,title]=VIEW_TITLES[r.name];
   if(r.name==="task"&&panelState.task){crumb=`Task · ${panelState.task.project_name||""}`;title=panelState.task.title}
-  const pid=r.name==="home"&&document.querySelector("#project-filter").value,proj=pid&&state.projects.find(p=>p.id===pid);
-  if(proj){crumb="Home · Projects";title=proj.name}
+  const pid=r.name==="portfolio"&&document.querySelector("#project-filter").value,proj=pid&&state.projects.find(p=>p.id===pid);
+  if(proj){crumb="Projects · Portfolio timeline";title=proj.name}
   document.querySelector("#crumb").textContent=crumb;document.querySelector("#page-title").textContent=title;document.title=`${title} · Astra`;
 }
 // Under the filters: "Showing X of Y" and one removable chip per active filter.
@@ -410,7 +419,7 @@ function clearFilter(key){
   (document.querySelector("#filter-note .filter-chip")||document.querySelector("#project-filter")).focus();
 }
 // "Show it" after a capture: clear the filters and make sure Home is the screen the link, rail and title show.
-function showAllOnHome(){clearAllFilters();if(currentRoute().name!=="home")location.hash="#/home"}
+function showAllOnPortfolio(){clearAllFilters();if(currentRoute().name!=="portfolio")location.hash="#/portfolio"}
 function clearAllFilters(){filtersFromUrl(new URLSearchParams());const sorted=state.sort!=="criticality";state.sort="criticality";syncFilters();shellTitle(currentRoute());if(sorted)load();else render()}
 document.querySelector("#filter-note").addEventListener("click",e=>{const b=e.target.closest("[data-clear]");if(b)clearFilter(b.dataset.clear)});
 // A short notice at the bottom of the screen. A plain notice fades after 6 seconds; one with an action, or
@@ -428,6 +437,10 @@ function showToast(text,actionLabel,action,sticky){
 }
 function applyRoute(moveFocus,fromLoad){
   if(!state.user)return;
+  // Links from before the Command Center put the dashboard filters on #/home; they belong to #/portfolio now.
+  const old=currentRoute();
+  if(old.name==="home"&&[...FILTER_PARAMS.map(([k])=>k),"open"].some(k=>old.params.has(k))&&history.replaceState)
+    history.replaceState(null,"",`#/portfolio?${old.params.toString()}`);
   const r=currentRoute(),linked=r.name==="task"?r.id:r.params.get("task"),taskId=isTaskId(linked)?linked:null;
   const viewHash=routeHash(r,null),sameView=!fromLoad&&viewHash===panelState.rendered;
   if(r.name!=="task"){panelState.lastView=viewHash;panelState.rendered=viewHash}
@@ -435,14 +448,18 @@ function applyRoute(moveFocus,fromLoad){
   if(taskId&&(taskId!==panelState.shown||(fromLoad&&state.loads===1)))openDetail(taskId);else if(!taskId)closePanel(true);
   else document.querySelector("#app").classList.toggle("task-page",r.name==="task");
   document.querySelectorAll("[data-view]").forEach(v=>{v.hidden=v.dataset.view!==r.name});
-  document.querySelectorAll("[data-nav]").forEach(a=>{if(a.dataset.nav===r.name)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current")});
+  const nav=NAV_OF[r.name]||r.name;
+  document.querySelectorAll("[data-nav]").forEach(a=>{if(a.dataset.nav===nav)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current")});
   if(sameView){shellTitle(r);return}
-  if(r.name==="home"){
+  if(r.name==="portfolio"){
     filtersFromUrl(r.params);
     const sort=r.params.get("sort")==="due_date"?"due_date":"criticality";
     if(sort!==state.sort){state.sort=sort;load();return}
-    document.querySelector('[data-nav="home"]').setAttribute("href",routeHash(r,null));
+    setPortfolioLinks(routeHash(r,null));
     render();
+  }else if(r.name==="home"){
+    renderHome();
+    if(isOwner()&&(!fromLoad||state.inboxLoads===undefined))openInbox();
   }else if(r.name==="my-work")renderMyWork();
   else if(r.name==="projects")renderProjects();
   else if(r.name==="inbox"&&(!fromLoad||state.inboxLoads===undefined))openInbox();
@@ -480,6 +497,90 @@ function renderProjects(){
   document.querySelector("#projects-body").innerHTML=`<h2>Projects <span class="count">${state.projects.length}</span></h2>`+
     (rows?`<ul class="project-list">${rows}</ul>`:`<p class="empty">No projects yet.${state.user&&state.user.global_role==="owner"?" Use New project to start one.":" You see a project once you are added to it."}</p>`);
 }
+// VPYGY5: the Command Center. Everything is drawn from what is already loaded (tasks, projects, the Owner's
+// cached requests) plus /api/portfolio; each count links to the list behind it, and rows open the task panel.
+function isOwner(){return !!state.user&&state.user.global_role==="owner"}
+function isOpen(t){return !CLOSED_STATUSES.includes(t.status)}
+function hhmm(){return new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}
+function homeTiles(){
+  const open=(state.tasks||[]).filter(isOpen),n=f=>open.filter(f).length;
+  return [
+    ["overdue","Overdue","red",n(t=>t.due_state==="overdue"),"#/portfolio?due=overdue&open=1","Open work past its due date"],
+    ["blocked","Blocked","purple",n(t=>t.is_blocked),"#/portfolio?risk=blocked&open=1","Open work waiting on an unfinished predecessor"],
+    isOwner()&&["awaiting","Awaiting Owner","amber",(state.ownerRequests||[]).length,"#/inbox","Requests only you can decide"],
+    ["week","Due in 7 days","blue",n(t=>t.days_to_due!=null&&t.days_to_due>=0&&t.days_to_due<=7),"#/portfolio?due=7&open=1","Open work due today or in the next 7 days"],
+    ["critical","Critical path","red",n(t=>t.is_critical_path),"#/portfolio?risk=critical&open=1","Open tasks with no slack on a project's critical path"],
+    ["undated","Undated","gray",n(t=>t.due_state==="undated"),"#/portfolio?due=undated&open=1","Open tasks and steps without a due date"],
+  ].filter(Boolean);
+}
+function homeRow(t,chip){
+  return `<li class="home-row"><button type="button" class="link row-title" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>
+    <span class="work-meta">${escapeHtml(t.project_name||"")} · ${escapeHtml(t.owner_name||"Unassigned")}</span>${chip}</li>`;
+}
+function riskChip(t){
+  if(t.due_state==="overdue")return `<span class="tag" data-tone="red">▲ ${escapeHtml(dueText(t))}</span>`;
+  if(t.is_blocked)return `<span class="tag" data-tone="purple">⊘ Blocked</span>`;
+  if(t.is_critical_path)return `<span class="tag" data-tone="red">◆ Critical path</span>`;
+  return `<span class="tag" data-tone="amber">Delayed</span>`;
+}
+function riskRank(t){return t.due_state==="overdue"?0:t.is_blocked?1:t.is_critical_path?2:3}
+function renderHome(){
+  const box=id=>document.querySelector(id),owner=isOwner(),tasks=state.tasks||[],projects=state.projects||[];
+  const empty=!projects.length;
+  box("#home-empty").hidden=!empty;box("#home-strip").hidden=box("#home-grid").hidden=box("#home-portfolio-card").hidden=empty;
+  if(empty){
+    box("#home-empty").innerHTML=`<div class="card empty-state"><h2>No projects yet</h2>${owner
+      ?'<p>Start a project to see its health, decisions and deadlines here.</p><a class="button-link primary" href="#/projects">Go to Projects</a>'
+      :"<p>You will see work here once the App Owner adds you to a project.</p>"}</div>`;
+  }
+  const at=hhmm();
+  box("#home-strip").innerHTML=homeTiles().map(([key,label,tone,count,href,def])=>
+    `<a class="tile" data-tile="${key}" data-tone="${tone}" href="${href}"><strong>${count}</strong><span class="tile-label">${escapeHtml(label)}</span><span class="tile-def">${escapeHtml(def)} · as of ${escapeHtml(at)}</span></a>`).join("");
+  // Needs Owner decision: owners only, with the live Approve / Reject of the Inbox.
+  box("#home-decisions-card").hidden=!owner||empty;
+  if(owner){
+    const reqs=state.ownerRequests||[],shown=reqs.slice(0,5);
+    box("#home-decisions").innerHTML=shown.length?`<ul class="home-list">${shown.map(r=>`<li class="decision-row">
+      <span class="avatar-sm" aria-hidden="true">${escapeHtml(initials(r.requested_by_name))}</span>
+      <div class="decision-main"><strong>${escapeHtml(requestTitle(r))}</strong>
+        <span class="work-meta">${escapeHtml(r.requested_by_name||"")} · ${escapeHtml(r.project_name||"")} · ${escapeHtml(new Date(r.requested_at).toLocaleString())}${r.reason?` · “${escapeHtml(r.reason)}”`:""}</span></div>
+      <div class="decision-actions">${r.task_id?`<button type="button" class="quiet" data-detail="${escapeHtml(r.task_id)}">Review</button>`:""}<button type="button" data-home-decision="approved" data-request-id="${escapeHtml(r.id)}">Approve</button><button type="button" class="quiet" data-home-decision="rejected" data-request-id="${escapeHtml(r.id)}">Reject</button></div></li>`).join("")}</ul>${reqs.length>shown.length?`<p class="fine"><a href="#/inbox">${reqs.length-shown.length} more in the Inbox</a></p>`:""}`
+      :'<p class="empty-line">Nothing is waiting for your decision.</p>';
+  }
+  // My next actions: my open work, soonest first, grouped Today (overdue and today) / This week / Later.
+  const me=state.user&&state.user.id,mine=tasks.filter(t=>t.owner_user_id===me&&isOpen(t))
+    .sort((a,b)=>String(a.due_date||"9999").localeCompare(String(b.due_date||"9999")));
+  const when=t=>t.due_state==="overdue"||t.due_state==="today"?"Today":t.days_to_due!=null&&t.days_to_due<=7?"This week":"Later";
+  const next=mine.slice(0,7);
+  box("#home-next").innerHTML=next.length?["Today","This week","Later"].map(g=>{const rows=next.filter(t=>when(t)===g);
+    return rows.length?`<h3 class="group-head">${g}</h3><ul class="home-list">${rows.map(t=>homeRow(t,`<span class="due-chip" data-due="${workGroup(t)}">${escapeHtml(dueText(t)||"No due date")}</span>`)).join("")}</ul>`:""}).join("")+
+    (mine.length>next.length?`<p class="fine"><a href="#/my-work">${mine.length-next.length} more in My Work</a></p>`:"")
+    :'<p class="empty-line">Nothing is assigned to you. Tasks you own show up here, soonest first.</p>';
+  // At risk: overdue, blocked, critical path or delayed, worst first.
+  const risk=tasks.filter(t=>isOpen(t)&&isAtRisk(t)).sort((a,b)=>riskRank(a)-riskRank(b)||(a.days_to_due??9999)-(b.days_to_due??9999));
+  box("#home-risk").innerHTML=risk.length?`<ul class="home-list">${risk.slice(0,6).map(t=>homeRow(t,riskChip(t))).join("")}</ul>${risk.length>6?`<p class="fine"><a href="#/portfolio?risk=atrisk&amp;open=1">${risk.length-6} more at risk</a></p>`:""}`
+    :'<p class="empty-line">Nothing is overdue, blocked, delayed or on the critical path.</p>';
+  // This week: open items due on each of the next 7 days.
+  const days=[...Array(7)].map((_,i)=>{const d=new Date();d.setDate(d.getDate()+i);return {i,d,n:tasks.filter(t=>isOpen(t)&&t.days_to_due===i).length}});
+  const peak=Math.max(1,...days.map(x=>x.n));
+  box("#home-week").innerHTML=`<ol class="week-strip">${days.map(({i,d,n})=>`<li class="week-day${i===0?" is-today":""}"><span class="week-bar" data-h="${Math.round(n/peak*4)}" aria-hidden="true"></span><strong>${n}</strong><span>${escapeHtml(d.toLocaleDateString(undefined,{weekday:"short",day:"numeric"}))}</span><span class="sr-only"> open item${n===1?"":"s"} due</span></li>`).join("")}</ol>`;
+  if(!empty)renderHomePortfolio();
+}
+async function renderHomePortfolio(){
+  const box=document.querySelector("#home-portfolio");
+  try{
+    const {portfolio}=await api("/api/portfolio");
+    box.innerHTML=(portfolio||[]).length?`<div class="entity-cards">${portfolio.map(b=>{
+      const budgets=Object.entries(b.budgets||{}).map(([c,a])=>`<span>${escapeHtml(c)} <strong>${Number(a).toLocaleString()}</strong></span>`).join("")||'<span class="muted">No budget set</span>';
+      return `<div class="entity-card"><h3>${escapeHtml(b.entity_name)}</h3><p class="work-meta">${b.project_count} project${b.project_count===1?"":"s"} · ${b.open} open · ${b.overdue} overdue · ${b.critical} critical</p><div class="entity-budget">${budgets}</div></div>`}).join("")}</div>
+      <p class="fine">Each project is counted once, under its primary entity. Budgets are per currency, never blended.</p>`
+      :'<p class="empty-line">No projects are filed under an entity yet.</p>';
+  }catch(err){box.innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`}
+}
+document.querySelector("#home-view").addEventListener("click",e=>{
+  const d=e.target.closest("[data-home-decision]");if(d){decideOwnerRequest(d.dataset.requestId,d.dataset.homeDecision,"home-decision-error");return}
+  const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail);
+});
 document.querySelector("#my-work-body").addEventListener("click",e=>{const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail)});
 // Capture: the task form with the optional fields folded away; the Home project filter is preselected.
 function openCapture(){
@@ -541,7 +642,7 @@ document.querySelector("#close-project").onclick=async()=>{
   }
 };
 // PZTYC9: a filter change rewrites the Home link (replaceState, so Back leaves the screen) and re-renders.
-for(const id of ["project-filter","status-filter","entity-filter","crit-filter","band-filter"]){document.querySelector(`#${id}`).onchange=filtersChanged}document.querySelector("#open-only").onchange=filtersChanged;document.querySelector("#owner-filter").oninput=filtersChanged;
+for(const id of ["project-filter","status-filter","entity-filter","crit-filter","band-filter","risk-filter"]){document.querySelector(`#${id}`).onchange=filtersChanged}document.querySelector("#open-only").onchange=filtersChanged;document.querySelector("#owner-filter").oninput=filtersChanged;
 // QY0WG2: changing the sort re-fetches the list in the chosen server-side order.
 document.querySelector("#sort-filter").onchange=e=>{state.sort=e.target.value;syncFilters();load()};
 document.querySelector("#new-project").onclick=()=>document.querySelector("#project-dialog").showModal();document.querySelector("#new-task").onclick=openCapture;
@@ -721,7 +822,7 @@ function renderFinalResults(results,filters){
 }
 document.querySelector("#export-btn").onclick=()=>{
   const p=new URLSearchParams();
-  const map={project_id:"#project-filter",status:"#status-filter",entity_id:"#entity-filter",criticality:"#crit-filter",band:"#band-filter",owner:"#owner-filter",sort:"#sort-filter"};
+  const map={project_id:"#project-filter",status:"#status-filter",entity_id:"#entity-filter",criticality:"#crit-filter",band:"#band-filter",risk:"#risk-filter",owner:"#owner-filter",sort:"#sort-filter"};
   for(const k in map){const v=document.querySelector(map[k]).value;if(v)p.set(k,v)}
   if(document.querySelector("#open-only").checked)p.set("open_only","1");
   p.set("format","csv");
@@ -749,6 +850,7 @@ async function openInbox(){
     ]);
     state.notifications=data.notifications;state.unread=data.unread;updateBell();
     renderInbox(data.notifications,ownerQueue.requests);
+    if(currentRoute().name==="home")renderHome();   // Home shows the same cached requests
   }catch(err){document.querySelector("#inbox-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`}
 }
 function renderInbox(items,requests=[]){
@@ -806,15 +908,15 @@ function requestConflictText(id,decision){
 }
 // Open task stacks the task over the inbox; if anything was saved there, show the inbox as it is now on Close.
 document.querySelector("#detail-dialog").addEventListener("close",()=>{if(currentRoute().name==="inbox"&&state.inboxLoads!==state.loads)openInbox()});
-async function decideOwnerRequest(id,decision){
+async function decideOwnerRequest(id,decision,errorId="inbox-error"){
   const reason=prompt(decision==="approved"?"Decision note (optional)":`Reason this request is ${decision}:`);
   if(reason===null)return;
   if(decision!=="approved"&&!reason.trim()){alert("A reason is required.");return}
-  const err=document.querySelector("#inbox-error");if(err)err.textContent="";
+  const box=()=>document.querySelector(`#${errorId}`),err=box();if(err)err.textContent="";
   try{await api(`/api/owner-action-requests/${id}/decision`,{method:"POST",body:JSON.stringify({decision,reason})});await load();await openInbox()}
   catch(x){
-    if(x.status===409){await load().catch(()=>{});await openInbox();showConflict(document.querySelector("#inbox-error"),requestConflictText(id,decision),x.message);return}
-    showConflict(document.querySelector("#inbox-error"),x.message);
+    if(x.status===409){await load().catch(()=>{});await openInbox();showConflict(box(),requestConflictText(id,decision),x.message);return}
+    showConflict(box(),x.message);
   }
 }
 async function markRead(id){
@@ -833,7 +935,7 @@ async function fillAssignees(projectId,select,selectedId){
   }catch{}
 }
 document.querySelector("#project-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{await api("/api/projects",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load()}catch(err){e.target.querySelector(".error").textContent=err.message}});
-document.querySelector("#task-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{const {task}=await api("/api/tasks",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load();if(task&&currentRoute().name==="home"&&!visibleTasks().some(t=>t.id===task.id))showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnHome)}catch(err){e.target.querySelector(".error").textContent=err.message}});
+document.querySelector("#task-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{const {task}=await api("/api/tasks",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load();if(task&&currentRoute().name==="portfolio"&&!visibleTasks().some(t=>t.id===task.id))showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnPortfolio)}catch(err){e.target.querySelector(".error").textContent=err.message}});
 const STATUSES=["draft","assigned","in_progress","submitted","changes_requested","completed","on_hold","delayed","cancelled","abandoned","reopened"];
 const CRITICALITIES=[["","Unrated"],["critical","Critical"],["high","High"],["normal","Normal"],["low","Low"]];
 const GOVERNED=["submitted","completed","on_hold","reopened"];

@@ -98,14 +98,24 @@ This first vertical slice provides:
   account menu (People and access for owners, Keyboard shortcuts, Sign out, Sign out
   everywhere; signing out reloads the page, so nothing of the last person's session stays on
   screen). There are no page-wide single-key shortcuts. Each
-  screen has its own link (`#/home`, `#/my-work`, `#/inbox`, `#/projects`). The Home filters
-  live in that link, so reload, Back and a shared link keep them; active filters show as
-  removable chips beside "Showing X of Y", with Clear all. My Work lists your open tasks by
-  due date; the Inbox is a page (Approve and Reject work there); Projects lists the projects
-  you can see and opens one on Home; Capture adds a task with a title and project (the other
-  fields fold under More fields) and says so if the current filters hide it. Portfolio, Final
+  screen has its own link (`#/home`, `#/portfolio`, `#/my-work`, `#/inbox`, `#/projects`).
+  The portfolio timeline (`#/portfolio`, under Projects) holds the filters, the Portfolio
+  Gantt and the schedule table; its filters live in the link, so reload, Back and a shared
+  link keep them (older `#/home?...` filter links are sent there), and active filters show as
+  removable chips beside "Showing X of Y", with Clear all. Its Risk filter (at risk, blocked,
+  critical path) and "No due date" option also narrow Export CSV. My Work lists your open
+  tasks by due date; the Inbox is a page (Approve and Reject work there); Projects lists the
+  projects you can see; Capture adds a task with a title and project (the other fields fold
+  under More fields) and says so if the current filters hide it. Portfolio by entity, Final
   results, Templates, Import, Export CSV and, with one project selected, Project history,
-  Save project as template and Close project are in the Home "More" menu;
+  Save project as template and Close project are in the portfolio timeline's "More" menu;
+- a Command Center Home: six health tiles (Overdue, Blocked, Awaiting Owner for owners, Due in
+  7 days, Critical path, Undated), each stating what it counts and when, and each opening the
+  matching filtered list; for owners, "Needs Owner decision" with working Approve and Reject
+  and a Review button that opens the task; "My next actions" (Today, This week, Later); "At
+  risk" (overdue, blocked, critical path or delayed, worst first); a "This week" strip of open
+  items due per day; and "Portfolio by entity". A new install shows one "No projects yet"
+  card instead;
 - a task panel docked on the right: a task opens beside the current screen, which stays
   visible and usable, and has a link of its own (`?task=<id>` on that screen, or
   `#/task/<id>` as a full page) that survives reload and Back/Forward and can be copied with

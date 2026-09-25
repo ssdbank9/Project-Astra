@@ -70,7 +70,7 @@ def _csv_cell(value) -> str:
 # does not narrow the rows and is left out.
 _FILTER_LABELS = {
     "project_id": "project", "entity_id": "entity", "status": "status", "criticality": "criticality",
-    "owner": "owner", "band": "band", "open_only": "open-only", "type": "type", "from": "from",
+    "owner": "owner", "band": "band", "risk": "risk", "open_only": "open-only", "type": "type", "from": "from",
     "to": "to", "q": "search",
 }
 _FILTER_VALUE_MAX = 40
@@ -205,7 +205,7 @@ class AstraHandler(BaseHTTPRequestHandler):
             if path == "/api/export":
                 user, _ = self._require_user()
                 query = parse_qs(urlparse(self.path).query)
-                filters = {k: query.get(k, [None])[0] for k in ("project_id", "status", "entity_id", "criticality", "owner", "band", "sort")}
+                filters = {k: query.get(k, [None])[0] for k in ("project_id", "status", "entity_id", "criticality", "owner", "band", "risk", "sort")}
                 filters["open_only"] = query.get("open_only", ["0"])[0] in ("1", "true")
                 export = self.service.export_tasks(user, filters)
                 if query.get("format", [""])[0] == "csv":

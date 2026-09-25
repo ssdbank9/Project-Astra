@@ -646,6 +646,26 @@ class AstraWebTests(unittest.TestCase):
         _, by_due = self.request("GET", f"/api/tasks?project_id={pid}&sort=due_date", cookie=cookie)
         self.assertEqual([t["title"] for t in by_due["tasks"]], ["Low soon", "Crit late"])
 
+    def test_export_applies_the_home_tile_filters(self):
+        # VPYGY5: the Risk filter and "No due date" behind the Home tiles narrow the export the same way.
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "Tiles"}, cookie=cookie, csrf=csrf)
+        pid = project["project"]["id"]
+        _, first = self.request("POST", "/api/tasks", {"project_id": pid, "title": "First", "due_date": "2099-01-01"}, cookie=cookie, csrf=csrf)
+        _, second = self.request("POST", "/api/tasks", {"project_id": pid, "title": "Second", "due_date": "2099-02-01"}, cookie=cookie, csrf=csrf)
+        self.request("POST", "/api/tasks", {"project_id": pid, "title": "Undated"}, cookie=cookie, csrf=csrf)
+        self.request("POST", "/api/task-dependencies", {"predecessor_task_id": first["task"]["id"],
+                                                        "successor_task_id": second["task"]["id"]}, cookie=cookie, csrf=csrf)
+        titles = lambda q: sorted(t["title"] for t in self.request("GET", f"/api/export?project_id={pid}&{q}", cookie=cookie)[1]["export"]["tasks"])
+        self.assertEqual(titles("band=undated"), ["Undated"])
+        self.assertEqual(titles("risk=blocked"), ["Second"])
+        self.assertIn("Second", titles("risk=atrisk"))
+        self.assertNotIn("Undated", titles("risk=atrisk"))
+        self.connection.request("GET", f"/api/export?project_id={pid}&risk=blocked&format=csv", None, {"Cookie": cookie})
+        response = self.connection.getresponse()
+        self.assertIn("__risk=blocked", response.getheader("Content-Disposition"))
+        response.read()
+
     def test_search_and_export_over_http(self):
         cookie, csrf = self._owner_session()
         _, project = self.request("POST", "/api/projects", {"name": "Findable"}, cookie=cookie, csrf=csrf)
@@ -1973,17 +1993,45 @@ globalThis.history={replaceState(a,b,url){calls.push(["replace",url]);location.h
 // Seed what the menu wiring reads at load time.
 document.querySelector("#more-btn").setAttribute("aria-controls","more-menu");document.querySelector("#more-menu").hidden=true;
 document.querySelector("#detail-dialog").hidden=true;
-(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel};");
+(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel,renderHome};");
 const a=globalThis.__a,out={},tick=()=>new Promise(r=>setTimeout(r,0));
 const keydown=(key,target,extra={})=>{const e={key,target,ctrlKey:false,metaKey:false,altKey:false,defaultPrevented:false,prevented:false,preventDefault(){this.prevented=true;this.defaultPrevented=true},stopPropagation(){},...extra};(docListeners.keydown||[]).forEach(f=>f(e));return e.prevented};
+const U1="11111111-1111-4111-8111-111111111111",U2="22222222-2222-4222-8222-222222222222",U3="33333333-3333-4333-8333-333333333333";
 (async()=>{
+if(mode==="home"){
+  // VPYGY5: the Command Center drawn from loaded tasks, for an owner, a member and an empty install.
+  const T=(o)=>({project_id:"p1",project_name:"P",owner_name:"Sara",status:"in_progress",due_state:"scheduled",days_to_due:20,due_date:"2026-10-20",is_blocked:false,is_critical_path:false,owner_user_id:"u2",...o});
+  a.state.projects=[{id:"p1",name:"P"}];
+  a.state.tasks=[T({id:"t1",title:"Late <img src=x onerror=alert(1)>",owner_user_id:"u1",due_state:"overdue",days_to_due:-3,due_date:"2026-09-22"}),
+    T({id:"t2",title:"Waiting",is_blocked:true}),T({id:"t3",title:"Tight",is_critical_path:true,days_to_due:2}),
+    T({id:"t4",title:"No date",due_state:"undated",days_to_due:null,due_date:null,owner_user_id:"u1"}),
+    T({id:"t5",title:"Soon",owner_user_id:"u1",days_to_due:3}),T({id:"t6",title:"Now",owner_user_id:"u1",due_state:"today",days_to_due:0}),
+    T({id:"t7",title:"Done late",status:"completed",due_state:"closed",days_to_due:-9,is_critical_path:true})];
+  a.state.ownerRequests=[{id:"r1",action:"update_task_status",task_id:U1,task_title:"<b>Tax</b>",project_name:"P",requested_by_name:"Mia Manager",requested_at:"2026-09-23T10:00:00Z",reason:"why",payload:{status:"cancelled"}}];
+  const q=s=>document.querySelector(s),grab=()=>({strip:q("#home-strip").innerHTML,decisions:q("#home-decisions").innerHTML,decisionsHidden:q("#home-decisions-card").hidden,
+    next:q("#home-next").innerHTML,risk:q("#home-risk").innerHTML,week:q("#home-week").innerHTML,empty:q("#home-empty").hidden,grid:q("#home-grid").hidden});
+  a.state.user={id:"u1",display_name:"Aly J",global_role:"owner"};a.renderHome();out.owner=grab();
+  a.state.user={id:"u1",display_name:"Omar M",global_role:"member"};a.renderHome();out.member=grab();
+  a.state.projects=[];a.renderHome();out.emptyMember=grab();
+  a.state.user={id:"u1",display_name:"Aly J",global_role:"owner"};a.renderHome();out.emptyOwner=grab();
+  // Approve and Review on Home go through the same calls as the Inbox.
+  globalThis.prompt=()=>"ok";fetches.splice(0);
+  const home=q("#home-view"),click=m=>home._listeners.click[0]({target:{closest:s=>m[s]||null}});
+  click({"[data-home-decision]":{dataset:{requestId:"r1",homeDecision:"approved"}}});
+  click({"[data-detail]":{dataset:{detail:U1}}});
+  await tick();out.clicks=fetches.slice();
+  // Old #/home?<filters> links land on the portfolio timeline.
+  a.state.projects=[{id:"p1",name:"P"}];location.hash="#/home?due=7&open=1";calls.splice(0);
+  try{a.applyRoute(false,false)}catch(e){out.routeError=String(e)}
+  out.redirect=[calls.filter(c=>c[0]==="replace").slice(0,1),location.hash];
+  process.stdout.write(JSON.stringify(out));return;
+}
 if(mode!=="main"){
   for(let i=0;i<10;i++)await tick();
   out.login=document.querySelector("#login").hidden;out.app=document.querySelector("#app").hidden;
   out.toast=document.querySelector("#toast").innerHTML;out.fetches=fetches.slice(0,1);
   process.stdout.write(JSON.stringify(out));return;
 }
-const U1="11111111-1111-4111-8111-111111111111",U2="22222222-2222-4222-8222-222222222222",U3="33333333-3333-4333-8333-333333333333";
 const panel=document.querySelector("#detail-dialog"),app=document.querySelector("#app");
 let closes=0;panel.addEventListener("close",()=>closes++);
 const snap=()=>({hash:location.hash,hidden:panel.hidden,app:app._classes(),calls:calls.splice(0),closes,full:document.querySelector("#detail-full").getAttribute("href"),focused:globalThis.__focused||null});
@@ -1995,7 +2043,7 @@ a.filtersFromUrl(new URLSearchParams("project=p1&status=delayed&entity=e1&crit=u
 out.values=["#project-filter","#status-filter","#entity-filter","#crit-filter","#band-filter","#owner-filter","#sort-filter"].map(s=>document.querySelector(s).value);
 out.open=document.querySelector("#open-only").checked;
 out.query=a.homeQuery();a.syncFilters();
-out.replaced=calls.splice(0);out.homeHref=document.querySelector('[data-nav="home"]').getAttribute("href");
+out.replaced=calls.splice(0);out.homeHref=a.state.portfolioHash;
 a.filtersFromUrl(new URLSearchParams(""));out.cleared=a.homeQuery();out.sortDefault=document.querySelector("#sort-filter").value;
 out.hashchange=typeof globalThis.__on_hashchange;out.pushState=typeof history.pushState;
 a.state.user=null;out.noUser=a.applyRoute(true)===undefined;
@@ -2036,7 +2084,7 @@ a.openPanel(U1);gone.isConnected=false;
 const again=document.querySelector(`[data-view]:not([hidden]) .link[data-detail="${U1}"]`)||(store[`[data-view]:not([hidden]) .link[data-detail="${U1}"]`]=el("replacement"));
 a.closePanel(false);out.reopenedFocus=snap();
 // M2: a filter picked while the panel is open survives closing it.
-location.hash="#/home";calls.splice(0);document.querySelector("#body").focus();
+location.hash="#/portfolio";calls.splice(0);document.querySelector("#body").focus();
 a.openPanel(U1);document.querySelector("#crit-filter").value="critical";a.syncFilters();out.filterWhileOpen=snap();
 a.closePanel(false);out.filterKept=snap();
 document.querySelector("#crit-filter").value="";
@@ -2050,8 +2098,8 @@ a.closePanel(false);out.closeTwice=snap();
 out.links=[a.taskLink("a/b"),a.taskApi("a/b","/events"),a.routeHash(a.parseRoute("#/home?due=7&task=x"),null),a.routeHash(a.parseRoute("#/my-work"),"y z")];
 // L1: a link whose task id is not a task id fetches nothing; the first load after sign-in fetches the task again.
 a.state.user={id:"u",display_name:"A B",global_role:"owner"};a.state.projects=[];a.state.tasks=[];
-fetches.splice(0);location.hash="#/home?task=..%2F..%2Fapi%2Fusers";a.applyRoute(false,false);out.badIdFetches=fetches.slice();
-a.closePanel(true);a.panelState.shown=U1;panel.hidden=false;fetches.splice(0);location.hash="#/home?task="+U1;a.state.loads=1;a.applyRoute(false,true);
+fetches.splice(0);location.hash="#/my-work?task=..%2F..%2Fapi%2Fusers";a.applyRoute(false,false);out.badIdFetches=fetches.slice();
+a.closePanel(true);a.panelState.shown=U1;panel.hidden=false;fetches.splice(0);location.hash="#/my-work?task="+U1;a.state.loads=1;a.applyRoute(false,true);
 out.firstLoadFetches=fetches.slice();
 // Re-review: j/k follow the screen's own order of task links (deduplicated).
 const realQSA=document.querySelectorAll;
@@ -2117,8 +2165,9 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertTrue(self.out["open"])
         query = "project=p1&status=delayed&entity=e1&crit=unrated&due=7&owner=Sara+K&sort=due_date&open=1"
         self.assertEqual(self.out["query"], query)
-        self.assertEqual(self.out["replaced"], [["replace", "#/home?" + query]])
-        self.assertEqual(self.out["homeHref"], "#/home?" + query)
+        # VPYGY5: the filtered dashboard is #/portfolio; Home is the Command Center.
+        self.assertEqual(self.out["replaced"], [["replace", "#/portfolio?" + query]])
+        self.assertEqual(self.out["homeHref"], "#/portfolio?" + query)
         self.assertEqual(self.out["cleared"], "")
         self.assertEqual(self.out["sortDefault"], "criticality")
 
@@ -2179,6 +2228,49 @@ class AstraShellRouterTests(unittest.TestCase):
         out = _run_shell_driver("boot-me-fails")
         self.assertFalse(out["login"])
 
+    def test_home_command_center_for_owner_member_and_empty_install(self):
+        out = _run_shell_driver("home")
+        owner, member = out["owner"], out["member"]
+        tiles = dict(re.findall(r'data-tile="(\w+)" data-tone="\w+" href="([^"]+)"><strong>(\d+)</strong>', owner["strip"]) and
+                     [(k, (h, int(n))) for k, h, n in re.findall(r'data-tile="(\w+)" data-tone="\w+" href="([^"]+)"><strong>(\d+)</strong>', owner["strip"])])
+        self.assertEqual(tiles, {
+            "overdue": ("#/portfolio?due=overdue&open=1", 1), "blocked": ("#/portfolio?risk=blocked&open=1", 1),
+            "awaiting": ("#/inbox", 1), "week": ("#/portfolio?due=7&open=1", 3),
+            "critical": ("#/portfolio?risk=critical&open=1", 1), "undated": ("#/portfolio?due=undated&open=1", 1)})
+        self.assertIn("Open work past its due date · as of ", owner["strip"])
+        # Owner decisions: live buttons, a Review that opens the task, text escaped.
+        self.assertFalse(owner["decisionsHidden"])
+        self.assertIn('data-home-decision="approved" data-request-id="r1"', owner["decisions"])
+        self.assertIn('data-home-decision="rejected" data-request-id="r1"', owner["decisions"])
+        self.assertIn(f'data-detail="{U1}">Review</button>', owner["decisions"])
+        self.assertIn("&lt;b&gt;Tax&lt;/b&gt;", owner["decisions"])
+        self.assertEqual(out["clicks"][:2], ["/api/owner-action-requests/r1/decision", f"/api/tasks/{U1}"])
+        # My next actions: my open work grouped Today / This week / Later; closed work never shows.
+        nxt = owner["next"]
+        self.assertLess(nxt.index(">Today<"), nxt.index('data-detail="t1"'))
+        self.assertLess(nxt.index('data-detail="t6"'), nxt.index(">This week<"))
+        self.assertLess(nxt.index(">This week<"), nxt.index('data-detail="t5"'))
+        self.assertLess(nxt.index(">Later<"), nxt.index('data-detail="t4"'))
+        self.assertNotIn('data-detail="t2"', nxt)
+        self.assertIn("Late &lt;img src=x onerror=alert(1)&gt;", nxt)
+        # At risk: worst first, open only.
+        risk = owner["risk"]
+        self.assertEqual(re.findall(r'data-detail="(t\d)"', risk), ["t1", "t2", "t3"])
+        self.assertIn("▲ 3 days overdue", risk)
+        self.assertIn("⊘ Blocked", risk)
+        self.assertIn("◆ Critical path", risk)
+        self.assertEqual(len(re.findall(r'class="week-day', owner["week"])), 7)
+        # A member sees no Awaiting Owner tile and no decisions.
+        self.assertNotIn('data-tile="awaiting"', member["strip"])
+        self.assertTrue(member["decisionsHidden"])
+        # A new install: one empty state, with the next step only for the owner.
+        self.assertFalse(out["emptyOwner"]["empty"])
+        self.assertTrue(out["emptyOwner"]["grid"])
+        self.assertTrue(out["emptyMember"]["decisionsHidden"])
+        # Old dashboard links move to the portfolio timeline.
+        self.assertNotIn("routeError", out)
+        self.assertEqual(out["redirect"], [[["replace", "#/portfolio?due=7&open=1"]], "#/portfolio?due=7&open=1"])
+
     def test_shell_landmarks_rail_top_bar_and_menus(self):
         html = self.html
         self.assertIn('<nav class="rail" aria-label="Main">', html)
@@ -2202,7 +2294,7 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertNotIn("<button", toolbar)
         self.assertNotIn('id="inbox-dialog"', html)
         self.assertRegex(html, r'data-view="inbox"[^>]*><div id="inbox-body"')
-        self.assertRegex(html, r'data-view="projects"[^>]*>\s*<div class="page-actions"><button type="button" id="new-project" hidden>')
+        self.assertRegex(html, r'data-view="projects"[^>]*>\s*<div class="page-actions"><a class="quiet button-link portfolio-link" href="#/portfolio">Portfolio timeline</a><button type="button" id="new-project" hidden>')
         self.assertIn("Portfolio Gantt", html)
         self.assertIn('<dialog id="keys-dialog"', html)
         self.assertIn('<div id="toast" class="toast" role="status" aria-live="polite"></div>', html)
@@ -2211,7 +2303,7 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertIn('<h2 id="task-dialog-title">Capture a task</h2>', self.html)
         self.assertIn('<details class="more-fields"><summary>More fields</summary>', self.html)
         self.assertIn('document.querySelector("#new-task").onclick=openCapture;', self.js)
-        self.assertIn('showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnHome)', self.js)
+        self.assertIn('showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnPortfolio)', self.js)
         self.assertIn('data-request-decision="approved"', self.js)
 
 
@@ -2256,10 +2348,10 @@ class AstraTaskPanelTests(unittest.TestCase):
 
     def test_a_filter_picked_while_the_panel_is_open_survives_closing_it(self):
         # Lock #9 review M2.
-        self.assertEqual(self.out["filterWhileOpen"]["hash"], f"#/home?crit=critical&task={U1}")
+        self.assertEqual(self.out["filterWhileOpen"]["hash"], f"#/portfolio?crit=critical&task={U1}")
         kept = self.out["filterKept"]
-        self.assertEqual(kept["calls"], [["replace", "#/home?crit=critical"]])
-        self.assertEqual(kept["hash"], "#/home?crit=critical")
+        self.assertEqual(kept["calls"], [["replace", "#/portfolio?crit=critical"]])
+        self.assertEqual(kept["hash"], "#/portfolio?crit=critical")
 
     def test_a_panel_opened_from_a_link_closes_without_leaving_the_app(self):
         self.assertEqual(self.out["linkOpen"]["calls"], [])

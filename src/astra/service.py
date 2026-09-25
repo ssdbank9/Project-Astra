@@ -1477,6 +1477,7 @@ class AstraService:
         criticality = filters.get("criticality") or None
         owner = (filters.get("owner") or "").lower()
         band = filters.get("band") or None
+        risk = filters.get("risk") or None
         open_only = bool(filters.get("open_only"))
         entity_projects = None
         if entity:
@@ -1501,6 +1502,16 @@ class AstraService:
             if band == "overdue" and t.get("due_state") != "overdue":
                 return False
             if band == "today" and t.get("due_state") != "today":
+                return False
+            # VPYGY5: the Home tiles' filters. Same rules as app.js matchesBand/matchesRisk.
+            if band == "undated" and t.get("due_state") != "undated":
+                return False
+            if risk == "blocked" and not t.get("is_blocked"):
+                return False
+            if risk == "critical" and not t.get("is_critical_path"):
+                return False
+            if risk == "atrisk" and not (t.get("due_state") == "overdue" or t.get("is_blocked")
+                                         or t.get("is_critical_path") or t["status"] == "delayed"):
                 return False
             if band and band.isdigit():
                 days = t.get("days_to_due")
