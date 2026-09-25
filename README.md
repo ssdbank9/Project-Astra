@@ -60,7 +60,12 @@ This first vertical slice provides:
   predecessor cannot move to In progress, be submitted or be accepted on any path (board, task
   panel or API): anyone but an owner is refused with "waits on …", and an owner confirms an
   override, recorded as `dependency_override` in the same transaction and noticed to the other
-  owners; and project closure is a separate
+  owners. Approving a request meets the same rules at decision time: each pending request in
+  the Inbox and on Home says what approving it would override ("Waits on …", "In progress is
+  at 3 of 3", a date past the project target), and Approve asks the owner to confirm each
+  one the server names, recording the override in the deciding owner's name
+  (`override_dependencies`, `override_wip` and `confirmed` on
+  `POST /api/owner-action-requests/<id>/decision`); and project closure is a separate
   App Owner-only event, with exceptional closure preserving a residual-work snapshot rather
   than silently completing unfinished tasks;
 - attachment-link and final-result mutations (add/remove, mark/unmark) are App Owner-only,
@@ -200,7 +205,9 @@ This first vertical slice provides:
   date past the project target (there are no milestones; the target stands in) first shows what
   it affects and applies only when confirmed; the confirmation is recorded as
   `schedule_impact_confirmed` in the same transaction as the move and the other owners are
-  told. The same rule applies when dates change in the task panel or through the API. A
+  told. The same rule applies when dates change in the task panel or through the API, when a
+  task is reopened with a revised due date, and when a schedule proposal is approved
+  (`confirmed` on `/reopen` and `/schedule-proposals/<id>/approve`). A
   finish-to-start link is broken only when the successor starts before the predecessor's
   due day, so a task due 12 Oct followed by one starting 12 Oct does not ask. Tasks that
   follow are not moved. Only an ordinary move (no consequences) offers Undo.
@@ -221,7 +228,9 @@ This first vertical slice provides:
   A bulk never replaces your own lock on a task you are already editing. A due-date shift
   with schedule consequences applies only with `confirmed` (the reviewed preview sends it).
   Undo (15 seconds) restores every task, or none if any changed since
-  (`bulk_change_undone`). API: `POST /api/projects/<id>/bulk/preview`, `/bulk/apply`
+  (`bulk_change_undone`). The write reads the board once before and once after the task
+  writes, so a 200-task change in a 1000-task project holds the database for well under a
+  second. API: `POST /api/projects/<id>/bulk/preview`, `/bulk/apply`
   (`expected_revisions` from the preview) and `/bulk/undo`;
 - work-in-progress limits (schema v20, `wip_limits`): an owner sets an optional limit per open
   board column per project (Limits… on the board; Draft, Ready, In progress, Blocked,
@@ -231,8 +240,8 @@ This first vertical slice provides:
   a board move, a bulk change or its Undo, a board Undo, the task panel's status, hold,
   submit, reopen and request-changes actions, creating a task and promoting a step to top
   level. Whatever would put more top-level open tasks in a column than its limit is refused
-  with the reason for anyone but an owner; an owner may go over it after a confirm, and an
-  owner's approval of a request counts as that confirm. Going over is recorded as
+  with the reason for anyone but an owner; an owner may go over it after a confirm, including
+  when approving a request (the request card shows the limit first). Going over is recorded as
   `wip_limit_override` in the same transaction and noticed to the other owners. Leaving a
   column is never limited. A card that enters Blocked because of a dependency (a link added,
   a predecessor reopened) is not refused, since nobody moved it: the column simply shows

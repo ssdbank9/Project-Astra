@@ -75,7 +75,7 @@ Locks so far:
   With it Gate 2 is complete (slices 1-7), apart from Aly's signoff.
 - Lock #12 (granted 12:56 UTC 2026-09-25, Slack ts 1790341004.453539): from `77fcfce`, the
   post-Gate-2 batch under the JQY55P 2026-09-19 owner decisions, **not pushed** at the time
-  of writing. Four commits:
+  of writing. Five commits:
   - `a2161a0` JN1QYG board drag and drop, Move to and 15-second Undo (schema v18,
     `tasks.board_rank`), with Aly's on-hold decision (ts 1790342529.695749: a project manager
     puts work on hold directly; leaving hold is still an Owner request).
@@ -86,8 +86,15 @@ Locks so far:
   - One fix commit for independent reviews 12a, 12b and 12c (each "approve with
     follow-ups", no High; one Medium each, all fixed). The dependency rule, the Gantt impact
     confirm and the WIP limit now hold on every path (board, panel, API, bulk, Undo), inside
-    the write transaction. A focused re-review of the fix commit is next.
-  - The three tickets are in review. Tests: `Ran 619 tests`, `OK`. Evidence (screenshots
+    the write transaction. That is `55ddf3c`.
+  - One fix commit for re-review 12d of `55ddf3c` ("approve with follow-ups": 0 High, 2
+    Medium, 2 Low, all fixed). A bulk change reads the board once before and once after its
+    writes (a 200-task change in a 1000-task project took 33 s under the write lock, now
+    about 0.2 s). Approving a request re-runs the dependency, WIP and date rules at decision
+    time and asks the owner to confirm each one; the Inbox and Home request cards show what
+    approving would override. Reopen with a new due date and approving a schedule proposal
+    ask about date consequences too.
+  - The three tickets are in review. Tests: `Ran 639 tests`, `OK`. Evidence (screenshots
     and a short video) lives in the session scratchpad, `lock12-shots/`.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
@@ -130,7 +137,8 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   change): `Ran 498 tests`, `OK`; with the review 10 fixes: `Ran 503 tests`, `OK`. With lock #11
   (Gate 2 slice 7, no schema change): `Ran 507 tests`, `OK`; with the review 11 fixes:
   `Ran 510 tests`, `OK`. With lock #12 (schema v18 to v20): `Ran 540`, `564` and `586`
-  tests after each feature commit, and `Ran 619 tests`, `OK` with the review 12a-12c fixes.
+  tests after each feature commit, `Ran 619 tests`, `OK` with the review 12a-12c fixes, and
+  `Ran 639 tests`, `OK` with the re-review 12d fixes.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 

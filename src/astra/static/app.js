@@ -789,8 +789,8 @@ function askMove(kind,t,column,err){
       `<ul class="impact-list">${((err&&err.impact)||[]).map(i=>`<li>${escapeHtml(i)}</li>`).join("")}</ul><p class="muted">Tasks that follow are not moved for you. The other owners are told once you confirm.</p>`,"Move anyway"],
     unlock:["Force unlock",`${escapeHtml(err&&err.lock?lockText(err.lock):"")} Unlocking lets others change ${name} now; anything they have not saved will be refused, and they are told.`,
       `<label>Reason (optional)<input name="reason" autocomplete="off"></label>`,"Unlock"],
-    wip:["Go over the limit",`${escapeHtml(((err&&err.impact)||[""])[0])} Move ${name} to ${COL_LABEL[column]} anyway? Going over is recorded and the other owners are told.`,"","Move anyway"],
-    dependencies:["Override dependency",`${name} waits on ${escapeHtml(((err&&err.impact)||[]).join(", "))}. Move it to ${COL_LABEL[column]} anyway? The override is recorded and the other owners are told.`,"","Move anyway"],
+    wip:["Go over the limit",`${escapeHtml(((err&&err.impact)||[""])[0])} Move ${name} to ${COL_LABEL[column]||"its new column"} anyway? Going over is recorded and the other owners are told.`,"","Move anyway"],
+    dependencies:["Override dependency",`${name} waits on ${escapeHtml(((err&&err.impact)||[]).join(", "))}. Move it to ${COL_LABEL[column]||"its new column"} anyway? The override is recorded and the other owners are told.`,"","Move anyway"],
   }[kind];
   f.innerHTML=`<h2 id="move-dialog-title">${view[0]}</h2><p>${view[1]}</p>${view[2]}<div class="error" id="move-error" role="alert"></div><div class="actions"><button type="button" class="quiet" data-move-cancel>Cancel</button><button type="submit">${view[3]}</button></div>`;
   if(kind==="hold")fillAssignees(t.project_id,f.querySelector('select[name="owner_user_id"]'),t.owner_user_id);
@@ -815,12 +815,14 @@ async function moveCard(t,column,beforeId=null){
   if(kind){const answer=await askMove(kind,t,column);if(!answer){boardAnnounce("Move cancelled.");return}extra=answer}
   const send=more=>api(`/api/tasks/${encodeURIComponent(t.id)}/board-move`,{method:"POST",body:JSON.stringify({to_column:column,expected_revision:t.revision,...extra,...more})});
   try{
-    // An owner confirms a dependency override and a work-in-progress override, one after the other.
+    // An owner confirms a dependency override and a work-in-progress override, one after the other;
+    // a reopen whose new due date has consequences confirms those too (review 12d L1).
     let out,more={};
     for(;;){
       try{out=await send(more);break}
       catch(err){
-        if(err.status!==409||!["dependencies","wip"].includes(err.confirm)||more[err.confirm==="wip"?"override_wip":"override_dependencies"])throw err;
+        const flag=CONFIRM_FLAGS[err.confirm];
+        if(err.status!==409||!flag||more[flag])throw err;
         const ok=await askMove(err.confirm,t,column,err);if(!ok){boardAnnounce("Move cancelled.");await load();return}
         more={...more,...ok};
       }
@@ -1302,7 +1304,7 @@ function renderHome(){
     box("#home-decisions").innerHTML=shown.length?`<ul class="home-list">${shown.map(r=>`<li class="decision-row">
       <span class="avatar-sm" aria-hidden="true">${escapeHtml(initials(r.requested_by_name))}</span>
       <div class="decision-main"><strong>${escapeHtml(requestTitle(r))}</strong>
-        <span class="work-meta">${escapeHtml(r.requested_by_name||"")} · ${escapeHtml(r.project_name||"")} · ${escapeHtml(new Date(r.requested_at).toLocaleString())}${r.reason?` · “${escapeHtml(r.reason)}”`:""}</span></div>
+        <span class="work-meta">${escapeHtml(r.requested_by_name||"")} · ${escapeHtml(r.project_name||"")} · ${escapeHtml(new Date(r.requested_at).toLocaleString())}${r.reason?` · “${escapeHtml(r.reason)}”`:""}</span>${requestGates(r)}</div>
       <div class="decision-actions">${r.task_id?`<button type="button" class="quiet" data-detail="${escapeHtml(r.task_id)}">Review</button>`:""}<button type="button" data-home-decision="approved" data-request-id="${escapeHtml(r.id)}">Approve</button><button type="button" class="quiet" data-home-decision="rejected" data-request-id="${escapeHtml(r.id)}">Reject</button></div></li>`).join("")}</ul>${reqs.length>shown.length?`<p class="fine"><a href="#/inbox">${reqs.length-shown.length} more in the Inbox</a></p>`:""}`
       :'<p class="empty-line">Nothing is waiting for your decision.</p>';
   }
@@ -1683,7 +1685,13 @@ function requestDetail(r){
   const change=r.action==="update_task_status"&&p.status
     ?`<p>Change status ${p.from_status?`from <strong>${escapeHtml(statusLabel(p.from_status))}</strong> `:""}to <strong>${escapeHtml(statusLabel(p.status))}</strong></p>`:"";
   const reason=r.reason?`<p><em>Reason: ${escapeHtml(r.reason)}</em></p>`:`<p class="muted">No reason given.</p>`;
-  return `<div class="request-detail">${change}${reason}</div>`;
+  return `<div class="request-detail">${change}${reason}${requestGates(r)}</div>`;
+}
+// Review 12d M2: what approving would override, shown before the owner clicks Approve. The
+// server checks the same rules again at decision time and asks the owner to confirm them.
+function requestGates(r){
+  const lines=(r.gates&&r.gates.lines)||[];
+  return lines.length?`<p class="request-gates"><strong>Approving overrides:</strong> ${lines.map(escapeHtml).join(" · ")}</p>`:"";
 }
 // 0D9Q3X: a 409 means the record moved on under the user; show the current one instead of the stale form.
 // The first line says what happened and what to do; the server's own reason follows on its own line.
@@ -1717,7 +1725,14 @@ async function decideOwnerRequest(id,decision,errorId="inbox-error"){
   if(reason===null)return;
   if(decision!=="approved"&&!reason.trim()){alert("A reason is required.");return}
   const box=()=>document.querySelector(`#${errorId}`),err=box();if(err)err.textContent="";
-  try{await api(`/api/owner-action-requests/${id}/decision`,{method:"POST",body:JSON.stringify({decision,reason})});await load();await openInbox()}
+  // Review 12d M2: an approval meets the same dependency, limit and date rules as acting
+  // directly; each one the server names is confirmed in turn, or the approval is left alone.
+  const r=(state.ownerRequests||[]).find(q=>q.id===id)||{};
+  const task=(state.tasks||[]).find(t=>t.id===r.task_id)||{title:r.task_title||r.project_name||"",project_id:r.project_id};
+  try{
+    const out=await withConfirms(task,(r.gates&&r.gates.column)||null,more=>api(`/api/owner-action-requests/${id}/decision`,{method:"POST",body:JSON.stringify({decision,reason,...more})}));
+    if(!out)return;
+    await load();await openInbox()}
   catch(x){
     if(x.status===409){await load().catch(()=>{});await openInbox();showConflict(box(),requestConflictText(id,decision),x.message);return}
     showConflict(box(),x.message);
@@ -2043,7 +2058,8 @@ async function decideSchedule(id,action,btn){
   const err=document.querySelector("#sched-error");if(err)err.textContent="";
   try{
     let outcome;
-    if(action==="approve"){outcome=await api(`/api/schedule-proposals/${id}/approve`,{method:"POST",body:"{}"});}
+    // Review 12d L1: approving new dates with consequences asks first, as on the chart.
+    if(action==="approve"){outcome=await withConfirms(state.tasks.find(t=>t.id===detailTaskId),null,more=>api(`/api/schedule-proposals/${id}/approve`,{method:"POST",body:JSON.stringify(more)}));if(!outcome)return}
     else{const reason=btn.parentElement.querySelector(".sched-reject-reason").value;outcome=await api(`/api/schedule-proposals/${id}/reject`,{method:"POST",body:JSON.stringify({reason})});}
     await load();await openDetail(detailTaskId);
     if(outcome.request){const current=document.querySelector("#sched-error");current.style.color="#0c7c86";current.textContent="Owner request created; the live schedule is unchanged."}

@@ -2467,6 +2467,16 @@ if(mode==="gantt"){
   out.banner=lockBanner(held,"",true);out.bannerNoForce=lockBanner(held,"",false);
   out.chipOther=boardCard(T({id:"c1",title:"Card",lock:held}),[],true);
   out.chipMine=boardCard(T({id:"c2",title:"Card",lock:{...held,holder_user_id:"u1"}}),[],true);
+  // Review 12d L2: Escape cancels a bar drag, puts the bar back and sends nothing.
+  const bar={classList:{remove(){},add(){}},style:{left:"55%",width:"9%"}};
+  Object.assign(a.gdrag,{bar,active:true,x0:10,w0:4,t,lease:null});posts.splice(0);
+  keydown("Escape",document.body);
+  out.escape=[a.gdrag.bar,a.gdrag.active,bar.style.left,bar.style.width,posts.filter(p=>p[0].endsWith("/reschedule")).length];
+  // An edit form left idle for a minute lets its lease go instead of renewing it.
+  reply=()=>null;posts.splice(0);
+  const idle={token:"tokI",kind:"edit",last:Date.now()-61000,timer:null};a.leases.set("g9",idle);
+  await renewLease("g9",idle);await flush();
+  out.idle=[a.leases.has("g9"),posts.splice(0).map(p=>[p[0],p[1]])];
   process.stdout.write(JSON.stringify(out));return;
 }
 if(mode==="bulk"){
@@ -2515,6 +2525,43 @@ if(mode==="bulk"){
   askBulk({...plan,wip:null,blocked:[{id:"c",title:"C <x>",reason:"is already Ready"}],counts:{ok:2,blocked:1}});out.dialogBlocked=document.querySelector("#move-form").innerHTML;
   askBulk({...plan,wip:{...plan.wip,can_override:false}});out.dialogWipManager=document.querySelector("#move-form").innerHTML;
   askBulk(plan);out.dialogWipOwner=document.querySelector("#move-form").innerHTML;
+  // Review 12d L2: what the preview lists is escaped, and going over a limit needs the tick.
+  const X='<img src=x onerror="globalThis.__xss=5">';
+  askBulk({...plan,wip:null,ok:[{id:"a",title:X,revision:3}],blocked:[{id:"c",title:X,reason:X}],impact:[{id:"a",title:X,impact:[X]}],counts:{ok:1,blocked:1}});
+  out.dialogXss=document.querySelector("#move-form").innerHTML;out.pickXss=pickBox({id:"z",title:X});
+  const pending=askBulk(plan),form=document.querySelector("#move-form"),tick=document.querySelector('[name="override_wip"]');
+  document.querySelector("#move-error").textContent="";tick.checked=false;form.onsubmit({preventDefault(){}});
+  out.tickError=document.querySelector("#move-error").textContent;tick.checked=true;form.onsubmit({preventDefault(){}});out.ticked=await pending;
+  // Only an owner sees Limits…; a member (no project management) sees no pick boxes.
+  location.hash="#/project/"+U1+"/board";
+  out.limitsManager=a.renderBoard(tasks,"").includes('id="wip-settings"');
+  a.state.user={...a.state.user,global_role:"owner"};out.limitsOwner=a.renderBoard(tasks,"").includes('id="wip-settings"');
+  a.state.user={...a.state.user,global_role:"member"};a.state.projects[0].can_manage=false;
+  const memberBoard=a.renderBoard(tasks,"");out.memberBoard=[memberBoard.includes("bulk-pick"),memberBoard.includes("wip-settings")];
+  a.state.projects[0].can_manage=true;
+  // Shift-click takes the range from the last box; Shift+Arrow adds the next box.
+  location.hash="#/project/"+U1+"/list";
+  const boxes=["a","b","c","d"].map(id=>{const b={dataset:{pick:id},checked:false,focus(){},matches:()=>false,closest:sel=>sel==="[data-pick]"?b:null};return b});
+  const realQSA=document.querySelectorAll;document.querySelectorAll=sel=>sel==="[data-pick]"?boxes:[];
+  a.bulk.ids=new Set();a.bulk.last=null;a.bulk.pid=U1;
+  const click=(b,shiftKey)=>{b.checked=!b.checked;(docListeners.click||[]).forEach(f=>{try{f({target:b,shiftKey,button:0,preventDefault(){},stopPropagation(){}})}catch{}})};
+  click(boxes[0],false);click(boxes[2],true);out.shiftClick=[...a.bulk.ids].sort();
+  a.bulk.ids=new Set();a.bulk.last=null;keydown("ArrowDown",boxes[1],{shiftKey:true});out.shiftArrow=[...a.bulk.ids].sort();
+  document.querySelectorAll=realQSA;
+  // Review 12d M2: the Inbox card names what approving overrides (escaped), and Approve confirms
+  // each rule the server names in turn; a cancelled confirm decides nothing.
+  a.state.user={id:"u9",display_name:"Aly",global_role:"owner"};
+  const req={id:"r1",action:"update_task_status",task_id:"a",task_title:"A",project_id:U1,project_name:"P",requested_by_name:"Sara",
+    requested_at:"2026-09-25T10:00:00Z",reason:"back",payload:{status:"in_progress",from_status:"on_hold"},
+    gates:{lines:["Waits on "+X,"In progress is at 1 of 1"],column:"progress"}};
+  a.renderInbox([],[req,{...req,id:"r2",gates:{lines:[],column:"progress"}}]);out.inboxGates=document.querySelector("#inbox-body").innerHTML;
+  globalThis.prompt=()=>"ok";globalThis.openInbox=async()=>{};
+  const asks=[];globalThis.askMove=async(kind,task,column)=>{asks.push([kind,task.title,column]);return kind==="wip"?{override_wip:true}:{override_dependencies:true}};
+  let n=0;posts.splice(0);
+  reply=u=>u.includes("/decision")?(++n===1?{status:409,body:{error:"waits",confirm:"dependencies",impact:["Pre"]}}:n===2?{status:409,body:{error:"full",confirm:"wip",impact:["full"]}}:{body:{request:{}}}):null;
+  await decideOwnerRequest("r1","approved");out.decisionPosts=posts.splice(0).filter(p=>p[0].includes("/decision")).map(p=>p[1]);out.decisionAsks=asks.splice(0);
+  globalThis.askMove=async()=>null;n=0;await decideOwnerRequest("r1","approved");
+  out.cancelledPosts=posts.splice(0).map(p=>p[0]);
   process.stdout.write(JSON.stringify(out));return;
 }
 if(mode==="work"){
@@ -3113,6 +3160,10 @@ class AstraGanttDragDriverTests(unittest.TestCase):
                                                   ["/api/tasks/g1/lock/release", {"token": "tok1"}]])
         self.assertEqual(self.out["refusedLease"], [False, "Sara <K>"])
 
+    def test_review_12d_escape_puts_the_bar_back_and_an_idle_form_lets_go(self):
+        self.assertEqual(self.out["escape"], [None, False, "10%", "4%", 0])
+        self.assertEqual(self.out["idle"], [False, [["/api/tasks/g9/lock/release", {"token": "tokI"}]]])
+
     def test_review_12b_leases_tip_lock_time_touch_and_escaping(self):
         self.assertEqual(self.out["borrow"], {"ok": True, "borrowed": True})
         self.assertEqual(self.out["afterDragDrop"], [True, 0])  # the edit lease is still held
@@ -3184,6 +3235,42 @@ class AstraBulkDriverTests(unittest.TestCase):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
         self.assertIn('body:JSON.stringify({limits:Object.fromEntries(changed.map(k=>[k,data[k]||null])),reason:data.reason})', js)
         self.assertNotIn("for(const k of changed)await api", js)
+
+    def test_review_12d_the_preview_and_pick_boxes_escape_what_they_show(self):
+        for html in (self.out["dialogXss"], self.out["pickXss"]):
+            self.assertNotIn("<img", html)
+        self.assertEqual(self.out["dialogXss"].count("&lt;img"), 5)  # ok, blocked title and reason, impact title and text
+        self.assertIn('aria-label="Select “&lt;img', self.out["pickXss"])
+
+    def test_review_12d_going_over_a_limit_needs_the_tick(self):
+        self.assertEqual(self.out["tickError"], "Tick “Go over the limit” to apply, or change fewer tasks.")
+        self.assertEqual(self.out["ticked"], {"override_wip": True})
+
+    def test_review_12d_limits_are_an_owners_and_pick_boxes_a_managers(self):
+        self.assertFalse(self.out["limitsManager"])
+        self.assertTrue(self.out["limitsOwner"])
+        self.assertEqual(self.out["memberBoard"], [False, False])
+
+    def test_review_12d_shift_click_and_shift_arrow_select_ranges(self):
+        self.assertEqual(self.out["shiftClick"], ["a", "b", "c"])
+        self.assertEqual(self.out["shiftArrow"], ["b", "c"])
+
+    def test_review_12d_the_inbox_card_shows_what_approving_overrides(self):
+        html = self.out["inboxGates"]
+        self.assertNotIn("<img", html)
+        self.assertIn('<p class="request-gates"><strong>Approving overrides:</strong> Waits on &lt;img', html)
+        self.assertIn(" · In progress is at 1 of 1</p>", html)
+        self.assertEqual(html.count("request-gates"), 1)  # a request that overrides nothing says nothing
+
+    def test_review_12d_approve_confirms_each_rule_in_turn(self):
+        self.assertEqual(self.out["decisionAsks"], [["dependencies", "A", "progress"], ["wip", "A", "progress"]])
+        self.assertEqual(self.out["decisionPosts"], [
+            {"decision": "approved", "reason": "ok"},
+            {"decision": "approved", "reason": "ok", "override_dependencies": True},
+            {"decision": "approved", "reason": "ok", "override_dependencies": True, "override_wip": True}])
+        self.assertEqual([p for p in self.out["cancelledPosts"] if "/decision" in p], [
+            "/api/owner-action-requests/r1/decision"])  # the first ask only; nothing more is sent
+        self.assertNotIn("load", self.out["cancelledPosts"])
 
     def test_the_preview_withholds_apply_until_it_can_succeed(self):
         blocked = self.out["dialogBlocked"]

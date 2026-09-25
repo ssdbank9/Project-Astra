@@ -337,8 +337,12 @@ class AstraHandler(BaseHTTPRequestHandler):
             if (path.startswith("/api/owner-action-requests/") and path.endswith("/decision")
                     and path.count("/") == 4):
                 request_id = path.split("/")[3]
+                # Review 12d M2: the owner confirms, at decision time, any rule the approval meets.
                 result = self.service.decide_owner_action_request(
-                    user, request_id, payload.get("decision", ""), payload.get("reason", "")
+                    user, request_id, payload.get("decision", ""), payload.get("reason", ""),
+                    override_dependencies=payload.get("override_dependencies") is True,
+                    override_wip=payload.get("override_wip") is True,
+                    confirmed=payload.get("confirmed") is True,
                 )
                 return self._json(result)
             if path.startswith("/api/users/") and path.endswith("/secondary-owner") and path.count("/") == 4:
@@ -406,7 +410,8 @@ class AstraHandler(BaseHTTPRequestHandler):
             if path.startswith("/api/tasks/") and path.endswith("/reopen"):
                 task_id = path.split("/")[3]
                 outcome = self.service.reopen_task(user, task_id, payload.get("reason", ""), payload.get("new_due_date"),
-                                                   override_wip=payload.get("override_wip") is True)
+                                                   override_wip=payload.get("override_wip") is True,
+                                                   confirmed=payload.get("confirmed") is True)
                 return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"task": outcome})
             if path.startswith("/api/tasks/") and path.endswith("/hold"):
                 task_id = path.split("/")[3]
@@ -435,7 +440,8 @@ class AstraHandler(BaseHTTPRequestHandler):
                 return self._json({"proposal": proposal}, HTTPStatus.CREATED)
             if path.startswith("/api/schedule-proposals/") and path.endswith("/approve"):
                 proposal_id = path.split("/")[3]
-                outcome = self.service.approve_schedule_proposal(user, proposal_id, payload.get("decision_reason", ""))
+                outcome = self.service.approve_schedule_proposal(user, proposal_id, payload.get("decision_reason", ""),
+                                                                 confirmed=payload.get("confirmed") is True)
                 return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"task": outcome})
             if path.startswith("/api/schedule-proposals/") and path.endswith("/reject"):
                 proposal_id = path.split("/")[3]

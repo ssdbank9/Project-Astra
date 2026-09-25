@@ -1166,48 +1166,55 @@ class AstraService:
     # original order and update_task calls them in that order.
     def update_task(self, actor: dict, task_id: str, payload: dict,
         *, owner_decision: OwnerDecision | None = None, move_kind: str | None = None,
-        audit_events: list | None = None,
+        audit_events: list | None = None, known_impact: list | None = None,
     ) -> dict:
         """``move_kind`` ("board" or "gantt") marks an ordinary move that may be undone; it is
         a keyword the board and Gantt paths pass, never read from the request payload.
-        ``audit_events`` are written in the same transaction as the change."""
+        ``audit_events`` are written in the same transaction as the change. ``known_impact``
+        is the Gantt's own reading of the new dates, so the project is loaded once."""
         before, expected_revision = self._authorize_task_update(actor, task_id, payload)
         fields = self._validate_task_update(before, payload)
         events = list(audit_events or [])
         override_dependencies = payload.get("override_dependencies") is True
         if fields["status_changed"]:
             # An early answer; the rule is evaluated again, and recorded, inside the write.
-            self._dependency_gate(actor, before, fields["status"], override_dependencies, owner_decision)
+            self._dependency_gate(actor, before, fields["status"], override_dependencies)
         request = self._route_protected_status_update(actor, before, fields)
         if request is not None:
             return request
         # Review 12b L2: a date change with consequences asks first on every path (panel, API,
         # Gantt); the confirmation is recorded with the change and the other owners are told.
-        events += self._date_impact_gate(actor, before, fields, payload.get("confirmed") is True, owner_decision)
+        events += self._date_impact_gate(actor, before, fields, payload.get("confirmed") is True, known_impact)
         return self._write_task_update(actor, task_id, before, fields, expected_revision, owner_decision,
                                        move_kind=move_kind, audit_events=events,
                                        override_dependencies=override_dependencies,
                                        override_wip=payload.get("override_wip") is True)
 
-    def _date_impact_gate(self, actor: dict, before: dict, fields: dict, confirmed: bool,
-                          owner_decision: OwnerDecision | None = None) -> list:
-        start, due = fields["start_date"], fields["due_date"]
-        if owner_decision or (start, due) == (before.get("start_date"), before.get("due_date")):
-            return []
-        listed = next((t for t in self.list_tasks(actor, before["project_id"]) if t["id"] == before["id"]), None)
+    def _date_impact(self, actor: dict, task: dict, start: str | None, due: str | None) -> list[str]:
+        """The consequences of new dates for one task (one project load, for the critical path)."""
+        listed = next((t for t in self.list_tasks(actor, task["project_id"]) if t["id"] == task["id"]), None)
         if not listed:
             return []
-        target = self.db.execute("SELECT target_date FROM projects WHERE id=?", (before["project_id"],)).fetchone()
+        target = self.db.execute("SELECT target_date FROM projects WHERE id=?", (task["project_id"],)).fetchone()
         listed["project_target_date"] = target["target_date"] if target else None
-        impact = self._schedule_impact(listed, start, due)
+        return self._schedule_impact(listed, start, due)
+
+    def _date_impact_gate(self, actor: dict, before: dict, fields: dict, confirmed: bool,
+                          known_impact: list | None = None) -> list:
+        """Review 12b L2 and 12d M2/L1: a date change with consequences asks first on every
+        path, an approval included. Returns the schedule_impact_confirmed event to write with
+        the change. ``known_impact`` is what the caller already worked out for these dates."""
+        start, due = fields["start_date"], fields["due_date"]
+        if (start, due) == (before.get("start_date"), before.get("due_date")):
+            return []
+        impact = self._date_impact(actor, before, start, due) if known_impact is None else known_impact
         if not impact:
             return []
         if not confirmed:
             raise NeedsConfirmation(f"Moving “{before['title']}” has consequences; confirm to go ahead.", "impact", impact)
         return [("schedule_impact_confirmed", None, {"impact": impact}, "; ".join(impact))]
 
-    def _dependency_gate(self, actor: dict, task: dict, status: str, override: bool,
-                         owner_decision: OwnerDecision | None = None) -> list:
+    def _dependency_gate(self, actor: dict, task: dict, status: str, override: bool) -> list:
         """Review 12a M1 (JQY55P: only an owner may override dependency requirements).
         Returns the dependency_override event to write with the change, if any."""
         if status not in DEPENDENCY_GATED_STATUSES or task["status"] in REOPEN_ONLY_STATUSES:
@@ -1221,7 +1228,9 @@ class AstraService:
         if actor["global_role"] != "owner":
             raise RuleRefusal(f"“{task['title']}” waits on {names}; it can move to {label} once that is completed. "
                               "Only an owner may override a dependency.")
-        if not (override or owner_decision):
+        # Review 12d M2: an approval is no exception. The deciding owner is shown the waits and
+        # confirms them, and the override is recorded in that owner's name.
+        if not override:
             raise NeedsConfirmation(f"“{task['title']}” waits on {names}. Move it to {label} anyway?",
                                     "dependencies", waits)
         return [("dependency_override", {"blocked_by": waits}, {"status": status},
@@ -1374,7 +1383,7 @@ class AstraService:
         rule_events = []
         from_column = None
         if fields["status_changed"]:
-            rule_events += self._dependency_gate(actor, before, fields["status"], override_dependencies, owner_decision)
+            rule_events += self._dependency_gate(actor, before, fields["status"], override_dependencies)
             from_column = self._top_column(actor, before["project_id"], task_id) if check_wip else None
         cursor = self.db.execute(
             """UPDATE tasks SET title=?,description=?,owner_user_id=?,status=?,criticality=?,start_date=?,due_date=?,
@@ -1392,8 +1401,7 @@ class AstraService:
         self._event(task_id, actor["id"], "task_updated", before, {**after, "move_kind": move_kind} if move_kind else after,
                     fields["reason"], notify=notify)
         if fields["status_changed"] and check_wip:
-            rule_events += self._wip_entry_gate(actor, before["project_id"], task_id, from_column, override_wip,
-                                                owner_decision)
+            rule_events += self._wip_entry_gate(actor, before["project_id"], task_id, from_column, override_wip)
         self._write_audit_events(task_id, actor["id"], list(audit_events or []) + rule_events)
         if fields["status_changed"]:
             self._resolve_pending_requests(
@@ -2048,8 +2056,14 @@ class AstraService:
             )
 
     def decide_owner_action_request(
-        self, actor: dict, request_id: str, decision: str, reason: str = ""
+        self, actor: dict, request_id: str, decision: str, reason: str = "",
+        *, override_dependencies: bool = False, override_wip: bool = False, confirmed: bool = False,
     ) -> dict:
+        """Review 12d M2: approving runs the action's dependency, work-in-progress and date
+        rules at decision time, exactly as if the owner acted directly. A rule that fires
+        answers NeedsConfirmation to the owner (naming the predecessor, the limit or the
+        consequence), and the approval goes ahead only with the matching flag; the override
+        is recorded in the deciding owner's name, in the action's own transaction."""
         request = self._owner_action_request(actor, request_id)
         if request["status"] != "pending":
             raise Conflict("Owner-action request conflict: this request has already been decided.")
@@ -2093,46 +2107,52 @@ class AstraService:
                     f"Task revision conflict: request expected {payload['expected_revision']}, "
                     f"current revision is {task['revision']}."
                 )
-        result = self._execute_owner_action_request(actor, request, payload, reason)
+        flags = {"override_dependencies": override_dependencies is True, "override_wip": override_wip is True,
+                 "confirmed": confirmed is True}
+        result = self._execute_owner_action_request(actor, request, payload, reason, flags)
         decided = self._owner_action_request(actor, request_id)
         if decided["status"] != "approved":
             raise RuntimeError("Approved action completed without resolving its Owner request.")
         return {"request": decided, "result": result}
 
-    def _execute_owner_action_request(self, actor: dict, request: dict, payload: dict, reason: str):
+    def _execute_owner_action_request(self, actor: dict, request: dict, payload: dict, reason: str,
+                                      flags: dict | None = None):
         action = request["action"]
+        flags = flags or {}
         decision = OwnerDecision(request_id=request["id"], reason=reason)
         if action == "update_task_status":
             return self.update_task(actor, request["task_id"], {
                 "status": payload["status"],
                 "reason": payload.get("reason") or request["reason"],
                 "expected_revision": payload["expected_revision"],
+                **{k: True for k, v in flags.items() if v},
             }, owner_decision=decision)
         if action == "accept_submission":
             return self.accept_submission(
                 actor, payload["submission_id"], payload.get("decision_note", ""), payload.get("checklist"),
-                owner_decision=decision,
+                owner_decision=decision, override_dependencies=flags.get("override_dependencies", False),
             )
         if action == "request_changes":
             return self.request_changes(
                 actor, payload["submission_id"], payload.get("reason") or request["reason"],
-                owner_decision=decision,
+                owner_decision=decision, override_wip=flags.get("override_wip", False),
             )
         if action == "reopen_task":
             return self.reopen_task(
                 actor, request["task_id"], payload.get("reason") or request["reason"], payload.get("new_due_date"),
-                owner_decision=decision,
+                owner_decision=decision, override_wip=flags.get("override_wip", False),
+                confirmed=flags.get("confirmed", False),
             )
         if action == "set_on_hold":
             return self.set_on_hold(
                 actor, request["task_id"], payload.get("reason") or request["reason"],
                 payload.get("checkpoint_date"), payload.get("owner_user_id"),
-                owner_decision=decision,
+                owner_decision=decision, override_wip=flags.get("override_wip", False),
             )
         if action == "approve_schedule_proposal":
             return self.approve_schedule_proposal(
                 actor, payload["proposal_id"], payload.get("decision_reason") or reason,
-                owner_decision=decision,
+                owner_decision=decision, confirmed=flags.get("confirmed", False),
             )
         if action == "reject_schedule_proposal":
             return self.reject_schedule_proposal(
@@ -2164,12 +2184,60 @@ class AstraService:
             + where + " ORDER BY r.requested_at DESC, r.id DESC",
             params,
         ).fetchall()
-        result = []
+        result, cache = [], {}
         for row in rows:
             request = dict(row)
             request["payload"] = json.loads(request["payload_json"])
+            if request["status"] == "pending":
+                request["gates"] = self._request_gates(actor, request, cache)
             result.append(request)
         return result
+
+    # What each request would change the task's status to, for its gates.
+    REQUEST_TARGET_STATUS = {"accept_submission": "completed", "request_changes": "changes_requested",
+                             "reopen_task": "reopened", "set_on_hold": "on_hold"}
+
+    def _request_gates(self, actor: dict, request: dict, cache: dict) -> dict | None:
+        """Review 12d M2: what approving a pending request would meet right now, for its
+        Inbox card: the predecessors it waits on, a column at its work-in-progress limit, and
+        the consequences of new dates. The same rules run again when the owner decides; this
+        is what the owner sees before clicking Approve. ``cache`` holds per-project loads."""
+        task_id, payload, action = request.get("task_id"), request["payload"], request["action"]
+        row = self.db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone() if task_id else None
+        if not row:
+            return None
+        task, project_id = dict(row), row["project_id"]
+        lines, column = [], None
+        status = payload.get("status") if action == "update_task_status" else self.REQUEST_TARGET_STATUS.get(action)
+        if status:
+            self._add_dependency_state([task])
+            if status in DEPENDENCY_GATED_STATUSES and task["status"] not in REOPEN_ONLY_STATUSES and task["blocked_by"]:
+                lines.append("Waits on " + ", ".join(p["title"] for p in task["blocked_by"]))
+            column = self.board_column({"status": status, "is_blocked": task["is_blocked"]})
+            from_column = self._top_column(actor, project_id, task_id)
+            limit = self.wip_limits(project_id).get(column)
+            if from_column is not None and limit and self._wip_entered(column, from_column, status):
+                if ("counts", project_id) not in cache:
+                    cache[("counts", project_id)] = self._column_counts(actor, project_id)
+                count = cache[("counts", project_id)].get(column, 0)
+                if count + 1 > limit:
+                    lines.append(f"{BOARD_COLUMN_LABELS[column]} is at {count} of {limit}")
+        dates = None
+        if action == "reopen_task" and payload.get("new_due_date"):
+            dates = (task.get("start_date"), payload["new_due_date"])
+        elif action == "approve_schedule_proposal":
+            proposal = self.db.execute("SELECT start_date, due_date FROM task_schedule_proposals WHERE id=?",
+                                       (payload.get("proposal_id"),)).fetchone()
+            dates = (proposal["start_date"], proposal["due_date"]) if proposal else None
+        if dates and dates != (task.get("start_date"), task.get("due_date")):
+            if ("listed", project_id) not in cache:
+                target = self.db.execute("SELECT target_date FROM projects WHERE id=?", (project_id,)).fetchone()
+                cache[("listed", project_id)] = (
+                    {t["id"]: t for t in self.list_tasks(actor, project_id)}, target["target_date"] if target else None)
+            listed, target_date = cache[("listed", project_id)]
+            if task_id in listed:
+                lines += self._schedule_impact({**listed[task_id], "project_target_date": target_date}, *dates)
+        return {"lines": lines, "column": column}
 
     def _may_submit(self, actor: dict, task) -> bool:
         """Project Manager (or Owner), the Task Owner, or a task collaborator. The caller
@@ -2247,7 +2315,7 @@ class AstraService:
         if submission["status"] != "submitted":
             raise ValueError("Only a pending submission can be accepted.")
         if actor["global_role"] == "owner":  # early answer; re-run in the write
-            self._dependency_gate(actor, task, "completed", override_dependencies, owner_decision)
+            self._dependency_gate(actor, task, "completed", override_dependencies)
         if actor["global_role"] != "owner":
             return self._request_protected_action(
                 actor,
@@ -2272,7 +2340,7 @@ class AstraService:
             self._assert_active_request_revision(task, owner_decision)
             if submission["status"] != "submitted" or task["status"] != "submitted":
                 raise Conflict("Submission decision conflict: this submission is no longer pending.")
-            events = self._dependency_gate(actor, task, "completed", override_dependencies, owner_decision)
+            events = self._dependency_gate(actor, task, "completed", override_dependencies)
             cursor = self.db.execute(
                 "UPDATE task_submissions SET status='accepted', decided_by=?, decided_at=?, decision_note=?, checklist=?"
                 " WHERE id=? AND status='submitted'",
@@ -2349,7 +2417,7 @@ class AstraService:
             self._event(task["id"], actor["id"], "changes_requested", None,
                         {"submission_id": submission_id, "version": submission["version"]}, reason)
             self._write_audit_events(task["id"], actor["id"], self._wip_entry_gate(
-                actor, task["project_id"], task["id"], from_column, override_wip, owner_decision))
+                actor, task["project_id"], task["id"], from_column, override_wip))
             self._resolve_pending_requests(
                 actor,
                 "request_changes",
@@ -2364,7 +2432,7 @@ class AstraService:
 
     def reopen_task(self, actor: dict, task_id: str, reason: str, new_due_date,
         *, owner_decision: OwnerDecision | None = None, expected_revision: int | None = None,
-        audit_events: list | None = None, override_wip: bool = False,
+        audit_events: list | None = None, override_wip: bool = False, confirmed: bool = False,
     ) -> dict:
         task = self.get_task(actor, task_id)
         if task["status"] not in {"completed", "cancelled", "abandoned"}:
@@ -2386,6 +2454,9 @@ class AstraService:
             if current["revision"] != (task["revision"] if expected_revision is None else expected_revision):
                 raise Conflict("Task revision conflict: the task changed before reopening began.")
             self._assert_active_request_revision(current, owner_decision)
+            # Review 12d L1: a revised due date meets the same date rule as any other change.
+            impact_events = self._date_impact_gate(
+                actor, current, {"start_date": current.get("start_date"), "due_date": new_due}, confirmed is True)
             from_column = self._top_column(actor, task["project_id"], task_id)
             # accepted_submission_id is retained so the prior accepted version stays visible.
             cursor = self.db.execute(
@@ -2397,8 +2468,8 @@ class AstraService:
                 raise Conflict("Task revision conflict: the task changed before it could be reopened.")
             self._event(task_id, actor["id"], "task_reopened", before,
                         {"status": "reopened", "due_date": new_due}, reason)
-            self._write_audit_events(task_id, actor["id"], list(audit_events or []) + self._wip_entry_gate(
-                actor, task["project_id"], task_id, from_column, override_wip, owner_decision))
+            self._write_audit_events(task_id, actor["id"], list(audit_events or []) + impact_events + self._wip_entry_gate(
+                actor, task["project_id"], task_id, from_column, override_wip))
             self._resolve_pending_requests(
                 actor,
                 "reopen_task",
@@ -2478,7 +2549,7 @@ class AstraService:
             self._event(task_id, actor["id"], "task_on_hold", {"status": task["status"]},
                         {"status": "on_hold", "checkpoint_date": checkpoint, "owner_user_id": hold_owner}, reason)
             self._write_audit_events(task_id, actor["id"], list(audit_events or []) + self._wip_entry_gate(
-                actor, task["project_id"], task_id, from_column, override_wip, owner_decision))
+                actor, task["project_id"], task_id, from_column, override_wip))
             self._resolve_pending_requests(
                 actor,
                 "set_on_hold",
@@ -2572,7 +2643,8 @@ class AstraService:
                     raise NeedsConfirmation(f"Moving a {task['status']} task back into work reopens it: give a reason "
                                             "and a revised due date.", "reopen")
                 outcome = self.reopen_task(actor, task_id, reason, payload.get("new_due_date"),
-                                           expected_revision=expected, audit_events=extra, override_wip=wip)
+                                           expected_revision=expected, audit_events=extra, override_wip=wip,
+                                           confirmed=payload.get("confirmed") is True)
             elif status == task["status"]:
                 raise ValueError(f"“{title}” is already {status.replace('_', ' ')}; it shows under "
                                  f"{BOARD_COLUMN_LABELS[source]} because it waits on {', '.join(waits_on)}.")
@@ -2870,10 +2942,7 @@ class AstraService:
             raise ValueError(f"The start date ({start}) would be after the due date ({due}).")
         if (start, due) == (task.get("start_date"), task.get("due_date")):
             raise ValueError(f"“{title}” already has these dates.")
-        listed = next(t for t in self.list_tasks(actor, task["project_id"]) if t["id"] == task_id)
-        target = self.db.execute("SELECT target_date FROM projects WHERE id=?", (task["project_id"],)).fetchone()
-        listed["project_target_date"] = target["target_date"] if target else None
-        impact = self._schedule_impact(listed, start, due)
+        impact = self._date_impact(actor, task, start, due)
         confirmed = payload.get("confirmed") is True
         if impact and not confirmed:
             raise NeedsConfirmation(f"Moving “{title}” has consequences; confirm to go ahead.", "impact", impact)
@@ -2886,7 +2955,7 @@ class AstraService:
         # move with consequences is not an ordinary move, so it carries no Undo mark.
         outcome = self.update_task(actor, task_id, {"start_date": start, "due_date": due, "expected_revision": expected,
                                                     "reason": "Gantt drag: " + ", ".join(parts), "confirmed": confirmed},
-                                   move_kind=None if impact else "gantt")
+                                   move_kind=None if impact else "gantt", known_impact=impact)
         if isinstance(outcome, dict) and "request" in outcome:
             return {"request": outcome["request"]}
         moved_event = self._latest_event_id(task_id, actor["id"], "task_updated")
@@ -2961,17 +3030,31 @@ class AstraService:
                                     str(reason or "").strip() or None)
         return self.wip_limits(project_id)
 
-    def _column_counts(self, actor: dict, project_id: str) -> dict:
-        """Top-level open tasks per board column, as the board shows them."""
-        tasks = self.list_tasks(actor, project_id)
-        ids = {t["id"] for t in tasks}
+    def _board_snapshot(self, project_id: str) -> dict:
+        """Review 12d M1: every top-level task's board column and status, from two plain
+        queries (no enriched list), so the work-in-progress rule costs the same however
+        large the project is. A task waits when any predecessor is not completed, as in
+        _add_dependency_state; a step (a task whose parent is in the project) is left out."""
+        rows = self.db.execute("SELECT id, status, parent_task_id FROM tasks WHERE project_id=?",
+                               (project_id,)).fetchall()
+        waiting = {r[0] for r in self.db.execute(
+            """SELECT DISTINCT d.successor_task_id FROM task_dependencies d
+               JOIN tasks s ON s.id=d.successor_task_id JOIN tasks p ON p.id=d.predecessor_task_id
+               WHERE s.project_id=? AND p.status!='completed'""", (project_id,)).fetchall()}
+        ids = {r["id"] for r in rows}
+        return {r["id"]: (self.board_column({"status": r["status"], "is_blocked": r["id"] in waiting}), r["status"])
+                for r in rows if r["parent_task_id"] not in ids}
+
+    @staticmethod
+    def _snapshot_counts(snapshot: dict) -> dict:
         counts: dict[str, int] = {}
-        for t in tasks:
-            if t.get("parent_task_id") in ids:
-                continue
-            column = self.board_column(t)
+        for column, _status in snapshot.values():
             counts[column] = counts.get(column, 0) + 1
         return counts
+
+    def _column_counts(self, actor: dict, project_id: str) -> dict:
+        """Top-level open tasks per board column, as the board shows them."""
+        return self._snapshot_counts(self._board_snapshot(project_id))
 
     @staticmethod
     def _wip_over(target: str, count: int, limit: int, incoming: int) -> dict:
@@ -3006,36 +3089,48 @@ class AstraService:
         return over
 
     def _top_column(self, actor: dict, project_id: str, task_id: str) -> str | None:
-        """The board column a top-level task shows in, or None for a step or a new task."""
-        tasks = self.list_tasks(actor, project_id)
-        ids = {t["id"] for t in tasks}
-        task = next((t for t in tasks if t["id"] == task_id), None)
-        if not task or task.get("parent_task_id") in ids:
+        """The board column a top-level task shows in, or None for a step or a new task.
+        One task's row and its waits only (review 12d M1)."""
+        row = self.db.execute("SELECT status, parent_task_id FROM tasks WHERE id=? AND project_id=?",
+                              (task_id, project_id)).fetchone()
+        if not row:
             return None
-        return self.board_column(task)
+        if row["parent_task_id"] and self.db.execute("SELECT 1 FROM tasks WHERE id=? AND project_id=?",
+                                                     (row["parent_task_id"], project_id)).fetchone():
+            return None
+        waits = self.db.execute(
+            """SELECT 1 FROM task_dependencies d JOIN tasks p ON p.id=d.predecessor_task_id
+               WHERE d.successor_task_id=? AND p.status!='completed' LIMIT 1""", (task_id,)).fetchone()
+        return self.board_column({"status": row["status"], "is_blocked": bool(waits)})
+
+    @staticmethod
+    def _wip_entered(column: str | None, from_column: str | None, status: str) -> bool:
+        """Whether a task now in ``column`` entered a limited column. Entry into Blocked caused
+        by a dependency is not refused: nobody moved the card (only on_hold counts)."""
+        return bool(column) and column != from_column and column in WIP_COLUMNS \
+            and not (column == "blocked" and status != "on_hold")
 
     def _wip_entry_gate(self, actor: dict, project_id: str, task_id: str, from_column: str | None,
-                        override: bool, owner_decision=None) -> list:
+                        override: bool) -> list:
         """Review 12c M1: the work-in-progress limit is a rule of every status-changing write a
         person makes. Called inside the write transaction after the row changed: if the task
         now sits in a different column that is over its limit, anyone but an owner is refused
-        and an owner confirms (an owner's approval of a request counts as the confirmation).
-        Entry into Blocked caused by a dependency is not refused: nobody moved the card.
-        Returns the wip_limit_override event to write in the same transaction."""
-        tasks = self.list_tasks(actor, project_id)
-        ids = {t["id"] for t in tasks}
-        task = next((t for t in tasks if t["id"] == task_id), None)
-        if not task or task.get("parent_task_id") in ids:
-            return []
-        target = self.board_column(task)
-        if target == from_column or target not in WIP_COLUMNS or (target == "blocked" and task["status"] != "on_hold"):
+        and an owner confirms with ``override`` (review 12d M2: an approval is no exception;
+        the deciding owner confirms what they are shown). Returns the wip_limit_override
+        event to write in the same transaction. The project is counted only when the column
+        the task entered has a limit (review 12d M1)."""
+        target = self._top_column(actor, project_id, task_id)
+        status = self.db.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not status or not self._wip_entered(target, from_column, status["status"]):
             return []
         limit = self.wip_limits(project_id).get(target)
-        count = sum(1 for t in tasks if t.get("parent_task_id") not in ids and self.board_column(t) == target)
-        if not limit or count <= limit:
+        if not limit:
+            return []
+        count = self._column_counts(actor, project_id).get(target, 0)
+        if count <= limit:
             return []
         over = self._wip_over(target, count - 1, limit, 1)
-        self._wip_decide(actor, target, over, override or owner_decision is not None)
+        self._wip_decide(actor, target, over, override)
         return [("wip_limit_override", {"column": target, **over}, {"column": target}, over["message"])]
 
     # ---- XV92JJ: bulk changes ----
@@ -3177,7 +3272,9 @@ class AstraService:
             with transaction(self.db):
                 if recheck:
                     recheck()
-                start_columns = {r["id"]: self._top_column(actor, project_id, r["id"]) for r in rows}
+                # Review 12d M1: one snapshot of the board before the writes and one after them,
+                # not a project reload per task, so the write lock is held briefly.
+                start = self._board_snapshot(project_id)
                 for row in rows:
                     before = self.get_task(actor, row["id"])
                     if before["revision"] != row["revision"]:
@@ -3190,14 +3287,13 @@ class AstraService:
                                     "after_revision": after["revision"],
                                     "before": {k: before[k] for k in row["change"]},
                                     "after": {k: after[k] for k in row["change"]}})
+                end = self._board_snapshot(project_id)
                 entered: dict[str, int] = {}
                 for row in rows:
-                    column = self._top_column(actor, project_id, row["id"])
-                    task = self.get_task(actor, row["id"])
-                    if column and column != start_columns[row["id"]] and column in WIP_COLUMNS \
-                            and not (column == "blocked" and task["status"] != "on_hold"):
+                    column, status = end.get(row["id"], (None, None))
+                    if self._wip_entered(column, start.get(row["id"], (None,))[0], status):
                         entered[column] = entered.get(column, 0) + 1
-                counts = self._column_counts(actor, project_id) if entered else {}
+                counts = self._snapshot_counts(end) if entered else {}
                 limits = self.wip_limits(project_id) if entered else {}
                 overs = []
                 for column, incoming in sorted(entered.items()):
@@ -4263,7 +4359,7 @@ class AstraService:
         return proposal
 
     def approve_schedule_proposal(self, actor: dict, proposal_id: str, decision_reason: str = "",
-        *, owner_decision: OwnerDecision | None = None,
+        *, owner_decision: OwnerDecision | None = None, confirmed: bool = False,
     ) -> dict:
         proposal = self.get_schedule_proposal(actor, proposal_id)
         task = self.get_task(actor, proposal["task_id"])
@@ -4293,6 +4389,8 @@ class AstraService:
             self._assert_active_request_revision(task, owner_decision)
             if proposal["status"] != "pending":
                 raise Conflict("Schedule decision conflict: this proposal is no longer pending.")
+            # Review 12d L1: approving new dates meets the same date rule as setting them.
+            impact_events = self._date_impact_gate(actor, task, after, confirmed is True)
             cursor = self.db.execute(
                 "UPDATE tasks SET start_date=?, due_date=?, updated_at=?, revision=revision+1"
                 " WHERE id=? AND revision=?",
@@ -4309,6 +4407,7 @@ class AstraService:
             if cursor.rowcount != 1:
                 raise Conflict("Schedule decision conflict: this proposal is no longer pending.")
             self._event(task["id"], actor["id"], "schedule_revised", before, after, proposal["reason"])
+            self._write_audit_events(task["id"], actor["id"], impact_events)
             self._resolve_pending_requests(
                 actor,
                 "approve_schedule_proposal",

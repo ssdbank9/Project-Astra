@@ -14,7 +14,7 @@ from unittest.mock import patch
 from astra.auth import hash_password, verify_password
 from astra.db import connect
 from astra.service import (BLOCKED_NOTICE_CAP, BLOCKED_NOTICE_WINDOW_SECONDS, AstraService, Conflict, Forbidden,
-                           now_text, validate_attachment_path)
+                           NeedsConfirmation, now_text, validate_attachment_path)
 
 from link_roots import allow_attachment_roots, link
 
@@ -1158,7 +1158,10 @@ class AstraCoreTests(unittest.TestCase):
         prop = self.service.propose_schedule(self.owner, a["id"], "2026-10-01", "2026-10-12", "client delay")
         self.assertEqual(self.service.get_task(self.owner, a["id"])["due_date"], "2026-10-05")  # not applied yet
         self.assertIn(b["id"], [s["id"] for s in prop["impacted_successors"]])
-        self.service.approve_schedule_proposal(self.owner, prop["id"], "ok")
+        # Review 12d L1: A's new due date runs into B's start, so approving asks first.
+        with self.assertRaises(NeedsConfirmation):
+            self.service.approve_schedule_proposal(self.owner, prop["id"], "ok")
+        self.service.approve_schedule_proposal(self.owner, prop["id"], "ok", confirmed=True)
         self.assertEqual(self.service.get_task(self.owner, a["id"])["due_date"], "2026-10-12")  # current revised
         self.assertEqual(self.service.get_task(self.owner, b["id"])["due_date"], "2026-10-10")  # dependent NOT moved
         self.assertIn("schedule_revised", [e["event_type"] for e in self.service.task_events(self.owner, a["id"])])

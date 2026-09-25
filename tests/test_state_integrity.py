@@ -1400,11 +1400,11 @@ class AstraStateIntegrityTests(unittest.TestCase):
         original = self.service._execute_owner_action_request
         calls = []
 
-        def wrapped(actor, request, payload, reason):
+        def wrapped(actor, request, payload, reason, *flags):  # review 12d M2: the decision's confirm flags
             if not calls:
                 calls.append(request["id"])
                 nested()
-            return original(actor, request, payload, reason)
+            return original(actor, request, payload, reason, *flags)
 
         return patch.object(self.service, "_execute_owner_action_request", side_effect=wrapped)
 
@@ -1579,7 +1579,8 @@ class AstraStateIntegrityTests(unittest.TestCase):
     def test_closed_task_writes_work_again_after_the_governed_reopen(self):
         project, manager, neighbour, closed = self._closed_fixture("Closed reopen")
         task, _ = closed[0]
-        self.service.reopen_task(self.owner, task["id"], "more work", "2027-03-01")
+        # Review 12d L1: the revised due date has schedule consequences, which the owner confirms.
+        self.service.reopen_task(self.owner, task["id"], "more work", "2027-03-01", confirmed=True)
         self.assertEqual(self.service.set_parent(self.owner, task["id"], neighbour["id"])["parent_task_id"],
                          neighbour["id"])
         self.assertEqual(self.service.confirm_criticality(self.owner, task["id"], "high", "evidence")["criticality"],

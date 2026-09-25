@@ -113,7 +113,9 @@ No client preview is authority. Every commit recalculates against current data.
 - Manager drops on protected review/accepted/completed/closed targets create an
   approval request; they do not change live status.
 - Only the App Owner accepts/rejects review, completes/closes/reopens work or
-  overrides dependency/evidence requirements.
+  overrides dependency/evidence requirements. Approving a request is no exception:
+  the dependency, WIP and date rules run again at decision time, the request card
+  shows what approving would override, and the owner confirms each one.
 - An invalid drop returns the card to its source and displays a specific reason.
 - Filters, swimlanes, grouping and saved views never change the underlying task.
 - `Move to...` provides the same operation without dragging.
@@ -130,7 +132,8 @@ No client preview is authority. Every commit recalculates against current data.
 - Managers confirm impact moves themselves, and the Owners are notified (Aly's later
   Gantt decision on JQY55P, which supersedes the earlier "Owner approval request" rule).
   Astra records the confirmation as `schedule_impact_confirmed` with the move, and does
-  so on every path that changes dates (Gantt, task panel, API). Downstream tasks stay
+  so on every path that changes dates (Gantt, task panel, API, reopen with a revised
+  due date, and approving a schedule proposal). Downstream tasks stay
   fixed in this version; offering to move them is not built.
 - A finish-to-start link is broken only when the successor starts before the day the
   predecessor is due. A successor starting on the predecessor's due day is allowed.

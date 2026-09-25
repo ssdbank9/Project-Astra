@@ -583,13 +583,22 @@ class Review12cTests(BoardFixture):
             s.reopen_task(self.owner, first["id"], "again", "2027-03-01")
         s.reopen_task(self.owner, first["id"], "again", "2027-03-01", override_wip=True)
         self.assertEqual(self.kinds(first["id"])[-2:], ["task_reopened", "wip_limit_override"])
-        # An owner's approval of a manager's request counts as the override.
+        # Review 12d M2: an owner's approval of a manager's off-hold request into the full column
+        # asks the owner first; only the confirmed approval goes over, in the owner's name.
         s.set_wip_limit(self.owner, self.pid, "blocked", None)
         request = s.update_task(self.manager, held["id"], {"status": "in_progress", "reason": "vendor back",
                                                           "expected_revision": self.rev(held["id"])})["request"]
-        s.decide_owner_action_request(self.owner, request["id"], "approved", "ok")
+        with self.assertRaises(NeedsConfirmation) as asked:
+            s.decide_owner_action_request(self.owner, request["id"], "approved", "ok")
+        self.assertEqual(asked.exception.confirm, "wip")
+        self.assertEqual(self.fresh(held["id"])["status"], "on_hold")
+        self.assertNotIn("wip_limit_override", self.kinds(held["id"]))
+        self.assertEqual(s._owner_action_request(self.owner, request["id"])["status"], "pending")
+        s.decide_owner_action_request(self.owner, request["id"], "approved", "ok", override_wip=True)
         self.assertEqual(self.fresh(held["id"])["status"], "in_progress")
-        self.assertIn("wip_limit_override", self.kinds(held["id"]))
+        row = self.service.db.execute("SELECT actor_user_id FROM task_events WHERE task_id=? AND event_type='wip_limit_override'",
+                                      (held["id"],)).fetchone()
+        self.assertEqual(row["actor_user_id"], self.owner["id"])
 
     def test_m1_bulk_undo_meets_the_limit(self):
         s = self.service
@@ -683,6 +692,251 @@ class Review12cTests(BoardFixture):
         self.assertNotIn("draft", s.wip_limits(self.pid))  # nothing saved when one column is refused
         with self.assertRaises(Forbidden):
             s.set_wip_limits(self.manager, self.pid, {"draft": 2})
+
+
+class Review12dTests(BoardFixture):
+    """Re-review 12d: the bulk write stays short however large the project, an approval meets
+    the same rules as acting directly, reopen and schedule approval ask about new dates, and
+    the revert experiments that survived 12c."""
+
+    def setUp(self):
+        super().setUp()
+        self.pid = self.project["id"]
+
+    def new(self, title, **k):
+        return self.service.create_task(self.owner, {"project_id": self.pid, "title": title, **k})
+
+    def rev(self, task_id):
+        return self.fresh(task_id)["revision"]
+
+    def kinds(self, task_id):
+        return [e["event_type"] for e in self.events(task_id)]
+
+    def request_for(self, task_id):
+        return next(r for r in self.service.list_owner_action_requests(self.owner) if r["task_id"] == task_id)
+
+    def event_actor(self, task_id, kind):
+        row = self.db.execute("SELECT actor_user_id FROM task_events WHERE task_id=? AND event_type=?"
+                              " ORDER BY occurred_at DESC, rowid DESC LIMIT 1", (task_id, kind)).fetchone()
+        return row["actor_user_id"] if row else None
+
+    def test_m1_a_200_task_bulk_in_a_1000_task_project_is_quick(self):
+        import time
+        s = self.service
+        now = datetime.now(timezone.utc).isoformat()
+        rows = [(f"t{i:04d}", self.pid, f"Big {i}", now, self.owner["id"], now) for i in range(1000)]
+        self.db.executemany(  # seeded directly: 1000 create_task calls would only slow the suite
+            "INSERT INTO tasks(id,project_id,title,description,status,criticality,due_date,created_at,created_by,updated_at)"
+            " VALUES(?,?,?,'','draft','normal','2026-11-10',?,?,?)", rows)
+        for i in range(0, 60, 2):  # some waits, as in the reviewer's probe
+            s.add_task_dependency(self.owner, f"t{i:04d}", f"t{i + 1:04d}")
+        s.set_wip_limit(self.owner, self.pid, "ready", 500)
+        ids = [f"t{i:04d}" for i in range(100, 300)]
+        body = {"task_ids": ids, "action": "status", "value": "ready"}
+        plan = s.bulk_preview(self.manager, self.pid, body)
+        self.assertEqual(plan["counts"]["ok"], 200)
+        started = time.monotonic()
+        done = s.bulk_apply(self.manager, self.pid, {**body, "expected_revisions": {i["id"]: i["revision"] for i in plan["ok"]}})
+        applied = time.monotonic() - started
+        started = time.monotonic()
+        s.bulk_undo(self.manager, self.pid, {"bulk_id": done["bulk_id"]})
+        undone = time.monotonic() - started
+        # A generous bound: the 12d build took 33 s here; the snapshot build takes a fraction of a second.
+        self.assertLess(applied, 2.0)
+        self.assertLess(undone, 2.0)
+        self.assertEqual({self.fresh(i)["status"] for i in ids}, {"draft"})
+
+    def test_m1_single_task_paths_load_the_project_at_most_once(self):
+        s = self.service
+        s.set_wip_limits(self.owner, self.pid, {"ready": 5, "progress": 5, "submitted": 5, "blocked": 5})
+        pred = self.new("Pred", due_date="2026-11-01")
+        succ = self.new("Succ", start_date="2026-11-03", due_date="2026-11-05")
+        s.add_task_dependency(self.owner, pred["id"], succ["id"])
+        loads = []
+        real = s.list_tasks
+        s.list_tasks = lambda *a, **k: loads.append(1) or real(*a, **k)
+        try:
+            steps = {
+                "board move": lambda: self.move(self.manager, "ready"),
+                "panel status": lambda: s.update_task(self.manager, self.task["id"], {
+                    "status": "in_progress", "reason": "go", "expected_revision": self.rev(self.task["id"])}),
+                "panel dates": lambda: s.update_task(self.manager, self.task["id"], {
+                    "due_date": "2026-11-20", "reason": "later", "expected_revision": self.rev(self.task["id"])}),
+                "gantt drag": lambda: s.reschedule_task(self.manager, pred["id"], {
+                    "start_date": None, "due_date": "2026-11-02", "expected_revision": self.rev(pred["id"]),
+                    "confirmed": True}),
+                "submit": lambda: s.submit_task(self.manager, self.task["id"], "done"),
+                "hold": lambda: s.set_on_hold(self.manager, succ["id"], "wait", "2027-01-01", self.member["id"]),
+            }
+            for name, step in steps.items():
+                loads.clear()
+                step()
+                with self.subTest(path=name):
+                    self.assertLessEqual(len(loads), 1)
+        finally:
+            s.list_tasks = real
+
+    def test_m2_the_reviewers_repro_an_accept_request_filed_while_waiting(self):
+        s = self.service
+        pre = self.new("Pre")
+        s.update_task(self.owner, pre["id"], {"status": "in_progress", "reason": "go", "expected_revision": self.rev(pre["id"])})
+        w = s.create_task(self.owner, {"project_id": self.pid, "title": "W", "owner_user_id": self.member["id"]})
+        submission = s.submit_task(self.member, w["id"], "done")
+        s.add_task_dependency(self.manager, pre["id"], w["id"])
+        filed = s.accept_submission(self.manager, submission["id"], "looks fine")
+        self.assertIn("request", filed)
+        request = self.request_for(w["id"])
+        self.assertEqual(request["gates"]["lines"], ["Waits on Pre"])  # shown on the Inbox card
+        with self.assertRaises(NeedsConfirmation) as asked:
+            s.decide_owner_action_request(self.owner, request["id"], "approved", "ok")
+        self.assertEqual((asked.exception.confirm, asked.exception.impact), ("dependencies", ["Pre"]))
+        self.assertEqual(self.fresh(w["id"])["status"], "submitted")
+        self.assertNotIn("dependency_override", self.kinds(w["id"]))
+        self.assertEqual(self.request_for(w["id"])["status"], "pending")
+        s.decide_owner_action_request(self.owner, request["id"], "approved", "ok", override_dependencies=True)
+        self.assertEqual(self.fresh(w["id"])["status"], "completed")
+        self.assertEqual(self.event_actor(w["id"], "dependency_override"), self.owner["id"])
+        # "True" only: a truthy flag is not a confirmation.
+        with self.assertRaises(NeedsConfirmation):
+            other = s.create_task(self.owner, {"project_id": self.pid, "title": "W2", "owner_user_id": self.member["id"]})
+            sub2 = s.submit_task(self.member, other["id"], "done")
+            s.add_task_dependency(self.manager, pre["id"], other["id"])
+            s.accept_submission(self.manager, sub2["id"], "fine")
+            s.decide_owner_action_request(self.owner, self.request_for(other["id"])["id"], "approved", "ok",
+                                          override_dependencies="yes")
+
+    def test_m2_a_wait_added_after_the_request_was_filed_still_asks(self):
+        s = self.service
+        pre = self.new("Pre")
+        held = self.new("Held")
+        s.set_on_hold(self.owner, held["id"], "wait", "2027-01-01", self.member["id"])
+        request = s.update_task(self.manager, held["id"], {"status": "in_progress", "reason": "back",
+                                                          "expected_revision": self.rev(held["id"])})["request"]
+        self.assertEqual(self.request_for(held["id"])["gates"]["lines"], [])
+        s.add_task_dependency(self.owner, pre["id"], held["id"])
+        self.assertEqual(self.request_for(held["id"])["gates"]["lines"], ["Waits on Pre"])
+        with self.assertRaises(NeedsConfirmation) as asked:
+            s.decide_owner_action_request(self.owner, request["id"], "approved", "ok")
+        self.assertEqual(asked.exception.confirm, "dependencies")
+        s.decide_owner_action_request(self.owner, request["id"], "approved", "ok", override_dependencies=True)
+        self.assertEqual(self.fresh(held["id"])["status"], "in_progress")
+
+    def test_m2_the_card_names_the_limit_and_the_dates(self):
+        s = self.service
+        s.set_project_schedule(self.owner, self.pid, None, "2026-12-31", "plan")
+        busy = self.new("Busy")
+        s.update_task(self.owner, busy["id"], {"status": "in_progress", "reason": "go", "expected_revision": self.rev(busy["id"])})
+        s.set_wip_limit(self.owner, self.pid, "progress", 1)
+        held = self.new("Held")
+        s.set_on_hold(self.owner, held["id"], "wait", "2027-01-01", self.member["id"])
+        s.update_task(self.manager, held["id"], {"status": "in_progress", "reason": "back", "expected_revision": self.rev(held["id"])})
+        self.assertEqual(self.request_for(held["id"])["gates"], {"lines": ["In progress is at 1 of 1"], "column": "progress"})
+        late = self.new("Late", due_date="2026-12-01")
+        s.propose_schedule(self.manager, late["id"], None, "2027-02-01", "slipped")
+        proposal = s.list_schedule_proposals(self.owner, late["id"])[0]
+        s.approve_schedule_proposal(self.manager, proposal["id"], "please")
+        lines = self.request_for(late["id"])["gates"]["lines"]
+        self.assertEqual(lines, ["The new due date is after the project target (2026-12-31)."])
+
+    def test_l1_reopen_and_schedule_approval_ask_about_new_dates(self):
+        s = self.service
+        s.set_project_schedule(self.owner, self.pid, None, "2026-12-31", "plan")
+        done = self.new("Done", due_date="2026-11-01")
+        s.submit_task(self.owner, done["id"], "done")
+        s.accept_submission(self.owner, s.list_task_submissions(self.owner, done["id"])[0]["id"], "ok")
+        with self.assertRaises(NeedsConfirmation) as asked:
+            s.reopen_task(self.owner, done["id"], "again", "2027-03-01")
+        self.assertEqual(asked.exception.confirm, "impact")
+        self.assertEqual(self.fresh(done["id"])["status"], "completed")
+        s.reopen_task(self.owner, done["id"], "again", "2027-03-01", confirmed=True)
+        self.assertEqual(self.kinds(done["id"])[-2:], ["task_reopened", "schedule_impact_confirmed"])
+        # The owner approving a proposal directly, and through a manager's request.
+        late = self.new("Late", due_date="2026-12-01")
+        s.propose_schedule(self.manager, late["id"], None, "2027-02-01", "slipped")
+        proposal = s.list_schedule_proposals(self.owner, late["id"])[0]
+        with self.assertRaises(NeedsConfirmation):
+            s.approve_schedule_proposal(self.owner, proposal["id"], "ok")
+        self.assertEqual(self.fresh(late["id"])["due_date"], "2026-12-01")
+        request = s.approve_schedule_proposal(self.manager, proposal["id"], "please")["request"]
+        with self.assertRaises(NeedsConfirmation):
+            s.decide_owner_action_request(self.owner, request["id"], "approved", "ok")
+        s.decide_owner_action_request(self.owner, request["id"], "approved", "ok", confirmed=True)
+        self.assertEqual(self.fresh(late["id"])["due_date"], "2027-02-01")
+        self.assertEqual(self.kinds(late["id"])[-3:-1], ["schedule_revised", "schedule_impact_confirmed"])
+        self.assertEqual(self.event_actor(late["id"], "schedule_impact_confirmed"), self.owner["id"])
+        # A reopen date inside the target asks nothing.
+        again = self.new("Again", due_date="2026-11-01")
+        s.submit_task(self.owner, again["id"], "done")
+        s.accept_submission(self.owner, s.list_task_submissions(self.owner, again["id"])[0]["id"], "ok")
+        s.reopen_task(self.owner, again["id"], "again", "2026-11-20")
+        self.assertNotIn("schedule_impact_confirmed", self.kinds(again["id"]))
+
+    # ---- L2: revert experiments that survived 12c ----
+
+    def test_l2_a_step_does_not_count_toward_a_limit(self):
+        s = self.service
+        s.update_task(self.owner, self.task["id"], {"status": "assigned", "reason": "r", "expected_revision": self.rev(self.task["id"])})
+        self.new("Step", status="assigned", parent_task_id=self.task["id"])
+        self.assertEqual(s._column_counts(self.owner, self.pid).get("ready"), 1)
+        s.set_wip_limit(self.owner, self.pid, "ready", 2)
+        other = self.new("Other")
+        self.move(self.manager, "ready", other["id"])  # 2 of 2: the step is not counted
+        self.assertEqual(self.fresh(other["id"])["status"], "assigned")
+
+    def test_l2_a_bulk_takes_at_most_200_tasks(self):
+        ids = [f"x{i}" for i in range(201)]
+        with self.assertRaisesRegex(ValueError, "Select between 1 and 200 tasks"):
+            self.service.bulk_preview(self.manager, self.pid, {"task_ids": ids, "action": "status", "value": "ready"})
+
+    def test_l2_bulk_undo_closes_after_the_window(self):
+        s = self.service
+        body = {"task_ids": [self.task["id"]], "action": "status", "value": "ready"}
+        plan = s.bulk_preview(self.manager, self.pid, body)
+        done = s.bulk_apply(self.manager, self.pid, {**body, "expected_revisions": {i["id"]: i["revision"] for i in plan["ok"]}})
+        old = (datetime.now(timezone.utc) - timedelta(seconds=21)).isoformat()
+        self.db.execute("UPDATE project_events SET occurred_at=? WHERE event_type='bulk_change'", (old,))
+        with self.assertRaisesRegex(ValueError, "Undo window has passed"):
+            s.bulk_undo(self.manager, self.pid, {"bulk_id": done["bulk_id"]})
+        self.assertEqual(self.fresh()["status"], "assigned")
+
+    def test_l2_a_waiting_task_is_blocked_in_a_bulk_move_to_in_progress(self):
+        s = self.service
+        pre = self.new("Pre")
+        s.add_task_dependency(self.owner, pre["id"], self.task["id"])
+        plan = s.bulk_preview(self.owner, self.pid, {"task_ids": [self.task["id"]], "action": "status", "value": "progress"})
+        self.assertEqual(plan["blocked"][0]["reason"], "waits on Pre; move it on its own")
+
+    def test_l2_a_board_move_out_of_changes_requested_is_not_undoable(self):
+        s = self.service
+        submission = s.submit_task(self.owner, self.task["id"], "done")
+        s.request_changes(self.owner, submission["id"], "fix it")
+        out = self.move(self.owner, "ready")
+        self.assertNotIn("undo", out)
+        event = s._latest_event_id(self.task["id"], self.owner["id"], "task_updated")
+        # Even an event carrying the board's mark is refused when it left a status the board
+        # never offers Undo from (the server's own check, not the client's).
+        row = self.db.execute("SELECT after_json FROM task_events WHERE id=?", (event,)).fetchone()
+        self.db.execute("UPDATE task_events SET after_json=? WHERE id=?",
+                        (json.dumps({**json.loads(row["after_json"]), "move_kind": "board"}), event))
+        with self.assertRaisesRegex(ValueError, "no move of yours to undo"):
+            s.undo_move(self.owner, self.task["id"], {"event_id": event})
+
+    def test_l2_a_dependency_driven_blocked_entry_is_not_refused(self):
+        s = self.service
+        s.set_on_hold(self.owner, self.new("Held")["id"], "wait", "2027-01-01", self.member["id"])
+        s.set_wip_limit(self.owner, self.pid, "blocked", 1)
+        pre = self.new("Pre")
+        step = self.new("Step", parent_task_id=self.task["id"])
+        s.add_task_dependency(self.owner, pre["id"], step["id"])
+        s.set_parent(self.manager, step["id"], None)  # promoted into Blocked by its wait: not a move
+        self.assertEqual(s._column_counts(self.owner, self.pid)["blocked"], 2)
+        self.assertNotIn("wip_limit_override", self.kinds(step["id"]))
+
+    def test_l2_locks_and_limits_go_with_their_task_and_project(self):
+        cascades = {t: {r["table"]: r["on_delete"] for r in self.db.execute(f"PRAGMA foreign_key_list({t})").fetchall()}
+                    for t in ("task_locks", "wip_limits")}
+        self.assertEqual(cascades["task_locks"].get("tasks"), "CASCADE")
+        self.assertEqual(cascades["wip_limits"].get("projects"), "CASCADE")
 
 
 class TaskLockTests(BoardFixture):

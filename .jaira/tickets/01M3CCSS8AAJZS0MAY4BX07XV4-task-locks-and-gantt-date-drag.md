@@ -28,7 +28,7 @@ related:
   - 01M3C0MZ2TASFSNYRN1E3C1Z74
 commits: []
 created-at: 2026-09-25T13:41:41Z
-updated-at: 2026-09-25T15:40:26Z
+updated-at: 2026-09-25T17:27:33Z
 updated-by: Claude
 claimed-by: vm-32647
 claimed-at: 2026-09-25T13:41:59Z
@@ -77,3 +77,4 @@ outcome-resolves: "Ticket B of lock #12: task locks and Gantt date drag."
 - **2026-09-25 14:00 · Claude** — Found out while building it: the app has no live refresh. Another person's lock chip and banner appear when the board or panel loads, not the moment the lease is taken. The refusal (409 naming the holder) is what always tells the truth at write time. Lease timestamps are compared as ISO strings from datetime.now(timezone.utc).isoformat(), the same format now_text() writes. Phones default the Timeline to the schedule table; in the chart, phones get no data-drag and no grips. A touch pointer never starts a bar drag at any width, so tablets use the panel date fields. The critical-path impact counts only when a date of that task changes. A dependency impact counts only when this task's relevant date changed, so an old overlap the move leaves alone does not ask again. Undo was generalised: undo_board_move became undo_move, keyed by the reason prefix ('Board move: ' restores status, 'Gantt drag: ' restores start and due), and /board-undo became /undo-move. Neither is pushed yet.
 - **2026-09-25 14:00 · Claude** — Gaps left on purpose (lean): board reorder writes ranks only, with no task event, so it does not check locks. Adding or removing reviewers writes no task event, so it is not lock-guarded either. Leases are per person, not per tab: the holder's second tab passes. The release on tab close relies on the 60 s expiry (sendBeacon cannot carry the CSRF header).
 - **2026-09-25 15:40 · Claude** — Review 12b fix set (not yet committed): the gaps noted earlier are closed. Reviewer add and remove now write reviewer_added and reviewer_removed events, which are lock-guarded and shown only to managers. add_task_dependency and remove_task_dependency check the predecessor's lease. reorder_board checks every id. A renew needs a live lease. Gantt Undo relies on move_kind='gantt'. The date-impact confirm now runs in update_task on every path. DoD item 1 has been reworded to match.
+- **2026-09-25 17:27 · Claude** — Re-review 12d L1: reopen_task (revised due date) and approve_schedule_proposal now run _date_impact_gate inside their transaction, with confirmed (also on /reopen, /schedule-proposals/<id>/approve, the board's reopen drop and the owner-request decision). The Gantt passes its own impact reading down to update_task (known_impact), so a drag loads the project once. The 15:40 note's 'not yet committed' work landed in 34eeca1.
