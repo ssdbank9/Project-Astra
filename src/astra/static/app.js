@@ -387,7 +387,7 @@ async function openPortfolio(){
         <div class="facts">${fact("Projects",String(b.project_count))}${fact("Open",String(b.open))}${fact("Overdue",String(b.overdue))}${fact("Critical",String(b.critical))}</div>
         <div class="pf-budget">Budget roll-up: <strong>${budgets}</strong></div></div>`;
     }).join("")||"<p>No projects yet.</p>";
-    document.querySelector("#portfolio-body").innerHTML=`<h2>Portfolio by entity</h2><p style="color:#667085;font-size:12px;">Each project is counted once, under its primary entity. Budgets shown per currency (never blended).</p>${cards}`;
+    document.querySelector("#portfolio-body").innerHTML=`<h2>Portfolio by entity</h2><p class="fine">Each project is counted once, under its primary entity. Budgets shown per currency (never blended).</p>${cards}`;
     const d=document.querySelector("#portfolio-dialog");if(!d.open)d.showModal();
   }catch(err){document.querySelector("#portfolio-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`;document.querySelector("#portfolio-dialog").showModal()}
 }
@@ -401,12 +401,12 @@ async function openTemplates(){
   }catch(err){document.querySelector("#templates-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`;document.querySelector("#templates-dialog").showModal()}
 }
 function renderTemplates(templates){
-  const rows=(templates||[]).map(t=>`<li><strong>${escapeHtml(t.name)}</strong> · <span style="color:#667085">${escapeHtml(t.kind)} · ${t.task_count} task(s)${(t.roles||[]).length?` · roles: ${escapeHtml(t.roles.map(r=>TEMPLATE_ROLE_LABELS[r]||r).join(", "))}`:""}</span>
-    ${t.description?`<br><em style="color:#667085">${escapeHtml(t.description)}</em>`:""}
+  const rows=(templates||[]).map(t=>`<li><strong>${escapeHtml(t.name)}</strong> · <span class="muted">${escapeHtml(t.kind)} · ${t.task_count} task(s)${(t.roles||[]).length?` · roles: ${escapeHtml(t.roles.map(r=>TEMPLATE_ROLE_LABELS[r]||r).join(", "))}`:""}</span>
+    ${t.description?`<br><em class="muted">${escapeHtml(t.description)}</em>`:""}
     <br><button type="button" class="link" data-use-template="${escapeHtml(t.id)}" data-kind="${escapeHtml(t.kind)}" data-roles="${escapeHtml((t.roles||[]).join(","))}">Use</button>
     <button type="button" class="link" data-delete-template="${escapeHtml(t.id)}">Delete</button></li>`).join("")||"<li>No templates yet. Save a project or a task as a template to reuse it.</li>";
   document.querySelector("#templates-body").innerHTML=`<h2>Templates</h2>
-    <p style="color:#667085;font-size:12px;">A template copies structure — titles, hierarchy, dependencies, criticality, attachment links, relative dates and a suggested owner <em>role</em> (App Owner, Chairman, Project manager, member or viewer), never a named person. Never status, history or evidence. New tasks start in draft. When you use a template you pick who fills each role; a role you leave on automatic goes to its only holder on the target project, otherwise the task stays unassigned.</p>
+    <p class="fine">A template copies structure — titles, hierarchy, dependencies, criticality, attachment links, relative dates and a suggested owner <em>role</em> (App Owner, Chairman, Project manager, member or viewer), never a named person. Never status, history or evidence. New tasks start in draft. When you use a template you pick who fills each role; a role you leave on automatic goes to its only holder on the target project, otherwise the task stays unassigned.</p>
     <ul class="people-list">${rows}</ul><div class="error" id="templates-error"></div>`;
   document.querySelectorAll("#templates-body [data-use-template]").forEach(b=>b.addEventListener("click",()=>useTemplate(b.dataset.useTemplate,b.dataset.kind,(b.dataset.roles||"").split(",").filter(Boolean))));
   document.querySelectorAll("#templates-body [data-delete-template]").forEach(b=>b.addEventListener("click",()=>deleteTemplate(b.dataset.deleteTemplate)));
@@ -455,7 +455,7 @@ async function renderRolePicker(kind,roles,finish){
   }).join("");
   const hint=kind==="project"?"Each person you pick is given that role on the new project and is pre-filled on its tasks.":"A person you pick must already hold that role on the target project.";
   document.querySelector("#templates-body").innerHTML=`<form id="template-role-form"><h2>Who fills each role?</h2>
-    <p class="muted" style="font-size:12px;">${hint}</p>${rows}
+    <p class="fine">${hint}</p>${rows}
     <div class="actions"><button type="button" class="quiet" id="template-role-back">Back</button><button>Create</button></div>
     <div class="error" id="templates-error"></div></form>`;
   document.querySelector("#template-role-back").addEventListener("click",openTemplates);
@@ -499,13 +499,13 @@ function renderFinalResults(results,filters){
   const rows=(results||[]).map(r=>{
     const where=r.source_type==="attachment"?`<code class="att-path">${escapeHtml(r.attachment_path||"")}</code>`:`accepted submission v${escapeHtml(String(r.submission_version||""))}`;
     const ents=(r.entities||[]).join(", ")||"—";
-    return `<tr><td><strong>${escapeHtml(r.title)}</strong><br><small style="color:#667085">${where}</small></td>
+    return `<tr><td><strong>${escapeHtml(r.title)}</strong><br><small class="muted">${where}</small></td>
       <td>${escapeHtml(r.source_type)}</td>
-      <td><button type="button" class="link" data-detail="${escapeHtml(r.task_id)}">${escapeHtml(r.task_title)}</button><br><small style="color:#667085">${escapeHtml(r.project_name)} · ${escapeHtml(ents)}</small></td>
+      <td><button type="button" class="link" data-detail="${escapeHtml(r.task_id)}">${escapeHtml(r.task_title)}</button><br><small class="muted">${escapeHtml(r.project_name)} · ${escapeHtml(ents)}</small></td>
       <td><small>${escapeHtml(new Date(r.marked_at).toLocaleDateString())}</small></td></tr>`;
   }).join("")||`<tr><td colspan="4">No final results yet. Mark an accepted submission or an attachment as a final result.</td></tr>`;
   document.querySelector("#final-results-body").innerHTML=`<h2>Final results</h2>
-    <p style="color:#667085;font-size:12px;">Curated deliverables across your projects. Every final result is marked by hand — an accepted submission or an attachment. Acceptance alone does not add one.</p>
+    <p class="fine">Curated deliverables across your projects. Every final result is marked by hand — an accepted submission or an attachment. Acceptance alone does not add one.</p>
     <div class="add-dep" id="fr-filters">
       <select id="fr-project"><option value="">All projects</option>${projOpts}</select>
       <select id="fr-entity"><option value="">All entities</option>${entOpts}</select>
@@ -535,7 +535,7 @@ async function openSearch(q){
   if(!q.trim())return;
   try{
     const {results}=await api(`/api/search?q=${encodeURIComponent(q)}`);
-    const tasks=(results.tasks||[]).map(t=>`<li><button type="button" class="link" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button> · ${escapeHtml(t.status)} · <span style="color:#667085">${escapeHtml(t.project_name)}</span></li>`).join("")||"<li>No matching tasks.</li>";
+    const tasks=(results.tasks||[]).map(t=>`<li><button type="button" class="link" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button> · ${escapeHtml(t.status)} · <span class="muted">${escapeHtml(t.project_name)}</span></li>`).join("")||"<li>No matching tasks.</li>";
     const projects=(results.projects||[]).map(p=>`<li>${escapeHtml(p.name)}</li>`).join("")||"<li>No matching projects.</li>";
     document.querySelector("#search-body").innerHTML=`<h2>Search: ${escapeHtml(q)}</h2><h3>Tasks</h3><ul class="people-list">${tasks}</ul><h3>Projects</h3><ul class="people-list">${projects}</ul>`;
     document.querySelectorAll("#search-body [data-detail]").forEach(b=>b.addEventListener("click",()=>{document.querySelector("#search-dialog").close();openDetail(b.dataset.detail)}));
@@ -814,7 +814,7 @@ function buildSchedule(task,closed){
       <input class="sched-reject-reason" placeholder="Reason to reject" aria-label="Reason to reject">
       <button type="button" class="link" data-reject-sched="${escapeHtml(p.id)}">${canDecide?"Reject":"Request Owner rejection"}</button></span>`
     :`<span class="blocked-text">Owner decision required</span>`;
-    return `<li>Proposed <strong>${escapeHtml(p.start_date||"—")} → ${escapeHtml(p.due_date||"—")}</strong> by ${escapeHtml(p.proposed_by_name||"")} <em style="color:#667085;">(${escapeHtml(p.reason)})</em>${controls}</li>`}).join("")||"<li>No pending proposals.</li>";
+    return `<li>Proposed <strong>${escapeHtml(p.start_date||"—")} → ${escapeHtml(p.due_date||"—")}</strong> by ${escapeHtml(p.proposed_by_name||"")} <em class="muted">(${escapeHtml(p.reason)})</em>${controls}</li>`}).join("")||"<li>No pending proposals.</li>";
   const historyRows=history.map(p=>`<li>${escapeHtml(p.status)} · ${escapeHtml(p.start_date||"—")} → ${escapeHtml(p.due_date||"—")} · proposed by ${escapeHtml(p.proposed_by_name||"")}${p.decided_by_name?` · decided by ${escapeHtml(p.decided_by_name)}`:""}</li>`).join("");
   return `<div class="schedule"><h3>Schedule</h3>
     <div class="facts">
@@ -963,7 +963,7 @@ function buildAttachments(task){
   const frByAtt={};(task.final_results||[]).forEach(f=>{if(f.attachment_id)frByAtt[f.attachment_id]=f.id});
   const rows=(task.attachments||[]).map(a=>{
     const missing=a.exists===false?' <span class="blocked-text">(file not found)</span>':"";
-    const note=a.note?`<br><em style="color:#667085;">${escapeHtml(a.note)}</em>`:"";
+    const note=a.note?`<br><em class="muted">${escapeHtml(a.note)}</em>`:"";
     const frCtl=!canManageFiles?"":frByAtt[a.id]
       ?`<span class="fr-tag">★ final result</span> <button type="button" class="link" data-unmark-fr="${escapeHtml(frByAtt[a.id])}">Unmark</button>`
       :`<button type="button" class="link" data-mark-fr-att="${escapeHtml(a.id)}">Mark as final result</button>`;
@@ -1151,7 +1151,7 @@ function renderPeople(users,memberships,ownerEvents){
       <div class="error" id="filing-error"></div></form>
     <form id="calendar-form"><h3>Project calendar (working days &amp; holidays)</h3>
       <label>Project<select id="calendar-project"><option value="">Choose a project…</option>${filingProjectOptions}</select></label>
-      <p style="color:#8792a2;font-size:12px;margin:4px 0;">Every day counts by default. Uncheck days or add holidays only if this project should skip them.</p>
+      <p class="fine">Every day counts by default. Uncheck days or add holidays only if this project should skip them.</p>
       <div id="calendar-body"></div>
       <div class="error" id="calendar-error"></div></form>`;
   document.querySelector("#add-user-form").addEventListener("submit",submitAddUser);
@@ -1229,7 +1229,7 @@ function renderFilingEntities(projectId){
       </div>
       <label>Reason for date change<input id="project-schedule-reason" placeholder="Required to change project dates"></label>
       <div class="actions"><button type="button" id="save-schedule">Save project dates</button></div>
-      <p style="color:#667085;font-size:12px;">Informational only — project dates are logged on every change but never block task dates.</p>
+      <p class="fine">Informational only — project dates are logged on every change but never block task dates.</p>
       <div class="error" id="schedule-error"></div>
     </div>`;
   document.querySelector("#save-budget").addEventListener("click",()=>saveBudget(projectId));

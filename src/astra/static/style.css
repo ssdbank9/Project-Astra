@@ -1,7 +1,12 @@
+/* 4T4DEA: Inter 4.001, served by Astra (Google Fonts css2 v20 latin and latin-ext subsets, variable
+   weight axis 100-900). Licence: fonts/Inter-OFL.txt. latin-ext downloads only when a name needs it. */
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("fonts/inter-latin-4.001.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("fonts/inter-latin-ext-4.001.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
 :root {
-  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-family: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
   color: #172033;
   background: #f3f5f8;
+  /* Palette (unchanged; the Gate 2 design uses the same values) */
   --navy: #172a46;
   --teal: #0c7c86;
   --red: #c53a48;
@@ -11,6 +16,22 @@
   --gray: #8792a2;
   --crit: #a01f2b;
   --ink: #172033;
+  /* 4T4DEA: semantic tokens. Surfaces, lines and text */
+  --canvas: #f3f5f8; --surface: #ffffff; --surface-2: #f7f9fb; --surface-3: #eef1f5;
+  --line: #e2e7ed; --line-2: #edf0f4; --line-strong: #c8d0db;
+  /* --muted is 5.3:1 or better on every surface below (the older #667085 drops to 4.4:1 on --surface-3) */
+  --text-2: #3a465b; --muted: #5b6475; --teal-dark: #0a6870; --teal-soft: #e3f4f5; --focus: #0c7c86;
+  /* Spacing (4px base), radii and elevation */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px;
+  --radius-sm: 6px; --radius: 8px; --radius-md: 10px; --radius-lg: 12px;
+  --shadow-1: 0 1px 2px rgba(23, 42, 70, .06);
+  --shadow-2: 0 10px 30px rgba(23, 42, 70, .16);
+  --shadow-3: 0 22px 70px rgba(23, 42, 70, .31);
+  /* Type scale: caption 11, small 12, body 14, lead 16, title 20, display 24 */
+  --fs-caption: 11px; --fs-small: 12px; --fs-body: 14px; --fs-lead: 16px; --fs-title: 20px; --fs-display: 24px;
+  --lh-tight: 1.25; --lh-body: 1.45;
+  /* Motion: short and optional (switched off under prefers-reduced-motion) */
+  --dur-1: 100ms; --dur-2: 150ms; --dur-3: 250ms; --ease-enter: cubic-bezier(0, 0, .35, 1); --ease-exit: cubic-bezier(.4, 0, 1, 1);
   /* D73AQW: step identity hues (Okabe-Ito, colour-blind safe), their tints on white (22%; 35% for
      hues 5-7) and a darker "edge" per hue (same hue and saturation, lower lightness) used for the
      segment's bottom stripe and 1px border. GF-3: the edge is what separates a segment from its own
@@ -22,29 +43,40 @@
   --step-1-edge: #0072B2; --step-2-edge: #D05C00; --step-3-edge: #00916A; --step-4-edge: #C25F96; --step-5-edge: #A67300; --step-6-edge: #1985C2; --step-7-edge: #8B830B;
 }
 * { box-sizing: border-box; }
-body { margin: 0; }
+body { margin: 0; font-size: var(--fs-body); line-height: var(--lh-body); background: var(--canvas); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+h1, h2, h3, h4 { line-height: var(--lh-tight); letter-spacing: -.01em; }
+h1 { font-size: var(--fs-display); font-weight: 700; }
+h2 { font-size: var(--fs-title); font-weight: 650; }
+h3 { font-size: var(--fs-lead); font-weight: 650; }
+/* One keyboard focus ring for every interactive element (4T4DEA). Mouse clicks on buttons show none. */
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 0; border-color: var(--focus); }
 .brand { font-weight: 800; letter-spacing: .18em; color: #44bac3; }
-.subtitle { margin-left: 18px; color: #dfe8f1; }
-.login-card { max-width: 430px; margin: 9vh auto; background: white; padding: 42px; border-radius: 16px; box-shadow: 0 18px 50px #172a4620; }
+.subtitle { color: #dfe8f1; }
+.fine { color: var(--muted); font-size: var(--fs-small); line-height: 1.4; }
+.login-card { max-width: 430px; margin: 9vh auto; background: var(--surface); padding: 42px; border-radius: 16px; box-shadow: 0 18px 50px #172a4620; }
 .login-card h1 { margin: .6rem 0; }
-.login-card p { color: #667085; }
-label { display: flex; flex-direction: column; gap: 6px; font-size: .86rem; font-weight: 650; margin: 12px 0; }
-input, select, textarea { font: inherit; padding: 10px 12px; border: 1px solid #c8d0db; border-radius: 8px; background: white; }
+.login-card p { color: var(--muted); }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-2); margin: 12px 0; }
+input, select, textarea { font: inherit; font-size: var(--fs-body); font-weight: 400; color: var(--ink); padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); }
 textarea { min-height: 76px; }
-button { font: inherit; font-weight: 700; padding: 10px 16px; border: 0; border-radius: 8px; background: var(--teal); color: white; cursor: pointer; }
+button { font: inherit; font-weight: 600; padding: 9px 16px; border: 0; border-radius: var(--radius); background: var(--teal); color: white; cursor: pointer; transition: background-color var(--dur-1) ease; }
+button:not([class]):hover { background: var(--teal-dark); }
 .quiet { background: #e9eef4; color: #27364c; }
+.quiet:hover { background: #dde4ec; }
 .error { color: var(--red); margin-top: 12px; min-height: 1.2em; }
-header { height: 66px; background: var(--navy); color: white; padding: 0 28px; display: flex; align-items: center; justify-content: space-between; }
-header button { margin-left: 18px; padding: 7px 12px; }
+header { min-height: 60px; background: var(--navy); color: white; padding: 8px 28px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+header > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+header button { padding: 7px 12px; }
 main { max-width: 1480px; margin: auto; padding: 24px; }
 .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.summary div, .panel, .toolbar { background: white; border: 1px solid #e2e7ed; border-radius: 12px; }
+.summary div, .panel, .toolbar { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); }
 .summary div { padding: 18px; }
-.summary strong { font-size: 1.65rem; display: block; }
-.summary span { color: #667085; }
-.toolbar { margin: 18px 0; padding: 12px 16px; display: flex; gap: 14px; align-items: end; }
-.toolbar label { margin: 0; min-width: 180px; }
-.toolbar button { height: 41px; }
+.summary strong { font-size: 1.65rem; display: block; font-variant-numeric: tabular-nums; }
+.summary span { color: var(--muted); }
+.toolbar { margin: 18px 0; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 12px 14px; align-items: end; }
+.toolbar label { margin: 0; flex: 1 1 160px; min-width: 150px; }
+.toolbar button, .toolbar input, .toolbar select { height: 40px; }
 .panel { padding: 20px; overflow: hidden; }
 .panel-title { display: flex; justify-content: space-between; align-items: center; }
 .panel-title h2 { margin: 0; }
@@ -59,7 +91,7 @@ main { max-width: 1480px; margin: auto; padding: 24px; }
 .toolbar label.inline input { width: auto; }
 .bands { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin: 4px 0 14px; }
 .band { background: #f3f5f8; border: 1px solid #e2e7ed; border-radius: 8px; padding: 10px; text-align: center; border-left: 4px solid #c8d0db; }
-.band strong { font-size: 1.3rem; display: block; }
+.band strong { font-size: 1.3rem; display: block; font-variant-numeric: tabular-nums; }
 .band span { color: #667085; font-size: .76rem; }
 .band.overdue { border-left-color: var(--red); }
 .band.today { border-left-color: var(--amber); }
@@ -105,7 +137,7 @@ button.bar.plain { display: flex; align-items: center; margin: 0; border: 0; fon
 .proj-flag.start { background: #7a5af5; }
 .proj-flag.target { background: #d1495b; }
 .empty { padding: 36px; text-align: center; color: #667085; }
-dialog { border: 0; border-radius: 14px; padding: 0; box-shadow: 0 22px 70px #172a4650; width: min(560px, 92vw); }
+dialog { border: 0; border-radius: 14px; padding: 0; box-shadow: var(--shadow-3); width: min(560px, 92vw); color: var(--ink); }
 dialog::backdrop { background: #172a4670; }
 dialog form { padding: 26px; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
@@ -117,7 +149,8 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 #detail-body h3 { margin: 22px 0 6px; border-top: 1px solid #e3e7ee; padding-top: 16px; }
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 12px 0; }
 .fact { background: #f3f5f8; border-radius: 8px; padding: 8px 10px; }
-.fact span { display: block; color: #667085; font-size: .74rem; }
+.fact span { display: block; color: var(--muted); font-size: var(--fs-caption); }
+.fact strong { font-variant-numeric: tabular-nums; }
 .desc { color: #3a465b; white-space: pre-wrap; }
 .deps ul, .history ul { list-style: none; padding: 0; margin: 8px 0; }
 .deps li, .history li { padding: 8px 0; border-bottom: 1px solid #edf0f4; font-size: .86rem; }
@@ -278,7 +311,7 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .muted { color: #667085; font-weight: 500; }
 .view-controls { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 18px; }
 .view-controls .legend { margin: 12px 0; flex-wrap: wrap; row-gap: 6px; }
-.view-toggle { font-size: .84rem; margin: 0; min-height: 44px; padding: 0 4px; }
+.view-toggle { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; margin: 0; min-height: 44px; padding: 0 4px; }
 .view-toggle input { width: 18px; height: 18px; margin: 0; }
 .bar:focus-visible, .step:focus-visible, .track:focus-visible, .expand:focus-visible, .step-more:focus-visible, .chip:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; z-index: 4; }
 /* The parent bar is a light "track" tinted by state; steps sit inside it. */
@@ -368,15 +401,19 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .sched-table tr.task-tr td { font-weight: 700; }
 .sched-table tr.step-tr td:nth-child(2) { color: #667085; font-weight: 500; }
 .sched-table .link { font-size: inherit; text-align: left; }
+/* 4T4DEA: reduced motion switches off every transition and animation, not only the Gantt's. */
 @media (prefers-reduced-motion: reduce) {
-  .step, .bar, .expand, #step-tip { transition: none; }
+  *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
   .step:hover { transform: none; }
 }
 @media (max-width: 760px) {
+  header { padding: 10px 16px; }
+  .subtitle { display: none; }
+  main { padding: 16px; }
   .summary { grid-template-columns: 1fr 1fr; }
   .bands { grid-template-columns: repeat(3, 1fr); }
   .toolbar { align-items: stretch; flex-direction: column; }
-  .toolbar label { min-width: 0; }
+  .toolbar label { min-width: 0; flex: none; }
   .gantt-row { grid-template-columns: 200px 170px minmax(600px, 1fr); }
   .step-legend, .view-controls .legend { font-size: .76rem; }
   .sched-table { font-size: .78rem; }

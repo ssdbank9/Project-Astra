@@ -88,6 +88,11 @@ This first vertical slice provides:
   a `+N` disclosure for steps not drawn at this scale, an "n steps need dates" chip, a dashed
   extension where a step runs past its parent's dates, and a Schedule table twin with the
   same rows as text, which is the default at phone width;
+- one visual system: the Inter typeface (4.001, SIL Open Font License) is served by Astra
+  itself from `src/astra/static/fonts`, so the page makes no third-party requests and the
+  Content-Security-Policy allows fonts from Astra only; every control shows a keyboard focus
+  ring, a reduced-motion setting switches animation off, and the page fits phone (390px) to
+  desktop (1440px) widths without sideways scrolling;
 - a final-results repository: the App Owner marks an accepted submission or an attachment
   by hand (acceptance alone adds nothing), and the Final results dialog filters by project,
   entity, type, marked date (from/to, whole days in UTC, both ends inclusive) and a search,

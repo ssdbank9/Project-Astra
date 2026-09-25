@@ -98,6 +98,37 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertIn("Portfolio Gantt", body)
 
+    def _get_bytes(self, path):
+        self.connection.request("GET", path)
+        response = self.connection.getresponse()
+        return response, response.read()
+
+    def test_inter_font_is_served_by_astra_with_strict_allowlist_and_caching(self):
+        # 4T4DEA: the page needs no third-party origin; the versioned font files cache for a year.
+        for name in ("inter-latin-4.001.woff2", "inter-latin-ext-4.001.woff2"):
+            response, body = self._get_bytes(f"/static/fonts/{name}")
+            self.assertEqual(response.status, 200, name)
+            self.assertEqual(response.getheader("Content-Type"), "font/woff2")
+            self.assertEqual(response.getheader("Cache-Control"), "public, max-age=31536000, immutable")
+            self.assertEqual(response.getheader("X-Content-Type-Options"), "nosniff")
+            self.assertEqual(body[:4], b"wOF2")
+            self.assertEqual(int(response.getheader("Content-Length")), len(body))
+        response, body = self._get_bytes("/static/fonts/Inter-OFL.txt")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("Content-Type"), "text/plain; charset=utf-8")
+        self.assertIn(b"SIL Open Font License, Version 1.1", body)
+        for path in ("/static/fonts/", "/static/fonts/other.woff2", "/static/fonts/%2e%2e/app.js",
+                     "/static/fonts/../web.py", "/static/inter-latin-4.001.woff2", "/static/FONTS/Inter-OFL.txt",
+                     "/static/fonts/inter-latin-4.001.woff2/"):
+            response, _ = self._get_bytes(path)
+            self.assertEqual(response.status, 404, path)
+        response, _ = self._get_bytes("/")
+        csp = response.getheader("Content-Security-Policy")
+        self.assertIn("font-src 'self'", csp)
+        self.assertIn("style-src 'self'", csp)
+        self.assertNotIn("unsafe-inline", csp)
+        self.assertEqual(response.getheader("Cache-Control"), "no-cache")
+
     def test_dependency_api_reports_blocked_task_and_rejects_cycle(self):
         response, login = self.request("POST", "/api/login", {
             "email": "owner@example.org", "password": "correct horse battery",
@@ -1835,6 +1866,54 @@ class AstraStaticAssetTests(unittest.TestCase):
                        '"Your password has been changed. Your other sessions were signed out."',
                        '"Blocked password reset of the primary owner"'):
             self.assertIn(phrase, self.js)
+
+
+class AstraFoundationStaticTests(unittest.TestCase):
+    """4T4DEA: the design foundation (tokens, self-hosted font, focus, motion, no CSP-blocked styles)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.js = (STATIC / "app.js").read_text(encoding="utf-8")
+        cls.css = (STATIC / "style.css").read_text(encoding="utf-8")
+        cls.html = (STATIC / "index.html").read_text(encoding="utf-8")
+
+    def test_no_inline_style_attributes_reach_the_page(self):
+        # style-src 'self' drops style="..." attributes, so styling must come from classes.
+        self.assertNotIn('style="', self.js)
+        self.assertNotIn("style='", self.js)
+        self.assertNotIn('style="', self.html)
+        self.assertRegex(self.css, r"(?m)^\.fine \{ color: var\(--muted\); font-size: var\(--fs-small\);")
+
+    def test_font_faces_point_at_the_served_files_only(self):
+        from astra import web
+        urls = re.findall(r'url\("([^"]+)"\)', self.css)
+        self.assertEqual(sorted(urls), sorted(web.FONT_FILES))
+        shipped = {f"fonts/{p.name}" for p in (STATIC / "fonts").iterdir()}
+        self.assertEqual(shipped, web.FONT_FILES | {"fonts/Inter-OFL.txt"})
+        self.assertIn("fonts/Inter-OFL.txt", web.STATIC_FILES)
+        self.assertEqual(self.css.count("@font-face"), 2)
+        self.assertIn("font-display: swap", self.css)
+        self.assertRegex(self.css, r":root \{\n  font-family: Inter,")
+        pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('"static/fonts/*"', pyproject)
+
+    def test_tokens_type_scale_focus_and_reduced_motion(self):
+        for token in ("--surface:", "--line:", "--muted:", "--space-4:", "--radius:", "--shadow-2:",
+                      "--fs-caption: 11px", "--fs-small: 12px", "--fs-body: 14px", "--fs-lead: 16px",
+                      "--fs-title: 20px", "--fs-display: 24px"):
+            self.assertIn(token, self.css)
+        # Today's palette is kept.
+        for colour in ("--navy: #172a46", "--teal: #0c7c86", "--red: #c53a48", "--amber: #d98d16"):
+            self.assertIn(colour, self.css)
+        self.assertIn(":focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }", self.css)
+        motion = self.css[self.css.index("@media (prefers-reduced-motion: reduce)"):]
+        motion = motion[:motion.index("\n}\n")]
+        self.assertIn("*, *::before, *::after { transition-duration: .01ms !important;", motion)
+        self.assertIn("animation-duration: .01ms !important", motion)
+
+    def test_toolbar_wraps_instead_of_scrolling_sideways(self):
+        self.assertRegex(self.css, r"(?m)^\.toolbar \{[^}]*flex-wrap: wrap;")
+        self.assertRegex(self.css, r"(?m)^header \{[^}]*flex-wrap: wrap;")
 
 
 # ARZWV7: renderDetail is run under node against a permissive DOM stub, so these tests read the

@@ -22,6 +22,13 @@ SESSION_COOKIE = "astra_session"
 JSON_MAX_BYTES = 1_000_000
 # Raw file uploads (Excel/CSV import) get their own ceiling; JSON stays at 1 MB.
 IMPORT_MAX_BYTES = 5 * 1024 * 1024
+# Fonts are served by Astra itself (4T4DEA), so the page needs no third-party origin.
+CONTENT_SECURITY_POLICY = ("default-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; "
+                           "base-uri 'none'; frame-ancestors 'none'")
+# Only these files are served from static/. The Inter files carry their version in the name
+# (Inter 4.001, Google Fonts css2 v20 latin and latin-ext subsets), so they can be cached for a year.
+STATIC_FILES = {"index.html", "app.js", "style.css", "fonts/Inter-OFL.txt"}
+FONT_FILES = {"fonts/inter-latin-4.001.woff2", "fonts/inter-latin-ext-4.001.woff2"}
 
 
 class PayloadTooLarge(ValueError):
@@ -639,7 +646,7 @@ class AstraHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", CONTENT_SECURITY_POLICY)
         if cookie:
             self.send_header("Set-Cookie", cookie)
         self.end_headers()
@@ -689,17 +696,23 @@ class AstraHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def _static(self, name: str):
-        if name not in {"index.html", "app.js", "style.css"}:
+        if name not in STATIC_FILES and name not in FONT_FILES:
             return self.send_error(HTTPStatus.NOT_FOUND)
-        payload = files("astra").joinpath("static", name).read_bytes()
+        payload = files("astra").joinpath("static", *name.split("/")).read_bytes()
+        if name in FONT_FILES:
+            content_type, cache = "font/woff2", "public, max-age=31536000, immutable"
+        elif name.endswith(".txt"):
+            content_type, cache = "text/plain; charset=utf-8", "no-cache"
+        else:
+            content_type, cache = mimetypes.guess_type(name)[0] or "application/octet-stream", "no-cache"
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", mimetypes.guess_type(name)[0] or "application/octet-stream")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", CONTENT_SECURITY_POLICY)
         self.end_headers()
         self.wfile.write(payload)
 
