@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from .auth import dummy_password_hash, new_token, token_digest, verify_password
 from .db import connect, database_path
 from .importer import FORMULA_PREFIXES, ImportConflict, ImportTooLarge
-from .service import AstraService, Conflict, Forbidden, now_text
+from .service import AstraService, Conflict, Forbidden, NeedsConfirmation, now_text
 
 
 SESSION_COOKIE = "astra_session"
@@ -357,6 +357,16 @@ class AstraHandler(BaseHTTPRequestHandler):
                 user_id = path.split("/")[3]
                 updated = self.service.set_user_active(user, user_id, bool(payload.get("active")))
                 return self._json({"user": updated})
+            # JN1QYG: board drag and drop. A move answers 202 when it filed an Owner request.
+            if path.startswith("/api/tasks/") and path.endswith("/board-move") and path.count("/") == 4:
+                outcome = self.service.move_task(user, path.split("/")[3], payload)
+                return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json(outcome)
+            if path.startswith("/api/tasks/") and path.endswith("/board-undo") and path.count("/") == 4:
+                return self._json({"task": self.service.undo_board_move(user, path.split("/")[3], payload)})
+            if path.startswith("/api/projects/") and path.endswith("/board-order") and path.count("/") == 4:
+                order = self.service.reorder_board(user, path.split("/")[3], str(payload.get("column", "")),
+                                                   payload.get("task_ids"))
+                return self._json({"order": order})
             if path.startswith("/api/tasks/") and path.endswith("/submit"):
                 task_id = path.split("/")[3]
                 submission = self.service.submit_task(user, task_id, payload.get("note", ""))
@@ -720,6 +730,8 @@ class AstraHandler(BaseHTTPRequestHandler):
     def _error(self, exc: Exception):
         if isinstance(exc, Forbidden):
             return self._json({"error": str(exc)}, HTTPStatus.FORBIDDEN)
+        if isinstance(exc, NeedsConfirmation):
+            return self._json({"error": str(exc), "confirm": exc.confirm, "impact": exc.impact}, HTTPStatus.CONFLICT)
         if isinstance(exc, (Conflict, ImportConflict)):
             return self._json({"error": str(exc)}, HTTPStatus.CONFLICT)
         if isinstance(exc, (PayloadTooLarge, ImportTooLarge)):

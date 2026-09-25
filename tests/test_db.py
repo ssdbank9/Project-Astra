@@ -1222,5 +1222,73 @@ class NotificationActorMigrationTests(unittest.TestCase):
             connection.close()
 
 
+
+class BoardRankMigrationTests(unittest.TestCase):
+    """JN1QYG: schema 18 saves the board order (tasks.board_rank, nullable, not backfilled)."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "astra.sqlite3"
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def at_v17(self):
+        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.set_authorizer(deny_create_index(db.V18_BOARD_RANK_INDEX))
+        with self.assertRaises(sqlite3.DatabaseError):
+            db.migrate(connection)
+        connection.set_authorizer(None)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 17)
+        return connection
+
+    def test_fresh_database_has_the_board_rank_and_its_index(self):
+        connection = db.connect(self.path)
+        try:
+            self.assertGreaterEqual(db.SCHEMA_VERSION, 18)
+            self.assertIn("board_rank", table_columns(connection, "tasks"))
+            self.assertEqual([r["name"] for r in connection.execute(
+                f"PRAGMA index_info({db.V18_BOARD_RANK_INDEX})").fetchall()], ["project_id", "board_rank"])
+        finally:
+            connection.close()
+
+    def test_v17_tasks_upgrade_unranked_and_match_fresh_schema(self):
+        connection = self.at_v17()
+        try:
+            self.assertNotIn("board_rank", table_columns(connection, "tasks"))
+            connection.execute(
+                "INSERT INTO users(id,email,display_name,password_hash,global_role,created_at,is_primary_owner)"
+                " VALUES('owner-1','o@example.org','Owner','x','owner','2026-01-01T00:00:00Z',1)")
+            connection.execute("INSERT INTO projects(id,name,created_at,created_by) VALUES('p1','P','2026-01-01','owner-1')")
+            connection.execute("INSERT INTO tasks(id,project_id,title,status,created_at,created_by,updated_at)"
+                               " VALUES('t1','p1','T','draft','2026-01-01','owner-1','2026-01-01')")
+            db.migrate(connection)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+            self.assertIsNone(connection.execute("SELECT board_rank FROM tasks WHERE id='t1'").fetchone()[0])
+            fresh = db.connect(Path(self.temp.name) / "fresh.sqlite3")
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
+    def test_failure_in_the_v18_step_rolls_back_then_retries(self):
+        connection = self.at_v17()
+        try:
+            catalog_before = full_catalog(connection)
+            connection.set_authorizer(deny_create_index(db.V18_BOARD_RANK_INDEX))
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(full_catalog(connection), catalog_before)
+            self.assertNotIn("board_rank", table_columns(connection, "tasks"))
+            db.migrate(connection)
+            self.assertIn("board_rank", table_columns(connection, "tasks"))
+        finally:
+            connection.close()
+
 if __name__ == "__main__":
     unittest.main()

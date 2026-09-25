@@ -45,8 +45,12 @@ This first vertical slice provides:
   ordinary task changes and their own events, but not Owner-action requests or decisions,
   blocked attempts or import keys written by others;
 - a governed work lifecycle: submissions are recorded and only the App Owner decides the
-  protected actions — accept, request changes, reopen, hold, close, and schedule proposal
-  decisions; an eligible project manager or designated approver may request them, which
+  protected actions — accept, request changes, reopen, close, taking work off hold, and
+  schedule proposal decisions. A project manager puts work on hold directly (owner decision,
+  2026-09-25), with the same reason, checkpoint and responsible owner, audited as `task_on_hold`
+  and notified to the other owners; anyone else who is not an owner or a manager of the project
+  cannot. An eligible project manager or designated approver may request the protected actions (a
+  designated approver who is not a manager still requests a hold), which
   records one idempotent Owner request without changing live state; the Owner can approve,
   reject, or cancel that request from **Inbox — Needs action**, where each request shows the
   status it asks for (and the status it moves from, when recorded), the requester's reason, and
@@ -131,7 +135,7 @@ This first vertical slice provides:
 - a page per project (`#/project/<id>/<tab>`, opened from Projects) with tabs Overview
   (status, dates, progress, open, overdue, blocked and critical-path counts, next due), List
   (the schedule table), Board, Timeline (the Gantt) and Activity (the project history), and
-  Add a task, plus Save as template and Close project for owners. The Board is read-only: it
+  Add a task, plus Save as template and Close project for owners. The Board
   maps the 11 statuses into 7 columns — Draft = draft; Ready = assigned; In progress =
   in_progress, reopened, changes_requested, delayed; Blocked = on_hold, or any open task
   waiting on an unfinished predecessor; Submitted = submitted; Accepted = completed; Closed =
@@ -141,9 +145,28 @@ This first vertical slice provides:
   of m done" (steps are counted on their parent, not drawn as cards). "Divide by" splits the
   board into swimlanes by owner or criticality and is kept in the link; owner lanes are
   one per person (by user id), so two people with the same name get separate lanes, marked
-  "(1 of 2)" and "(2 of 2)". Status still changes
-  only through the task's own lifecycle actions. Every column keeps the same width in the
+  "(1 of 2)" and "(2 of 2)". Every column keeps the same width in the
   header and in every swimlane; a wide board scrolls sideways inside its own frame;
+- board drag and drop for owners and the project's managers (members, viewers and the
+  Chairman see the board read-only). Dragging a card within a column saves its place in that
+  column (`tasks.board_rank`, schema v18; recorded in project history as `board_reordered`, no
+  notice). Dragging it to another column changes its status through the same server rules as the
+  task panel: Draft, Ready and In progress set draft, assigned and in_progress; Blocked puts it
+  on hold (reason, checkpoint and responsible owner); Submitted submits it; Accepted accepts
+  the pending submission; Closed cancels or abandons it (with a reason); dragging a closed or
+  accepted card back into work reopens it (reason and revised due date). A manager's protected
+  drop files the existing Owner request instead (HTTP 202), and a card that waits on an
+  unfinished predecessor cannot go to In progress, Submitted or Accepted: a manager's drop is
+  refused with "waits on …", an owner confirms an override that is recorded as
+  `dependency_override`. A refused drop snaps back with the server's reason, and every refusal
+  is recorded as `board_move_blocked` and noticed to the owners (under the blocked-notice cap).
+  An ordinary move among Draft, Ready and In progress, and a reorder, shows Undo for 15 seconds:
+  Undo is a new audited change ("Undo of Draft → Ready (event …)"), refused once the task has
+  changed again or 20 seconds have passed, and never rewrites history. Every card also has a
+  "Move to…" menu (keyboard: Enter opens it, arrows move, Escape closes; up and down move the
+  card in its column). Phones never drag: a swipe scrolls and the menu moves work. The API is
+  `POST /api/tasks/<id>/board-move`, `POST /api/tasks/<id>/board-undo` and
+  `POST /api/projects/<id>/board-order`;
 - My Work with two tabs. List (`#/my-work`) groups the open tasks you own into Overdue,
   Today, This week (due within the next 7 days, day 7 included, as on Home), Later and No date, each with a
   count, soonest first, with a filter box. Calendar (`#/my-work/calendar?month=YYYY-MM`) is a
@@ -246,6 +269,10 @@ the database is untouched: it has more than one owner and the message lists thei
 Back up `astra.sqlite3`, set every owner except the primary back to their earlier role
 (`UPDATE users SET global_role='member' WHERE id=...`), start Astra again, and make them
 secondary owners from the People screen.
+
+Schema 18 adds `tasks.board_rank` (a nullable
+number; a task without one sorts after the ranked cards of its column) and the index
+`idx_tasks_board_rank` on `(project_id, board_rank)`. Nothing existing is rewritten.
 
 Database migrations are applied one SQL statement at a time inside a single
 `BEGIN IMMEDIATE` transaction per schema version. The schema changes and that step's

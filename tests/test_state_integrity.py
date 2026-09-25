@@ -30,6 +30,20 @@ class AstraStateIntegrityTests(unittest.TestCase):
         self.db.close()
         self.temp.cleanup()
 
+    def _hold_request(self, task, reason="vendor", checkpoint="2027-04-01", hold_owner_id=None):
+        """A set_on_hold Owner request. Since Aly's decision of 2026-09-25 (Slack ts 1790342529.695749)
+        a project manager puts work on hold directly, so the request comes from the other route that
+        still files one: a designated approver who is not a manager."""
+        email = f"hold-approver-{task['project_id'][:8]}@example.org"
+        row = self.db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+        if row:
+            approver = self.service.get_user(row["id"])
+        else:
+            approver = self.service.create_user(self.owner, email, "Hold approver", "approver password safe")
+            self.service.grant_project_access(self.owner, task["project_id"], approver["id"], "member")
+        self.service.add_task_reviewer(self.owner, task["id"], approver["id"], "approver")
+        return self.service.set_on_hold(approver, task["id"], reason, checkpoint, hold_owner_id)
+
     def test_stale_task_update_is_rejected_without_state_or_event_change(self):
         project = self.service.create_project(self.owner, "Concurrency")
         task = self.service.create_task(
@@ -313,9 +327,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
         hold_task = self.service.create_task(
             self.owner, {"project_id": project["id"], "title": "Hold", "owner_user_id": manager["id"]}
         )
-        requested = self.service.set_on_hold(
-            manager, hold_task["id"], "vendor", "2027-04-01", manager["id"]
-        )
+        requested = self._hold_request(hold_task, "vendor", "2027-04-01", manager["id"])
         self._approve_and_assert_resolved(requested["request"], task_id=hold_task["id"])
         self.assertEqual(self.service.get_task(self.owner, hold_task["id"])["status"], "on_hold")
 
@@ -380,9 +392,8 @@ class AstraStateIntegrityTests(unittest.TestCase):
 
         def request_hold(title):
             task = new_task(title)
-            return self.service.set_on_hold(
-                manager, task["id"], "manager reason", "2027-04-01", manager["id"]
-            )["request"], task_events(task["id"])
+            return self._hold_request(task, "manager reason", "2027-04-01", manager["id"])["request"], \
+                task_events(task["id"])
 
         def request_reopen(title):
             task = self._completed_task(project, manager, title)
@@ -639,9 +650,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
                     self.owner,
                     {"project_id": project["id"], "title": f"Hold {label}", "owner_user_id": manager["id"]},
                 )
-                request = self.service.set_on_hold(
-                    manager, task["id"], "vendor", "2027-04-01", manager["id"]
-                )["request"]
+                request = self._hold_request(task, "vendor", "2027-04-01", manager["id"])["request"]
                 self.service.set_on_hold(self.owner, task["id"], "Owner hold", checkpoint, hold_owner["id"])
                 if matches:
                     self._assert_resolved(request, task_id=task["id"])
@@ -988,7 +997,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
         task = self.service.create_task(
             self.owner, {"project_id": project["id"], "title": "Hold", "owner_user_id": manager["id"]}
         )
-        request = self.service.set_on_hold(manager, task["id"], "vendor", "2027-04-01", manager["id"])["request"]
+        request = self._hold_request(task, "vendor", "2027-04-01", manager["id"])["request"]
         edited = self.service.update_task(
             self.owner, task["id"], {"title": "Unrelated edit", "expected_revision": task["revision"]}
         )
@@ -1257,7 +1266,7 @@ class AstraStateIntegrityTests(unittest.TestCase):
 
         def hold(title):
             task = new_task(title)
-            request = self.service.set_on_hold(manager, task["id"], "vendor", "2027-04-01", manager["id"])["request"]
+            request = self._hold_request(task, "vendor", "2027-04-01", manager["id"])["request"]
             return task["id"], request, lambda: None
 
         def schedule(decide):

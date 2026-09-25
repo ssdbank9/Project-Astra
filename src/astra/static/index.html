@@ -176,6 +176,9 @@
     <dt><kbd>j</kbd> / <kbd>k</kbd></dt><dd>Next or previous task, while focus is in the task panel and not in a field</dd>
   </dl><p class="fine">No single-key shortcut works anywhere else on the page.</p></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <dialog id="move-dialog" aria-labelledby="move-dialog-title"><form method="dialog" id="move-form"></form></dialog>
+  <div class="menu move-menu" id="move-menu" role="menu" aria-label="Move task" hidden></div>
+  <div id="board-live" class="sr-only" aria-live="polite"></div>
   <div id="step-tip" role="tooltip" hidden></div>
   <script src="/static/app.js"></script>
 </body>

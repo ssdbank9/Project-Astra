@@ -87,7 +87,24 @@ BLOCKED_NOTICE_CAP = 5
 BLOCKED_NOTICE_KINDS = frozenset({
     "attachment_add_blocked", "attachment_removal_blocked", "final_result_mark_blocked",
     "final_result_unmark_blocked", "protected_action_blocked", "owner_change_blocked",
+    "board_move_blocked",
 })
+
+# JN1QYG (owner decision 2026-09-19, Kanban dragging): the board's seven columns. Each
+# drop runs the action that already governs that status; nothing here is a new route
+# around the lifecycle rules. The keys match app.js BOARD_COLUMNS.
+BOARD_COLUMNS = ("draft", "ready", "progress", "blocked", "submitted", "accepted", "closed")
+BOARD_COLUMN_LABELS = {"draft": "Draft", "ready": "Ready", "progress": "In progress", "blocked": "Blocked",
+                       "submitted": "Submitted", "accepted": "Accepted", "closed": "Closed"}
+BOARD_WORK_STATUS = {"draft": "draft", "ready": "assigned", "progress": "in_progress"}
+# A task waiting on an unfinished predecessor may not be dragged forward into these;
+# only an owner may override (owner decision, protected Kanban status authority).
+BOARD_DEPENDENCY_GATED = frozenset({"progress", "submitted", "accepted"})
+# Ordinary moves (between these statuses, applied directly) show a 15-second Undo; the
+# server accepts the Undo a little longer so a click at 15 s still lands.
+BOARD_UNDO_SOURCE_STATUSES = frozenset({"draft", "assigned", "in_progress", "delayed"})
+BOARD_UNDO_SECONDS = 15
+BOARD_UNDO_GRACE_SECONDS = 5
 # Owner decision Item 2 on 6G89SJ: the App Owner hears of every attachment removal outcome,
 # including their own, so a single-owner install is told too. Other owner actions are
 # still not self-notified (Z24KVH).
@@ -210,6 +227,16 @@ class Forbidden(PermissionError):
 
 class Conflict(ValueError):
     """The requested write was based on state that is no longer current."""
+
+
+class NeedsConfirmation(Conflict):
+    """JN1QYG: the move is allowed only after the actor confirms its consequence. The web
+    layer answers 409 with ``confirm`` (what to confirm) and ``impact`` (why), and the
+    client repeats the request with that confirmation set."""
+
+    def __init__(self, message: str, confirm: str, impact: list | None = None):
+        super().__init__(message)
+        self.confirm, self.impact = confirm, list(impact or [])
 
 
 @dataclass(frozen=True)
@@ -998,6 +1025,8 @@ class AstraService:
         projects = self._attach_entities([dict(row) for row in rows])
         for project in projects:  # FKVHH8: today in the project's own timezone, as its tasks' due states use
             project["today"] = self._today_in_timezone(project.get("timezone"))
+            # JN1QYG: the board offers dragging only where the server would allow the move.
+            project["can_manage"] = self.can_manage_project(actor, project["id"])
         return projects
 
     def grant_project_access(self, actor: dict, project_id: str, user_id: str, role: str) -> None:
@@ -2263,7 +2292,11 @@ class AstraService:
         hold_owner = self._validate_assignee(task["project_id"], hold_owner_id or task.get("owner_user_id"))
         if not hold_owner:
             raise ValueError("On-hold work requires a responsible owner.")
-        if actor["global_role"] != "owner":
+        # Aly 2026-09-25 (Slack ts 1790342529.695749): a manager of the project puts work on hold
+        # directly, with the same reason, checkpoint and hold owner. Anyone else keeps today's route
+        # (a designated approver files a request; everyone else is refused and audited). Leaving
+        # on_hold is unchanged: a manager's attempt still files an Owner request.
+        if not self.can_manage_project(actor, task["project_id"]):
             return self._request_protected_action(
                 actor,
                 task,
@@ -2304,6 +2337,183 @@ class AstraService:
                 owner_decision=owner_decision,
             )
         return self.get_task(actor, task_id)
+
+    # --- JN1QYG: board moves (drag and drop, Move to, Undo) ---
+    # Owner decisions 2026-09-19 (Kanban dragging, protected status authority, Undo). A drop
+    # runs the action that already governs the target status, so every role limit, reason
+    # rule and Owner request of today applies unchanged; the board adds the dependency gate,
+    # the audit of refused moves and a short, revision-checked Undo.
+
+    @staticmethod
+    def board_column(task: dict) -> str:
+        """The board column a task shows in (mirrors app.js boardColumn)."""
+        status = task["status"]
+        if status == "completed":
+            return "accepted"
+        if status in ("cancelled", "abandoned"):
+            return "closed"
+        if status == "submitted":
+            return "submitted"
+        if status == "on_hold" or task.get("is_blocked"):
+            return "blocked"
+        return {"draft": "draft", "assigned": "ready"}.get(status, "progress")
+
+    def _latest_event_id(self, task_id: str, actor_id: str, kind: str) -> str | None:
+        row = self.db.execute(
+            "SELECT id FROM task_events WHERE task_id=? AND actor_user_id=? AND event_type=?"
+            " ORDER BY occurred_at DESC, rowid DESC LIMIT 1",
+            (task_id, actor_id, kind),
+        ).fetchone()
+        return row["id"] if row else None
+
+    def _audit_board_block(self, actor: dict, task: dict, source: str, target: str, message: str) -> None:
+        """A refused drop is audited after the refused write rolled back; owners hear of it
+        under the KBWY86 per-actor cap (owner decision: blocked consequential attempts)."""
+        with transaction(self.db):
+            self._event(task["id"], actor["id"], "board_move_blocked",
+                        {"column": source, "status": task["status"]}, {"column": target}, message)
+
+    def move_task(self, actor: dict, task_id: str, payload: dict) -> dict:
+        target = str(payload.get("to_column", ""))
+        if target not in BOARD_COLUMNS:
+            raise ValueError("Unknown board column.")
+        task = self.get_task(actor, task_id)
+        self._add_dependency_state([task])
+        source = self.board_column(task)
+        try:
+            return self._move_task(actor, task, source, target, payload)
+        except Conflict:
+            raise  # stale board or a confirmation to ask for: not a refused attempt
+        except (ValueError, Forbidden) as exc:
+            self._audit_board_block(actor, task, source, target, str(exc))
+            raise
+
+    def _move_task(self, actor: dict, task: dict, source: str, target: str, payload: dict) -> dict:
+        task_id, title = task["id"], task["title"]
+        if not self.can_manage_project(actor, task["project_id"]):
+            raise Forbidden("Only an owner or a manager of this project can move its tasks on the board.")
+        expected = payload.get("expected_revision")
+        if isinstance(expected, bool) or not isinstance(expected, int):
+            raise ValueError("An integer expected_revision is required to move a task.")
+        if expected != task["revision"]:
+            raise Conflict("This task changed since the board was loaded; reload the board and try again.")
+        if target == source:
+            raise ValueError(f"“{title}” is already in {BOARD_COLUMN_LABELS[target]}.")
+        is_owner = actor["global_role"] == "owner"
+        override = False
+        waits_on = [p["title"] for p in task.get("blocked_by") or []]
+        if target in BOARD_DEPENDENCY_GATED and waits_on and task["status"] not in REOPEN_ONLY_STATUSES:
+            names = ", ".join(waits_on)
+            if not is_owner:
+                raise ValueError(f"“{title}” waits on {names}; it can move to {BOARD_COLUMN_LABELS[target]} once "
+                                 "that is completed. Only an owner may override a dependency.")
+            if not payload.get("override_dependencies"):
+                raise NeedsConfirmation(f"“{title}” waits on {names}. Move it to {BOARD_COLUMN_LABELS[target]} anyway?",
+                                        "dependencies", waits_on)
+            override = True
+        reason = str(payload.get("reason", "")).strip()
+        auto_reason = f"Board move: {BOARD_COLUMN_LABELS[source]} → {BOARD_COLUMN_LABELS[target]}"
+        undo = None
+        if target in BOARD_WORK_STATUS:
+            status = BOARD_WORK_STATUS[target]
+            if task["status"] in REOPEN_ONLY_STATUSES:
+                if not reason or not payload.get("new_due_date"):
+                    raise NeedsConfirmation(f"Moving a {task['status']} task back into work reopens it: give a reason "
+                                            "and a revised due date.", "reopen")
+                outcome = self.reopen_task(actor, task_id, reason, payload.get("new_due_date"))
+            elif status == task["status"]:
+                raise ValueError(f"“{title}” is already {status.replace('_', ' ')}; it shows under "
+                                 f"{BOARD_COLUMN_LABELS[source]} because it waits on {', '.join(waits_on)}.")
+            else:
+                outcome = self.update_task(actor, task_id, {"status": status, "expected_revision": expected,
+                                                            "reason": reason or auto_reason})
+                if "request" not in outcome and task["status"] in BOARD_UNDO_SOURCE_STATUSES and not reason:
+                    undo = {"event_id": self._latest_event_id(task_id, actor["id"], "task_updated"),
+                            "seconds": BOARD_UNDO_SECONDS}
+        elif target == "blocked":
+            if not reason or not payload.get("checkpoint_date"):
+                raise NeedsConfirmation("Blocked means on hold: give a reason and a follow-up checkpoint date.", "hold")
+            outcome = self.set_on_hold(actor, task_id, reason, payload.get("checkpoint_date"),
+                                       payload.get("owner_user_id") or None)
+        elif target == "submitted":
+            if not payload.get("confirmed"):
+                raise NeedsConfirmation(f"Submit “{title}” for review?", "submit")
+            outcome = {"submission": self.submit_task(actor, task_id, str(payload.get("note", "")))}
+        elif target == "accepted":
+            pending = self.db.execute(
+                "SELECT id, version FROM task_submissions WHERE task_id=? AND status='submitted'"
+                " ORDER BY version DESC LIMIT 1", (task_id,)).fetchone()
+            if task["status"] != "submitted" or not pending:
+                raise ValueError(f"Only a submitted task can be accepted; submit “{title}” for review first.")
+            if not payload.get("confirmed"):
+                raise NeedsConfirmation(f"Accept submission v{pending['version']} of “{title}”?", "accept")
+            outcome = self.accept_submission(actor, pending["id"], str(payload.get("note", "")))
+        else:  # closed
+            status = payload.get("status")
+            if status not in ("cancelled", "abandoned") or not reason:
+                raise NeedsConfirmation("Closing a task needs Cancelled or Abandoned and a reason.", "close")
+            outcome = self.update_task(actor, task_id, {"status": status, "expected_revision": expected,
+                                                        "reason": reason})
+        if isinstance(outcome, dict) and "request" in outcome:
+            return {"request": outcome["request"]}
+        if override:
+            with transaction(self.db):
+                self._event(task_id, actor["id"], "dependency_override", {"blocked_by": waits_on},
+                            {"column": target}, reason or auto_reason)
+        result = {"task": self.get_task(actor, task_id)}
+        if undo and undo["event_id"]:
+            result["undo"] = undo
+        return result
+
+    def undo_board_move(self, actor: dict, task_id: str, payload: dict) -> dict:
+        """A new audited change that reverses one ordinary board move by the same person,
+        through the same rules. Refused when the task changed since or the window passed,
+        so a later change is never reversed blindly (owner decision: Undo and recovery)."""
+        event = self.db.execute(
+            "SELECT * FROM task_events WHERE id=? AND task_id=?", (str(payload.get("event_id", "")), task_id)
+        ).fetchone()
+        if not event or event["event_type"] != "task_updated" or event["actor_user_id"] != actor["id"] \
+                or not str(event["reason"] or "").startswith("Board move: "):
+            raise ValueError("There is no board move of yours to undo here.")
+        before, after = json.loads(event["before_json"]), json.loads(event["after_json"])
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(event["occurred_at"])).total_seconds()
+        if age > BOARD_UNDO_SECONDS + BOARD_UNDO_GRACE_SECONDS:
+            raise ValueError("The Undo window has passed; move the task back on the board instead.")
+        task = self.get_task(actor, task_id)
+        if task["revision"] != after["revision"] or task["status"] != after["status"]:
+            raise Conflict("The task changed after your move, so it was not undone; check its history first.")
+        return self.update_task(actor, task_id, {
+            "status": before["status"], "expected_revision": task["revision"],
+            "reason": f"Undo of {event['reason'][len('Board move: '):]} (event {event['id']})",
+        })
+
+    def reorder_board(self, actor: dict, project_id: str, column: str, task_ids: list) -> list[str]:
+        """Save the order of one board column (priority within the column). Audited in the
+        project history without a notice: routine ordering belongs to the daily digest,
+        which is not built, so it stays visible in history only (owner decision)."""
+        if column not in BOARD_COLUMNS:
+            raise ValueError("Unknown board column.")
+        if not self.can_manage_project(actor, project_id):
+            raise Forbidden("Only an owner or a manager of this project can reorder its board.")
+        if not isinstance(task_ids, list) or not task_ids or len(task_ids) > 500 \
+                or not all(isinstance(t, str) for t in task_ids) or len(set(task_ids)) != len(task_ids):
+            raise ValueError("Send the column's task ids in their new order.")
+        with transaction(self.db):
+            tasks = self.list_tasks(actor, project_id)
+            by_id = {t["id"]: t for t in tasks}
+            for tid in task_ids:
+                current = by_id.get(tid)
+                if not current:
+                    raise KeyError("Task not found in this project.")
+                if self.board_column(current) != column:
+                    raise Conflict("The board changed since it was loaded; reload the board and try again.")
+            before = [t["id"] for t in sorted((t for t in tasks if t["id"] in set(task_ids)),
+                                             key=lambda t: (t.get("board_rank") is None, t.get("board_rank") or 0))]
+            for rank, tid in enumerate(task_ids, start=1):
+                self.db.execute("UPDATE tasks SET board_rank=? WHERE id=?", (float(rank), tid))
+            self._project_event(project_id, actor["id"], "board_reordered",
+                                {"column": column, "before": before, "after": list(task_ids)}, None)
+        return list(task_ids)
 
     def list_subtasks(self, actor: dict, task_id: str) -> list[dict]:
         # D73AQW: the Gantt step segments, their tooltip and the detail dialog's

@@ -218,6 +218,20 @@ main { grid-column: 2; width: 100%; max-width: 1480px; margin: 0 auto; padding: 
 .col-hidden { margin: 0; color: var(--muted); font-size: 13px; font-weight: 600; text-align: center; }
 .lane-head { position: sticky; left: 0; width: max-content; margin: 14px 0 6px; font-size: var(--fs-small); color: var(--text-2); letter-spacing: .04em; text-transform: uppercase; }  /* stays in view while the board scrolls sideways */
 .board-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-1); }
+/* JN1QYG: drag and drop. The card is the handle; the ghost follows the pointer and the column under it
+   shows where the card will land. Nothing animates, so reduced motion needs no extra rule. */
+.board-card[data-card] { cursor: grab; }
+.board-card.is-dragging { opacity: .4; }
+body.board-dragging, body.board-dragging * { cursor: grabbing; user-select: none; }
+.drag-ghost { position: fixed; top: 0; left: 0; z-index: 75; margin: 0; pointer-events: none; box-shadow: var(--shadow-3); opacity: .95; }
+.board .col.drop-target { outline: 2px dashed var(--teal); outline-offset: -2px; background: var(--teal-soft); }
+.drop-marker { flex: none; height: 4px; border-radius: 2px; background: var(--teal); }
+.card-move { align-self: flex-start; font-size: var(--fs-small); }
+@media (max-width: 760px) { .drag-only { display: none; } }   /* phones move work from the menu */
+.move-menu { position: fixed; top: 0; left: 0; z-index: 72; max-width: calc(100vw - 16px); }
+#move-form fieldset.choice { display: flex; gap: 18px; margin: 12px 0; padding: 0; border: 0; }
+#move-form fieldset.choice legend { margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+#move-form fieldset.choice label { flex-direction: row; align-items: center; gap: 6px; margin: 0; font-weight: 500; }
 .board-card .card-title { color: var(--ink); font-size: var(--fs-body); font-weight: 600; text-align: left; text-decoration: none; }
 .board-card .card-title:hover { color: var(--teal); text-decoration: underline; }
 .card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

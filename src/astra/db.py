@@ -8,7 +8,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 
 class SchemaMigrationRefused(RuntimeError):
@@ -749,6 +749,22 @@ def _migrate_v17(connection: sqlite3.Connection) -> None:
     """)
 
 
+V18_BOARD_RANK_INDEX = "idx_tasks_board_rank"
+
+
+def _migrate_v18(connection: sqlite3.Connection) -> None:
+    """v17 -> v18: a saved board order (ticket JN1QYG).
+
+    ``board_rank`` orders cards inside a board column; dragging a card within a column
+    rewrites the ranks of that column. NULL means "not ranked yet": those cards follow the
+    ranked ones in the list order. Not backfilled.
+    """
+    _execute_statements(connection, f"""
+        ALTER TABLE tasks ADD COLUMN board_rank REAL;
+        CREATE INDEX {V18_BOARD_RANK_INDEX} ON tasks(project_id, board_rank);
+    """)
+
+
 # The ordered schema history: (version, step). migrate() runs every step whose version
 # is above the database's user_version, each in its own transaction with its bump.
 # Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
@@ -770,4 +786,5 @@ MIGRATION_STEPS = (
     (15, _migrate_v15),
     (16, _migrate_v16),
     (17, _migrate_v17),
+    (18, _migrate_v18),
 )

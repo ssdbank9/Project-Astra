@@ -1811,6 +1811,51 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual(parent_row["due_state"], "undated")
 
 
+class AstraGovernedDragWebTests(unittest.TestCase):
+    """Lock #12 over HTTP: board moves, locks, date drags, bulk changes and WIP limits."""
+
+    setUp, tearDown = AstraWebTests.setUp, AstraWebTests.tearDown
+    request, _owner_session, _login_as = AstraWebTests.request, AstraWebTests._owner_session, AstraWebTests._login_as
+
+    def _project_with_manager(self):
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "Drag HTTP"}, cookie=cookie, csrf=csrf)
+        pid = project["project"]["id"]
+        _, manager = self.request("POST", "/api/users", {"email": "pm@example.org", "display_name": "PM",
+                                                         "password": "manager password safe"}, cookie=cookie, csrf=csrf)
+        self.request("POST", "/api/project-access", {"project_id": pid, "user_id": manager["user"]["id"],
+                                                     "role": "manager"}, cookie=cookie, csrf=csrf)
+        _, task = self.request("POST", "/api/tasks", {"project_id": pid, "title": "Card"}, cookie=cookie, csrf=csrf)
+        return (cookie, csrf), self._login_as("pm@example.org", "manager password safe"), pid, task["task"]
+
+    def test_board_move_undo_and_order_over_http(self):
+        (ocookie, ocsrf), (cookie, csrf), pid, task = self._project_with_manager()
+        response, moved = self.request("POST", f"/api/tasks/{task['id']}/board-move",
+                                       {"to_column": "progress", "expected_revision": task["revision"]},
+                                       cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(moved["task"]["status"], "in_progress")
+        response, undone = self.request("POST", f"/api/tasks/{task['id']}/board-undo",
+                                        {"event_id": moved["undo"]["event_id"]}, cookie=cookie, csrf=csrf)
+        self.assertEqual((response.status, undone["task"]["status"]), (200, "draft"))
+        # A dialog target answers 409 with what to confirm; a manager's close files a request (202).
+        rev = undone["task"]["revision"]
+        response, ask = self.request("POST", f"/api/tasks/{task['id']}/board-move",
+                                     {"to_column": "closed", "expected_revision": rev}, cookie=cookie, csrf=csrf)
+        self.assertEqual((response.status, ask["confirm"]), (409, "close"))
+        response, filed = self.request("POST", f"/api/tasks/{task['id']}/board-move",
+                                       {"to_column": "closed", "expected_revision": rev, "status": "cancelled",
+                                        "reason": "Duplicate"}, cookie=cookie, csrf=csrf)
+        self.assertEqual((response.status, filed["request"]["action"]), (202, "update_task_status"))
+        response, order = self.request("POST", f"/api/projects/{pid}/board-order",
+                                       {"column": "draft", "task_ids": [task["id"]]}, cookie=cookie, csrf=csrf)
+        self.assertEqual((response.status, order["order"]), (200, [task["id"]]))
+        # Without the CSRF token nothing moves.
+        response, _ = self.request("POST", f"/api/tasks/{task['id']}/board-move",
+                                   {"to_column": "ready", "expected_revision": rev}, cookie=cookie)
+        self.assertEqual(response.status, 403)
+
+
 class AstraStaticAssetTests(unittest.TestCase):
     """D73AQW adversarial-review follow-ups pinned on the shipped static files.
 
@@ -2183,6 +2228,43 @@ if(mode==="board"){
   location.hash="#/project/"+U1+"/nope?divide=owner";calls.splice(0);
   try{a.applyRoute(false,false)}catch(e){out.tabRouteError=String(e)}
   out.tabFix=[calls.filter(c=>c[0]==="replace"),location.hash];
+  process.stdout.write(JSON.stringify(out));return;
+}
+if(mode==="drag"){
+  // JN1QYG: movable cards, the saved order, the dialog each column needs, and the move/Undo round trip.
+  const T=o=>({project_id:U1,project_name:"P",status:"draft",due_state:"scheduled",days_to_due:9,due_date:"2026-10-04",owner_name:"Sara",owner_user_id:"u-sara",criticality:"high",revision:3,...o});
+  a.state.user={id:"u1",display_name:"PM",global_role:"member"};
+  a.state.projects=[{id:U1,name:"P",status:"active",entities:[],can_manage:true}];
+  const tasks=[T({id:"a",title:"A <b>",board_rank:2}),T({id:"b",title:"B",board_rank:1}),T({id:"c",title:"C"}),T({id:"x",title:"X",status:"submitted"})];
+  a.state.tasks=tasks;
+  out.movable=a.renderBoard(tasks,"");
+  a.state.projects[0].can_manage=false;out.readOnly=a.renderBoard(tasks,"");a.state.projects[0].can_manage=true;
+  out.order=columnOrder(U1,"draft");
+  out.kinds=[["draft","blocked"],["draft","closed"],["draft","submitted"],["submitted","accepted"],["draft","accepted"],["completed","progress"],["cancelled","draft"],["draft","ready"]]
+    .map(([st,col])=>moveDialogKind({status:st},col));
+  const posts=[];let reply=()=>null;
+  globalThis.fetch=async(u,opt)=>{posts.push([u,opt&&opt.body?JSON.parse(opt.body):null]);const r=reply(u)||{};const status=r.status||200;return {ok:status<400,status,json:async()=>r.body||{}}};
+  globalThis.load=async()=>{posts.push(["load"])};
+  const timers=[],realST=globalThis.setTimeout;globalThis.setTimeout=(f,ms)=>{timers.push(ms);return 0};
+  reply=u=>u.endsWith("/board-move")?{body:{task:{...tasks[2],status:"assigned",revision:4},undo:{event_id:"ev1",seconds:15}}}:null;
+  await moveCard({...tasks[2]},"ready");
+  out.movePosts=posts.splice(0);out.moveToast=document.querySelector("#toast").innerHTML;out.toastTimers=timers.splice(0);
+  await document.querySelector("#toast-action")._listeners.click[0]();for(let i=0;i<10;i++)await new Promise(r=>realST(r,0));
+  out.undoPosts=posts.splice(0);
+  reply=u=>u.endsWith("/board-move")?{status:400,body:{error:"B waits on A; only an owner may override."}}:null;
+  await moveCard({...tasks[1]},"progress");out.refusedToast=document.querySelector("#toast").innerHTML;out.refusedPosts=posts.splice(0);
+  globalThis.askMove=async()=>null;await moveCard({...tasks[0]},"closed");out.cancelPosts=posts.splice(0);
+  globalThis.askMove=async kind=>kind==="close"?{status:"cancelled",reason:"Duplicate"}:{override_dependencies:true};
+  reply=u=>u.endsWith("/board-move")?{status:202,body:{request:{id:"r1",action:"update_task_status"}}}:null;
+  await moveCard({...tasks[0]},"closed");out.requestPosts=posts.splice(0);out.requestToast=document.querySelector("#toast").innerHTML;
+  let n=0;reply=u=>u.endsWith("/board-move")?(n++?{body:{task:{...tasks[1],status:"in_progress",revision:4}}}:{status:409,body:{error:"B waits on A.",confirm:"dependencies",impact:["A"]}}):null;
+  a.state.user.global_role="owner";await moveCard({...tasks[1]},"progress");out.overridePosts=posts.splice(0);
+  reply=()=>null;
+  await saveColumnOrder(U1,"draft",["c","b","a"],true);out.orderPosts=posts.splice(0);
+  await document.querySelector("#toast-action")._listeners.click.at(-1)();for(let i=0;i<10;i++)await new Promise(r=>realST(r,0));out.orderUndoPosts=posts.splice(0);
+  globalThis.setTimeout=realST;
+  const btn={dataset:{moveMenu:"a"},setAttribute(){},getBoundingClientRect:()=>({left:10,bottom:20})};
+  openMoveMenu(btn);out.menu=document.querySelector("#move-menu").innerHTML;
   process.stdout.write(JSON.stringify(out));return;
 }
 if(mode==="work"){
@@ -2632,6 +2714,84 @@ class AstraProjectPageTests(unittest.TestCase):
         self.assertEqual(self.out["ownerActions"], [False, False, False])
         self.assertIn("tasks, 2 steps", self.out["facts"])
         self.assertIn('<progress id="project-progress" max="100" value="33">', self.out["overview"])
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")
+class AstraBoardDragDriverTests(unittest.TestCase):
+    """JN1QYG: movable cards, the Move to menu, the dialog each column needs and the Undo round trip."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out = _run_shell_driver("drag")
+
+    def test_only_managers_and_owners_get_movable_cards(self):
+        self.assertEqual(self.out["movable"].count('class="link card-move" data-move-menu='), 4)
+        self.assertIn('aria-haspopup="menu"', self.out["movable"])
+        self.assertIn('aria-label="Move “A &lt;b&gt;” to…">Move to…</button>', self.out["movable"])
+        self.assertNotIn("card-move", self.out["readOnly"])
+        self.assertNotIn("data-card", self.out["readOnly"])
+        self.assertIn("read-only for your role", self.out["readOnly"])
+
+    def test_the_saved_order_decides_the_column(self):
+        self.assertEqual(self.out["order"], ["b", "a", "c"])  # rank 1, rank 2, then unranked
+        self.assertLess(self.out["movable"].index('data-card="b"'), self.out["movable"].index('data-card="a"'))
+
+    def test_each_column_asks_for_what_its_rule_needs(self):
+        self.assertEqual(self.out["kinds"], ["hold", "close", "submit", "accept", None, "reopen", "reopen", None])
+
+    def test_an_ordinary_move_posts_once_and_offers_undo_for_fifteen_seconds(self):
+        self.assertEqual(self.out["movePosts"][0], ["/api/tasks/c/board-move", {"to_column": "ready", "expected_revision": 3}])
+        self.assertIn("Moved “C” from Draft to Ready.", self.out["moveToast"])
+        self.assertIn('id="toast-action">Undo</button>', self.out["moveToast"])
+        self.assertIn(15000, self.out["toastTimers"])
+        self.assertEqual(self.out["undoPosts"][0], ["/api/tasks/c/board-undo", {"event_id": "ev1"}])
+        # ...and the card goes back to its old place in Draft.
+        self.assertEqual(self.out["undoPosts"][1], ["/api/projects/11111111-1111-4111-8111-111111111111/board-order",
+                                                    {"column": "draft", "task_ids": ["b", "a", "c"]}])
+
+    def test_a_refused_drop_snaps_back_with_the_servers_reason(self):
+        self.assertIn("“B” stays in Draft: B waits on A; only an owner may override.", self.out["refusedToast"])
+        self.assertNotIn("toast-action", self.out["refusedToast"])
+        self.assertEqual(len([p for p in self.out["refusedPosts"] if p[0].endswith("/board-move")]), 1)
+
+    def test_cancelling_the_dialog_sends_nothing(self):
+        self.assertEqual(self.out["cancelPosts"], [])
+
+    def test_a_managers_protected_drop_files_a_request(self):
+        self.assertEqual(self.out["requestPosts"][0][1], {"to_column": "closed", "expected_revision": 3,
+                                                          "status": "cancelled", "reason": "Duplicate"})
+        self.assertIn("Sent to an owner for approval: “A &lt;b&gt;” to Closed.", self.out["requestToast"])
+        self.assertNotIn("Undo", self.out["requestToast"])
+
+    def test_an_owner_overrides_a_dependency_only_after_confirming(self):
+        moves = [p[1] for p in self.out["overridePosts"] if p[0].endswith("/board-move")]
+        self.assertEqual(moves, [{"to_column": "progress", "expected_revision": 3},
+                                 {"to_column": "progress", "expected_revision": 3, "override_dependencies": True}])
+
+    def test_reorder_saves_and_undo_restores_the_previous_order(self):
+        url = "/api/projects/11111111-1111-4111-8111-111111111111/board-order"
+        self.assertEqual(self.out["orderPosts"], [[url, {"column": "draft", "task_ids": ["c", "b", "a"]}]])
+        self.assertEqual(self.out["orderUndoPosts"][0], [url, {"column": "draft", "task_ids": ["b", "a", "c"]}])
+
+    def test_phones_scroll_and_use_the_menu_and_no_inline_styles_are_written(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        css = (STATIC / "style.css").read_text(encoding="utf-8")
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        self.assertIn('e.target.closest(".card-move")||phoneMQ.matches)return;', js)  # phones never start a drag
+        self.assertIn("if(drag.touch){if(moved>8){clearTimeout(drag.timer);drag.card=null}return}", js)  # a swipe scrolls
+        self.assertIn('if(e.key==="Escape"&&drag.active)', js)
+        for rule in (".drag-ghost{", ".board .col.drop-target{", ".drop-marker{", ".move-menu{"):
+            self.assertIn(rule, css.replace(" {", "{"))
+        for hook in ('id="move-dialog"', 'id="move-form"', 'id="move-menu" role="menu"', 'id="board-live" class="sr-only" aria-live="polite"'):
+            self.assertIn(hook, html)
+        self.assertNotIn("style=", html)
+
+    def test_move_to_menu_lists_the_moves_up_down_first(self):
+        menu = self.out["menu"]
+        self.assertTrue(menu.startswith('<button type="button" role="menuitem" data-move-to="up">'))
+        self.assertLess(menu.index('data-move-to="down"'), menu.index('data-move-to="ready"'))
+        self.assertNotIn('data-move-to="draft"', menu)  # its own column is not offered
+        self.assertEqual(menu.count('role="menuitem"'), 8)
 
 
 @unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")
@@ -3116,6 +3276,15 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
         if result.returncode != 0:
             raise AssertionError(result.stderr)
         cls.html = json.loads(result.stdout)
+
+    def test_a_manager_puts_work_on_hold_rather_than_requesting_it(self):
+        # Aly 2026-09-25 (Slack ts 1790342529.695749): managers hold directly, with a reason.
+        for who in ("owner", "manager"):
+            with self.subTest(who=who):
+                html = self.html[f"{who}-in_progress"]
+                self.assertIn('<form data-life="hold">', html)
+                self.assertIn("<button>Put on hold</button>", html)
+                self.assertNotIn("Request Owner hold", html)
 
     def test_closed_task_hides_refused_forms_and_says_reopen_first(self):
         for who in ("owner", "manager"):

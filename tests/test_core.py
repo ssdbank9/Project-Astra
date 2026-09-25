@@ -768,18 +768,57 @@ class AstraCoreTests(unittest.TestCase):
         self.assertEqual(reopen["request"]["action"], "reopen_task")
         self.assertEqual(self.service.get_task(self.owner, review_task["id"])["status"], "completed")
 
-        ordinary_task = self.service.create_task(self.owner, {
+
+    def _hold_fixture(self, label):
+        project = self.service.create_project(self.owner, f"Hold {label}")
+        manager = self.service.create_user(self.owner, f"hold-{label}-pm@example.org", "Manager", "manager password safe")
+        member = self.service.create_user(self.owner, f"hold-{label}-member@example.org", "Member", "member password safe")
+        self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
+        self.service.grant_project_access(self.owner, project["id"], member["id"], "member")
+        task = self.service.create_task(self.owner, {
             "project_id": project["id"], "title": "Ordinary", "owner_user_id": manager["id"],
         })
-        hold = self.service.set_on_hold(
-            manager, ordinary_task["id"], "Waiting for vendor", "2027-03-02", manager["id"]
-        )
-        self.assertEqual(hold["request"]["action"], "set_on_hold")
-        self.assertEqual(self.service.get_task(self.owner, ordinary_task["id"])["status"], "draft")
+        return project, manager, member, task
+
+    def test_a_project_manager_puts_work_on_hold_directly(self):
+        # Aly 2026-09-25 (Slack ts 1790342529.695749): "yes they can put it directly with reason."
+        _, manager, _, task = self._hold_fixture("direct")
+        held = self.service.set_on_hold(manager, task["id"], "Waiting for vendor", "2027-03-02", manager["id"])
+        self.assertNotIn("request", held)
+        self.assertEqual(held["status"], "on_hold")
+        self.assertEqual(self.service.list_owner_action_requests(self.owner), [])
+        checkpoint = self.db.execute(
+            "SELECT checkpoint_date, reason, owner_user_id, created_by FROM task_checkpoints WHERE task_id=?",
+            (task["id"],)).fetchone()
+        self.assertEqual(tuple(checkpoint), ("2027-03-02", "Waiting for vendor", manager["id"], manager["id"]))
+        event = self.service.task_events(self.owner, task["id"])[-1]
+        self.assertEqual((event["event_type"], event["actor_user_id"], event["reason"]),
+                         ("task_on_hold", manager["id"], "Waiting for vendor"))
+        self.assertTrue(any(n["kind"] == "task_on_hold" for n in self.service.list_notifications(self.owner)))
+        # The rules that applied before still apply: a reason, a checkpoint and a hold owner.
+        other = self.service.create_task(self.owner, {"project_id": task["project_id"], "title": "Other"})
+        for args, message in ((("", "2027-03-02"), "requires a reason"), (("vendor", ""), "checkpoint")):
+            with self.assertRaisesRegex(ValueError, message):
+                self.service.set_on_hold(manager, other["id"], *args, manager["id"])
+        with self.assertRaisesRegex(ValueError, "responsible owner"):
+            self.service.set_on_hold(manager, other["id"], "vendor", "2027-03-02")
+
+    def test_a_non_manager_still_cannot_put_work_on_hold(self):
+        _, _, member, task = self._hold_fixture("member")
+        with self.assertRaises(Forbidden):
+            self.service.set_on_hold(member, task["id"], "Waiting for vendor", "2027-03-02", member["id"])
+        self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], "draft")
+        self.assertEqual(self.service.task_events(self.owner, task["id"])[-1]["event_type"], "protected_action_blocked")
         self.assertEqual(
-            self.db.execute("SELECT COUNT(*) FROM task_checkpoints WHERE task_id=?", (ordinary_task["id"],)).fetchone()[0],
-            0,
-        )
+            self.db.execute("SELECT COUNT(*) FROM task_checkpoints WHERE task_id=?", (task["id"],)).fetchone()[0], 0)
+
+    def test_a_manager_taking_work_off_hold_still_files_an_owner_request(self):
+        _, manager, _, task = self._hold_fixture("leave")
+        held = self.service.set_on_hold(manager, task["id"], "Waiting for vendor", "2027-03-02", manager["id"])
+        out = self.service.update_task(manager, task["id"], {
+            "status": "in_progress", "reason": "Vendor replied", "expected_revision": held["revision"]})
+        self.assertEqual(out["request"]["action"], "update_task_status")
+        self.assertEqual(self.service.get_task(self.owner, task["id"])["status"], "on_hold")
 
     def test_read_only_chairman_protected_attempts_are_blocked_audited_and_notified(self):
         project = self.service.create_project(self.owner, "Chairman blocked")

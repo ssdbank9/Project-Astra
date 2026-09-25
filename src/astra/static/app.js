@@ -1,5 +1,5 @@
 const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality"};
-async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.error||"Request failed");err.status=response.status;throw err}return data}
+async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.error||"Request failed");err.status=response.status;err.confirm=data.confirm;err.impact=data.impact;throw err}return data}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
 function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);document.querySelector("#new-project").hidden=document.querySelector("#people").hidden=!isOwner();projectActions();refreshImportAccess()}
 async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.today=t.today||null;state.timezone=t.timezone||null;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
@@ -445,13 +445,14 @@ document.querySelector("#filter-note").addEventListener("click",e=>{const b=e.ta
 // to the screen it was shown on: moving to another screen clears it.
 let toastTimer=null,toastView=null;
 function clearToast(){clearTimeout(toastTimer);document.querySelector("#toast").innerHTML="";toastView=null}
-function showToast(text,actionLabel,action,sticky){
+function showToast(text,actionLabel,action,sticky,ms){
   const box=document.querySelector("#toast");clearTimeout(toastTimer);toastView=currentRoute().name;
   const keep=!!actionLabel||!!sticky;
   box.innerHTML=`<span>${escapeHtml(text)}</span>${actionLabel?`<button type="button" class="link" id="toast-action">${escapeHtml(actionLabel)}</button>`:""}${keep?'<button type="button" class="link" id="toast-dismiss" aria-label="Dismiss">×</button>':""}`;
   if(actionLabel)document.querySelector("#toast-action").addEventListener("click",()=>{clearToast();action()});
   if(keep)document.querySelector("#toast-dismiss").addEventListener("click",clearToast);
-  else toastTimer=setTimeout(clearToast,6000);
+  // JN1QYG: an Undo notice lasts exactly as long as its Undo (owner decision: 15 seconds).
+  if(ms)toastTimer=setTimeout(clearToast,ms);else if(!keep)toastTimer=setTimeout(clearToast,6000);
 }
 function applyRoute(moveFocus,fromLoad){
   if(!state.user)return;
@@ -617,7 +618,10 @@ function boardColumn(t){
 }
 const CRIT_ORDER=["critical","high","normal","low",""];
 const boardExpanded=new Set();
-function boardCard(t,kids){
+// JN1QYG: a saved order (board_rank) first, then the list order for cards never ranked.
+function byBoardRank(a,b){return (a.board_rank==null)-(b.board_rank==null)||(a.board_rank??0)-(b.board_rank??0)}
+function canMoveOnBoard(pid){const p=(state.projects||[]).find(x=>x.id===pid);return !!(p&&p.can_manage)}
+function boardCard(t,kids,movable){
   const done=kids.filter(k=>k.status==="completed").length,col=boardColumn(t),tags=[];
   if(t.is_blocked&&!CLOSED_STATUSES.includes(t.status))tags.push(`<span class="tag" data-tone="purple">⊘ Waits on ${escapeHtml((t.blocked_by&&t.blocked_by[0]&&t.blocked_by[0].title)||"a predecessor")}</span>`);
   if(t.status==="on_hold")tags.push('<span class="tag" data-tone="purple">∥ On hold</span>');
@@ -627,13 +631,14 @@ function boardCard(t,kids){
   if(col==="accepted")tags.push('<span class="tag" data-tone="green">✓ Accepted</span>');
   if(col==="closed")tags.push(`<span class="tag">× ${escapeHtml(statusLabel(t.status))}</span>`);
   const due=CLOSED_STATUSES.includes(t.status)?"":`<span class="due-chip" data-due="${workGroup(t)}">${escapeHtml(dueText(t)||"No due date")}</span>`;
-  return `<article class="board-card"><button type="button" class="link card-title" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>
+  const id=escapeHtml(t.id),move=movable?`<button type="button" class="link card-move" data-move-menu="${id}" aria-haspopup="menu" aria-expanded="false" aria-controls="move-menu" aria-label="Move “${escapeHtml(t.title)}” to…">Move to…</button>`:"";
+  return `<article class="board-card"${movable?` data-card="${id}"`:""}><button type="button" class="link card-title" data-detail="${id}">${escapeHtml(t.title)}</button>
     <div class="card-meta"><span class="avatar-sm" aria-hidden="true">${escapeHtml(initials(t.owner_name)||"–")}</span><span class="sr-only">Owner: ${escapeHtml(t.owner_name||"Unassigned")}.</span>${due}${t.criticality?`<span class="card-crit">${escapeHtml(t.criticality.charAt(0).toUpperCase()+t.criticality.slice(1))}</span>`:""}</div>
-    ${tags.length?`<div class="tags">${tags.join("")}</div>`:""}${kids.length?`<p class="card-steps">Steps ${done} of ${kids.length} done</p>`:""}</article>`;
+    ${tags.length?`<div class="tags">${tags.join("")}</div>`:""}${kids.length?`<p class="card-steps">Steps ${done} of ${kids.length} done</p>`:""}${move}</article>`;
 }
 function renderBoard(tasks,divide){
-  const ids=new Set(tasks.map(t=>t.id)),top=tasks.filter(t=>!t.parent_task_id||!ids.has(t.parent_task_id));
-  const kidsOf=id=>tasks.filter(t=>t.parent_task_id===id);
+  const ids=new Set(tasks.map(t=>t.id)),top=tasks.filter(t=>!t.parent_task_id||!ids.has(t.parent_task_id)).sort(byBoardRank);
+  const kidsOf=id=>tasks.filter(t=>t.parent_task_id===id),movable=!!top.length&&canMoveOnBoard(top[0].project_id);
   // 3C1Z74: owner lanes are keyed by user id, so two people who share a display name get their own lanes.
   const laneKey=divide==="owner"?t=>t.owner_user_id||"":divide==="criticality"?t=>t.criticality||"":()=>"";
   const names=new Map(top.map(t=>[t.owner_user_id||"",t.owner_name||"Unassigned"]));
@@ -651,12 +656,12 @@ function renderBoard(tasks,divide){
   const laneRows=lanes.map(k=>{
     const inLane=top.filter(t=>laneKey(t)===k);
     const cells=BOARD_COLUMNS.map(([key])=>{const cards=inLane.filter(t=>boardColumn(t)===key);
-      return `<div class="col${shut(key)?" is-collapsed":""}" data-col="${key}">${shut(key)?(cards.length?`<p class="col-hidden">${cards.length}</p>`:""):cards.map(t=>boardCard(t,kidsOf(t.id))).join("")}</div>`}).join("");
+      return `<div class="col${shut(key)?" is-collapsed":""}" data-col="${key}">${shut(key)?(cards.length?`<p class="col-hidden">${cards.length}</p>`:""):cards.map(t=>boardCard(t,kidsOf(t.id),movable)).join("")}</div>`}).join("");
     return `${divide?`<h3 class="lane-head">${escapeHtml(laneName(k))} <span class="count">${inLane.length}</span></h3>`:""}<div class="board-cols">${cells}</div>`;
   }).join("");
   const opts=[["","None"],["owner","Owner"],["criticality","Criticality"]].map(([v,l])=>`<option value="${v}"${v===(divide||"")?" selected":""}>${l}</option>`).join("");
   return `<div class="board-bar"><label class="inline">Divide by <select id="board-divide">${opts}</select></label>
-      <span class="work-meta">${top.length} task${top.length===1?"":"s"} · steps show on their parent · read-only: status changes stay in the task</span></div>
+      <span class="work-meta">${top.length} task${top.length===1?"":"s"} · steps show on their parent · ${movable?'<span class="drag-only">drag a card or </span>use Move to…; ordinary moves can be undone for 15 seconds':"read-only for your role"}</span></div>
     ${top.length?`<div class="board${LOCKED_COLUMNS.filter(shut).map(k=>" shut-"+k).join("")}" role="region" aria-label="Board" tabindex="0"><div class="board-cols board-head">${head}</div>${laneRows}</div>`
       :'<p class="empty-line">No tasks in this project yet. Use Add a task to start.</p>'}`;
 }
@@ -715,6 +720,8 @@ function renderProject(r){
 document.querySelector("#project-body").addEventListener("click",e=>{
   const t=e.target.closest("[data-toggle-col]");
   if(t){const k=t.dataset.toggleCol;if(boardExpanded.has(k))boardExpanded.delete(k);else boardExpanded.add(k);renderProject(currentRoute());document.querySelector(`[data-toggle-col="${k}"]`)?.focus();return}
+  const m=e.target.closest("[data-move-menu]");
+  if(m){const menu=document.querySelector("#move-menu");if(!menu.hidden&&menu.dataset.task===m.dataset.moveMenu)closeMoveMenu(true);else openMoveMenu(m);return}
   const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail);
 });
 document.querySelector("#project-body").addEventListener("change",e=>{
@@ -722,6 +729,199 @@ document.querySelector("#project-body").addEventListener("change",e=>{
   const r=currentRoute(),p=new URLSearchParams(r.params);if(e.target.value)p.set("divide",e.target.value);else p.delete("divide");
   const q=p.toString(),h=`#/${r.path}${q?"?"+q:""}`;if(history.replaceState)history.replaceState(null,"",h);panelState.rendered=routeHash(parseRoute(h),null);
   renderProject(currentRoute());document.querySelector("#board-divide")?.focus();
+});
+// JN1QYG: governed board drag and drop (owner decisions 2026-09-19: Kanban dragging, protected status
+// authority, Undo, touch). The server runs today's rules for every drop; the board only mirrors who may
+// move. Mouse and pen drag at once past a small threshold; a finger drags after a deliberate long press on
+// tablets (a quick swipe still scrolls); phones use the Move to menu, which is also the keyboard path.
+const COL_LABEL=Object.fromEntries(BOARD_COLUMNS);
+const drag={card:null};
+function boardAnnounce(text){const live=document.querySelector("#board-live");if(live)live.textContent=text}
+function columnOrder(pid,column,without){
+  const ids=new Set(state.tasks.map(t=>t.id));
+  return state.tasks.filter(t=>t.project_id===pid&&(!t.parent_task_id||!ids.has(t.parent_task_id))&&boardColumn(t)===column&&t.id!==without).sort(byBoardRank).map(t=>t.id);
+}
+async function saveColumnOrder(pid,column,order,undoable){
+  const before=columnOrder(pid,column);
+  await api(`/api/projects/${encodeURIComponent(pid)}/board-order`,{method:"POST",body:JSON.stringify({column,task_ids:order})});
+  if(undoable){
+    showToast(`Order saved in ${COL_LABEL[column]}.`,"Undo",async()=>{
+      try{await api(`/api/projects/${encodeURIComponent(pid)}/board-order`,{method:"POST",body:JSON.stringify({column,task_ids:before})});showToast("Order restored.")}
+      catch(err){showToast(`The order was not restored: ${err.message}`,null,null,true)}
+      await load();
+    },false,15000);
+  }
+}
+// What a drop onto a column needs from the person first (the reason or record the rules ask for).
+function moveDialogKind(t,column){
+  if(column==="blocked")return "hold";
+  if(column==="closed")return "close";
+  if(column==="submitted")return "submit";
+  if(column==="accepted"&&t.status==="submitted")return "accept";
+  if(BOARD_WORK.has(column)&&CLOSED_STATUSES.includes(t.status))return "reopen";
+  return null;
+}
+const BOARD_WORK=new Set(["draft","ready","progress"]);
+function askMove(kind,t,column,err){
+  const d=document.querySelector("#move-dialog"),f=document.querySelector("#move-form"),name=`“${escapeHtml(t.title)}”`;
+  const today=appToday(),reason=(label,hint)=>`<label>${label}<input name="reason" required autocomplete="off"${hint?` placeholder="${hint}"`:""}></label>`;
+  const view={
+    hold:["Put on hold",`Moving ${name} to Blocked puts it on hold. The rules ask for a reason, a follow-up checkpoint and who is responsible.`,
+      `${reason("Reason")}<div class="grid"><label>Checkpoint date<input name="checkpoint_date" type="date" required min="${today}"></label><label>Responsible<select name="owner_user_id"></select></label></div>`,"Put on hold"],
+    close:["Close task",`Closing ${name} needs how it ended and why.`,
+      `<fieldset class="choice"><legend>Close as</legend><label><input type="radio" name="status" value="cancelled" checked> Cancelled</label><label><input type="radio" name="status" value="abandoned"> Abandoned</label></fieldset>${reason("Reason")}`,"Close task"],
+    reopen:["Reopen task",`Moving ${name} back into work reopens it, with a reason and a revised due date.`,
+      `${reason("Reason")}<label>New due date<input name="new_due_date" type="date" required min="${today}"></label>`,"Reopen"],
+    submit:["Submit for review",`Submit ${name} for review?`,`<label>Note (optional)<textarea name="note"></textarea></label>`,"Submit"],
+    accept:["Accept submission",`Accept the submission of ${name}?`,`<label>Decision note (optional)<textarea name="note"></textarea></label>`,"Accept"],
+    dependencies:["Override dependency",`${name} waits on ${escapeHtml(((err&&err.impact)||[]).join(", "))}. Move it to ${COL_LABEL[column]} anyway? The override is recorded and the other owners are told.`,"","Move anyway"],
+  }[kind];
+  f.innerHTML=`<h2 id="move-dialog-title">${view[0]}</h2><p>${view[1]}</p>${view[2]}<div class="error" id="move-error" role="alert"></div><div class="actions"><button type="button" class="quiet" data-move-cancel>Cancel</button><button type="submit">${view[3]}</button></div>`;
+  if(kind==="hold")fillAssignees(t.project_id,f.querySelector('select[name="owner_user_id"]'),t.owner_user_id);
+  return new Promise(resolve=>{
+    let settled=false;const done=v=>{if(settled)return;settled=true;if(d.open)d.close();resolve(v)};
+    f.onsubmit=e=>{e.preventDefault();const data=Object.fromEntries(new FormData(f));
+      if(kind==="dependencies")return done({override_dependencies:true});
+      if(kind==="submit"||kind==="accept")return done({confirmed:true,note:data.note||""});
+      done(data)};
+    f.querySelector("[data-move-cancel]").onclick=()=>done(null);
+    d.addEventListener("close",()=>done(null),{once:true});
+    d.showModal();(f.querySelector("input:not([type=radio]),textarea")||f.querySelector('button[type="submit"]'))?.focus();
+  });
+}
+async function moveCard(t,column,beforeId=null){
+  const pid=t.project_id,from=boardColumn(t),kind=moveDialogKind(t,column),fromOrder=columnOrder(pid,from);
+  let extra={};
+  if(kind){const answer=await askMove(kind,t,column);if(!answer){boardAnnounce("Move cancelled.");return}extra=answer}
+  const send=more=>api(`/api/tasks/${encodeURIComponent(t.id)}/board-move`,{method:"POST",body:JSON.stringify({to_column:column,expected_revision:t.revision,...extra,...more})});
+  try{
+    let out;
+    try{out=await send({})}
+    catch(err){
+      if(err.status!==409||err.confirm!=="dependencies")throw err;
+      const ok=await askMove("dependencies",t,column,err);if(!ok){boardAnnounce("Move cancelled.");await load();return}
+      out=await send(ok);
+    }
+    if(out.request){showToast(`Sent to an owner for approval: “${t.title}” to ${COL_LABEL[column]}.`);await load();return}
+    const moved=out.task;Object.assign(t,moved);
+    if(boardColumn(t)===column){   // land where it was dropped; from the menu or a column head, at the end
+      const order=columnOrder(pid,column,t.id),at=beforeId?order.indexOf(beforeId):-1;
+      order.splice(at<0?order.length:at,0,t.id);
+      try{await saveColumnOrder(pid,column,order,false)}catch{}
+    }
+    const landed=boardColumn(t),waits=(t.blocked_by||[]).map(p=>p.title).join(", ");
+    const text=`Moved “${t.title}” from ${COL_LABEL[from]} to ${COL_LABEL[column]}.`+(landed==="blocked"&&column!=="blocked"&&waits?` It shows under Blocked until ${waits} is completed.`:"");
+    if(out.undo)showToast(text,"Undo",()=>undoMove(t,out.undo.event_id,from,fromOrder),false,out.undo.seconds*1000);else showToast(text);
+    boardAnnounce(text);
+  }catch(err){
+    const text=err.message.includes(`“${t.title}”`)?`Not moved. ${err.message}`:`“${t.title}” stays in ${COL_LABEL[from]}: ${err.message}`;
+    showToast(text,null,null,true);boardAnnounce(text);
+  }
+  await load();
+}
+async function undoMove(t,eventId,from,fromOrder){
+  try{
+    await api(`/api/tasks/${encodeURIComponent(t.id)}/board-undo`,{method:"POST",body:JSON.stringify({event_id:eventId})});
+    // Put the card back where it was in its column too (best effort: skipped if that column changed meanwhile).
+    if(fromOrder&&fromOrder.length>1)try{await api(`/api/projects/${encodeURIComponent(t.project_id)}/board-order`,{method:"POST",body:JSON.stringify({column:from,task_ids:fromOrder})})}catch{}
+    showToast(`Move undone: “${t.title}” is back.`)}
+  catch(err){showToast(`The move was not undone: ${err.message}`,null,null,true)}
+  await load();
+}
+function cellAt(x,y){const el=document.elementFromPoint(x,y);return el&&el.closest(".board .col[data-col]")}
+function clearDropMarks(){document.querySelectorAll(".col.drop-target").forEach(c=>c.classList.remove("drop-target"));document.querySelectorAll(".drop-marker").forEach(m=>m.remove())}
+function startDrag(x,y){
+  clearTimeout(drag.timer);drag.active=true;
+  const r=drag.card.getBoundingClientRect(),ghost=drag.card.cloneNode(true);
+  ghost.classList.add("drag-ghost");ghost.setAttribute("aria-hidden","true");ghost.removeAttribute("data-card");ghost.style.width=`${r.width}px`;
+  drag.ghost=ghost;drag.ox=x-r.left;drag.oy=y-r.top;document.body.appendChild(ghost);
+  drag.card.classList.add("is-dragging");document.body.classList.add("board-dragging");
+  try{drag.card.setPointerCapture(drag.pointer)}catch{}
+  boardAnnounce(`Dragging “${drag.title}”. Drop it on a column, or press Escape to cancel.`);
+  dragTo(x,y);
+}
+function dragTo(x,y){
+  drag.ghost.style.transform=`translate(${Math.round(x-drag.ox)}px,${Math.round(y-drag.oy)}px)`;
+  const cell=cellAt(x,y);clearDropMarks();drag.over=cell;drag.before=null;
+  if(cell){
+    cell.classList.add("drop-target");
+    const cards=[...cell.querySelectorAll(".board-card:not(.is-dragging)")],next=cards.find(c=>{const b=c.getBoundingClientRect();return y<b.top+b.height/2});
+    drag.before=next?next.dataset.card||null:null;
+    if(!cell.classList.contains("col-head")&&!cell.classList.contains("is-collapsed")){const m=document.createElement("div");m.className="drop-marker";cell.insertBefore(m,next||null)}
+  }
+  const board=document.querySelector(".board");if(board){const b=board.getBoundingClientRect();if(x<b.left+40)board.scrollLeft-=16;else if(x>b.right-40)board.scrollLeft+=16}
+}
+function endDrag(drop){
+  clearTimeout(drag.timer);
+  const {active,over,before,id}=drag;
+  if(drag.ghost)drag.ghost.remove();
+  if(drag.card)drag.card.classList.remove("is-dragging");
+  document.body.classList.remove("board-dragging");clearDropMarks();
+  drag.card=null;drag.active=false;drag.ghost=null;
+  if(!active)return;
+  drag.suppressClick=true;setTimeout(()=>{drag.suppressClick=false},0);
+  const t=state.tasks.find(x=>x.id===id);
+  if(!drop||!over||!t){boardAnnounce("Move cancelled.");return}
+  const column=over.dataset.col;
+  if(column===boardColumn(t)){
+    if(over.classList.contains("col-head"))return;
+    const was=columnOrder(t.project_id,column),order=columnOrder(t.project_id,column,t.id),at=before?order.indexOf(before):-1;order.splice(at<0?order.length:at,0,t.id);
+    if(order.join()===was.join())return;
+    saveColumnOrder(t.project_id,column,order,true).then(load,err=>{showToast(`The order was not saved: ${err.message}`,null,null,true);load()});
+  }else moveCard(t,column,over.classList.contains("col-head")?null:before);
+}
+const boardBody=document.querySelector("#project-body");
+boardBody.addEventListener("pointerdown",e=>{
+  const card=e.target.closest(".board-card[data-card]");
+  if(!card||e.button>0||e.target.closest(".card-move")||phoneMQ.matches)return;
+  Object.assign(drag,{card,id:card.dataset.card,title:card.querySelector(".card-title")?.textContent||"",x:e.clientX,y:e.clientY,pointer:e.pointerId,touch:e.pointerType==="touch",active:false});
+  if(drag.touch)drag.timer=setTimeout(()=>startDrag(drag.x,drag.y),450);
+});
+document.addEventListener("pointermove",e=>{
+  if(!drag.card||e.pointerId!==drag.pointer)return;
+  if(!drag.active){
+    const moved=Math.hypot(e.clientX-drag.x,e.clientY-drag.y);
+    if(drag.touch){if(moved>8){clearTimeout(drag.timer);drag.card=null}return}   // a swipe scrolls; it never moves work
+    if(moved<6)return;
+    startDrag(e.clientX,e.clientY);
+  }
+  e.preventDefault();dragTo(e.clientX,e.clientY);
+});
+document.addEventListener("pointerup",e=>{if(drag.card&&e.pointerId===drag.pointer)endDrag(true)});
+document.addEventListener("pointercancel",e=>{if(drag.card&&e.pointerId===drag.pointer)endDrag(false)});
+document.addEventListener("touchmove",e=>{if(drag.active)e.preventDefault()},{passive:false});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&drag.active){e.preventDefault();endDrag(false)}});
+boardBody.addEventListener("click",e=>{if(drag.suppressClick){e.preventDefault();e.stopPropagation()}},true);
+// The Move to menu: the same moves from the keyboard, a screen reader or a phone.
+function openMoveMenu(btn){
+  const menu=document.querySelector("#move-menu"),t=state.tasks.find(x=>x.id===btn.dataset.moveMenu);if(!t)return;
+  const col=boardColumn(t),order=columnOrder(t.project_id,col),at=order.indexOf(t.id);
+  const items=BOARD_COLUMNS.filter(([k])=>k!==col).map(([k,l])=>`<button type="button" role="menuitem" data-move-to="${k}">Move to ${l}</button>`);
+  if(at>=0&&at<order.length-1)items.unshift('<button type="button" role="menuitem" data-move-to="down">Move down in this column</button>');
+  if(at>0)items.unshift('<button type="button" role="menuitem" data-move-to="up">Move up in this column</button>');
+  menu.innerHTML=items.join("");menu.dataset.task=t.id;
+  closeMenus(menu);menu.hidden=false;btn.setAttribute("aria-expanded","true");drag.menuButton=btn;
+  const r=btn.getBoundingClientRect(),w=Math.min(260,(window.innerWidth||1024)-16);
+  menu.style.left=`${Math.max(8,Math.min(r.left,(window.innerWidth||1024)-w-8))}px`;menu.style.top=`${Math.min(r.bottom+4,(window.innerHeight||768)-(menu.offsetHeight||0)-8)}px`;
+  menu.querySelector('[role="menuitem"]')?.focus();
+}
+function closeMoveMenu(refocus){const menu=document.querySelector("#move-menu");menu.hidden=true;const b=drag.menuButton;if(b){b.setAttribute("aria-expanded","false");if(refocus&&b.isConnected)b.focus()}}
+document.querySelector("#move-menu").addEventListener("click",async e=>{
+  const item=e.target.closest("[data-move-to]");if(!item)return;
+  const menu=e.currentTarget,t=state.tasks.find(x=>x.id===menu.dataset.task),to=item.dataset.moveTo;closeMoveMenu(false);if(!t)return;
+  if(to==="up"||to==="down"){
+    const col=boardColumn(t),order=columnOrder(t.project_id,col),at=order.indexOf(t.id),j=to==="up"?at-1:at+1;[order[at],order[j]]=[order[j],order[at]];
+    try{await saveColumnOrder(t.project_id,col,order,true)}catch(err){showToast(`The order was not saved: ${err.message}`,null,null,true)}
+    await load();document.querySelector(`[data-move-menu="${CSS.escape(t.id)}"]`)?.focus();return;
+  }
+  await moveCard(t,to);document.querySelector(`[data-move-menu="${CSS.escape(t.id)}"]`)?.focus();
+});
+document.querySelector("#move-menu").addEventListener("keydown",e=>{
+  const list=[...e.currentTarget.querySelectorAll('[role="menuitem"]')],i=list.indexOf(document.activeElement);
+  if(e.key==="Escape"){e.preventDefault();e.stopPropagation();closeMoveMenu(true)}
+  else if(e.key==="Tab")closeMoveMenu(false);
+  else if(e.key==="ArrowDown"||e.key==="ArrowUp"){e.preventDefault();list[(i+(e.key==="ArrowDown"?1:list.length-1))%list.length]?.focus()}
+  else if(e.key==="Home"||e.key==="End"){e.preventDefault();list[e.key==="Home"?0:list.length-1]?.focus()}
 });
 document.querySelector("#project-capture").addEventListener("click",()=>openCapture(currentRoute().id));
 document.querySelector("#project-save-template").addEventListener("click",()=>saveProjectAsTemplate(currentRoute().id));
@@ -859,7 +1059,7 @@ function wireMenu(buttonId){
 wireMenu("#more-btn");wireMenu("#user-menu-btn");
 // The skip link moves focus without touching the hash, which the router owns.
 document.querySelector("#skip-link").addEventListener("click",e=>{e.preventDefault();document.querySelector("#main").focus()});
-document.addEventListener("click",e=>{if(!e.target.closest(".menu-wrap"))closeMenus()});
+document.addEventListener("click",e=>{if(!e.target.closest(".menu-wrap,.move-menu,[data-move-menu]"))closeMenus()});
 document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;const menu=document.querySelector(".menu:not([hidden])");if(!menu)return;
   const btn=document.querySelector(`[aria-controls="${menu.id}"]`),held=menu.contains(document.activeElement)||document.activeElement===btn;e.preventDefault();closeMenus();if(held&&btn)btn.focus()});
 // Ctrl/Cmd+K jumps to search. There are no page-wide single-key shortcuts (WCAG 2.1.4); j/k work only while
@@ -1573,7 +1773,7 @@ function buildLifecycle(task,extra=""){
     actions+=`<form data-life="reopen" id="reopen-form"><label>Reason to reopen<input name="reason" required></label><label>Revised due date<input name="new_due_date" type="date" required></label><div class="actions"><button>${canDecide?"Reopen":"Request Owner reopening"}</button></div></form>`;
   }
   if(!closed&&task.status!=="on_hold"&&(canDecide||canRequest)){
-    actions+=`<form data-life="hold"><label>On-hold reason<input name="reason" required></label><label>Follow-up checkpoint<input name="checkpoint_date" type="date" required></label><label>Responsible owner<select name="owner_user_id"><option value="">Unassigned</option></select></label><div class="actions"><button>${canDecide?"Put on hold":"Request Owner hold"}</button></div></form>`;
+    actions+=`<form data-life="hold"><label>On-hold reason<input name="reason" required></label><label>Follow-up checkpoint<input name="checkpoint_date" type="date" required></label><label>Responsible owner<select name="owner_user_id"><option value="">Unassigned</option></select></label><div class="actions"><button>${canDecide||task.permissions?.can_edit_ordinary?"Put on hold":"Request Owner hold"}</button></div></form>`;
   }
   return `<div class="lifecycle"><h3>Lifecycle</h3>
     <ul class="submissions">${subs}</ul>${actions}
