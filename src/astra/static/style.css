@@ -132,10 +132,10 @@ main { grid-column: 2; width: 100%; max-width: 1480px; margin: 0 auto; padding: 
 .filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: var(--fs-small); font-weight: 600; }
 .filter-chip span { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-3); color: var(--muted); font-size: 13px; line-height: 1; }
 .filter-chip:hover span { background: var(--line-strong); color: var(--ink); }
-.toast { position: fixed; left: 50%; bottom: 24px; z-index: 70; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; max-width: min(560px, calc(100vw - 32px)); padding: 12px 16px; border-radius: var(--radius-md); background: var(--ink); color: #fff; box-shadow: var(--shadow-2); font-size: 13px; }
+.toast { position: fixed; left: 16px; right: 16px; bottom: 24px; z-index: 70; width: fit-content; margin: 0 auto; display: flex; align-items: center; gap: 14px; max-width: 560px; padding: 12px 16px; border-radius: var(--radius-md); background: var(--ink); color: #fff; box-shadow: var(--shadow-2); font-size: 13px; }
 .toast:empty { display: none; }
 .toast button.link { color: var(--teal-light); font-size: 13px; white-space: nowrap; }
-#toast-dismiss { padding: 0 4px; color: #fff; font-size: 18px; text-decoration: none; }
+#toast-dismiss { min-width: 24px; min-height: 24px; padding: 0 4px; color: #fff; font-size: 18px; text-decoration: none; }
 .keys { display: grid; grid-template-columns: max-content 1fr; gap: 10px 16px; margin: 12px 0 0; }
 .keys dt { white-space: nowrap; }
 .keys dd { margin: 0; color: var(--text-2); }
@@ -259,6 +259,8 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   #detail-body .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 1023px) {
+  /* 44px targets wherever the panel is full screen (phones and tablets). */
+  .avatar, .panel-close { min-width: 44px; min-height: 44px; }
   .task-panel { left: 0; z-index: 45; width: auto; border-left: 0; box-shadow: none; }
 }
 /* #/task/<id>: the same panel as the page itself. */
@@ -533,7 +535,7 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   .rail-item { flex: 1 1 0; padding: 6px 0; }
   .rail-item[aria-current="page"]::before { left: 14px; right: 14px; top: -4px; bottom: auto; width: auto; height: 3px; border-radius: 0 0 3px 3px; }
   .toast { bottom: 80px; }
-  .avatar, .panel-close { min-width: 44px; min-height: 44px; }
+  #toast-dismiss { min-width: 44px; min-height: 44px; }
   /* The More menu opens as a sheet above the bottom bar, so it never runs off-screen. */
   #more-menu { position: fixed; left: 16px; right: 16px; top: auto; bottom: 76px; max-height: calc(100vh - 160px); overflow-y: auto; }
   #detail-body .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }

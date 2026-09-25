@@ -1973,7 +1973,7 @@ globalThis.history={replaceState(a,b,url){calls.push(["replace",url]);location.h
 // Seed what the menu wiring reads at load time.
 document.querySelector("#more-btn").setAttribute("aria-controls","more-menu");document.querySelector("#more-menu").hidden=true;
 document.querySelector("#detail-dialog").hidden=true;
-(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp};");
+(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel};");
 const a=globalThis.__a,out={},tick=()=>new Promise(r=>setTimeout(r,0));
 const keydown=(key,target,extra={})=>{const e={key,target,ctrlKey:false,metaKey:false,altKey:false,defaultPrevented:false,prevented:false,preventDefault(){this.prevented=true;this.defaultPrevented=true},stopPropagation(){},...extra};(docListeners.keydown||[]).forEach(f=>f(e));return e.prevented};
 (async()=>{
@@ -2053,6 +2053,24 @@ a.state.user={id:"u",display_name:"A B",global_role:"owner"};a.state.projects=[]
 fetches.splice(0);location.hash="#/home?task=..%2F..%2Fapi%2Fusers";a.applyRoute(false,false);out.badIdFetches=fetches.slice();
 a.closePanel(true);a.panelState.shown=U1;panel.hidden=false;fetches.splice(0);location.hash="#/home?task="+U1;a.state.loads=1;a.applyRoute(false,true);
 out.firstLoadFetches=fetches.slice();
+// Re-review: j/k follow the screen's own order of task links (deduplicated).
+const realQSA=document.querySelectorAll;
+document.querySelectorAll=s=>s.includes("[data-detail]")?[U3,U1,U3,U2].map(id=>({dataset:{detail:id},closest:()=>null})):[];
+location.hash="#/my-work?task="+U1;a.panelState.shown=U1;calls.splice(0);fetches.splice(0);
+a.stepPanel(1);out.jNext=[calls.splice(0),fetches.splice(0)];
+location.hash="#/my-work?task="+U1;a.panelState.shown=U1;a.stepPanel(-1);out.kPrev=[calls.splice(0),fetches.splice(0)];
+a.panelState.shown=U2;a.stepPanel(1);out.jAtEnd=[calls.splice(0),fetches.splice(0)];
+document.querySelectorAll=realQSA;
+// Re-review N1/N2: only a plain notice gets a timer; any notice is cleared when the screen changes.
+const realST=globalThis.setTimeout;let timers=[];globalThis.setTimeout=(f,ms)=>{timers.push(ms);return 0};
+location.hash="#/home";
+a.showToast("plain");const plainTimers=timers.splice(0);
+a.showToast("with action","Show it",()=>{});const actionTimers=timers.splice(0);
+a.showToast("copy by hand",null,null,true);const stickyTimers=timers.splice(0);out.stickyHtml=document.querySelector("#toast").innerHTML;
+globalThis.setTimeout=realST;
+out.toastTimers=[plainTimers,actionTimers,stickyTimers];
+a.state.user=null;location.hash="#/home?task="+U1;globalThis.__on_hashchange();out.toastSameScreen=document.querySelector("#toast").innerHTML!=="";
+location.hash="#/my-work";globalThis.__on_hashchange();out.toastOtherScreen=document.querySelector("#toast").innerHTML;
 // H1: signing out reloads the page (no DOM or state survives for the next person).
 calls.splice(0);globalThis.fetch=async u=>({ok:true,status:200,json:async()=>({})});
 await document.querySelector("#logout").onclick();await document.querySelector("#logout-all").onclick();
@@ -2121,6 +2139,13 @@ class AstraShellRouterTests(unittest.TestCase):
             self.assertNotIn("<img", html)
             self.assertNotIn("<b>", html)
 
+    def test_notices_with_an_action_or_a_manual_step_have_no_timer_and_stay_on_their_screen(self):
+        # Lock #9 re-review N1/N2 and L9.
+        self.assertEqual(self.out["toastTimers"], [[6000], [], []])
+        self.assertIn('id="toast-dismiss"', self.out["stickyHtml"])
+        self.assertTrue(self.out["toastSameScreen"])      # the task param changing is the same screen
+        self.assertEqual(self.out["toastOtherScreen"], "")
+
     def test_owner_only_items_are_hidden_for_other_roles(self):
         # [close project, save as template, project history, people, new project] hidden?
         self.assertEqual(self.out["roles"]["member+project"], [True, True, False, True, True])
@@ -2186,7 +2211,7 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertIn('<h2 id="task-dialog-title">Capture a task</h2>', self.html)
         self.assertIn('<details class="more-fields"><summary>More fields</summary>', self.html)
         self.assertIn('document.querySelector("#new-task").onclick=openCapture;', self.js)
-        self.assertIn('showToast(`“${task.title}” was added · the current filters hide it`,"Show it",clearAllFilters)', self.js)
+        self.assertIn('showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnHome)', self.js)
         self.assertIn('data-request-decision="approved"', self.js)
 
 
@@ -2265,7 +2290,9 @@ class AstraTaskPanelTests(unittest.TestCase):
         # At 1024px and wider the panel sits below the top bar (review M1) and is narrower up to 1279px (L5).
         self.assertRegex(css, r"@media \(min-width: 1024px\) \{\n  \.task-panel \{ top: var\(--topbar-h\); \}")
         self.assertRegex(css, r"@media \(min-width: 1024px\) and \(max-width: 1279px\) \{\n  :root \{ --panel-w: 380px; \}")
-        self.assertRegex(css, r"@media \(max-width: 1023px\) \{\n  \.task-panel \{ left: 0;")
+        self.assertRegex(css, r"@media \(max-width: 1023px\) \{\n[^}]*\}\n  \.task-panel \{ left: 0;")
+        # Re-review N3: 44px panel close and avatar wherever the panel is full screen.
+        self.assertRegex(css, r"@media \(max-width: 1023px\) \{\n  /\*[^*]*\*/\n  \.avatar, \.panel-close \{ min-width: 44px; min-height: 44px; \}")
         topbar_z = int(re.search(r"\.topbar \{[^}]*z-index: (\d+)", css).group(1))
         panel_z = int(re.search(r"\.task-panel \{[^}]*z-index: (\d+)", css).group(1))
         self.assertGreater(topbar_z, panel_z)   # the account menu opens over the panel
@@ -2277,6 +2304,15 @@ class AstraTaskPanelTests(unittest.TestCase):
         self.assertLess(body.index("${subtasks}"), body.index('<div class="deps">'))
         self.assertLess(body.index('<div class="deps">'), body.index("${lifecycle}"))
         self.assertLess(body.index("${lifecycle}"), body.index("${reviewers}"))
+
+    def test_j_and_k_follow_the_order_of_the_screen_behind(self):
+        # Screen order U3, U1, U2 (U3 listed twice): from U1, j goes to U2 and k to U3; past the end nothing.
+        calls, fetches = self.out["jNext"]
+        self.assertEqual(calls, [["replace", f"#/my-work?task={U2}"]])
+        self.assertEqual(fetches, [f"/api/tasks/{U2}", f"/api/tasks/{U2}/events"])
+        calls, fetches = self.out["kPrev"]
+        self.assertEqual(calls, [["replace", f"#/my-work?task={U3}"]])
+        self.assertEqual(self.out["jAtEnd"], [[], []])
 
     def test_state_chips_carry_a_glyph_or_word(self):
         chips = self.js[self.js.index("function stateTags(task){"):self.js.index("function roleLine(perms){")]

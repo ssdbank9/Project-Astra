@@ -409,18 +409,22 @@ function clearFilter(key){
   filtersChanged();
   (document.querySelector("#filter-note .filter-chip")||document.querySelector("#project-filter")).focus();
 }
+// "Show it" after a capture: clear the filters and make sure Home is the screen the link, rail and title show.
+function showAllOnHome(){clearAllFilters();if(currentRoute().name!=="home")location.hash="#/home"}
 function clearAllFilters(){filtersFromUrl(new URLSearchParams());const sorted=state.sort!=="criticality";state.sort="criticality";syncFilters();shellTitle(currentRoute());if(sorted)load();else render()}
 document.querySelector("#filter-note").addEventListener("click",e=>{const b=e.target.closest("[data-clear]");if(b)clearFilter(b.dataset.clear)});
-// A short notice at the bottom of the screen. A plain notice fades after 6 seconds; one with an action
-// stays until it is used or dismissed (WCAG 2.2.1).
-let toastTimer=null;
-function showToast(text,actionLabel,action){
-  const box=document.querySelector("#toast");clearTimeout(toastTimer);
-  box.innerHTML=`<span>${escapeHtml(text)}</span>${actionLabel?`<button type="button" class="link" id="toast-action">${escapeHtml(actionLabel)}</button><button type="button" class="link" id="toast-dismiss" aria-label="Dismiss">×</button>`:""}`;
-  if(actionLabel){
-    document.querySelector("#toast-action").addEventListener("click",()=>{box.innerHTML="";action()});
-    document.querySelector("#toast-dismiss").addEventListener("click",()=>{box.innerHTML=""});
-  }else toastTimer=setTimeout(()=>{box.innerHTML=""},6000);
+// A short notice at the bottom of the screen. A plain notice fades after 6 seconds; one with an action, or
+// one the person must act on by hand (sticky), stays until used or dismissed (WCAG 2.2.1). A notice belongs
+// to the screen it was shown on: moving to another screen clears it.
+let toastTimer=null,toastView=null;
+function clearToast(){clearTimeout(toastTimer);document.querySelector("#toast").innerHTML="";toastView=null}
+function showToast(text,actionLabel,action,sticky){
+  const box=document.querySelector("#toast");clearTimeout(toastTimer);toastView=currentRoute().name;
+  const keep=!!actionLabel||!!sticky;
+  box.innerHTML=`<span>${escapeHtml(text)}</span>${actionLabel?`<button type="button" class="link" id="toast-action">${escapeHtml(actionLabel)}</button>`:""}${keep?'<button type="button" class="link" id="toast-dismiss" aria-label="Dismiss">×</button>':""}`;
+  if(actionLabel)document.querySelector("#toast-action").addEventListener("click",()=>{clearToast();action()});
+  if(keep)document.querySelector("#toast-dismiss").addEventListener("click",clearToast);
+  else toastTimer=setTimeout(clearToast,6000);
 }
 function applyRoute(moveFocus,fromLoad){
   if(!state.user)return;
@@ -445,7 +449,7 @@ function applyRoute(moveFocus,fromLoad){
   shellTitle(r);
   if(moveFocus&&!taskId)document.querySelector("#page-title").focus();
 }
-window.addEventListener("hashchange",()=>{closeMenus();const quiet=panelState.quiet;panelState.quiet=false;applyRoute(!quiet)});
+window.addEventListener("hashchange",()=>{closeMenus();if(toastView&&toastView!==currentRoute().name)clearToast();const quiet=panelState.quiet;panelState.quiet=false;applyRoute(!quiet)});
 // My Work: open tasks the signed-in person owns, soonest first, grouped by when they are due.
 const WORK_GROUPS=[["overdue","Overdue"],["today","Today"],["week","Next 7 days"],["later","Later"],["undated","No due date"]];
 function workGroup(t){if(t.due_state==="overdue")return "overdue";if(t.due_state==="today")return "today";if(!t.due_date)return "undated";return t.days_to_due!=null&&t.days_to_due<=7?"week":"later"}
@@ -829,7 +833,7 @@ async function fillAssignees(projectId,select,selectedId){
   }catch{}
 }
 document.querySelector("#project-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{await api("/api/projects",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load()}catch(err){e.target.querySelector(".error").textContent=err.message}});
-document.querySelector("#task-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{const {task}=await api("/api/tasks",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load();if(task&&currentRoute().name==="home"&&!visibleTasks().some(t=>t.id===task.id))showToast(`“${task.title}” was added · the current filters hide it`,"Show it",clearAllFilters)}catch(err){e.target.querySelector(".error").textContent=err.message}});
+document.querySelector("#task-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{const {task}=await api("/api/tasks",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load();if(task&&currentRoute().name==="home"&&!visibleTasks().some(t=>t.id===task.id))showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnHome)}catch(err){e.target.querySelector(".error").textContent=err.message}});
 const STATUSES=["draft","assigned","in_progress","submitted","changes_requested","completed","on_hold","delayed","cancelled","abandoned","reopened"];
 const CRITICALITIES=[["","Unrated"],["critical","Critical"],["high","High"],["normal","Normal"],["low","Low"]];
 const GOVERNED=["submitted","completed","on_hold","reopened"];
@@ -918,7 +922,7 @@ function stepPanel(delta){
 document.querySelector("#detail-close").addEventListener("click",()=>closePanel(false));
 document.querySelector("#detail-copy").addEventListener("click",async()=>{
   const url=location.origin+location.pathname+taskLink(panelState.shown||detailTaskId);
-  try{await navigator.clipboard.writeText(url);showToast("Link to this task copied.")}catch{showToast(`Copy this link: ${url}`)}
+  try{await navigator.clipboard.writeText(url);showToast("Link to this task copied.")}catch{showToast(`Copy this link: ${url}`,null,null,true)}
 });
 document.addEventListener("keydown",e=>{
   const panel=document.querySelector("#detail-dialog");
