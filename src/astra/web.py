@@ -377,6 +377,18 @@ class AstraHandler(BaseHTTPRequestHandler):
                     return self._json(self.service.force_unlock_task(user, task_id, payload.get("reason", "")))
             if path.startswith("/api/tasks/") and path.endswith("/undo-move") and path.count("/") == 4:
                 return self._json({"task": self.service.undo_move(user, path.split("/")[3], payload)})
+            if path.startswith("/api/projects/") and path.count("/") == 5 and path.split("/")[4] == "bulk":
+                project_id, verb = path.split("/")[3], path.split("/")[5]
+                if verb == "preview":
+                    return self._json({"preview": self.service.bulk_preview(user, project_id, payload)})
+                if verb == "apply":
+                    return self._json(self.service.bulk_apply(user, project_id, payload))
+                if verb == "undo":
+                    return self._json(self.service.bulk_undo(user, project_id, payload))
+            if path.startswith("/api/projects/") and path.endswith("/wip-limits") and path.count("/") == 4:
+                limits = self.service.set_wip_limit(user, path.split("/")[3], str(payload.get("column", "")),
+                                                    payload.get("max_tasks"), payload.get("reason", ""))
+                return self._json({"wip_limits": limits})
             if path.startswith("/api/projects/") and path.endswith("/board-order") and path.count("/") == 4:
                 order = self.service.reorder_board(user, path.split("/")[3], str(payload.get("column", "")),
                                                    payload.get("task_ids"))

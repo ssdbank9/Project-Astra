@@ -1855,6 +1855,37 @@ class AstraGovernedDragWebTests(unittest.TestCase):
                                    {"to_column": "ready", "expected_revision": rev}, cookie=cookie)
         self.assertEqual(response.status, 403)
 
+    def test_bulk_change_and_wip_limits_over_http(self):
+        (ocookie, ocsrf), (cookie, csrf), pid, task = self._project_with_manager()
+        _, second = self.request("POST", "/api/tasks", {"project_id": pid, "title": "Card 2"}, cookie=ocookie, csrf=ocsrf)
+        ids = [task["id"], second["task"]["id"]]
+        response, _ = self.request("POST", f"/api/projects/{pid}/wip-limits", {"column": "ready", "max_tasks": 1},
+                                   cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 403)  # a manager does not configure limits
+        response, limits = self.request("POST", f"/api/projects/{pid}/wip-limits", {"column": "ready", "max_tasks": 1},
+                                        cookie=ocookie, csrf=ocsrf)
+        self.assertEqual((response.status, limits["wip_limits"]), (200, {"ready": 1}))
+        response, preview = self.request("POST", f"/api/projects/{pid}/bulk/preview",
+                                         {"task_ids": ids, "action": "status", "value": "ready"}, cookie=cookie, csrf=csrf)
+        self.assertEqual((response.status, preview["preview"]["counts"]), (200, {"ok": 2, "blocked": 0}))
+        self.assertEqual(preview["preview"]["wip"]["limit"], 1)
+        revisions = {i["id"]: i["revision"] for i in preview["preview"]["ok"]}
+        body = {"task_ids": ids, "action": "status", "value": "ready", "expected_revisions": revisions}
+        response, refused = self.request("POST", f"/api/projects/{pid}/bulk/apply", body, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 400)
+        self.assertIn("work-in-progress limit", refused["error"])
+        response, ask = self.request("POST", f"/api/projects/{pid}/bulk/apply", body, cookie=ocookie, csrf=ocsrf)
+        self.assertEqual((response.status, ask["confirm"]), (409, "wip"))
+        response, done = self.request("POST", f"/api/projects/{pid}/bulk/apply", {**body, "override_wip": True},
+                                      cookie=ocookie, csrf=ocsrf)
+        self.assertEqual((response.status, len(done["tasks"]), done["undo"]["seconds"]), (200, 2, 15))
+        response, undone = self.request("POST", f"/api/projects/{pid}/bulk/undo", {"bulk_id": done["bulk_id"]},
+                                        cookie=ocookie, csrf=ocsrf)
+        self.assertEqual((response.status, len(undone["tasks"])), (200, 2))
+        response, _ = self.request("POST", f"/api/projects/{pid}/bulk/preview",
+                                   {"task_ids": ids, "action": "status", "value": "ready"}, cookie=cookie)
+        self.assertEqual(response.status, 403)  # no CSRF token, no change
+
     def test_locks_and_gantt_reschedule_over_http(self):
         (ocookie, ocsrf), (cookie, csrf), pid, task = self._project_with_manager()
         tid = task["id"]
@@ -2200,7 +2231,7 @@ globalThis.history={replaceState(a,b,url){calls.push(["replace",url]);location.h
 // Seed what the menu wiring reads at load time.
 document.querySelector("#more-btn").setAttribute("aria-controls","more-menu");document.querySelector("#more-menu").hidden=true;
 document.querySelector("#detail-dialog").hidden=true;
-(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel,renderHome,boardColumn,renderBoard,renderProject,PROJECT_TABS,renderMyWork,calendarMonth,calExpanded,renderInbox,renderGantt,asOfText};");
+(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel,renderHome,boardColumn,renderBoard,renderProject,PROJECT_TABS,renderMyWork,calendarMonth,calExpanded,renderInbox,renderGantt,asOfText,bulk};");
 const a=globalThis.__a,out={},tick=()=>new Promise(r=>setTimeout(r,0));
 const keydown=(key,target,extra={})=>{const e={key,target,ctrlKey:false,metaKey:false,altKey:false,defaultPrevented:false,prevented:false,preventDefault(){this.prevented=true;this.defaultPrevented=true},stopPropagation(){},...extra};(docListeners.keydown||[]).forEach(f=>f(e));return e.prevented};
 const U1="11111111-1111-4111-8111-111111111111",U2="22222222-2222-4222-8222-222222222222",U3="33333333-3333-4333-8333-333333333333";
@@ -2306,6 +2337,9 @@ if(mode==="drag"){
   await moveCard({...tasks[0]},"closed");out.requestPosts=posts.splice(0);out.requestToast=document.querySelector("#toast").innerHTML;
   let n=0;reply=u=>u.endsWith("/board-move")?(n++?{body:{task:{...tasks[1],status:"in_progress",revision:4}}}:{status:409,body:{error:"B waits on A.",confirm:"dependencies",impact:["A"]}}):null;
   a.state.user.global_role="owner";await moveCard({...tasks[1]},"progress");out.overridePosts=posts.splice(0);
+  n=0;reply=u=>u.endsWith("/board-move")?[{status:409,body:{error:"deps",confirm:"dependencies",impact:["A"]}},{status:409,body:{error:"full",confirm:"wip",impact:["Ready is full."]}},{body:{task:{...tasks[1],status:"assigned",revision:4}}}][n++]:null;
+  globalThis.askMove=async kind=>kind==="wip"?{override_wip:true}:{override_dependencies:true};
+  await moveCard({...tasks[1]},"ready");out.wipPosts=posts.splice(0).filter(p=>p[0].endsWith("/board-move")).map(p=>p[1]);
   reply=()=>null;
   await saveColumnOrder(U1,"draft",["c","b","a"],true);out.orderPosts=posts.splice(0);
   await document.querySelector("#toast-action")._listeners.click.at(-1)();for(let i=0;i<10;i++)await new Promise(r=>realST(r,0));out.orderUndoPosts=posts.splice(0);
@@ -2355,6 +2389,49 @@ if(mode==="gantt"){
   out.banner=lockBanner(held,"",true);out.bannerNoForce=lockBanner(held,"",false);
   out.chipOther=boardCard(T({id:"c1",title:"Card",lock:held}),[],true);
   out.chipMine=boardCard(T({id:"c2",title:"Card",lock:{...held,holder_user_id:"u1"}}),[],true);
+  process.stdout.write(JSON.stringify(out));return;
+}
+if(mode==="bulk"){
+  // XV92JJ: pick boxes, Shift-click ranges, the preview and apply round trip, Undo, and WIP counts.
+  const T=o=>({project_id:U1,project_name:"P",status:"draft",due_state:"scheduled",days_to_due:9,due_date:"2026-10-04",owner_name:"Sara",owner_user_id:"u-sara",criticality:"high",revision:3,...o});
+  a.state.user={id:"u1",display_name:"PM",global_role:"member"};a.state.today="2026-09-25";
+  a.state.projects=[{id:U1,name:"P",status:"active",entities:[],can_manage:true,wip_limits:{ready:1,draft:3}}];
+  const tasks=[T({id:"a",title:"A"}),T({id:"b",title:"B"}),T({id:"c",title:"C",status:"assigned"}),T({id:"d",title:"D",status:"assigned"})];
+  a.state.tasks=tasks;
+  location.hash="#/project/"+U1+"/board";out.scope=bulkScope();
+  a.bulk.ids.add("b");out.board=a.renderBoard(tasks,"");a.bulk.ids.clear();
+  location.hash="#/home";out.noScope=bulkScope();out.boardElsewhere=boardCard(tasks[0],[],false);
+  location.hash="#/project/"+U1+"/list";
+  out.range=[pickRange(["a","b","c","d"],"a","c"),pickRange(["a","b","c","d"],"d","b"),pickRange(["a","b"],"x","b")];
+  const posts=[];let reply=()=>null;
+  globalThis.fetch=async(u,opt)=>{posts.push([u,opt&&opt.body?JSON.parse(opt.body):null]);const r=reply(u)||{};const status=r.status||200;return {ok:status<400,status,json:async()=>r.body||{}}};
+  globalThis.load=async()=>{posts.push(["load"])};
+  const timers=[],realST=globalThis.setTimeout;globalThis.setTimeout=(f,ms)=>{timers.push(ms);return 0};
+  const flush=async()=>{for(let i=0;i<10;i++)await new Promise(r=>realST(r,0))};
+  a.bulk.ids=new Set(["a","b"]);a.bulk.pid=U1;a.bulk.action="status";document.querySelector("#bulk-input").value="ready";
+  out.payload=bulkPayload();
+  const plan={action:"status",value:"ready",summary:"status to Ready",ok:[{id:"a",title:"A",revision:3},{id:"b",title:"B",revision:4}],blocked:[],impact:[],
+    wip:{count:2,limit:1,incoming:2,message:"Ready is at its work-in-progress limit.",column:"ready",can_override:true},counts:{ok:2,blocked:0}};
+  reply=u=>u.endsWith("/bulk/preview")?{body:{preview:plan}}:u.endsWith("/bulk/apply")?{body:{bulk_id:"bk1",tasks:[{id:"a"},{id:"b"}],summary:"status to Ready",undo:{bulk_id:"bk1",seconds:15}}}:u.endsWith("/bulk/undo")?{body:{tasks:[{id:"a"},{id:"b"}]}}:null;
+  const realAskBulk=askBulk;
+  const asked=[];globalThis.askBulk=async p=>{asked.push(p.counts);return {override_wip:true}};
+  await reviewBulk(U1);out.applyPosts=posts.splice(0);out.applyToast=document.querySelector("#toast").innerHTML;out.timers=timers.splice(0);out.cleared=a.bulk.ids.size;
+  await document.querySelector("#toast-action")._listeners.click.at(-1)();await flush();out.undoPosts=posts.splice(0);
+  // Removing the blocked tasks narrows the selection and previews again.
+  a.bulk.ids=new Set(["a","b","c"]);let round=0;
+  reply=u=>u.endsWith("/bulk/preview")?{body:{preview:round++?{...plan,blocked:[]}:{...plan,wip:null,blocked:[{id:"c",title:"C",reason:"is already Ready"}],counts:{ok:2,blocked:1}}}}:null;
+  globalThis.askBulk=async p=>p.blocked.length?{drop:true}:null;
+  await reviewBulk(U1);out.afterDrop=[...a.bulk.ids];out.dropPosts=posts.splice(0).map(p=>p[1]&&p[1].task_ids);
+  // A refused apply says nothing changed.
+  a.bulk.ids=new Set(["a"]);reply=u=>u.endsWith("/bulk/preview")?{body:{preview:{...plan,wip:null}}}:u.endsWith("/bulk/apply")?{status:409,body:{error:"“A” changed since the preview; nothing was changed. Preview again."}}:null;
+  globalThis.askBulk=async()=>({override_wip:false});await reviewBulk(U1);out.refusedToast=document.querySelector("#toast").innerHTML;posts.splice(0);
+  globalThis.setTimeout=realST;
+  // The preview dialog: blocked items, no Apply until they are removed; a limit a manager cannot pass.
+  globalThis.askBulk=realAskBulk;
+  const dlg=document.querySelector("#move-dialog");dlg.showModal=()=>{};dlg.close=()=>{};
+  askBulk({...plan,wip:null,blocked:[{id:"c",title:"C <x>",reason:"is already Ready"}],counts:{ok:2,blocked:1}});out.dialogBlocked=document.querySelector("#move-form").innerHTML;
+  askBulk({...plan,wip:{...plan.wip,can_override:false}});out.dialogWipManager=document.querySelector("#move-form").innerHTML;
+  askBulk(plan);out.dialogWipOwner=document.querySelector("#move-form").innerHTML;
   process.stdout.write(JSON.stringify(out));return;
 }
 if(mode==="work"){
@@ -2858,6 +2935,12 @@ class AstraBoardDragDriverTests(unittest.TestCase):
         self.assertEqual(moves, [{"to_column": "progress", "expected_revision": 3},
                                  {"to_column": "progress", "expected_revision": 3, "override_dependencies": True}])
 
+    def test_an_owner_confirms_each_override_once_in_turn(self):
+        self.assertEqual(self.out["wipPosts"], [
+            {"to_column": "ready", "expected_revision": 3},
+            {"to_column": "ready", "expected_revision": 3, "override_dependencies": True},
+            {"to_column": "ready", "expected_revision": 3, "override_dependencies": True, "override_wip": True}])
+
     def test_reorder_saves_and_undo_restores_the_previous_order(self):
         url = "/api/projects/11111111-1111-4111-8111-111111111111/board-order"
         self.assertEqual(self.out["orderPosts"], [[url, {"column": "draft", "task_ids": ["c", "b", "a"]}]])
@@ -2867,7 +2950,7 @@ class AstraBoardDragDriverTests(unittest.TestCase):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
         css = (STATIC / "style.css").read_text(encoding="utf-8")
         html = (STATIC / "index.html").read_text(encoding="utf-8")
-        self.assertIn('e.target.closest(".card-move")||phoneMQ.matches)return;', js)  # phones never start a drag
+        self.assertIn('e.target.closest(".card-move,.bulk-pick")||phoneMQ.matches)return;', js)  # phones never start a drag
         self.assertIn("if(drag.touch){if(moved>8){clearTimeout(drag.timer);drag.card=null}return}", js)  # a swipe scrolls
         self.assertIn('if(e.key==="Escape"&&drag.active)', js)
         for rule in (".drag-ghost{", ".board .col.drop-target{", ".drop-marker{", ".move-menu{"):
@@ -2943,6 +3026,60 @@ class AstraGanttDragDriverTests(unittest.TestCase):
         self.assertNotIn("force-unlock", self.out["bannerNoForce"])
         self.assertIn('class="tag lock-chip" data-tone="amber">🔒 Sara &lt;K&gt;', self.out["chipOther"])
         self.assertNotIn("lock-chip", self.out["chipMine"])  # your own lease is not a warning
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")
+class AstraBulkDriverTests(unittest.TestCase):
+    """XV92JJ: selection, the bulk preview and apply round trip, bulk Undo and WIP counts."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out = _run_shell_driver("bulk")
+
+    def test_pick_boxes_show_only_on_a_managed_project_page(self):
+        self.assertEqual(self.out["scope"], "11111111-1111-4111-8111-111111111111")
+        self.assertEqual(self.out["board"].count('class="bulk-pick"'), 4)
+        self.assertIn('class="board-card is-picked" data-card="b"', self.out["board"])
+        self.assertIn('aria-label="Select “A”"', self.out["board"])
+        self.assertIsNone(self.out["noScope"])
+        self.assertNotIn("bulk-pick", self.out["boardElsewhere"])
+
+    def test_column_heads_show_the_limit_and_an_overfull_column(self):
+        self.assertIn('<span class="count">2 / 3<span class="sr-only"> (work-in-progress limit 3)</span></span>', self.out["board"])
+        self.assertIn('<span class="count over-limit">2 / 1', self.out["board"])
+
+    def test_shift_click_takes_the_range_in_display_order(self):
+        self.assertEqual(self.out["range"], [["a", "b", "c"], ["b", "c", "d"], ["b"]])
+
+    def test_preview_then_apply_sends_the_previewed_revisions_and_offers_undo(self):
+        posts = [p for p in self.out["applyPosts"] if p[0] != "load" and "import" not in p[0]]
+        self.assertEqual(posts[0][1], {"task_ids": ["a", "b"], "action": "status", "value": "ready"})
+        self.assertEqual(posts[1][1], {"task_ids": ["a", "b"], "action": "status", "value": "ready",
+                                       "expected_revisions": {"a": 3, "b": 4}, "override_wip": True})
+        self.assertIn("Changed 2 tasks: status to Ready.", self.out["applyToast"])
+        self.assertEqual(self.out["timers"], [15000])
+        self.assertEqual(self.out["cleared"], 0)
+        self.assertEqual(self.out["undoPosts"][0], ["/api/projects/11111111-1111-4111-8111-111111111111/bulk/undo",
+                                                    {"bulk_id": "bk1"}])
+
+    def test_removing_blocked_tasks_narrows_the_selection_and_previews_again(self):
+        self.assertEqual(self.out["afterDrop"], ["a", "b"])
+        self.assertEqual(self.out["dropPosts"], [["a", "b", "c"], ["a", "b"]])
+
+    def test_a_refused_apply_says_nothing_changed_once(self):
+        self.assertIn("“A” changed since the preview; nothing was changed. Preview again.", self.out["refusedToast"])
+        self.assertEqual(self.out["refusedToast"].lower().count("nothing was changed"), 1)
+
+    def test_the_preview_withholds_apply_until_it_can_succeed(self):
+        blocked = self.out["dialogBlocked"]
+        self.assertIn("2 of 3 tasks will change", blocked)
+        self.assertIn("<strong>C &lt;x&gt;</strong> is already Ready", blocked)
+        self.assertIn("data-bulk-drop>Remove blocked from selection", blocked)
+        self.assertNotIn('type="submit"', blocked)
+        self.assertNotIn('type="submit"', self.out["dialogWipManager"])  # a manager cannot pass a limit
+        self.assertNotIn("override_wip", self.out["dialogWipManager"])
+        self.assertIn('name="override_wip"', self.out["dialogWipOwner"])
+        self.assertIn('type="submit">Apply to 2 tasks', self.out["dialogWipOwner"])
 
 
 @unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")

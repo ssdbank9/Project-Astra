@@ -360,5 +360,179 @@ class GanttRescheduleTests(BoardFixture):
         self.assertEqual([e["event_type"] for e in self.events(self.side["id"])].count("gantt_move_blocked"), 3)
 
 
+class WipLimitTests(BoardFixture):
+    """XV92JJ: optional work-in-progress limits per board column, set by an owner."""
+
+    def test_only_an_owner_sets_a_limit_and_every_change_is_in_history(self):
+        pid = self.project["id"]
+        with self.assertRaises(Forbidden):
+            self.service.set_wip_limit(self.manager, pid, "ready", 3)
+        self.assertEqual(self.service.set_wip_limit(self.second, pid, "ready", 3, "Keep Ready short"), {"ready": 3})
+        self.assertEqual(self.service.set_wip_limit(self.owner, pid, "ready", "5"), {"ready": 5})
+        self.assertEqual(self.service.set_wip_limit(self.owner, pid, "ready", None), {})
+        changes = [json.loads(e["detail_json"]) for e in self.service.project_events(self.owner, pid)
+                   if e["event_type"] == "wip_limit_changed"]
+        self.assertEqual([(c["before"], c["after"]) for c in changes], [(None, 3), (3, 5), (5, None)])
+        for column, value in (("accepted", 3), ("ready", 0.5), ("ready", 1000), ("ready", True), ("ready", "x")):
+            with self.subTest(column=column, value=value), self.assertRaises(ValueError):
+                self.service.set_wip_limit(self.owner, pid, column, value)
+        self.service.set_wip_limit(self.owner, pid, "progress", 2)
+        listed = next(p for p in self.service.list_projects(self.member) if p["id"] == pid)
+        self.assertEqual(listed["wip_limits"], {"progress": 2})
+
+    def test_a_move_over_the_limit_is_refused_and_only_an_owner_goes_over(self):
+        pid = self.project["id"]
+        self.service.set_wip_limit(self.owner, pid, "ready", 1)
+        self.move(self.manager, "ready")
+        other = self.service.create_task(self.owner, {"project_id": pid, "title": "Second"})
+        with self.assertRaisesRegex(ValueError, "Ready is at its work-in-progress limit: 1 of 1"):
+            self.move(self.manager, "ready", task_id=other["id"])
+        self.assertEqual(self.events(other["id"])[-1]["event_type"], "board_move_blocked")
+        with self.assertRaises(NeedsConfirmation) as caught:
+            self.move(self.owner, "ready", task_id=other["id"])
+        self.assertEqual(caught.exception.confirm, "wip")
+        moved = self.move(self.owner, "ready", task_id=other["id"], override_wip=True)
+        self.assertEqual(moved["task"]["status"], "assigned")
+        override = self.events(other["id"])[-1]
+        self.assertEqual((override["event_type"], json.loads(override["before_json"])["limit"]), ("wip_limit_override", 1))
+        self.assertTrue([n for n in self.service.list_notifications(self.second) if n["kind"] == "wip_limit_override"])
+        # Moving out of a full column, and within a column, is never limited.
+        self.assertEqual(self.move(self.manager, "draft", task_id=other["id"])["task"]["status"], "draft")
+
+
+class BulkChangeTests(BoardFixture):
+    """XV92JJ: bulk status, assignee and due-date changes: previewed, all or nothing, undoable."""
+
+    def setUp(self):
+        super().setUp()
+        pid = self.project["id"]
+        make = lambda title, **k: self.service.create_task(self.owner, {"project_id": pid, "title": title, **k})
+        self.a = make("Alpha", due_date="2026-10-10")
+        self.b = make("Bravo", start_date="2026-10-01", due_date="2026-10-12")
+        self.c = make("Charlie")
+        self.ids = [self.task["id"], self.a["id"], self.b["id"], self.c["id"]]
+
+    def preview(self, actor, action, value, ids=None):
+        return self.service.bulk_preview(actor, self.project["id"], {"task_ids": ids or self.ids, "action": action, "value": value})
+
+    def apply(self, actor, action, value, ids=None, **extra):
+        plan = self.preview(actor, action, value, ids)
+        revisions = {item["id"]: item["revision"] for item in plan["ok"]}
+        return self.service.bulk_apply(actor, self.project["id"], {"task_ids": ids or self.ids, "action": action,
+                                                                   "value": value, "expected_revisions": revisions, **extra})
+
+    def test_preview_counts_and_names_the_blocked_tasks(self):
+        self.service.submit_task(self.owner, self.c["id"], "done")
+        self.move(self.owner, "ready", task_id=self.a["id"])
+        plan = self.preview(self.manager, "status", "ready")
+        self.assertEqual(plan["counts"], {"ok": 2, "blocked": 2})
+        reasons = {b["title"]: b["reason"] for b in plan["blocked"]}
+        self.assertEqual(reasons, {"Alpha": "is already Ready", "Charlie": "is submitted; change it on its own"})
+        with self.assertRaisesRegex(ValueError, "Remove the blocked tasks first"):
+            self.apply(self.manager, "status", "ready")
+        self.assertEqual(self.fresh()["status"], "draft")  # nothing changed
+
+    def test_apply_is_one_change_with_one_notice_and_per_task_history(self):
+        out = self.apply(self.manager, "status", "progress")
+        self.assertEqual(len(out["tasks"]), 4)
+        for task_id in self.ids:
+            self.assertEqual(self.fresh(task_id)["status"], "in_progress")
+            self.assertEqual(self.events(task_id)[-1]["reason"], "Bulk change: status to In progress")
+        parent = self.service.project_events(self.owner, self.project["id"])[-1]
+        self.assertEqual(parent["event_type"], "bulk_change")
+        self.assertEqual(len(json.loads(parent["detail_json"])["tasks"]), 4)
+        notices = self.service.list_notifications(self.owner)
+        self.assertEqual([n["kind"] for n in notices if n["kind"] in ("bulk_change", "task_updated")], ["bulk_change"])
+        self.assertIn("bulk change: 4 tasks · status to In progress · by Manager", notices[0]["summary"])
+
+    def test_a_task_in_use_by_someone_else_stops_the_whole_change(self):
+        self.service.acquire_task_lock(self.owner, self.b["id"], "edit")
+        plan = self.preview(self.manager, "status", "ready")
+        self.assertEqual(plan["blocked"], [{"id": self.b["id"], "title": "Bravo", "revision": self.b["revision"],
+                                            "reason": "is being changed by Owner"}])
+        revisions = {i: self.fresh(i)["revision"] for i in self.ids}
+        with self.assertRaisesRegex(ValueError, "Nothing was changed.*“Bravo” is being changed by Owner"):
+            self.service.bulk_apply(self.manager, self.project["id"], {"task_ids": self.ids, "action": "status",
+                                    "value": "ready", "expected_revisions": revisions})
+        # The bulk leases themselves are all or nothing: one held task and none are taken.
+        with self.assertRaisesRegex(TaskLocked, "1 of the tasks is being changed by someone else \\(“Bravo” by Owner\\)"):
+            self.service._take_bulk_leases(self.manager, self.ids, "tok")
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM task_locks WHERE kind='bulk'").fetchone()[0], 0)
+        self.assertEqual([self.fresh(i)["status"] for i in self.ids], ["draft"] * 4)
+
+    def test_a_failure_part_way_rolls_every_task_back(self):
+        real, calls = self.service._apply_task_update, []
+        def failing(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 3:
+                raise Conflict("simulated")
+            return real(*args, **kwargs)
+        self.service._apply_task_update = failing
+        with self.assertRaisesRegex(Conflict, "simulated"):
+            self.apply(self.owner, "status", "ready")
+        self.service._apply_task_update = real
+        self.assertEqual([self.fresh(i)["status"] for i in self.ids], ["draft"] * 4)
+        self.assertNotIn("bulk_change", [e["event_type"] for e in self.service.project_events(self.owner, self.project["id"])])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM task_locks").fetchone()[0], 0)
+
+    def test_a_stale_preview_changes_nothing(self):
+        plan = self.preview(self.manager, "status", "ready")
+        revisions = {item["id"]: item["revision"] for item in plan["ok"]}
+        self.service.update_task(self.owner, self.a["id"], {"title": "Alpha 2", "expected_revision": self.a["revision"]})
+        with self.assertRaisesRegex(Conflict, "changed since the preview"):
+            self.service.bulk_apply(self.manager, self.project["id"], {"task_ids": self.ids, "action": "status",
+                                    "value": "ready", "expected_revisions": revisions})
+        self.assertEqual(self.fresh()["status"], "draft")
+
+    def test_assignee_and_due_date_offsets(self):
+        out = self.apply(self.manager, "assignee", self.manager["id"], ids=[self.a["id"], self.b["id"]])
+        self.assertEqual({self.fresh(t["id"])["owner_user_id"] for t in out["tasks"]}, {self.manager["id"]})
+        self.assertEqual(self.preview(self.manager, "assignee", self.manager["id"], [self.a["id"]])["blocked"][0]["reason"],
+                         "is already assigned to Manager")
+        with self.assertRaises(ValueError):
+            self.preview(self.manager, "assignee", self.second["id"] + "x", [self.a["id"]])
+        self.service.set_project_schedule(self.owner, self.project["id"], "2026-10-01", "2026-10-11", "Plan")
+        plan = self.preview(self.manager, "due_shift", 3)
+        self.assertEqual({b["title"]: b["reason"] for b in plan["blocked"]},
+                         {"Draft plan": "has no due date", "Charlie": "has no due date"})
+        self.assertEqual([i["title"] for i in plan["impact"]], ["Alpha", "Bravo"])  # both pass the target
+        self.apply(self.manager, "due_shift", 3, ids=[self.a["id"], self.b["id"]])
+        self.assertEqual((self.fresh(self.b["id"])["start_date"], self.fresh(self.b["id"])["due_date"]),
+                         ("2026-10-04", "2026-10-15"))
+        self.assertEqual(self.fresh(self.a["id"])["due_date"], "2026-10-13")
+        with self.assertRaisesRegex(ValueError, "whole number of days"):
+            self.preview(self.manager, "due_shift", 0)
+
+    def test_bulk_undo_restores_every_task_once_and_only_if_none_changed(self):
+        out = self.apply(self.manager, "status", "ready")
+        with self.assertRaisesRegex(ValueError, "no bulk change of yours"):
+            self.service.bulk_undo(self.owner, self.project["id"], {"bulk_id": out["bulk_id"]})
+        self.service.bulk_undo(self.manager, self.project["id"], {"bulk_id": out["bulk_id"]})
+        self.assertEqual([self.fresh(i)["status"] for i in self.ids], ["draft"] * 4)
+        self.assertTrue(self.events(self.a["id"])[-1]["reason"].startswith("Undo of bulk change (status to Ready)"))
+        with self.assertRaisesRegex(ValueError, "already been undone"):
+            self.service.bulk_undo(self.manager, self.project["id"], {"bulk_id": out["bulk_id"]})
+        again = self.apply(self.manager, "status", "ready")
+        self.service.update_task(self.owner, self.c["id"], {"title": "Charlie 2", "expected_revision": self.fresh(self.c["id"])["revision"]})
+        with self.assertRaisesRegex(Conflict, "“Charlie” changed after the bulk change"):
+            self.service.bulk_undo(self.manager, self.project["id"], {"bulk_id": again["bulk_id"]})
+        self.assertEqual(self.fresh(self.a["id"])["status"], "assigned")  # nothing was undone
+
+    def test_members_cannot_change_in_bulk_and_the_limit_applies(self):
+        with self.assertRaises(Forbidden):
+            self.preview(self.member, "status", "ready")
+        self.service.set_wip_limit(self.owner, self.project["id"], "ready", 2)
+        plan = self.preview(self.manager, "status", "ready")
+        self.assertEqual((plan["wip"]["count"], plan["wip"]["limit"], plan["wip"]["incoming"], plan["wip"]["can_override"]),
+                         (0, 2, 4, False))
+        with self.assertRaisesRegex(ValueError, "work-in-progress limit"):
+            self.apply(self.manager, "status", "ready")
+        with self.assertRaises(NeedsConfirmation):
+            self.apply(self.owner, "status", "ready")
+        self.apply(self.owner, "status", "ready", override_wip=True)
+        kinds = [e["event_type"] for e in self.service.project_events(self.owner, self.project["id"])]
+        self.assertEqual(kinds[-2:], ["bulk_change", "wip_limit_override"])
+
+
 if __name__ == "__main__":
     unittest.main()

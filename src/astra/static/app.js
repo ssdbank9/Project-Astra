@@ -281,20 +281,21 @@ function renderGantt(tasks){
   restoreFocus(el,focusKey);
 }
 function renderScheduleTable(groups,tableEl){
-  const {top,childrenOf,stepIndex}=groups;
+  const {top,childrenOf,stepIndex}=groups,scope=bulkScope();
   let steps=0;const rows=[];
   const cell=v=>`<td>${escapeHtml(v??"—")}</td>`;
   const walk=(t,parent)=>{
     const kids=childrenOf.get(t.id)||[];const m=stepIndex.get(t.id);const isStep=!!parent;
     const link=`<button type="button" class="link" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>`;
     const stepNo=isStep?`<i class="sw step-c${stepHue(m.idx)}${m.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${m.idx}</i><span class="sr-only">Step ${m.idx}</span> of ${m.total}`:"—";
-    rows.push(`<tr class="${isStep?"step-tr":"task-tr"}">${cell(t.project_name)}<td>${isStep?escapeHtml(parent.title):link}</td><td>${stepNo}</td><td>${isStep?link:"—"}</td>${cell(t.owner_name||"Unassigned")}${cell(t.start_date||"—")}${cell(t.due_date||"—")}${cell(statusLabel(t.status))}<td>${critLabel(t.criticality)}</td>${cell(dueText(t)||t.due_state)}<td>${t.is_critical_path?"Yes":"No"}</td></tr>`);
+    const pick=scope?`<td class="pick">${isStep?"":pickBox(t)}</td>`:"";
+    rows.push(`<tr class="${isStep?"step-tr":"task-tr"}${bulk.ids.has(t.id)?" is-picked":""}">${pick}${cell(t.project_name)}<td>${isStep?escapeHtml(parent.title):link}</td><td>${stepNo}</td><td>${isStep?link:"—"}</td>${cell(t.owner_name||"Unassigned")}${cell(t.start_date||"—")}${cell(t.due_date||"—")}${cell(statusLabel(t.status))}<td>${critLabel(t.criticality)}</td>${cell(dueText(t)||t.due_state)}<td>${t.is_critical_path?"Yes":"No"}</td></tr>`);
     if(isStep)steps++;
     kids.forEach(k=>walk(k,t));
   };
   top.forEach(t=>walk(t,null));
   const asOf=document.querySelector("#as-of").textContent;
-  const head=["Project","Task","Step #","Step","Owner","Start","Due","Status","Criticality","Due state","Critical path"].map(h=>`<th scope="col">${h}</th>`).join("");
+  const head=(scope?'<th scope="col" class="pick"><input type="checkbox" data-pick-all aria-label="Select every task in this list"></th>':"")+["Project","Task","Step #","Step","Owner","Start","Due","Status","Criticality","Due state","Critical path"].map(h=>`<th scope="col">${h}</th>`).join("");
   tableEl.innerHTML=`<table class="sched-table"><caption>Schedule table · ${top.length} task${top.length===1?"":"s"}, ${steps} step${steps===1?"":"s"} · same filters as the Gantt · ${escapeHtml(asOf)}</caption><thead><tr>${head}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 // Shared tooltip (WCAG 1.4.13: hoverable, persistent, dismissible). Shown on hover after a
@@ -467,6 +468,8 @@ function applyRoute(moveFocus,fromLoad){
   const pr=currentRoute(),rawPath=String(location.hash||"").replace(/^#\/?/,"").split("?")[0];
   if(pr.name==="project"&&rawPath!==pr.path&&history.replaceState){const q=String(location.hash).indexOf("?");history.replaceState(null,"",`#/${pr.path}${q<0?"":String(location.hash).slice(q)}`)}
   const r=currentRoute(),linked=r.name==="task"?r.id:r.params.get("task"),taskId=isTaskId(linked)?linked:null;
+  if(bulk.ids.size&&(r.name!=="project"||r.id!==bulk.pid)){bulk.ids.clear();bulk.last=null}
+  renderBulkBar();
   const viewHash=routeHash(r,null),sameView=!fromLoad&&viewHash===panelState.rendered;
   if(r.name!=="task"){panelState.lastView=viewHash;panelState.rendered=viewHash}
   // The first load after sign-in always fetches the task again: nothing rendered earlier is trusted.
@@ -636,7 +639,7 @@ function boardCard(t,kids,movable){
   if(lockedByOther(t))tags.push(`<span class="tag lock-chip" data-tone="amber">🔒 ${escapeHtml(t.lock.holder_name)}<span class="sr-only"> is changing this task</span></span>`);
   const due=CLOSED_STATUSES.includes(t.status)?"":`<span class="due-chip" data-due="${workGroup(t)}">${escapeHtml(dueText(t)||"No due date")}</span>`;
   const id=escapeHtml(t.id),move=movable?`<button type="button" class="link card-move" data-move-menu="${id}" aria-haspopup="menu" aria-expanded="false" aria-controls="move-menu" aria-label="Move “${escapeHtml(t.title)}” to…">Move to…</button>`:"";
-  return `<article class="board-card"${movable?` data-card="${id}"`:""}><button type="button" class="link card-title" data-detail="${id}">${escapeHtml(t.title)}</button>
+  return `<article class="board-card${bulk.ids.has(t.id)?" is-picked":""}"${movable?` data-card="${id}"`:""}>${movable?pickBox(t):""}<button type="button" class="link card-title" data-detail="${id}">${escapeHtml(t.title)}</button>
     <div class="card-meta"><span class="avatar-sm" aria-hidden="true">${escapeHtml(initials(t.owner_name)||"–")}</span><span class="sr-only">Owner: ${escapeHtml(t.owner_name||"Unassigned")}.</span>${due}${t.criticality?`<span class="card-crit">${escapeHtml(t.criticality.charAt(0).toUpperCase()+t.criticality.slice(1))}</span>`:""}</div>
     ${tags.length?`<div class="tags">${tags.join("")}</div>`:""}${kids.length?`<p class="card-steps">Steps ${done} of ${kids.length} done</p>`:""}${move}</article>`;
 }
@@ -653,8 +656,10 @@ function renderBoard(tasks,divide){
   const laneName=k=>divide==="owner"?(k?names.get(k)+nth(k):"Unassigned"):divide==="criticality"?(k?k.charAt(0).toUpperCase()+k.slice(1):"Unrated"):"";
   const shut=key=>LOCKED_COLUMNS.includes(key)&&!boardExpanded.has(key);
   const count=key=>top.filter(t=>boardColumn(t)===key).length;
+  const project=top.length?(state.projects||[]).find(p=>p.id===top[0].project_id):null,limits=(project&&project.wip_limits)||{};
+  const countTag=key=>{const n=count(key),max=limits[key];return max?`<span class="count${n>max?" over-limit":n===max?" at-limit":""}">${n} / ${max}<span class="sr-only"> (work-in-progress limit ${max})</span></span>`:`<span class="count">${n}</span>`};
   const head=BOARD_COLUMNS.map(([key,label])=>{
-    const locked=LOCKED_COLUMNS.includes(key),inner=`<span class="col-name">${label}</span><span class="count">${count(key)}</span>${locked?(shut(key)?'<span class="col-lock" aria-hidden="true">🔒</span><span class="sr-only">Owner decides; collapsed</span>':'<span class="col-lock">🔒 Owner decides</span>'):""}`;
+    const locked=LOCKED_COLUMNS.includes(key),inner=`<span class="col-name">${label}</span>${countTag(key)}${locked?(shut(key)?'<span class="col-lock" aria-hidden="true">🔒</span><span class="sr-only">Owner decides; collapsed</span>':'<span class="col-lock">🔒 Owner decides</span>'):""}`;
     return `<div class="col col-head${shut(key)?" is-collapsed":""}" data-col="${key}">${locked?`<button type="button" class="col-toggle" data-toggle-col="${key}" aria-expanded="${!shut(key)}">${inner}</button>`:inner}</div>`;
   }).join("");
   const laneRows=lanes.map(k=>{
@@ -664,7 +669,7 @@ function renderBoard(tasks,divide){
     return `${divide?`<h3 class="lane-head">${escapeHtml(laneName(k))} <span class="count">${inLane.length}</span></h3>`:""}<div class="board-cols">${cells}</div>`;
   }).join("");
   const opts=[["","None"],["owner","Owner"],["criticality","Criticality"]].map(([v,l])=>`<option value="${v}"${v===(divide||"")?" selected":""}>${l}</option>`).join("");
-  return `<div class="board-bar"><label class="inline">Divide by <select id="board-divide">${opts}</select></label>
+  return `<div class="board-bar"><label class="inline">Divide by <select id="board-divide">${opts}</select></label>${movable&&isOwner()?'<button type="button" class="quiet" id="wip-settings">Limits…</button>':""}
       <span class="work-meta">${top.length} task${top.length===1?"":"s"} · steps show on their parent · ${movable?'<span class="drag-only">drag a card or </span>use Move to…; ordinary moves can be undone for 15 seconds':"read-only for your role"}</span></div>
     ${top.length?`<div class="board${LOCKED_COLUMNS.filter(shut).map(k=>" shut-"+k).join("")}" role="region" aria-label="Board" tabindex="0"><div class="board-cols board-head">${head}</div>${laneRows}</div>`
       :'<p class="empty-line">No tasks in this project yet. Use Add a task to start.</p>'}`;
@@ -722,6 +727,7 @@ function renderProject(r){
   }else body.innerHTML=projectOverview(p,tasks);
 }
 document.querySelector("#project-body").addEventListener("click",e=>{
+  if(e.target.closest("#wip-settings"))return openWipSettings(currentRoute().id);
   const t=e.target.closest("[data-toggle-col]");
   if(t){const k=t.dataset.toggleCol;if(boardExpanded.has(k))boardExpanded.delete(k);else boardExpanded.add(k);renderProject(currentRoute());document.querySelector(`[data-toggle-col="${k}"]`)?.focus();return}
   const m=e.target.closest("[data-move-menu]");
@@ -782,6 +788,7 @@ function askMove(kind,t,column,err){
       `<ul class="impact-list">${((err&&err.impact)||[]).map(i=>`<li>${escapeHtml(i)}</li>`).join("")}</ul><p class="muted">Tasks that follow are not moved for you. The other owners are told once you confirm.</p>`,"Move anyway"],
     unlock:["Force unlock",`${escapeHtml(err&&err.lock?lockText(err.lock):"")} Unlocking lets others change ${name} now; anything they have not saved will be refused, and they are told.`,
       `<label>Reason (optional)<input name="reason" autocomplete="off"></label>`,"Unlock"],
+    wip:["Go over the limit",`${escapeHtml(((err&&err.impact)||[""])[0])} Move ${name} to ${COL_LABEL[column]} anyway? Going over is recorded and the other owners are told.`,"","Move anyway"],
     dependencies:["Override dependency",`${name} waits on ${escapeHtml(((err&&err.impact)||[]).join(", "))}. Move it to ${COL_LABEL[column]} anyway? The override is recorded and the other owners are told.`,"","Move anyway"],
   }[kind];
   f.innerHTML=`<h2 id="move-dialog-title">${view[0]}</h2><p>${view[1]}</p>${view[2]}<div class="error" id="move-error" role="alert"></div><div class="actions"><button type="button" class="quiet" data-move-cancel>Cancel</button><button type="submit">${view[3]}</button></div>`;
@@ -790,6 +797,7 @@ function askMove(kind,t,column,err){
     let settled=false;const done=v=>{if(settled)return;settled=true;if(d.open)d.close();resolve(v)};
     f.onsubmit=e=>{e.preventDefault();const data=Object.fromEntries(new FormData(f));
       if(kind==="dependencies")return done({override_dependencies:true});
+      if(kind==="wip")return done({override_wip:true});
       if(kind==="impact")return done({confirmed:true});
       if(kind==="unlock")return done({reason:data.reason||""});
       if(kind==="submit"||kind==="accept")return done({confirmed:true,note:data.note||""});
@@ -805,12 +813,15 @@ async function moveCard(t,column,beforeId=null){
   if(kind){const answer=await askMove(kind,t,column);if(!answer){boardAnnounce("Move cancelled.");return}extra=answer}
   const send=more=>api(`/api/tasks/${encodeURIComponent(t.id)}/board-move`,{method:"POST",body:JSON.stringify({to_column:column,expected_revision:t.revision,...extra,...more})});
   try{
-    let out;
-    try{out=await send({})}
-    catch(err){
-      if(err.status!==409||err.confirm!=="dependencies")throw err;
-      const ok=await askMove("dependencies",t,column,err);if(!ok){boardAnnounce("Move cancelled.");await load();return}
-      out=await send(ok);
+    // An owner confirms a dependency override and a work-in-progress override, one after the other.
+    let out,more={};
+    for(;;){
+      try{out=await send(more);break}
+      catch(err){
+        if(err.status!==409||!["dependencies","wip"].includes(err.confirm)||more[err.confirm==="wip"?"override_wip":"override_dependencies"])throw err;
+        const ok=await askMove(err.confirm,t,column,err);if(!ok){boardAnnounce("Move cancelled.");await load();return}
+        more={...more,...ok};
+      }
     }
     if(out.request){showToast(`Sent to an owner for approval: “${t.title}” to ${COL_LABEL[column]}.`);await load();return}
     const moved=out.task;Object.assign(t,moved);
@@ -891,7 +902,7 @@ function placeDrop(t,over,before){
 const boardBody=document.querySelector("#project-body");
 boardBody.addEventListener("pointerdown",e=>{
   const card=e.target.closest(".board-card[data-card]");
-  if(!card||e.button>0||e.target.closest(".card-move")||phoneMQ.matches)return;
+  if(!card||e.button>0||e.target.closest(".card-move,.bulk-pick")||phoneMQ.matches)return;
   Object.assign(drag,{card,id:card.dataset.card,title:card.querySelector(".card-title")?.textContent||"",x:e.clientX,y:e.clientY,pointer:e.pointerId,touch:e.pointerType==="touch",active:false});
   if(drag.touch)drag.timer=setTimeout(()=>startDrag(drag.x,drag.y),450);
 });
@@ -1080,6 +1091,132 @@ document.addEventListener("pointerup",async e=>{
 document.addEventListener("pointercancel",e=>{if(gdrag.bar&&e.pointerId===gdrag.pointer){const g=endBarDrag();if(g&&g.active)g.lease?.then(()=>dropLease(g.t.id))}});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&gdrag.active){e.preventDefault();const g=endBarDrag();announce("Move cancelled.");g.lease?.then(()=>dropLease(g.t.id))}});
 ganttEl.addEventListener("click",e=>{if(gdrag.suppressClick){e.preventDefault();e.stopPropagation()}},true);
+// XV92JJ: bulk changes. On a project's Board and List, owners and the project's managers tick tasks
+// (Shift-click for a range, Space to toggle, Shift+Arrow to extend in the list), then change status,
+// assignee or due dates for all of them in one previewed, all-or-nothing, undoable change.
+const bulk={ids:new Set(),pid:null,last:null,action:"status"};
+function bulkScope(){const r=currentRoute();return r.name==="project"&&r.id&&canMoveOnBoard(r.id)?r.id:null}
+function pickBox(t){return `<input type="checkbox" class="bulk-pick" data-pick="${escapeHtml(t.id)}"${bulk.ids.has(t.id)?" checked":""} aria-label="Select “${escapeHtml(t.title)}”">`}
+function syncPicks(){
+  document.querySelectorAll("[data-pick]").forEach(b=>{const on=bulk.ids.has(b.dataset.pick);b.checked=on;b.closest(".board-card,tr")?.classList.toggle("is-picked",on)});
+  const all=document.querySelector("[data-pick-all]"),boxes=[...document.querySelectorAll("[data-pick]")];
+  if(all){all.checked=boxes.length>0&&boxes.every(b=>b.checked);all.indeterminate=!all.checked&&boxes.some(b=>b.checked)}
+  renderBulkBar();
+}
+function clearBulk(){bulk.ids.clear();bulk.last=null;syncPicks()}
+function pick(id,on){if(on)bulk.ids.add(id);else bulk.ids.delete(id)}
+// Shift-click: everything between the last box ticked and this one, in the order shown.
+function pickRange(order,from,to){const i=order.indexOf(from),j=order.indexOf(to);if(i<0||j<0)return [to];return order.slice(Math.min(i,j),Math.max(i,j)+1)}
+document.addEventListener("click",e=>{
+  const box=e.target.closest("[data-pick]");if(!box)return;
+  const pid=bulkScope();if(!pid)return;
+  if(bulk.pid!==pid){bulk.ids.clear();bulk.pid=pid}
+  const id=box.dataset.pick,boxes=[...document.querySelectorAll("[data-pick]")].map(b=>b.dataset.pick);
+  (e.shiftKey&&bulk.last?pickRange(boxes,bulk.last,id):[id]).forEach(x=>pick(x,box.checked));
+  bulk.last=id;syncPicks();
+});
+document.addEventListener("change",e=>{
+  if(!e.target.matches("[data-pick-all]"))return;
+  const pid=bulkScope();if(!pid)return;if(bulk.pid!==pid){bulk.ids.clear();bulk.pid=pid}
+  document.querySelectorAll("[data-pick]").forEach(b=>pick(b.dataset.pick,e.target.checked));syncPicks();
+});
+document.addEventListener("keydown",e=>{
+  const box=e.target.closest&&e.target.closest("[data-pick]");if(!box||!e.shiftKey||(e.key!=="ArrowDown"&&e.key!=="ArrowUp"))return;
+  e.preventDefault();
+  const boxes=[...document.querySelectorAll("[data-pick]")],next=boxes[boxes.indexOf(box)+(e.key==="ArrowDown"?1:-1)];
+  if(!next)return;const pid=bulkScope();if(bulk.pid!==pid){bulk.ids.clear();bulk.pid=pid}
+  pick(box.dataset.pick,true);pick(next.dataset.pick,true);bulk.last=next.dataset.pick;next.focus();syncPicks();
+});
+function renderBulkBar(){
+  const bar=document.querySelector("#bulk-bar"),n=bulk.ids.size,pid=bulkScope();
+  if(!n||!pid){bar.hidden=true;bar.innerHTML="";document.body.classList.remove("has-bulk-bar");return}
+  if(bar.hidden||!bar.innerHTML){
+    bar.innerHTML=`<span class="bulk-count" id="bulk-count"></span>
+      <label class="bulk-field"><span class="bulk-label">Change</span><select id="bulk-action"><option value="status">Status</option><option value="assignee">Assignee</option><option value="due_shift">Due dates</option></select></label>
+      <span id="bulk-value" class="bulk-field"></span>
+      <button type="button" id="bulk-review">Review change…</button>
+      <button type="button" class="quiet" id="bulk-clear">Clear selection</button>`;
+    bar.querySelector("#bulk-action").value=bulk.action;fillBulkValue(pid);
+    bar.querySelector("#bulk-action").addEventListener("change",e=>{bulk.action=e.target.value;fillBulkValue(pid)});
+    bar.querySelector("#bulk-review").addEventListener("click",()=>reviewBulk(pid));
+    bar.querySelector("#bulk-clear").addEventListener("click",()=>{clearBulk();document.querySelector("[data-pick]")?.focus()});
+    bar.hidden=false;document.body.classList.add("has-bulk-bar");
+  }
+  bar.querySelector("#bulk-count").textContent=`${n} selected`;
+}
+function fillBulkValue(pid){
+  const slot=document.querySelector("#bulk-value");
+  if(bulk.action==="status")slot.innerHTML='<label><span class="bulk-label">to</span><select id="bulk-input"><option value="draft">Draft</option><option value="ready">Ready</option><option value="progress">In progress</option></select></label>';
+  else if(bulk.action==="assignee"){slot.innerHTML='<label><span class="bulk-label">to</span><select id="bulk-input"><option value="">Unassigned</option></select></label>';fillAssignees(pid,slot.querySelector("select"),"")}
+  else slot.innerHTML='<label><span class="bulk-label">by</span><input id="bulk-input" type="number" min="-365" max="365" step="1" value="7" inputmode="numeric"><span>days</span></label>';
+}
+function bulkPayload(){
+  const raw=document.querySelector("#bulk-input").value;
+  return {task_ids:[...bulk.ids],action:bulk.action,value:bulk.action==="due_shift"?Number(raw):raw};
+}
+async function reviewBulk(pid){
+  const payload=bulkPayload();
+  let plan;
+  try{({preview:plan}=await api(`/api/projects/${encodeURIComponent(pid)}/bulk/preview`,{method:"POST",body:JSON.stringify(payload)}))}
+  catch(err){showToast(`Cannot change these tasks: ${err.message}`,null,null,true);return}
+  const answer=await askBulk(plan);if(!answer)return;
+  if(answer.drop){plan.blocked.forEach(b=>bulk.ids.delete(b.id));syncPicks();if(bulk.ids.size)return reviewBulk(pid);return}
+  try{
+    const out=await api(`/api/projects/${encodeURIComponent(pid)}/bulk/apply`,{method:"POST",body:JSON.stringify({...payload,
+      expected_revisions:Object.fromEntries(plan.ok.map(i=>[i.id,i.revision])),override_wip:!!answer.override_wip})});
+    const n=out.tasks.length,text=`Changed ${n} task${n===1?"":"s"}: ${out.summary}.`;
+    clearBulk();
+    showToast(text,"Undo",async()=>{
+      try{const u=await api(`/api/projects/${encodeURIComponent(pid)}/bulk/undo`,{method:"POST",body:JSON.stringify({bulk_id:out.bulk_id})});showToast(`Bulk change undone for ${u.tasks.length} task${u.tasks.length===1?"":"s"}.`)}
+      catch(err){showToast(`The bulk change was not undone: ${err.message}`,null,null,true)}
+      await load();
+    },false,out.undo.seconds*1000);
+    boardAnnounce(text);
+  }catch(err){showToast(/nothing was changed/i.test(err.message)?err.message:`Nothing was changed: ${err.message}`,null,null,true)}
+  await load();
+}
+function askBulk(plan){
+  const d=document.querySelector("#move-dialog"),f=document.querySelector("#move-form");
+  const list=(items,fn)=>`<ul class="bulk-list">${items.slice(0,8).map(fn).join("")}${items.length>8?`<li class="muted">and ${items.length-8} more</li>`:""}</ul>`;
+  const total=plan.counts.ok+plan.counts.blocked,blocked=plan.blocked.length,wip=plan.wip;
+  const okPart=plan.ok.length?`<p>${plan.counts.ok} of ${total} task${total===1?"":"s"} will change: <strong>${escapeHtml(plan.summary)}</strong>.</p>${list(plan.ok,i=>`<li>${escapeHtml(i.title)}</li>`)}`:`<p>None of the ${total} selected tasks can change: <strong>${escapeHtml(plan.summary)}</strong>.</p>`;
+  const blockedPart=blocked?`<h3>Blocked (${blocked})</h3><p class="muted">Nothing changes until these are out of the selection.</p>${list(plan.blocked,b=>`<li><strong>${escapeHtml(b.title)}</strong> ${escapeHtml(b.reason)}</li>`)}`:"";
+  const wipPart=wip?`<div class="lock-banner"><span>${escapeHtml(wip.message)}</span></div>${wip.can_override?'<label class="check"><input type="checkbox" name="override_wip"> Go over the limit (recorded; the other owners are told)</label>':""}`:"";
+  const impactPart=plan.impact.length?`<h3>Schedule consequences</h3>${list(plan.impact,i=>`<li><strong>${escapeHtml(i.title)}</strong>: ${escapeHtml(i.impact.join(" "))}</li>`)}<p class="muted">Tasks that follow are not moved. The other owners are told.</p>`:"";
+  const canApply=!blocked&&plan.ok.length&&!(wip&&!wip.can_override);
+  f.innerHTML=`<h2 id="move-dialog-title">Review bulk change</h2>${okPart}${blockedPart}${wipPart}${impactPart}<div class="error" id="move-error" role="alert"></div>
+    <div class="actions"><button type="button" class="quiet" data-move-cancel>Cancel</button>${blocked?'<button type="button" data-bulk-drop>Remove blocked from selection</button>':""}${canApply?`<button type="submit">Apply to ${plan.counts.ok} task${plan.counts.ok===1?"":"s"}</button>`:""}</div>`;
+  return new Promise(resolve=>{
+    let settled=false;const done=v=>{if(settled)return;settled=true;if(d.open)d.close();resolve(v)};
+    f.onsubmit=e=>{e.preventDefault();
+      if(wip&&!f.querySelector('[name="override_wip"]')?.checked){f.querySelector("#move-error").textContent="Tick “Go over the limit” to apply, or change fewer tasks.";return}
+      done({override_wip:!!wip})};
+    f.querySelector("[data-move-cancel]").onclick=()=>done(null);
+    const drop=f.querySelector("[data-bulk-drop]");if(drop)drop.onclick=()=>done({drop:true});
+    d.addEventListener("close",()=>done(null),{once:true});
+    d.showModal();(f.querySelector('button[type="submit"],[data-bulk-drop]')||f.querySelector("[data-move-cancel]")).focus();
+  });
+}
+// XV92JJ: an owner sets each open column's work-in-progress limit (empty for none).
+const WIP_COLUMNS=["draft","ready","progress","blocked","submitted"];
+async function openWipSettings(pid){
+  const p=(state.projects||[]).find(x=>x.id===pid),limits=(p&&p.wip_limits)||{};
+  const d=document.querySelector("#move-dialog"),f=document.querySelector("#move-form");
+  f.innerHTML=`<h2 id="move-dialog-title">Work-in-progress limits</h2><p>A move that would put more tasks in a column than its limit is refused; only an owner may go over it, and that is recorded. Leave a box empty for no limit.</p>
+    <div class="grid wip-grid">${WIP_COLUMNS.map(k=>`<label>${COL_LABEL[k]}<input name="${k}" type="number" min="1" max="999" step="1" inputmode="numeric" value="${limits[k]??""}"></label>`).join("")}</div>
+    <label>Reason (optional)<input name="reason" autocomplete="off"></label>
+    <div class="error" id="move-error" role="alert"></div><div class="actions"><button type="button" class="quiet" data-move-cancel>Cancel</button><button type="submit">Save limits</button></div>`;
+  f.querySelector("[data-move-cancel]").onclick=()=>d.close();
+  f.onsubmit=async e=>{
+    e.preventDefault();const data=Object.fromEntries(new FormData(f));
+    const changed=WIP_COLUMNS.filter(k=>String(limits[k]??"")!==String(data[k]||""));
+    try{
+      for(const k of changed)await api(`/api/projects/${encodeURIComponent(pid)}/wip-limits`,{method:"POST",body:JSON.stringify({column:k,max_tasks:data[k]?Number(data[k]):null,reason:data.reason})});
+      d.close();showToast(changed.length?`Saved ${changed.length} limit${changed.length===1?"":"s"}.`:"No limits changed.");await load();
+    }catch(err){f.querySelector("#move-error").textContent=err.message;await load()}
+  };
+  d.showModal();f.querySelector("input")?.focus();
+}
 document.querySelector("#project-capture").addEventListener("click",()=>openCapture(currentRoute().id));
 document.querySelector("#project-save-template").addEventListener("click",()=>saveProjectAsTemplate(currentRoute().id));
 document.querySelector("#project-close").addEventListener("click",()=>closeProject(currentRoute().id));
@@ -1254,7 +1391,7 @@ document.querySelector("#portfolio-btn").onclick=openPortfolio;
 // 5WZ4A8: project history (schedule changes, closure, imports, owner-action decisions).
 // ZSZ9T2/K62ZAP: the server sends only schedule changes, closure and their own events to anyone
 // other than the Owner, the Chairman or a project manager.
-const PROJECT_EVENT_LABELS={project_schedule_changed:"Project dates changed",project_closed:"Project closed",import_committed:"Import committed",protected_action_blocked:"Owner action blocked",protected_action_approved:"Owner request approved",protected_action_rejected:"Owner request rejected",protected_action_cancelled:"Owner request cancelled"};
+const PROJECT_EVENT_LABELS={board_reordered:"Board order changed",bulk_change:"Bulk change",bulk_change_undone:"Bulk change undone",wip_limit_changed:"Work-in-progress limit changed",wip_limit_override:"Work-in-progress limit overridden",project_schedule_changed:"Project dates changed",project_closed:"Project closed",import_committed:"Import committed",protected_action_blocked:"Owner action blocked",protected_action_approved:"Owner request approved",protected_action_rejected:"Owner request rejected",protected_action_cancelled:"Owner request cancelled"};
 document.querySelector("#project-history-btn").onclick=()=>{const pid=document.querySelector("#project-filter").value;if(pid)openProjectHistory(pid)};
 async function openProjectHistory(projectId){
   const body=document.querySelector("#project-history-body"),project=state.projects.find(p=>p.id===projectId)||{};
@@ -1277,6 +1414,11 @@ function renderProjectEvent(ev){
       .filter(([k])=>String(b[k]??"")!==String(a[k]??""))
       .map(([k,l])=>`<br>${escapeHtml(l)}: ${escapeHtml(b[k]||"—")} → ${escapeHtml(a[k]||"—")}`).join("");
   }
+  if(ev.event_type==="bulk_change"||ev.event_type==="bulk_change_undone"){
+    const d=safeParse(ev.detail_json),n=(d.tasks||[]).length;
+    detail=`<br>${n} task${n===1?"":"s"}: ${escapeHtml((d.tasks||[]).map(t=>t.title).join(", "))}`;
+  }
+  if(ev.event_type==="wip_limit_changed"){const d=safeParse(ev.detail_json);detail=`<br>${escapeHtml(COL_LABEL[d.column]||d.column)}: ${escapeHtml(String(d.before??"none"))} → ${escapeHtml(String(d.after??"none"))}`}
   const reason=ev.reason?`<br><em>Reason: ${escapeHtml(ev.reason)}</em>`:"";
   return `<li><strong>${escapeHtml(label)}</strong> · ${escapeHtml(when)} · ${escapeHtml(who)}${reason}${detail}</li>`;
 }
@@ -1566,7 +1708,7 @@ const GOVERNED=["submitted","completed","on_hold","reopened"];
 // ARZWV7: a closed task is a fixed record; a Manager may only ask to move it back into ordinary work
 // (service.py REOPEN_ONLY_STATUSES / REOPEN_EQUIVALENT_STATUSES). UI hints only — the server decides.
 const BACK_TO_WORK=["draft","assigned","in_progress","delayed"];
-const EVENT_LABELS={import_committed:"Import committed",task_created:"Task created",task_updated:"Task updated",dependency_added:"Dependency added",dependency_removed:"Dependency removed",task_submitted:"Work submitted",submission_accepted:"Submission accepted",changes_requested:"Changes requested",task_reopened:"Task reopened",task_on_hold:"Put on hold",criticality_changed:"Criticality changed",parent_changed:"Parent changed",schedule_proposed:"Schedule change proposed",schedule_revised:"Schedule revised",schedule_proposal_rejected:"Schedule proposal rejected",attachment_added:"Attachment linked",attachment_removed:"Attachment link removed"};
+const EVENT_LABELS={board_move_blocked:"Board move refused",dependency_override:"Dependency overridden",wip_limit_override:"Work-in-progress limit overridden",task_lock_forced:"Lock forced open",gantt_move_blocked:"Date drag refused",schedule_impact_confirmed:"Date change with consequences confirmed",import_committed:"Import committed",task_created:"Task created",task_updated:"Task updated",dependency_added:"Dependency added",dependency_removed:"Dependency removed",task_submitted:"Work submitted",submission_accepted:"Submission accepted",changes_requested:"Changes requested",task_reopened:"Task reopened",task_on_hold:"Put on hold",criticality_changed:"Criticality changed",parent_changed:"Parent changed",schedule_proposed:"Schedule change proposed",schedule_revised:"Schedule revised",schedule_proposal_rejected:"Schedule proposal rejected",attachment_added:"Attachment linked",attachment_removed:"Attachment link removed"};
 const DIFF_FIELDS=[["title","Title"],["status","Status"],["criticality","Criticality"],["start_date","Start date"],["due_date","Due date"],["progress","Progress"],["description","Description"]];
 let detailTaskId=null;
 

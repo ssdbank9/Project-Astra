@@ -191,6 +191,26 @@ This first vertical slice provides:
   `schedule_impact_confirmed` and the other owners are told. Tasks that follow are not moved.
   API: `POST /api/tasks/<id>/reschedule` (`start_date`, `due_date`, `expected_revision`,
   `confirmed`);
+- bulk changes on a project's Board and List for owners and the project's managers: tick
+  tasks (Shift-click takes a range; in the List, Space toggles and Shift+Arrow extends), then
+  choose Status (Draft, Ready or In progress), Assignee, or a due-date offset in days (the start
+  moves with it). **Review change** previews how many tasks change and names every blocked task
+  with its reason (already there, submitted/on hold/closed so it changes on its own, waiting on a
+  predecessor, no due date, in use by someone else), plus any schedule consequences. Nothing
+  applies until the blocked ones are removed ("Remove blocked from selection"). Apply is all or
+  nothing: bulk locks are taken for every task first (if anyone else holds one, nothing starts
+  and the holders are named), then every write, one `bulk_change` project event listing the
+  tasks and a `task_updated` event per task share one transaction, and the other owners get one
+  notice. Undo (15 seconds) restores every task, or none if any changed since
+  (`bulk_change_undone`). API: `POST /api/projects/<id>/bulk/preview`, `/bulk/apply`
+  (`expected_revisions` from the preview) and `/bulk/undo`;
+- work-in-progress limits (schema v20, `wip_limits`): an owner sets an optional limit per open
+  board column per project (Limits… on the board; Draft, Ready, In progress, Blocked,
+  Submitted), recorded as `wip_limit_changed` in the project history. Column heads show
+  "n / limit". A board move or bulk status change that would put more top-level open tasks in
+  a column than its limit is refused with the reason; an owner may go over it after a confirm,
+  recorded as `wip_limit_override` and noticed to the other owners. Leaving a column is never
+  limited. API: `POST /api/projects/<id>/wip-limits` (`column`, `max_tasks` or empty to clear);
 - My Work with two tabs. List (`#/my-work`) groups the open tasks you own into Overdue,
   Today, This week (due within the next 7 days, day 7 included, as on Home), Later and No date, each with a
   count, soonest first, with a filter box. Calendar (`#/my-work/calendar?month=YYYY-MM`) is a
@@ -294,6 +314,7 @@ Back up `astra.sqlite3`, set every owner except the primary back to their earlie
 (`UPDATE users SET global_role='member' WHERE id=...`), start Astra again, and make them
 secondary owners from the People screen.
 
+Schema 20 adds `wip_limits` (one optional limit per project and open board column, 1 to 999).
 Schema 19 adds `task_locks` (one lease per task: holder, kind, token, acquired and expiry
 times; an expired row is no lock and is replaced on the next acquire). Schema 18 adds `tasks.board_rank` (a nullable
 number; a task without one sorts after the ranked cards of its column) and the index

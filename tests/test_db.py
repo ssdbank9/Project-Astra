@@ -1362,5 +1362,77 @@ class TaskLockMigrationTests(unittest.TestCase):
             connection.close()
 
 
+def deny_create_table(name):
+    def authorizer(action, arg1, *_):
+        return sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_CREATE_TABLE and arg1 == name else sqlite3.SQLITE_OK
+    return authorizer
+
+
+class WipLimitMigrationTests(unittest.TestCase):
+    """XV92JJ: schema 20 adds wip_limits, one optional limit per project and board column."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "astra.sqlite3"
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def at_v19(self):
+        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.set_authorizer(deny_create_table(db.V20_WIP_LIMITS_TABLE))
+        with self.assertRaises(sqlite3.DatabaseError):
+            db.migrate(connection)
+        connection.set_authorizer(None)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 19)
+        return connection
+
+    def test_fresh_database_has_wip_limits_with_their_checks(self):
+        connection = db.connect(self.path)
+        try:
+            self.assertGreaterEqual(db.SCHEMA_VERSION, 20)
+            self.assertEqual(table_columns(connection, "wip_limits"),
+                             ["project_id", "column_key", "max_tasks", "updated_by", "updated_at"])
+            connection.execute(
+                "INSERT INTO users(id,email,display_name,password_hash,global_role,created_at,is_primary_owner)"
+                " VALUES('owner-1','o@example.org','Owner','x','owner','2026-01-01T00:00:00Z',1)")
+            connection.execute("INSERT INTO projects(id,name,created_at,created_by) VALUES('p1','P','2026-01-01','owner-1')")
+            connection.execute("INSERT INTO wip_limits VALUES('p1','ready',3,'owner-1','now')")
+            for bad in (("p1", "accepted", 3), ("p1", "progress", 0), ("p1", "ready", 4)):
+                with self.subTest(bad=bad), self.assertRaises(sqlite3.IntegrityError):
+                    connection.execute("INSERT INTO wip_limits VALUES(?,?,?,'owner-1','now')", bad)
+        finally:
+            connection.close()
+
+    def test_v19_upgrades_to_the_fresh_schema(self):
+        connection = self.at_v19()
+        try:
+            db.migrate(connection)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+            fresh = db.connect(Path(self.temp.name) / "fresh.sqlite3")
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
+    def test_failure_in_the_v20_step_rolls_back_then_retries(self):
+        connection = self.at_v19()
+        try:
+            catalog_before = full_catalog(connection)
+            connection.set_authorizer(deny_create_table(db.V20_WIP_LIMITS_TABLE))
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(full_catalog(connection), catalog_before)
+            db.migrate(connection)
+            self.assertIn("max_tasks", table_columns(connection, "wip_limits"))
+        finally:
+            connection.close()
+
+
 if __name__ == "__main__":
     unittest.main()

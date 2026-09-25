@@ -8,7 +8,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 
 class SchemaMigrationRefused(RuntimeError):
@@ -789,6 +789,28 @@ def _migrate_v19(connection: sqlite3.Connection) -> None:
     """)
 
 
+V20_WIP_LIMITS_TABLE = "wip_limits"
+
+
+def _migrate_v20(connection: sqlite3.Connection) -> None:
+    """v19 -> v20: optional work-in-progress limits per board column (ticket XV92JJ).
+
+    At most one limit per project and column; no row means no limit. Only an owner sets
+    one; every change is kept in project history (wip_limit_changed). Nothing existing
+    changes.
+    """
+    _execute_statements(connection, f"""
+        CREATE TABLE {V20_WIP_LIMITS_TABLE} (
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            column_key TEXT NOT NULL CHECK (column_key IN ('draft','ready','progress','blocked','submitted')),
+            max_tasks INTEGER NOT NULL CHECK (max_tasks BETWEEN 1 AND 999),
+            updated_by TEXT NOT NULL REFERENCES users(id),
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (project_id, column_key)
+        );
+    """)
+
+
 # The ordered schema history: (version, step). migrate() runs every step whose version
 # is above the database's user_version, each in its own transaction with its bump.
 # Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
@@ -812,4 +834,5 @@ MIGRATION_STEPS = (
     (17, _migrate_v17),
     (18, _migrate_v18),
     (19, _migrate_v19),
+    (20, _migrate_v20),
 )

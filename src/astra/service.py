@@ -108,6 +108,12 @@ BOARD_UNDO_GRACE_SECONDS = 5
 # X07XV4: a task lock is a renewable lease (owner decision, multi-user locks and lock
 # expiry). The client renews every 20 seconds while a drag or the edit form is in use.
 LOCK_LEASE_SECONDS = 60
+# XV92JJ: work-in-progress limits exist for the open columns only, and a bulk status change
+# offers only the ordinary work columns (holds, submissions, decisions and closes each need
+# their own reason or record, so they stay one task at a time).
+WIP_COLUMNS = ("draft", "ready", "progress", "blocked", "submitted")
+BULK_MAX_TASKS = 200
+BULK_ACTIONS = ("status", "assignee", "due_shift")
 LOCK_KINDS = {"drag": "a drag", "edit": "an edit", "bulk": "a bulk change"}
 # The task events that change a task. While someone else holds an unexpired lease, _event
 # refuses these inside the write transaction, so every write path is covered and the
@@ -1050,6 +1056,7 @@ class AstraService:
             project["today"] = self._today_in_timezone(project.get("timezone"))
             # JN1QYG: the board offers dragging only where the server would allow the move.
             project["can_manage"] = self.can_manage_project(actor, project["id"])
+            project["wip_limits"] = self.wip_limits(project["id"])
         return projects
 
     def grant_project_access(self, actor: dict, project_id: str, user_id: str, role: str) -> None:
@@ -1278,32 +1285,40 @@ class AstraService:
         """The single write transaction: every guard that must see committed state runs
         inside it, under the write lock, not before it."""
         with transaction(self.db):
-            # An approval re-checks, under the write lock, that its request is still pending.
-            self._assert_active_request_revision(before, owner_decision)
-            cursor = self.db.execute(
-                """UPDATE tasks SET title=?,description=?,owner_user_id=?,status=?,criticality=?,start_date=?,due_date=?,
-                   progress=?,updated_at=?,revision=revision+1 WHERE id=? AND revision=?""",
-                (fields["title"], str(fields["description"]).strip(), fields["owner_user_id"],
-                 fields["status"], fields["criticality"], fields["start_date"], fields["due_date"],
-                 self._progress(fields["progress"]), now_text(), task_id,
-                 expected_revision),
+            return self._apply_task_update(actor, task_id, before, fields, expected_revision, owner_decision)
+
+    def _apply_task_update(
+        self, actor: dict, task_id: str, before: dict, fields: dict, expected_revision: int,
+        owner_decision: OwnerDecision | None, *, notify: bool = True,
+    ) -> dict:
+        """The body of one task update; the caller holds the transaction (XV92JJ: a bulk
+        change writes many of these in one)."""
+        # An approval re-checks, under the write lock, that its request is still pending.
+        self._assert_active_request_revision(before, owner_decision)
+        cursor = self.db.execute(
+            """UPDATE tasks SET title=?,description=?,owner_user_id=?,status=?,criticality=?,start_date=?,due_date=?,
+               progress=?,updated_at=?,revision=revision+1 WHERE id=? AND revision=?""",
+            (fields["title"], str(fields["description"]).strip(), fields["owner_user_id"],
+             fields["status"], fields["criticality"], fields["start_date"], fields["due_date"],
+             self._progress(fields["progress"]), now_text(), task_id,
+             expected_revision),
+        )
+        if cursor.rowcount != 1:
+            raise Conflict("Task revision conflict: the task changed before this update could be saved.")
+        self._ensure_baseline(task_id)
+        after = self.get_task(actor, task_id)
+        self._event(task_id, actor["id"], "task_updated", before, after, fields["reason"], notify=notify)
+        if fields["status_changed"]:
+            self._resolve_pending_requests(
+                actor,
+                "update_task_status",
+                project_id=before["project_id"],
+                intent={"status": fields["status"], "from_status": before["status"]},
+                task_id=task_id,
+                expected_revision=expected_revision,
+                decision_reason=fields["reason"] or "",
+                owner_decision=owner_decision,
             )
-            if cursor.rowcount != 1:
-                raise Conflict("Task revision conflict: the task changed before this update could be saved.")
-            self._ensure_baseline(task_id)
-            after = self.get_task(actor, task_id)
-            self._event(task_id, actor["id"], "task_updated", before, after, fields["reason"])
-            if fields["status_changed"]:
-                self._resolve_pending_requests(
-                    actor,
-                    "update_task_status",
-                    project_id=before["project_id"],
-                    intent={"status": fields["status"], "from_status": before["status"]},
-                    task_id=task_id,
-                    expected_revision=expected_revision,
-                    decision_reason=fields["reason"] or "",
-                    owner_decision=owner_decision,
-                )
         return after
 
     # T8WHJR (Aly Jafferani, 2026-09-23): a completed, cancelled or abandoned task is a fixed
@@ -2437,6 +2452,7 @@ class AstraService:
                 raise NeedsConfirmation(f"“{title}” waits on {names}. Move it to {BOARD_COLUMN_LABELS[target]} anyway?",
                                         "dependencies", waits_on)
             override = True
+        wip_over = self._wip_gate(actor, task["project_id"], target, 1, payload)
         reason = str(payload.get("reason", "")).strip()
         auto_reason = f"Board move: {BOARD_COLUMN_LABELS[source]} → {BOARD_COLUMN_LABELS[target]}"
         undo = None
@@ -2486,6 +2502,10 @@ class AstraService:
             with transaction(self.db):
                 self._event(task_id, actor["id"], "dependency_override", {"blocked_by": waits_on},
                             {"column": target}, reason or auto_reason)
+        if wip_over:
+            with transaction(self.db):
+                self._event(task_id, actor["id"], "wip_limit_override", {"column": target, **wip_over},
+                            {"column": target}, wip_over["message"])
         result = {"task": self.get_task(actor, task_id)}
         if undo and undo["event_id"]:
             result["undo"] = undo
@@ -2736,6 +2756,294 @@ class AstraService:
                             {"impact": impact, "event_id": moved_event}, "; ".join(impact))
             return {"task": self.get_task(actor, task_id), "impact": impact}
         return {"task": self.get_task(actor, task_id), "undo": {"event_id": moved_event, "seconds": BOARD_UNDO_SECONDS}}
+
+    # ---- XV92JJ: work-in-progress limits ----
+
+    def wip_limits(self, project_id: str) -> dict:
+        try:
+            rows = self.db.execute("SELECT column_key, max_tasks FROM wip_limits WHERE project_id=?",
+                                   (project_id,)).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table: wip_limits" not in str(exc):  # a database held below schema 20
+                raise
+            return {}
+        return {r["column_key"]: r["max_tasks"] for r in rows}
+
+    def set_wip_limit(self, actor: dict, project_id: str, column: str, max_tasks, reason: str = "") -> dict:
+        """Only an owner configures a column's limit (owner decision: workflow configuration
+        authority). Every change is kept in project history as wip_limit_changed."""
+        if not self.can_view_project(actor, project_id):
+            raise KeyError("Project not found.")
+        if actor["global_role"] != "owner":
+            raise Forbidden("Only an owner can set work-in-progress limits.")
+        if column not in WIP_COLUMNS:
+            raise ValueError("A limit can be set on Draft, Ready, In progress, Blocked or Submitted.")
+        if max_tasks in (None, "", 0, "0"):
+            limit = None
+        else:
+            try:
+                limit = int(max_tasks)
+            except (TypeError, ValueError):
+                raise ValueError("A limit is a whole number from 1 to 999, or empty for none.") from None
+            if isinstance(max_tasks, bool) or not 1 <= limit <= 999:
+                raise ValueError("A limit is a whole number from 1 to 999, or empty for none.")
+        with transaction(self.db):
+            before = self.wip_limits(project_id).get(column)
+            if before == limit:
+                raise ValueError(f"{BOARD_COLUMN_LABELS[column]} already has {'no limit' if limit is None else f'a limit of {limit}'}.")
+            if limit is None:
+                self.db.execute("DELETE FROM wip_limits WHERE project_id=? AND column_key=?", (project_id, column))
+            else:
+                self.db.execute("INSERT OR REPLACE INTO wip_limits VALUES(?,?,?,?,?)",
+                                (project_id, column, limit, actor["id"], now_text()))
+            self._project_event(project_id, actor["id"], "wip_limit_changed",
+                                {"column": column, "before": before, "after": limit}, str(reason or "").strip() or None)
+        return self.wip_limits(project_id)
+
+    def _column_counts(self, actor: dict, project_id: str) -> dict:
+        """Top-level open tasks per board column, as the board shows them."""
+        tasks = self.list_tasks(actor, project_id)
+        ids = {t["id"] for t in tasks}
+        counts: dict[str, int] = {}
+        for t in tasks:
+            if t.get("parent_task_id") in ids:
+                continue
+            column = self.board_column(t)
+            counts[column] = counts.get(column, 0) + 1
+        return counts
+
+    def _wip_state(self, actor: dict, project_id: str, target: str, incoming: int) -> dict | None:
+        limit = self.wip_limits(project_id).get(target)
+        if not limit or incoming <= 0:
+            return None
+        count = self._column_counts(actor, project_id).get(target, 0)
+        if count + incoming <= limit:
+            return None
+        label = BOARD_COLUMN_LABELS[target]
+        return {"count": count, "limit": limit, "incoming": incoming,
+                "message": (f"{label} is at its work-in-progress limit: {count} of {limit}, and this would make "
+                            f"{count + incoming}. Finish or move work out of {label} first; only an owner may go over it.")}
+
+    def _wip_gate(self, actor: dict, project_id: str, target: str, incoming: int, payload: dict) -> dict | None:
+        """Refuse a move over a column's limit; an owner may confirm an override. Returns
+        the override to audit, or None when the move is within the limit."""
+        over = self._wip_state(actor, project_id, target, incoming)
+        if not over:
+            return None
+        if actor["global_role"] != "owner":
+            raise ValueError(over["message"])
+        if not payload.get("override_wip"):
+            raise NeedsConfirmation(f"{BOARD_COLUMN_LABELS[target]} would hold {over['count'] + incoming} tasks, "
+                                    f"over its limit of {over['limit']}. Go over the limit?", "wip", [over["message"]])
+        return over
+
+    # ---- XV92JJ: bulk changes ----
+
+    def _bulk_plan(self, actor: dict, project_id: str, payload: dict) -> dict:
+        """Work out, without writing, what a bulk change would do to each task: the new
+        fields, or why the task is blocked. Preview and apply share it."""
+        if not self.can_view_project(actor, project_id):
+            raise KeyError("Project not found.")
+        if not self.can_manage_project(actor, project_id):
+            raise Forbidden("Only an owner or a manager of this project can change tasks in bulk.")
+        action, value = payload.get("action"), payload.get("value")
+        ids = payload.get("task_ids")
+        if action not in BULK_ACTIONS:
+            raise ValueError("Choose status, assignee or due-date offset.")
+        if not isinstance(ids, list) or not ids or len(ids) > BULK_MAX_TASKS \
+                or not all(isinstance(i, str) for i in ids) or len(set(ids)) != len(ids):
+            raise ValueError(f"Select between 1 and {BULK_MAX_TASKS} tasks.")
+        listed = {t["id"]: t for t in self.list_tasks(actor, project_id)}
+        target_row = self.db.execute("SELECT target_date FROM projects WHERE id=?", (project_id,)).fetchone()
+        target_date = target_row["target_date"] if target_row else None
+        if action == "status":
+            if value not in BOARD_WORK_STATUS:
+                raise ValueError("Bulk status can be Draft, Ready or In progress.")
+            reason = f"Bulk change: status to {BOARD_COLUMN_LABELS[value]}"
+            summary = f"status to {BOARD_COLUMN_LABELS[value]}"
+        elif action == "assignee":
+            owner_id = self._validate_assignee(project_id, value or None)
+            who = self.db.execute("SELECT display_name FROM users WHERE id=?", (owner_id,)).fetchone() if owner_id else None
+            name = who["display_name"] if who else "nobody"
+            reason, summary = f"Bulk change: assign to {name}", f"assign to {name}"
+        else:
+            if isinstance(value, bool) or not isinstance(value, int) or not value or abs(value) > 365:
+                raise ValueError("Shift due dates by a whole number of days between -365 and 365 (not 0).")
+            reason = f"Bulk change: due dates {value:+d} day{'s' if abs(value) != 1 else ''}"
+            summary = f"due dates {value:+d} day{'s' if abs(value) != 1 else ''}"
+        ok, blocked, impact = [], [], []
+        for task_id in ids:
+            task = listed.get(task_id)
+            if not task:
+                raise KeyError("Task not found in this project.")
+            base = {"id": task_id, "title": task["title"], "revision": task["revision"]}
+            why, change = None, None
+            lock = task.get("lock")
+            if lock and lock["holder_user_id"] != actor["id"]:
+                why = f"is being changed by {lock['holder_name']}"
+            elif task["status"] in REOPEN_ONLY_STATUSES:
+                why = f"is {task['status']}; reopen it first"
+            elif action == "status":
+                status = BOARD_WORK_STATUS[value]
+                if task["status"] not in BOARD_UNDO_SOURCE_STATUSES:
+                    why = f"is {task['status'].replace('_', ' ')}; change it on its own"
+                elif task["status"] == status:
+                    why = f"is already {BOARD_COLUMN_LABELS[value]}"
+                elif value in BOARD_DEPENDENCY_GATED and task.get("blocked_by"):
+                    why = "waits on " + ", ".join(p["title"] for p in task["blocked_by"]) + "; move it on its own"
+                else:
+                    change = {"status": status}
+            elif action == "assignee":
+                if (task.get("owner_user_id") or None) == owner_id:
+                    why = f"is already assigned to {name}"
+                else:
+                    change = {"owner_user_id": owner_id}
+            else:
+                if not task.get("due_date"):
+                    why = "has no due date"
+                else:
+                    shift = lambda d: (date.fromisoformat(d) + timedelta(days=value)).isoformat() if d else None
+                    change = {"due_date": shift(task["due_date"]), "start_date": shift(task.get("start_date"))}
+                    hits = self._schedule_impact({**task, "project_target_date": target_date},
+                                                 change["start_date"], change["due_date"])
+                    if hits:
+                        impact.append({"id": task_id, "title": task["title"], "impact": hits})
+            if change is not None:
+                try:
+                    self._validate_task_update(task, {**change, "reason": reason})
+                except ValueError as exc:
+                    why, change = str(exc), None
+            if why:
+                blocked.append({**base, "reason": why})
+            else:
+                ok.append({**base, "change": change})
+        wip = None
+        if action == "status":
+            incoming = sum(1 for item in ok if self.board_column(listed[item["id"]]) != value)
+            wip = self._wip_state(actor, project_id, value, incoming)
+            if wip:
+                wip = {**wip, "column": value, "can_override": actor["global_role"] == "owner"}
+        return {"action": action, "value": value, "reason": reason, "summary": summary, "ok": ok, "blocked": blocked,
+                "impact": impact, "wip": wip, "counts": {"ok": len(ok), "blocked": len(blocked)}}
+
+    def bulk_preview(self, actor: dict, project_id: str, payload: dict) -> dict:
+        plan = self._bulk_plan(actor, project_id, payload)
+        return {k: plan[k] for k in ("action", "value", "summary", "ok", "blocked", "impact", "wip", "counts")}
+
+    def _take_bulk_leases(self, actor: dict, task_ids: list, token: str) -> None:
+        """All or nothing: if anyone else holds any of the tasks, nothing starts and the
+        holders are named (owner decision: bulk locking)."""
+        stamp = datetime.now(timezone.utc)
+        expires = (stamp + timedelta(seconds=LOCK_LEASE_SECONDS)).isoformat()
+        with transaction(self.db):
+            held = []
+            for task_id in task_ids:
+                lock = self._active_lock(task_id)
+                if lock and lock["holder_user_id"] != actor["id"]:
+                    title = self.db.execute("SELECT title FROM tasks WHERE id=?", (task_id,)).fetchone()["title"]
+                    held.append((title, lock))
+            if held:
+                names = "; ".join(f"“{t}” by {lock['holder_name']}" for t, lock in held)
+                raise TaskLocked(f"Nothing was changed: {len(held)} of the tasks {'is' if len(held) == 1 else 'are'} "
+                                 f"being changed by someone else ({names}). Try again when they finish.", held[0][1])
+            for task_id in task_ids:
+                self.db.execute("INSERT OR REPLACE INTO task_locks VALUES(?,?,?,?,?,?)",
+                                (task_id, actor["id"], "bulk", token, stamp.isoformat(), expires))
+
+    def _release_bulk_leases(self, token: str) -> None:
+        with transaction(self.db):
+            self.db.execute("DELETE FROM task_locks WHERE token=? AND kind='bulk'", (token,))
+
+    def _write_bulk(self, actor: dict, project_id: str, bulk_id: str, kind: str, rows: list, reason: str,
+                    detail: dict, notice: str) -> list:
+        """One transaction: every task write, then one project event that lists them. Any
+        failure rolls every task back."""
+        token = uuid4().hex
+        self._take_bulk_leases(actor, [r["id"] for r in rows], token)
+        try:
+            written = []
+            with transaction(self.db):
+                for row in rows:
+                    before = self.get_task(actor, row["id"])
+                    if before["revision"] != row["revision"]:
+                        raise Conflict(f"“{before['title']}” changed since the preview; nothing was changed. "
+                                       "Preview again.")
+                    fields = self._validate_task_update(before, {**row["change"], "reason": reason})
+                    after = self._apply_task_update(actor, row["id"], before, fields, row["revision"], None, notify=False)
+                    written.append({"id": row["id"], "title": before["title"], "before_revision": before["revision"],
+                                    "after_revision": after["revision"],
+                                    "before": {k: before[k] for k in row["change"]},
+                                    "after": {k: after[k] for k in row["change"]}})
+                self._project_event(project_id, actor["id"], kind, {**detail, "bulk_id": bulk_id, "tasks": written},
+                                    reason, notice=notice)
+            return written
+        finally:
+            self._release_bulk_leases(token)
+
+    def bulk_apply(self, actor: dict, project_id: str, payload: dict) -> dict:
+        """Apply a previewed bulk change, all or nothing (owner decision: bulk dragging)."""
+        plan = self._bulk_plan(actor, project_id, payload)
+        if plan["blocked"]:
+            names = "; ".join(f"“{b['title']}” {b['reason']}" for b in plan["blocked"])
+            raise ValueError(f"Nothing was changed. Remove the blocked tasks first: {names}.")
+        expected = payload.get("expected_revisions") or {}
+        for item in plan["ok"]:
+            if expected.get(item["id"]) != item["revision"]:
+                raise Conflict(f"“{item['title']}” changed since the preview; nothing was changed. Preview again.")
+        wip = plan["wip"]
+        if wip:
+            self._wip_gate(actor, project_id, wip["column"], wip["incoming"], payload)
+        bulk_id = uuid4().hex
+        n = len(plan["ok"])
+        who = self._actor_name(actor)
+        notice = f"bulk change: {n} task{'s' if n != 1 else ''} · {plan['summary']} · by {who}"
+        if plan["impact"]:
+            notice += f" · {len(plan['impact'])} with schedule consequences"
+        detail = {"action": plan["action"], "value": plan["value"], "impact": plan["impact"],
+                  "wip_override": wip["message"] if wip else None}
+        written = self._write_bulk(actor, project_id, bulk_id, "bulk_change", plan["ok"], plan["reason"], detail, notice)
+        if wip:
+            with transaction(self.db):
+                self._project_event(project_id, actor["id"], "wip_limit_override",
+                                    {"column": wip["column"], "count": wip["count"], "limit": wip["limit"],
+                                     "incoming": wip["incoming"], "bulk_id": bulk_id}, wip["message"],
+                                    notice=f"work-in-progress limit overridden: {BOARD_COLUMN_LABELS[wip['column']]} · by {who}")
+        return {"bulk_id": bulk_id, "tasks": written, "summary": plan["summary"],
+                "undo": {"bulk_id": bulk_id, "seconds": BOARD_UNDO_SECONDS}}
+
+    def bulk_undo(self, actor: dict, project_id: str, payload: dict) -> dict:
+        """Reverse one bulk change of yours, every task or none: refused if any of them
+        changed since, or once the Undo window has passed."""
+        if not self.can_manage_project(actor, project_id):
+            raise Forbidden("Only an owner or a manager of this project can change tasks in bulk.")
+        bulk_id = str(payload.get("bulk_id", ""))
+        row = next((r for r in self.db.execute(
+            "SELECT * FROM project_events WHERE project_id=? AND event_type='bulk_change' AND actor_user_id=?"
+            " ORDER BY occurred_at DESC LIMIT 50", (project_id, actor["id"])).fetchall()
+            if json.loads(r["detail_json"] or "{}").get("bulk_id") == bulk_id), None)
+        if not row:
+            raise ValueError("There is no bulk change of yours to undo here.")
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(row["occurred_at"])).total_seconds()
+        if age > BOARD_UNDO_SECONDS + BOARD_UNDO_GRACE_SECONDS:
+            raise ValueError("The Undo window has passed; change the tasks back instead.")
+        done = self.db.execute("SELECT detail_json FROM project_events WHERE project_id=? AND event_type='bulk_change_undone'",
+                               (project_id,)).fetchall()
+        if any(json.loads(d["detail_json"] or "{}").get("undoes") == bulk_id for d in done):
+            raise ValueError("That bulk change has already been undone.")
+        detail = json.loads(row["detail_json"])
+        rows = []
+        for item in detail["tasks"]:
+            current = self.get_task(actor, item["id"])
+            if current["revision"] != item["after_revision"]:
+                raise Conflict(f"“{item['title']}” changed after the bulk change, so nothing was undone; "
+                               "check its history first.")
+            rows.append({"id": item["id"], "revision": current["revision"], "change": item["before"]})
+        n = len(rows)
+        reason = f"Undo of bulk change ({row['reason'][len('Bulk change: '):]})"
+        written = self._write_bulk(actor, project_id, uuid4().hex, "bulk_change_undone", rows, reason,
+                                   {"undoes": bulk_id}, f"bulk change undone: {n} task{'s' if n != 1 else ''} · by "
+                                   f"{self._actor_name(actor)}")
+        return {"tasks": written}
 
     def list_subtasks(self, actor: dict, task_id: str) -> list[dict]:
         # D73AQW: the Gantt step segments, their tooltip and the detail dialog's

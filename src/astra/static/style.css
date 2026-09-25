@@ -217,7 +217,7 @@ main { grid-column: 2; width: 100%; max-width: 1480px; margin: 0 auto; padding: 
 .col-lock { width: 100%; color: var(--muted); font-size: var(--fs-caption); font-weight: 600; }
 .col-hidden { margin: 0; color: var(--muted); font-size: 13px; font-weight: 600; text-align: center; }
 .lane-head { position: sticky; left: 0; width: max-content; margin: 14px 0 6px; font-size: var(--fs-small); color: var(--text-2); letter-spacing: .04em; text-transform: uppercase; }  /* stays in view while the board scrolls sideways */
-.board-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-1); }
+.board-card { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-1); }
 /* JN1QYG: drag and drop. The card is the handle; the ghost follows the pointer and the column under it
    shows where the card will land. Nothing animates, so reduced motion needs no extra rule. */
 .board-card[data-card] { cursor: grab; }
@@ -245,6 +245,38 @@ body.bar-dragging #step-tip { display: none; }
 .impact-list { margin: 0 0 var(--space-2); padding-left: 1.2em; }
 .impact-list li { margin: 4px 0; }
 @media (max-width: 760px) { .bar-grip { display: none; } .bar[data-drag] { cursor: pointer; } }
+/* XV92JJ: bulk selection and work-in-progress limits */
+.board-card .bulk-pick { position: absolute; top: 12px; right: 10px; width: 18px; height: 18px; margin: 0; accent-color: var(--teal); cursor: pointer; }
+.board-card:has(.bulk-pick) .card-title { padding-right: 26px; }
+.board-card.is-picked { outline: 2px solid var(--teal); outline-offset: -2px; background: var(--teal-soft); }
+.sched-table .pick { width: 36px; text-align: center; }
+.sched-table .pick input { width: 18px; height: 18px; margin: 0; accent-color: var(--teal); }
+.sched-table tr.is-picked td { background: var(--teal-soft); }
+.bulk-bar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 70; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); width: max-content; max-width: calc(100vw - 32px); padding: 10px 14px; border-radius: var(--radius-md); background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow-3); }
+.bulk-bar[hidden] { display: none; }
+.bulk-bar .bulk-count { font-weight: 700; }
+.bulk-bar label { flex-direction: row; align-items: center; gap: 6px; margin: 0; white-space: nowrap; }
+.bulk-bar select, .bulk-bar input { min-height: 36px; }
+.bulk-bar input[type="number"] { width: 5.5em; }
+body.has-bulk-bar #toast { bottom: 96px; }
+.bulk-list { margin: 0 0 var(--space-3); padding-left: 1.2em; max-height: 40vh; overflow: auto; }
+.bulk-list li { margin: 3px 0; }
+.check { display: flex; gap: 8px; align-items: center; margin: var(--space-2) 0; font-weight: 600; }
+.board .count.at-limit { color: var(--chip-amber); font-weight: 700; }
+.board .count.over-limit { color: var(--red); font-weight: 800; }
+.wip-grid { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+@media (max-width: 760px) {
+  .bulk-bar { left: 16px; right: 16px; bottom: calc(var(--space-3) + 64px); transform: none; width: auto; max-width: none;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 12px; }
+  .bulk-bar .bulk-count { order: 1; align-self: center; }
+  .bulk-bar #bulk-clear { order: 2; justify-self: end; min-height: 36px; padding: 0 10px; }
+  .bulk-bar .bulk-field { order: 3; min-width: 0; }
+  .bulk-bar .bulk-field label, .bulk-bar label.bulk-field { display: flex; }
+  .bulk-bar .bulk-field select, .bulk-bar .bulk-field input { flex: 1 1 auto; width: auto; min-width: 0; }
+  .bulk-bar #bulk-review { order: 4; grid-column: 1 / -1; }
+  .bulk-bar .bulk-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  body.has-bulk-bar #toast { bottom: 220px; }
+}
 .move-menu { position: fixed; top: 0; left: 0; z-index: 72; max-width: calc(100vw - 16px); }
 #move-form fieldset.choice { display: flex; gap: 18px; margin: 12px 0; padding: 0; border: 0; }
 #move-form fieldset.choice legend { margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-2); }
