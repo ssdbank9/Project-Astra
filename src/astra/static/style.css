@@ -179,6 +179,49 @@ main { grid-column: 2; width: 100%; max-width: 1480px; margin: 0 auto; padding: 
 .entity-card { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); }
 .entity-card h3 { margin: 0 0 2px; font-size: var(--fs-body); }
 .entity-budget { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 13px; }
+/* CR121Z: project page, tabs and the read-only board. */
+.project-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 8px; }
+.project-head .work-meta { margin: 0; font-size: 13px; }
+.project-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.project-actions button { padding: 7px 14px; }
+.tabs { display: flex; gap: 4px; margin: 0 0 16px; overflow-x: auto; border-bottom: 1px solid var(--line); }
+.tabs a { flex: none; padding: 10px 14px; border-bottom: 2px solid transparent; color: var(--text-2); font-weight: 600; text-decoration: none; }
+.tabs a:hover { color: var(--ink); }
+.tabs a[aria-current="page"] { border-bottom-color: var(--teal); color: var(--chip-teal); }
+.tabs a:focus-visible { outline-offset: -2px; }
+#project-gantt-slot .view-toggle { display: none; }
+.gantt-row:not(.gantt-head):hover { background: var(--surface-2); }
+.overview .facts { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.progress-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 8px; font-size: 13px; }
+.progress-line label { margin: 0; }
+.progress-line progress { flex: 1 1 200px; height: 10px; accent-color: var(--teal); }
+.board-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+.board-bar label { margin: 0; flex-direction: row; align-items: center; gap: 8px; }
+.board-bar select { padding: 6px 10px; }
+.board { position: relative; overflow-x: auto; padding-bottom: 8px; }  /* relative: keeps the cards' sr-only text inside the scroller */
+/* One grid template for the header row and every swimlane: fixed minimum tracks and a fixed minimum row
+   width, so a lane's long card titles can never widen its own columns out of line with the header. */
+.board-cols { display: grid; grid-template-columns: repeat(7, minmax(180px, 1fr)); gap: 12px; min-width: 1332px; }
+.board.shut-accepted .board-cols { grid-template-columns: repeat(5, minmax(180px, 1fr)) 128px minmax(180px, 1fr); min-width: 1280px; }
+.board.shut-closed .board-cols { grid-template-columns: repeat(6, minmax(180px, 1fr)) 128px; min-width: 1280px; }
+.board.shut-accepted.shut-closed .board-cols { grid-template-columns: repeat(5, minmax(180px, 1fr)) 128px 128px; min-width: 1228px; }
+.board-cols .col { display: flex; min-width: 0; flex-direction: column; gap: 8px; padding: 8px; border-radius: var(--radius-md); background: var(--surface-2); overflow-wrap: anywhere; }
+.board-head .col { flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px; background: var(--surface-3); }
+.board-head { position: sticky; top: 0; z-index: 1; }
+.col-head, .col-toggle { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-weight: 650; font-size: 13px; }
+.col-toggle { width: 100%; padding: 0; background: none; color: var(--ink); text-align: left; }
+.col-lock { width: 100%; color: var(--muted); font-size: var(--fs-caption); font-weight: 600; }
+.col-hidden { margin: 0; color: var(--muted); font-size: 13px; font-weight: 600; text-align: center; }
+.lane-head { position: sticky; left: 0; width: max-content; margin: 14px 0 6px; font-size: var(--fs-small); color: var(--text-2); letter-spacing: .04em; text-transform: uppercase; }  /* stays in view while the board scrolls sideways */
+.board-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-1); }
+.board-card .card-title { color: var(--ink); font-size: var(--fs-body); font-weight: 600; text-align: left; text-decoration: none; }
+.board-card .card-title:hover { color: var(--teal); text-decoration: underline; }
+.card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.card-meta .due-chip { align-self: auto; }
+.card-crit { color: var(--text-2); font-size: var(--fs-small); font-weight: 600; }
+.card-steps { margin: 0; color: var(--muted); font-size: var(--fs-small); }
+.board-card .tags { margin: 0; }
+.board-card .tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }  /* long dependency names wrap inside the card */
 .filter-note strong { color: var(--ink); }
 .filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: var(--fs-small); font-weight: 600; }
 .filter-chip span { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-3); color: var(--muted); font-size: 13px; line-height: 1; }
@@ -602,6 +645,13 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   .page-card, .card { padding: 14px 16px; }
   .summary { grid-template-columns: 1fr 1fr; }
   .health-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  /* One board column at a time, swiped sideways. */
+  .board { scroll-snap-type: x mandatory; }
+  .board .board-cols { grid-template-columns: repeat(7, calc(100vw - 88px)); min-width: max-content; }
+  .board.shut-accepted .board-cols { grid-template-columns: repeat(5, calc(100vw - 88px)) 128px calc(100vw - 88px); }
+  .board.shut-closed .board-cols { grid-template-columns: repeat(6, calc(100vw - 88px)) 128px; }
+  .board.shut-accepted.shut-closed .board-cols { grid-template-columns: repeat(5, calc(100vw - 88px)) 128px 128px; }
+  .board-cols .col { scroll-snap-align: start; }
   .tile-def { font-size: var(--fs-caption); }
   .decision-row { flex-wrap: wrap; }
   .decision-row .avatar-sm { display: none; }

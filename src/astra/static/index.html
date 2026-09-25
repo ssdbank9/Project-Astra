@@ -89,7 +89,7 @@
           <label class="inline"><input type="checkbox" id="open-only"> Open work only</label>
         </section>
         <div id="filter-note" class="filter-note" role="status"></div>
-        <section class="panel">
+        <section class="panel" id="gantt-panel">
           <div class="panel-title"><h2>Portfolio Gantt</h2><span id="as-of"></span>
             <div class="menu-wrap">
               <button type="button" class="quiet menu-btn" id="more-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu">More<span aria-hidden="true"> ▾</span></button>
@@ -105,6 +105,7 @@
               </div>
             </div>
           </div>
+        <div id="gantt-host">
         <div class="view-controls">
           <div class="legend"><i class="overdue"></i>Overdue <i class="soon"></i>Due in 7 days <i class="scheduled"></i>Scheduled <i class="blocked"></i>Blocked <i class="undated"></i>Undated <i class="critical"></i>Critical path <i class="proj-start-key"></i>Project start <i class="proj-target-key"></i>Project target</div>
           <label class="inline view-toggle"><input type="checkbox" id="view-table"> Schedule table</label>
@@ -114,6 +115,7 @@
         <div id="schedule-table" hidden></div>
         <div class="legend step-legend" id="step-legend" hidden><span class="legend-cap">Steps inside a task bar (colour = step number):</span> <i class="sw step-c1" aria-hidden="true">1</i>Step 1 <i class="sw step-c2" aria-hidden="true">2</i>Step 2 <i class="sw step-c3" aria-hidden="true">3</i>Step 3 <i class="sw step-c4" aria-hidden="true">4</i>Step 4 <i class="sw step-c5" aria-hidden="true">5</i>Step 5 <i class="sw step-c6" aria-hidden="true">6</i>Step 6 <i class="sw step-c7" aria-hidden="true">7</i>Step 7 <span class="legend-cap">· 8+ repeats the colours with a doubled stripe · ✓ completed · × cancelled · ∥ on hold (hatched) · +N not drawn at this scale (too small or overlapping) · dashed track end = step runs past the parent's dates · dashed chip = steps need dates</span></div>
           <div id="gantt-live" class="sr-only" aria-live="polite"></div>
+        </div>
         </section>
       </section>
       <section class="view" data-view="my-work" aria-labelledby="page-title" hidden><div id="my-work-body" class="page-card"></div></section>
@@ -121,6 +123,19 @@
       <section class="view" data-view="projects" aria-labelledby="page-title" hidden>
         <div class="page-actions"><a class="quiet button-link portfolio-link" href="#/portfolio">Portfolio timeline</a><button type="button" id="new-project" hidden>New project</button></div>
         <div id="projects-body" class="page-card"></div>
+      </section>
+      <section class="view" data-view="project" aria-labelledby="page-title" hidden>
+        <div class="project-head">
+          <p id="project-facts" class="work-meta"></p>
+          <div class="project-actions">
+            <button type="button" id="project-capture">Add a task</button>
+            <button type="button" class="quiet" id="project-save-template" hidden>Save as template</button>
+            <button type="button" class="quiet" id="project-close" hidden>Close project</button>
+          </div>
+        </div>
+        <nav class="tabs" aria-label="Project views" id="project-tabs"></nav>
+        <div id="project-body"></div>
+        <div id="project-gantt-slot" class="page-card" hidden></div>
       </section>
       <aside id="detail-dialog" class="task-panel" aria-labelledby="detail-heading" hidden>
         <div class="panel-bar">

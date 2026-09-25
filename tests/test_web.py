@@ -1993,7 +1993,7 @@ globalThis.history={replaceState(a,b,url){calls.push(["replace",url]);location.h
 // Seed what the menu wiring reads at load time.
 document.querySelector("#more-btn").setAttribute("aria-controls","more-menu");document.querySelector("#more-menu").hidden=true;
 document.querySelector("#detail-dialog").hidden=true;
-(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel,renderHome};");
+(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel,renderHome,boardColumn,renderBoard,renderProject,PROJECT_TABS};");
 const a=globalThis.__a,out={},tick=()=>new Promise(r=>setTimeout(r,0));
 const keydown=(key,target,extra={})=>{const e={key,target,ctrlKey:false,metaKey:false,altKey:false,defaultPrevented:false,prevented:false,preventDefault(){this.prevented=true;this.defaultPrevented=true},stopPropagation(){},...extra};(docListeners.keydown||[]).forEach(f=>f(e));return e.prevented};
 const U1="11111111-1111-4111-8111-111111111111",U2="22222222-2222-4222-8222-222222222222",U3="33333333-3333-4333-8333-333333333333";
@@ -2024,6 +2024,31 @@ if(mode==="home"){
   a.state.projects=[{id:"p1",name:"P"}];location.hash="#/home?due=7&open=1";calls.splice(0);
   try{a.applyRoute(false,false)}catch(e){out.routeError=String(e)}
   out.redirect=[calls.filter(c=>c[0]==="replace").slice(0,1),location.hash];
+  process.stdout.write(JSON.stringify(out));return;
+}
+if(mode==="board"){
+  // CR121Z: the 11 statuses land in 7 read-only columns; lanes, collapsed columns and escaping.
+  const statuses=["draft","assigned","in_progress","submitted","changes_requested","completed","on_hold","delayed","cancelled","abandoned","reopened"];
+  out.columns=Object.fromEntries(statuses.map(st=>[st,a.boardColumn({status:st,is_blocked:false})]));
+  out.blockedColumns=Object.fromEntries(statuses.map(st=>[st,a.boardColumn({status:st,is_blocked:true})]));
+  const T=o=>({project_id:U1,project_name:"P",status:"in_progress",due_state:"scheduled",days_to_due:9,due_date:"2026-10-04",owner_name:"Sara Khan",criticality:"high",...o});
+  const tasks=[T({id:"a",title:"Plan <img src=x onerror=alert(1)>",status:"draft",owner_name:"",criticality:null}),
+    T({id:"b",title:"Build",is_blocked:true,blocked_by:[{title:"Plan"}],is_critical_path:true}),
+    T({id:"c",title:"Ship",status:"completed",due_state:"closed"}),T({id:"d",title:"Step one",parent_task_id:"b",status:"completed"}),
+    T({id:"e",title:"Step two",parent_task_id:"b"}),T({id:"f",title:"Drop",status:"cancelled",owner_name:"Omar Malik",criticality:"low"})];
+  out.board=a.renderBoard(tasks,"");out.byOwner=a.renderBoard(tasks,"owner");out.byCrit=a.renderBoard(tasks,"criticality");
+  out.emptyBoard=a.renderBoard([],"");
+  out.tabs=a.PROJECT_TABS.map(([k])=>k);
+  out.routes=["#/project/"+U1+"/board?divide=owner","#/project/"+U1,"#/project/"+U1+"/nope","#/project/p1/board","#/my-work/calendar","#/my-work/other"]
+    .map(h=>{const r=a.parseRoute(h);return [r.name,r.id,r.tab,r.path,r.params.toString()]});
+  // An unknown project says so; a known one draws its tabs.
+  a.state.user={id:"u1",display_name:"A B",global_role:"member"};a.state.projects=[{id:U1,name:"P",status:"active",entities:[]}];a.state.tasks=tasks;
+  a.renderProject(a.parseRoute("#/project/"+U2+"/board"));out.missing=document.querySelector("#project-body").innerHTML;
+  a.renderProject(a.parseRoute("#/project/"+U1+"/board"));out.tabsHtml=document.querySelector("#project-tabs").innerHTML;
+  out.memberActions=["#project-capture","#project-save-template","#project-close"].map(s=>document.querySelector(s).hidden);
+  a.state.user.global_role="owner";a.renderProject(a.parseRoute("#/project/"+U1+"/overview"));
+  out.ownerActions=["#project-capture","#project-save-template","#project-close"].map(s=>document.querySelector(s).hidden);
+  out.facts=document.querySelector("#project-facts").textContent;out.overview=document.querySelector("#project-body").innerHTML;
   process.stdout.write(JSON.stringify(out));return;
 }
 if(mode!=="main"){
@@ -2305,6 +2330,80 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertIn('document.querySelector("#new-task").onclick=openCapture;', self.js)
         self.assertIn('showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnPortfolio)', self.js)
         self.assertIn('data-request-decision="approved"', self.js)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")
+class AstraProjectPageTests(unittest.TestCase):
+    """CR121Z: the project page, its tabs and the read-only board."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out = _run_shell_driver("board")
+
+    def test_statuses_map_into_seven_columns(self):
+        self.assertEqual(self.out["columns"], {
+            "draft": "draft", "assigned": "ready", "in_progress": "progress", "reopened": "progress",
+            "changes_requested": "progress", "delayed": "progress", "on_hold": "blocked", "submitted": "submitted",
+            "completed": "accepted", "cancelled": "closed", "abandoned": "closed"})
+        # Waiting on a predecessor moves open work to Blocked; submitted and closed work stays put.
+        blocked = self.out["blockedColumns"]
+        for status in ("draft", "assigned", "in_progress", "reopened", "changes_requested", "delayed", "on_hold"):
+            self.assertEqual(blocked[status], "blocked", status)
+        self.assertEqual((blocked["submitted"], blocked["completed"], blocked["cancelled"]), ("submitted", "accepted", "closed"))
+
+    def test_board_cards_columns_and_collapsed_owner_columns(self):
+        board = self.out["board"]
+        heads = re.findall(r'class="col col-head[^"]*" data-col="(\w+)"', board)
+        self.assertEqual(heads, ["draft", "ready", "progress", "blocked", "submitted", "accepted", "closed"])
+        # Steps are not cards; their parent says how many are done.
+        self.assertEqual(re.findall(r'data-detail="(\w)"', board), ["a", "b"])
+        self.assertIn("Steps 1 of 2 done", board)
+        self.assertIn("⊘ Waits on Plan", board)
+        self.assertIn("◆ Critical path", board)
+        self.assertIn("Plan &lt;img src=x onerror=alert(1)&gt;", board)
+        self.assertNotIn("<img", board)
+        # Accepted and Closed start collapsed with a toggle; their cards are counted, not drawn.
+        self.assertIn('data-toggle-col="accepted" aria-expanded="false"', board)
+        self.assertIn('data-toggle-col="closed" aria-expanded="false"', board)
+        self.assertIn('<p class="col-hidden">1</p>', board)
+        self.assertIn("No tasks in this project yet.", self.out["emptyBoard"])
+
+    def test_divide_by_owner_and_criticality(self):
+        lanes = lambda html: re.findall(r'<h3 class="lane-head">([^<]+) <span class="count">(\d+)</span>', html)
+        self.assertEqual(lanes(self.out["byOwner"]), [("Omar Malik", "1"), ("Sara Khan", "2"), ("Unassigned", "1")])
+        self.assertEqual(lanes(self.out["byCrit"]), [("High", "2"), ("Low", "1"), ("Unrated", "1")])
+        self.assertEqual(lanes(self.out["board"]), [])
+        self.assertIn('<option value="owner" selected>Owner</option>', self.out["byOwner"])
+
+    def test_header_and_every_lane_share_one_grid_template(self):
+        html = self.out["byOwner"]
+        # Every row, header included, is a .board-cols grid with seven cells, so one CSS template sizes them all.
+        rows = re.findall(r'<div class="board-cols( board-head)?"', html)
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[0], " board-head")
+        css = (STATIC / "style.css").read_text(encoding="utf-8")
+        rule = re.search(r"\n\.board-cols \{([^}]*)\}", css).group(1)
+        self.assertIn("grid-template-columns: repeat(7, minmax(180px, 1fr))", rule)
+        # A content-sized row (max-content) let a lane's long titles widen its own columns out of line.
+        self.assertIn("min-width: 1332px", rule)
+        self.assertNotIn("max-content", rule)
+
+    def test_project_routes_tabs_and_actions(self):
+        self.assertEqual(self.out["tabs"], ["overview", "list", "board", "timeline", "activity"])
+        self.assertEqual(self.out["routes"], [
+            ["project", U1, "board", f"project/{U1}/board", "divide=owner"],
+            ["project", U1, "overview", f"project/{U1}/overview", ""],
+            ["project", U1, "overview", f"project/{U1}/overview", ""],
+            ["home", None, None, "home", ""],                      # not a project id
+            ["my-work", "calendar", None, "my-work/calendar", ""],
+            ["my-work", None, None, "my-work", ""]])
+        self.assertIn("This project is not available", self.out["missing"])
+        self.assertIn(f'href="#/project/{U1}/board" aria-current="page">Board</a>', self.out["tabsHtml"])
+        # [capture, save as template, close] hidden? Members can add tasks; only owners save or close.
+        self.assertEqual(self.out["memberActions"], [False, True, True])
+        self.assertEqual(self.out["ownerActions"], [False, False, False])
+        self.assertIn("tasks, 2 steps", self.out["facts"])
+        self.assertIn('<progress id="project-progress" max="100" value="33">', self.out["overview"])
 
 
 @unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")

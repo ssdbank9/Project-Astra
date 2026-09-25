@@ -116,6 +116,19 @@ This first vertical slice provides:
   risk" (overdue, blocked, critical path or delayed, worst first); a "This week" strip of open
   items due per day; and "Portfolio by entity". A new install shows one "No projects yet"
   card instead;
+- a page per project (`#/project/<id>/<tab>`, opened from Projects) with tabs Overview
+  (status, dates, progress, open, overdue, blocked and critical-path counts, next due), List
+  (the schedule table), Board, Timeline (the Gantt) and Activity (the project history), and
+  Add a task, plus Save as template and Close project for owners. The Board is read-only: it
+  maps the 11 statuses into 7 columns — Draft = draft; Ready = assigned; In progress =
+  in_progress, reopened, changes_requested, delayed; Blocked = on_hold, or any open task
+  waiting on an unfinished predecessor; Submitted = submitted; Accepted = completed; Closed =
+  cancelled, abandoned (closed statuses win over everything, Submitted over Blocked).
+  Accepted and Closed are Owner-decided and start collapsed. Cards show the title, owner
+  initials, due date, criticality, "Waits on …", on hold, delayed, critical path and "Steps n
+  of m done" (steps are counted on their parent, not drawn as cards). "Divide by" splits the
+  board into swimlanes by owner or criticality and is kept in the link. Status still changes
+  only through the task's own lifecycle actions;
 - a task panel docked on the right: a task opens beside the current screen, which stays
   visible and usable, and has a link of its own (`?task=<id>` on that screen, or
   `#/task/<id>` as a full page) that survives reload and Back/Forward and can be copied with

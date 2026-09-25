@@ -8,6 +8,8 @@ function fillFilters(){const pf=document.querySelector("#project-filter"),tp=doc
 function projectEntityIds(projectId){const p=state.projects.find(p=>p.id===projectId);return new Set((p&&p.entities?p.entities:[]).map(e=>e.id))}
 function fillPredecessors(){const project=document.querySelector('#task-form select[name="project_id"]').value,select=document.querySelector('#task-form select[name="predecessor_task_id"]'),parent=document.querySelector('#task-form select[name="parent_task_id"]');select.innerHTML='<option value="">No predecessor</option>';parent.innerHTML='<option value="">No parent</option>';for(const task of state.tasks.filter(t=>t.project_id===project)){select.add(new Option(task.title,task.id));parent.add(new Option(task.title,task.id))}}
 function render(){
+  // The Gantt nodes may be on a project page; the portfolio takes them back.
+  mountGantt(document.querySelector("#gantt-panel"),null);
   projectActions();
   const tasks=visibleTasks();
   document.querySelector("#project-count").textContent=state.projects.length;
@@ -80,7 +82,7 @@ const storage={get(k,f){try{const v=localStorage.getItem(k);return v==null?f:JSO
 const storedExpanded=storage.get("astra.gantt.expanded",[]);
 const expandedParents=new Set(Array.isArray(storedExpanded)?storedExpanded:[]);
 const phoneMQ=window.matchMedia?window.matchMedia("(max-width: 760px)"):{matches:false};
-function currentView(){const stored=storage.get("astra.gantt.view",null);if(stored==="table"||stored==="chart")return stored;return phoneMQ.matches?"table":"chart"}
+function currentView(){if(state.viewOverride)return state.viewOverride;const stored=storage.get("astra.gantt.view",null);if(stored==="table"||stored==="chart")return stored;return phoneMQ.matches?"table":"chart"}
 // ISO dates parse as UTC midnight, so format them in UTC too or viewers west of UTC see the day before.
 function fmtDay(iso){if(!iso)return "—";return new Date(iso).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"})}
 function statusLabel(s){return STATUS_LABELS[s]||String(s||"").replace(/_/g," ")}
@@ -340,8 +342,8 @@ function toggleMore(btn){const list=document.getElementById(btn.getAttribute("ar
   document.addEventListener("click",e=>{if(!e.target.closest(".step-more,.step-more-list"))closeMoreLists()});
   window.addEventListener("scroll",()=>{if(tipFor)placeTip(tipFor)},true);
   document.querySelector("#view-table").onchange=e=>{storage.set("astra.gantt.view",e.target.checked?"table":"chart");render()};
-  if(phoneMQ.addEventListener)phoneMQ.addEventListener("change",()=>{if(state.user)render()});
-  let resizeTimer;window.addEventListener("resize",()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(state.user)render()},150)});
+  if(phoneMQ.addEventListener)phoneMQ.addEventListener("change",()=>{if(state.user)refreshGantt()});
+  let resizeTimer;window.addEventListener("resize",()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(state.user)refreshGantt()},150)});
 })();
 function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 // PZTYC9: the Gate 2 shell. A small hash router: #/home, #/my-work, #/inbox, #/projects. Moving between
@@ -350,18 +352,23 @@ function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":
 // (#/home?status=delayed&open=1), so reload, Back and a pasted link restore them.
 const VIEWS=["home","portfolio","my-work","inbox","projects"];
 // The rail item a screen belongs to (the portfolio timeline sits under Projects).
-const NAV_OF={portfolio:"projects"};
-const VIEW_TITLES={home:["Home","Command Center"],portfolio:["Projects","Portfolio timeline"],"my-work":["My Work","Assigned to me"],inbox:["Inbox","Needs action and activity"],projects:["Projects","All projects"],task:["Task","Task"]};
+const NAV_OF={portfolio:"projects",project:"projects"};
+const VIEW_TITLES={home:["Home","Command Center"],portfolio:["Projects","Portfolio timeline"],"my-work":["My Work","Assigned to me"],inbox:["Inbox","Needs action and activity"],projects:["Projects","All projects"],project:["Projects","Project"],task:["Task","Task"]};
 const FILTER_PARAMS=[["project","#project-filter"],["status","#status-filter"],["entity","#entity-filter"],["crit","#crit-filter"],["due","#band-filter"],["risk","#risk-filter"],["owner","#owner-filter"],["sort","#sort-filter"]];
 // Task ids are UUIDs; anything else in a link is ignored rather than sent to the server.
 const TASK_ID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isTaskId(id){return typeof id==="string"&&TASK_ID.test(id)}
+// CR121Z: a project page is #/project/<id>/<tab>; the tab defaults to Overview.
+const PROJECT_TABS=[["overview","Overview"],["list","List"],["board","Board"],["timeline","Timeline"],["activity","Activity"]];
 function parseRoute(hash){
-  const raw=String(hash||"").replace(/^#\/?/,""),q=raw.indexOf("?");
-  const [name,rawId]=(q<0?raw:raw.slice(0,q)).split("/");
+  const raw=String(hash||"").replace(/^#\/?/,""),q=raw.indexOf("?"),path=q<0?raw:raw.slice(0,q);
+  const [name,rawId,rawTab]=path.split("/");
   let id=null;try{id=rawId?decodeURIComponent(rawId):null}catch{id=null}   // a truncated %-escape is an unknown route, not an error
-  const known=VIEWS.includes(name)||(name==="task"&&isTaskId(id));
-  return {name:known?name:"home",id:known?id:null,params:new URLSearchParams(q<0?"":raw.slice(q+1))};
+  const known=VIEWS.includes(name)||((name==="task"||name==="project")&&isTaskId(id));
+  const tab=known&&name==="project"?(PROJECT_TABS.some(([k])=>k===rawTab)?rawTab:"overview"):null;
+  const sub=known&&(name==="task"||name==="project"||(name==="my-work"&&id==="calendar"))?id:null;
+  const routePath=!known?"home":name==="project"?`project/${encodeURIComponent(id)}/${tab}`:sub?`${name}/${encodeURIComponent(sub)}`:name;
+  return {name:known?name:"home",id:sub,tab,path:routePath,params:new URLSearchParams(q<0?"":raw.slice(q+1))};
 }
 function currentRoute(){return parseRoute(location.hash)}
 function filtersFromUrl(params){
@@ -389,6 +396,7 @@ function roleLabel(u){if(u.is_primary_owner)return "Primary owner";const r=Strin
 function shellTitle(r){
   let [crumb,title]=VIEW_TITLES[r.name];
   if(r.name==="task"&&panelState.task){crumb=`Task · ${panelState.task.project_name||""}`;title=panelState.task.title}
+  if(r.name==="project"){const p=(state.projects||[]).find(x=>x.id===r.id);if(p)title=p.name}
   const pid=r.name==="portfolio"&&document.querySelector("#project-filter").value,proj=pid&&state.projects.find(p=>p.id===pid);
   if(proj){crumb="Projects · Portfolio timeline";title=proj.name}
   document.querySelector("#crumb").textContent=crumb;document.querySelector("#page-title").textContent=title;document.title=`${title} · Astra`;
@@ -462,6 +470,7 @@ function applyRoute(moveFocus,fromLoad){
     if(isOwner()&&(!fromLoad||state.inboxLoads===undefined))openInbox();
   }else if(r.name==="my-work")renderMyWork();
   else if(r.name==="projects")renderProjects();
+  else if(r.name==="project")renderProject(r);
   else if(r.name==="inbox"&&(!fromLoad||state.inboxLoads===undefined))openInbox();
   shellTitle(r);
   if(moveFocus&&!taskId)document.querySelector("#page-title").focus();
@@ -490,13 +499,136 @@ function renderProjects(){
   const rows=state.projects.map(p=>{
     const tasks=state.tasks.filter(t=>t.project_id===p.id),open=tasks.filter(t=>!CLOSED_STATUSES.includes(t.status)).length,overdue=tasks.filter(t=>t.due_state==="overdue").length;
     const ents=(p.entities||[]).map(e=>e.name).join(", ");
-    return `<li><a class="project-row" href="#/home?project=${encodeURIComponent(p.id)}"><span class="project-name">${escapeHtml(p.name)}${p.status==="closed"?' <span class="badge" data-level="info">Closed</span>':""}</span>
+    return `<li><a class="project-row" href="#/project/${encodeURIComponent(p.id)}/overview"><span class="project-name">${escapeHtml(p.name)}${p.status==="closed"?' <span class="badge" data-level="info">Closed</span>':""}</span>
       <span class="work-meta">${ents?escapeHtml(ents)+" · ":""}${open} open task${open===1?"":"s"}${p.target_date?` · target ${escapeHtml(fmtDay(p.target_date))}`:""}</span>
       ${overdue?`<span class="due-chip" data-due="overdue">${overdue} overdue</span>`:""}</a></li>`;
   }).join("");
   document.querySelector("#projects-body").innerHTML=`<h2>Projects <span class="count">${state.projects.length}</span></h2>`+
     (rows?`<ul class="project-list">${rows}</ul>`:`<p class="empty">No projects yet.${state.user&&state.user.global_role==="owner"?" Use New project to start one.":" You see a project once you are added to it."}</p>`);
 }
+// CR121Z: the Gantt, its schedule table and their listeners live in one #gantt-host. The portfolio and the
+// project page move that node into place instead of keeping two copies; view forces chart or table.
+function mountGantt(slot,view){const host=document.querySelector("#gantt-host");if(host.parentElement!==slot)slot.appendChild(host);state.viewOverride=view}
+function refreshGantt(){const r=currentRoute();if(r.name==="project")renderProject(r);else if(r.name==="portfolio")render()}
+// Board columns. Closed statuses win over everything, Submitted over Blocked; see README for the mapping.
+const BOARD_COLUMNS=[["draft","Draft"],["ready","Ready"],["progress","In progress"],["blocked","Blocked"],["submitted","Submitted"],["accepted","Accepted"],["closed","Closed"]];
+const LOCKED_COLUMNS=["accepted","closed"];
+function boardColumn(t){
+  if(t.status==="completed")return "accepted";
+  if(t.status==="cancelled"||t.status==="abandoned")return "closed";
+  if(t.status==="submitted")return "submitted";
+  if(t.status==="on_hold"||t.is_blocked)return "blocked";
+  if(t.status==="draft")return "draft";
+  if(t.status==="assigned")return "ready";
+  return "progress";   // in_progress, reopened, changes_requested, delayed
+}
+const CRIT_ORDER=["critical","high","normal","low",""];
+const boardExpanded=new Set();
+function boardCard(t,kids){
+  const done=kids.filter(k=>k.status==="completed").length,col=boardColumn(t),tags=[];
+  if(t.is_blocked&&!CLOSED_STATUSES.includes(t.status))tags.push(`<span class="tag" data-tone="purple">⊘ Waits on ${escapeHtml((t.blocked_by&&t.blocked_by[0]&&t.blocked_by[0].title)||"a predecessor")}</span>`);
+  if(t.status==="on_hold")tags.push('<span class="tag" data-tone="purple">∥ On hold</span>');
+  if(t.status==="delayed")tags.push('<span class="tag" data-tone="amber">Delayed</span>');
+  if(t.status==="changes_requested")tags.push('<span class="tag" data-tone="amber">Changes requested</span>');
+  if(t.is_critical_path&&!CLOSED_STATUSES.includes(t.status))tags.push('<span class="tag" data-tone="red">◆ Critical path</span>');
+  if(col==="accepted")tags.push('<span class="tag" data-tone="green">✓ Accepted</span>');
+  if(col==="closed")tags.push(`<span class="tag">× ${escapeHtml(statusLabel(t.status))}</span>`);
+  const due=CLOSED_STATUSES.includes(t.status)?"":`<span class="due-chip" data-due="${workGroup(t)}">${escapeHtml(dueText(t)||"No due date")}</span>`;
+  return `<article class="board-card"><button type="button" class="link card-title" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>
+    <div class="card-meta"><span class="avatar-sm" aria-hidden="true">${escapeHtml(initials(t.owner_name)||"–")}</span><span class="sr-only">Owner: ${escapeHtml(t.owner_name||"Unassigned")}.</span>${due}${t.criticality?`<span class="card-crit">${escapeHtml(t.criticality.charAt(0).toUpperCase()+t.criticality.slice(1))}</span>`:critLabel("")}</div>
+    ${tags.length?`<div class="tags">${tags.join("")}</div>`:""}${kids.length?`<p class="card-steps">Steps ${done} of ${kids.length} done</p>`:""}</article>`;
+}
+function renderBoard(tasks,divide){
+  const ids=new Set(tasks.map(t=>t.id)),top=tasks.filter(t=>!t.parent_task_id||!ids.has(t.parent_task_id));
+  const kidsOf=id=>tasks.filter(t=>t.parent_task_id===id);
+  const laneKey=divide==="owner"?t=>t.owner_name||"":divide==="criticality"?t=>t.criticality||"":()=>"";
+  let lanes=[...new Set(top.map(laneKey))];
+  if(divide==="criticality")lanes.sort((a,b)=>CRIT_ORDER.indexOf(a)-CRIT_ORDER.indexOf(b));
+  else lanes.sort((a,b)=>(a===""?1:b===""?-1:a.localeCompare(b)));
+  const laneName=k=>divide==="owner"?(k||"Unassigned"):divide==="criticality"?(k?k.charAt(0).toUpperCase()+k.slice(1):"Unrated"):"";
+  const shut=key=>LOCKED_COLUMNS.includes(key)&&!boardExpanded.has(key);
+  const count=key=>top.filter(t=>boardColumn(t)===key).length;
+  const head=BOARD_COLUMNS.map(([key,label])=>{
+    const locked=LOCKED_COLUMNS.includes(key),inner=`<span class="col-name">${label}</span><span class="count">${count(key)}</span>${locked?(shut(key)?'<span class="col-lock" aria-hidden="true">🔒</span><span class="sr-only">Owner decides; collapsed</span>':'<span class="col-lock">🔒 Owner decides</span>'):""}`;
+    return `<div class="col col-head${shut(key)?" is-collapsed":""}" data-col="${key}">${locked?`<button type="button" class="col-toggle" data-toggle-col="${key}" aria-expanded="${!shut(key)}">${inner}</button>`:inner}</div>`;
+  }).join("");
+  const laneRows=lanes.map(k=>{
+    const inLane=top.filter(t=>laneKey(t)===k);
+    const cells=BOARD_COLUMNS.map(([key])=>{const cards=inLane.filter(t=>boardColumn(t)===key);
+      return `<div class="col${shut(key)?" is-collapsed":""}" data-col="${key}">${shut(key)?(cards.length?`<p class="col-hidden">${cards.length}</p>`:""):cards.map(t=>boardCard(t,kidsOf(t.id))).join("")}</div>`}).join("");
+    return `${divide?`<h3 class="lane-head">${escapeHtml(laneName(k))} <span class="count">${inLane.length}</span></h3>`:""}<div class="board-cols">${cells}</div>`;
+  }).join("");
+  const opts=[["","None"],["owner","Owner"],["criticality","Criticality"]].map(([v,l])=>`<option value="${v}"${v===(divide||"")?" selected":""}>${l}</option>`).join("");
+  return `<div class="board-bar"><label class="inline">Divide by <select id="board-divide">${opts}</select></label>
+      <span class="work-meta">${top.length} task${top.length===1?"":"s"} · steps show on their parent · read-only: status changes stay in the task</span></div>
+    ${top.length?`<div class="board${LOCKED_COLUMNS.filter(shut).map(k=>" shut-"+k).join("")}" role="region" aria-label="Board" tabindex="0"><div class="board-cols board-head">${head}</div>${laneRows}</div>`
+      :'<p class="empty-line">No tasks in this project yet. Use Add a task to start.</p>'}`;
+}
+function projectOverview(p,tasks){
+  const ids=new Set(tasks.map(t=>t.id)),top=tasks.filter(t=>!t.parent_task_id||!ids.has(t.parent_task_id));
+  const counted=top.filter(t=>t.status!=="cancelled"&&t.status!=="abandoned"),done=counted.filter(t=>t.status==="completed").length;
+  const open=tasks.filter(isOpen),pct=counted.length?Math.round(done/counted.length*100):0;
+  const facts=[
+    fact("Status",p.status==="closed"?"Closed":p.status==="on_hold"?"On hold":"Active"),
+    fact("Start",p.start_date?fmtDay(p.start_date):"Not set"),fact("Target",p.target_date?fmtDay(p.target_date):"Not set"),
+    fact("Open tasks",String(open.length)),fact("Overdue",String(open.filter(t=>t.due_state==="overdue").length)),
+    fact("Blocked",String(open.filter(t=>t.is_blocked).length)),fact("Critical path",String(open.filter(t=>t.is_critical_path).length)),
+    fact("Timezone",p.timezone||"—"),
+  ].join("");
+  const next=open.filter(t=>t.due_date).sort((a,b)=>a.due_date.localeCompare(b.due_date)).slice(0,5);
+  return `<div class="page-card overview">
+    <div class="progress-line"><label for="project-progress">Progress</label><progress id="project-progress" max="100" value="${pct}">${pct}%</progress>
+      <span><strong>${done} of ${counted.length}</strong> task${counted.length===1?"":"s"} accepted (${pct}%)</span></div>
+    <div class="facts">${facts}</div>
+    ${p.description?`<p class="desc">${escapeHtml(p.description)}</p>`:""}
+    ${p.status==="closed"&&p.closure_note?`<div class="state-note"><p><strong>Closed.</strong> ${escapeHtml(p.closure_note)}</p></div>`:""}
+    <h3 class="group-head">Next due</h3>${next.length?`<ul class="home-list">${next.map(t=>homeRow(t,`<span class="due-chip" data-due="${workGroup(t)}">${escapeHtml(dueText(t))}</span>`)).join("")}</ul>`:'<p class="empty-line">No open task has a due date.</p>'}
+  </div>`;
+}
+function renderProject(r){
+  const q=s=>document.querySelector(s),p=(state.projects||[]).find(x=>x.id===r.id),body=q("#project-body"),slot=q("#project-gantt-slot");
+  q("#project-tabs").innerHTML=p?PROJECT_TABS.map(([k,l])=>`<a href="#/project/${encodeURIComponent(p.id)}/${k}"${k===r.tab?' aria-current="page"':""}>${l}</a>`).join(""):"";
+  q("#project-capture").hidden=!p||p.status==="closed";
+  q("#project-save-template").hidden=!p||!isOwner();
+  q("#project-close").hidden=!p||!isOwner()||p.status==="closed";
+  slot.hidden=!p||!(r.tab==="list"||r.tab==="timeline");body.hidden=!slot.hidden;
+  if(!p){
+    q("#project-facts").textContent="";
+    body.innerHTML='<div class="card empty-state"><h2>This project is not available</h2><p>It may have been removed, or you are not a member of it.</p><a class="button-link primary" href="#/projects">All projects</a></div>';
+    return;
+  }
+  const tasks=state.tasks.filter(t=>t.project_id===p.id),ents=(p.entities||[]).map(e=>e.name).join(", ");
+  q("#project-facts").textContent=[ents,p.status==="closed"?"Closed":null,p.target_date?`Target ${fmtDay(p.target_date)}`:null,(()=>{const ids=new Set(tasks.map(t=>t.id)),steps=tasks.filter(t=>t.parent_task_id&&ids.has(t.parent_task_id)).length,top=tasks.length-steps;
+    return `${top} task${top===1?"":"s"}${steps?`, ${steps} step${steps===1?"":"s"}`:""}`})()].filter(Boolean).join(" · ");
+  if(!slot.hidden){
+    mountGantt(slot,r.tab==="list"||phoneMQ.matches?"table":"chart");
+    document.querySelector("#as-of").textContent=`As of ${new Date().toLocaleString()}`;
+    renderBands(tasks);renderGantt(tasks);return;
+  }
+  if(r.tab==="board")body.innerHTML=`<div class="page-card board-card-wrap">${renderBoard(tasks,r.params.get("divide"))}</div>`;
+  else if(r.tab==="activity"){
+    body.innerHTML='<div class="page-card"><h2>Activity</h2><p class="muted">Loading…</p></div>';
+    api(`/api/projects/${encodeURIComponent(p.id)}/events`).then(({events})=>{
+      const now=currentRoute();if(now.name!=="project"||now.id!==p.id||now.tab!=="activity")return;
+      const items=(events||[]).slice().reverse().map(renderProjectEvent).join("")||'<li class="muted">No history yet.</li>';
+      body.innerHTML=`<div class="page-card"><h2>Activity</h2><p class="fine">Project changes, closures, imports and Owner decisions, newest first. Task history is in each task.</p><div class="history"><ul>${items}</ul></div></div>`;
+    }).catch(err=>{body.innerHTML=`<div class="page-card"><p class="error">${escapeHtml(err.message)}</p></div>`});
+  }else body.innerHTML=projectOverview(p,tasks);
+}
+document.querySelector("#project-body").addEventListener("click",e=>{
+  const t=e.target.closest("[data-toggle-col]");
+  if(t){const k=t.dataset.toggleCol;if(boardExpanded.has(k))boardExpanded.delete(k);else boardExpanded.add(k);renderProject(currentRoute());document.querySelector(`[data-toggle-col="${k}"]`)?.focus();return}
+  const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail);
+});
+document.querySelector("#project-body").addEventListener("change",e=>{
+  if(e.target.id!=="board-divide")return;
+  const r=currentRoute(),p=new URLSearchParams(r.params);if(e.target.value)p.set("divide",e.target.value);else p.delete("divide");
+  const q=p.toString(),h=`#/${r.path}${q?"?"+q:""}`;if(history.replaceState)history.replaceState(null,"",h);panelState.rendered=routeHash(parseRoute(h),null);
+  renderProject(currentRoute());document.querySelector("#board-divide")?.focus();
+});
+document.querySelector("#project-capture").addEventListener("click",()=>openCapture(currentRoute().id));
+document.querySelector("#project-save-template").addEventListener("click",()=>saveProjectAsTemplate(currentRoute().id));
+document.querySelector("#project-close").addEventListener("click",()=>closeProject(currentRoute().id));
 // VPYGY5: the Command Center. Everything is drawn from what is already loaded (tasks, projects, the Owner's
 // cached requests) plus /api/portfolio; each count links to the list behind it, and rows open the task panel.
 function isOwner(){return !!state.user&&state.user.global_role==="owner"}
@@ -583,8 +715,9 @@ document.querySelector("#home-view").addEventListener("click",e=>{
 });
 document.querySelector("#my-work-body").addEventListener("click",e=>{const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail)});
 // Capture: the task form with the optional fields folded away; the Home project filter is preselected.
-function openCapture(){
-  const form=document.querySelector("#task-form"),project=form.querySelector('select[name="project_id"]'),pid=document.querySelector("#project-filter").value;
+function openCapture(pidArg){
+  const r=currentRoute(),pid=typeof pidArg==="string"?pidArg:r.name==="project"?r.id:r.name==="portfolio"?document.querySelector("#project-filter").value:"";
+  const form=document.querySelector("#task-form"),project=form.querySelector('select[name="project_id"]');
   if(pid&&[...project.options].some(o=>o.value===pid))project.value=pid;
   fillPredecessors();fillAssignees(project.value,form.querySelector('select[name="owner_user_id"]'));
   form.querySelector(".error").textContent="";
@@ -628,8 +761,8 @@ document.querySelector("#login-form").addEventListener("submit",async e=>{e.prev
 function signedOut(){state.user=state.csrf=null;location.replace(location.pathname)}
 document.querySelector("#logout").onclick=async()=>{await api("/api/logout",{method:"POST",body:"{}"});signedOut()};
 document.querySelector("#logout-all").onclick=async()=>{await api("/api/logout-all",{method:"POST",body:"{}"});signedOut()};
-document.querySelector("#close-project").onclick=async()=>{
-  const pid=document.querySelector("#project-filter").value;
+document.querySelector("#close-project").onclick=()=>closeProject(document.querySelector("#project-filter").value);
+async function closeProject(pid){
   if(!pid){alert("Select a single project in the filter to close it.");return}
   const note=prompt("Closure note (describe the outcome or any residual work):","");
   if(note===null)return;
@@ -640,7 +773,7 @@ document.querySelector("#close-project").onclick=async()=>{
       catch(e2){alert(e2.message)}
     }else{alert(err.message)}
   }
-};
+}
 // PZTYC9: a filter change rewrites the Home link (replaceState, so Back leaves the screen) and re-renders.
 for(const id of ["project-filter","status-filter","entity-filter","crit-filter","band-filter","risk-filter"]){document.querySelector(`#${id}`).onchange=filtersChanged}document.querySelector("#open-only").onchange=filtersChanged;document.querySelector("#owner-filter").oninput=filtersChanged;
 // QY0WG2: changing the sort re-fetches the list in the chosen server-side order.
@@ -690,7 +823,7 @@ async function openPortfolio(){
   }catch(err){document.querySelector("#portfolio-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`;document.querySelector("#portfolio-dialog").showModal()}
 }
 document.querySelector("#templates-btn").onclick=openTemplates;
-document.querySelector("#save-template-btn").onclick=saveProjectAsTemplate;
+document.querySelector("#save-template-btn").onclick=()=>saveProjectAsTemplate();
 async function openTemplates(){
   try{
     const {templates}=await api("/api/templates");
@@ -709,8 +842,7 @@ function renderTemplates(templates){
   document.querySelectorAll("#templates-body [data-use-template]").forEach(b=>b.addEventListener("click",()=>useTemplate(b.dataset.useTemplate,b.dataset.kind,(b.dataset.roles||"").split(",").filter(Boolean))));
   document.querySelectorAll("#templates-body [data-delete-template]").forEach(b=>b.addEventListener("click",()=>deleteTemplate(b.dataset.deleteTemplate)));
 }
-async function saveProjectAsTemplate(){
-  const pid=document.querySelector("#project-filter").value;
+async function saveProjectAsTemplate(pid=document.querySelector("#project-filter").value){
   if(!pid){alert("Pick a single project in the Project filter first, then save it as a template.");return}
   const name=prompt("Template name:");if(!name)return;
   const description=prompt("Template description (optional):")||"";
@@ -976,7 +1108,7 @@ async function openDetail(taskId){
 const panelState={shown:null,opener:null,openerKey:null,pushed:null,lastView:"#/home",quiet:false,task:null};
 function taskLink(id){return `#/task/${encodeURIComponent(id)}`}
 function taskApi(id,suffix=""){return `/api/tasks/${encodeURIComponent(id)}${suffix}`}
-function routeHash(r,taskId){const p=new URLSearchParams(r.params);p.delete("task");if(taskId)p.set("task",taskId);const q=p.toString();return `#/${r.name}${q?"?"+q:""}`}
+function routeHash(r,taskId){const p=new URLSearchParams(r.params);p.delete("task");if(taskId)p.set("task",taskId);const q=p.toString();return `#/${r.path||r.name}${q?"?"+q:""}`}
 function openPanel(taskId){
   const panel=document.querySelector("#detail-dialog"),app=document.querySelector("#app"),r=currentRoute(),isNew=panelState.shown!==taskId,wasHidden=panel.hidden;
   if(wasHidden){const a=document.activeElement,ok=a&&a!==document.body&&!panel.contains(a);panelState.opener=ok?a:null;
