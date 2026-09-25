@@ -995,7 +995,10 @@ class AstraService:
                 "SELECT p.* FROM projects p JOIN memberships m ON m.project_id=p.id WHERE m.user_id=? ORDER BY p.name COLLATE NOCASE",
                 (actor["id"],),
             ).fetchall()
-        return self._attach_entities([dict(row) for row in rows])
+        projects = self._attach_entities([dict(row) for row in rows])
+        for project in projects:  # FKVHH8: today in the project's own timezone, as its tasks' due states use
+            project["today"] = self._today_in_timezone(project.get("timezone"))
+        return projects
 
     def grant_project_access(self, actor: dict, project_id: str, user_id: str, role: str) -> None:
         self.require_owner(actor)
@@ -1469,6 +1472,8 @@ class AstraService:
             ).fetchall()
         return {"tasks": [dict(r) for r in task_rows], "projects": [dict(r) for r in project_rows]}
 
+    EXPORT_RISKS = ("atrisk", "blocked", "critical")
+
     def export_tasks(self, actor: dict, filters: dict) -> dict:
         # Authorization is inherited from list_tasks; only the actor's visible tasks are ever returned.
         tasks = self.list_tasks(actor, filters.get("project_id") or None, filters.get("sort") or "criticality")
@@ -1477,7 +1482,9 @@ class AstraService:
         criticality = filters.get("criticality") or None
         owner = (filters.get("owner") or "").lower()
         band = filters.get("band") or None
-        risk = filters.get("risk") or None
+        # An unknown risk value narrows nothing, so it is dropped rather than named in the filename.
+        risk = filters.get("risk") if filters.get("risk") in self.EXPORT_RISKS else None
+        filters = {**filters, "risk": risk}
         open_only = bool(filters.get("open_only"))
         entity_projects = None
         if entity:
@@ -3560,6 +3567,13 @@ class AstraService:
         if not 0 <= number <= 100:
             raise ValueError("Progress must be between 0 and 100.")
         return number
+
+    # The timezone a project gets when none is given; the app's "today" (Home, My Work, the
+    # calendar) is read in it, so the browser's own clock never decides what is due today.
+    DEFAULT_TIMEZONE = "Asia/Karachi"
+
+    def app_today(self) -> str:
+        return self._today_in_timezone(self.DEFAULT_TIMEZONE)
 
     @staticmethod
     def _today_in_timezone(tz_name: str | None) -> str:

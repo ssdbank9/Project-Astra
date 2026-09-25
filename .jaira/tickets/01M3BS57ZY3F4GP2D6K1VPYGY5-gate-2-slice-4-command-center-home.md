@@ -26,7 +26,7 @@ related:
   - 01M3BF5Z67ZKA6JJG020DR3PKR
 commits: []
 created-at: 2026-09-25T07:58:25Z
-updated-at: 2026-09-25T08:11:14Z
+updated-at: 2026-09-25T09:48:07Z
 updated-by: Claude
 claimed-by: vm-1430
 claimed-at: 2026-09-25T07:58:42Z
@@ -40,11 +40,11 @@ outcome-resolves: "All six DoD items ticked with proof; Ran 486 tests, OK; Chrom
 ## Definition of Done
 
 - [x] Home shows a health strip (Overdue, Blocked, Awaiting Owner for owners only, Due in 7 days, Critical path, Undated); each tile states its definition and time and opens the matching filtered list
-  proof: app.js homeTiles/renderHome; tiles link to #/portfolio?due=overdue&open=1, ?risk=blocked, #/inbox, ?due=7, ?risk=critical, ?due=undated, each with its definition and 'as of HH:MM'; test_web AstraShellRouterTests.test_home_command_center_for_owner_member_and_empty_install (counts and links); lock10-shots/slice4-owner-home-*.png
+  proof: app.js homeTiles/renderHome: tiles link to #/portfolio?due=overdue&open=1, ?risk=blocked, #/inbox, ?due=7, ?risk=critical, ?due=undated, each with its definition, and one 'Counts as of HH:MM' for the row. Corrected after review 10: at 6e9d079 the This week card beside the tiles covered days 0-6 while its 'Due in 7 days' link and the tile covered 0-7 (M2); the fix commit makes the strip 8 bars (today + 7) that add up to the tile. Tests: test_home_command_center_for_owner_member_and_empty_install (counts, links, strip total = tile, day-7 task inside); lock10-fix-shots/slice-fix-owner-home-*.png
 - [x] Needs Owner decision (owners only) lists pending requests with live Approve and Reject and a Review button that opens the task panel; hidden for everyone else
   proof: renderHome decisions from state.ownerRequests (cached by openInbox), data-home-decision buttons -> decideOwnerRequest(id,decision,'home-decision-error'), Review -> openDetail; hidden for non-owners; test_home_command_center... (buttons, click -> POST decision path and task fetch, escaping, member hidden)
 - [x] At risk, My next actions (Today / This week / Later), a This week strip and Portfolio by entity; rows open the task panel
-  proof: renderHome: My next actions (Today/This week/Later), At risk (worst first), This week strip (7 days), renderHomePortfolio from /api/portfolio; delegated click on #home-view opens the panel; test_home_command_center... (grouping, order, closed excluded)
+  proof: renderHome: My next actions (Today/This week/Later, This week = dueThisWeek, day 7 included), At risk (worst first), This week strip (today + next 7 days from the server's today), Portfolio by entity via portfolioCards, fetched once per Home visit; delegated click on #home-view opens the panel; test_home_command_center... (grouping, order, closed excluded, strip labels with the browser in Pacific/Pago_Pago, one /api/portfolio fetch)
 - [x] The Portfolio Gantt and schedule table stay reachable at #/portfolio (linked from Home and Projects), old #/home filter links redirect there, and the new Risk filter and No due date option back the tiles
   proof: index.html data-view=portfolio holds the summary, filters, Portfolio Gantt, schedule table and More menu; Home and Projects link to it; applyRoute redirects #/home?<filters>; Risk filter + No due date (app.js matchesRisk/matchesBand; service.py export_tasks band=undated and risk; web.py risk key); test_filters_round_trip... (#/portfolio), test_home_command_center... (redirect), AstraWebTests.test_export_applies_the_home_tile_filters
 - [x] A new install (no projects) and a member with no work get clear empty states; owner-only parts hidden for members
@@ -70,3 +70,4 @@ outcome-resolves: "All six DoD items ticked with proof; Ran 486 tests, OK; Chrom
 ## Progress
 - **2026-09-25 07:58 · Claude** — Plan reasoning (Claude, 2026-09-25): (1) Home decisions use a different attribute (data-home-decision) and one delegated listener, so the wiring test stub (which finds buttons by attribute across bodies) never sees two sets of Approve buttons. (2) Owner requests are fetched once by openInbox (as today) and cached in state.ownerRequests; Home re-renders from the cache after openInbox, so Approve/Reject on Home and in the Inbox share one path and one reload. (3) Tile links carry open=1 so a count and its list agree. (4) The dashboard moves rather than being rebuilt: its ids, filters and tests stay.
 - **2026-09-25 08:11 · Claude** — Found while building (Claude, 2026-09-25): Export CSV sends the dashboard filters to the server, which did not know band=undated or risk and would have exported everything; a tiny server change (service.py export_tasks, web.py filter keys) applies the same rules as app.js so the tile lists and their exports agree. Not built: 'since Monday' deltas and consequence chips (need history/impact data the server does not return).
+- **2026-09-25 09:48 · Claude** — Review 10 follow-ups (fix commit): M2, the This week strip is now today + 7 days (8 bars that add up to the Due in 7 days tile), with one shared dueThisWeek rule in app.js; M1, strip labels come from the server's today (/api/tasks 'today', Asia/Karachi) instead of the browser's clock; L4, the export drops an unknown risk value (service.py EXPORT_RISKS), so it is not named in the filename either; L5, Home cards keep their own height and 'Counts as of' is shown once; L7, /api/portfolio is fetched once per Home visit and one renderer (portfolioCards) serves Home and the More-menu dialog.

@@ -125,7 +125,7 @@ class AstraHandler(BaseHTTPRequestHandler):
                 q = parse_qs(urlparse(self.path).query)
                 project = q.get("project_id", [None])[0]
                 sort = q.get("sort", ["criticality"])[0]
-                return self._json({"tasks": self.service.list_tasks(user, project, sort)})
+                return self._json({"tasks": self.service.list_tasks(user, project, sort), "today": self.service.app_today()})
             if path == "/api/task-dependencies":
                 user, _ = self._require_user()
                 task_id = parse_qs(urlparse(self.path).query).get("task_id", [""])[0]

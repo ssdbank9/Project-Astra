@@ -665,6 +665,42 @@ class AstraWebTests(unittest.TestCase):
         response = self.connection.getresponse()
         self.assertIn("__risk=blocked", response.getheader("Content-Disposition"))
         response.read()
+        # Review L4: an unknown risk value narrows nothing and is not named in the filename.
+        self.assertEqual(titles("risk=anything"), ["First", "Second", "Undated"])
+        self.connection.request("GET", f"/api/export?project_id={pid}&risk=anything&format=csv", None, {"Cookie": cookie})
+        response = self.connection.getresponse()
+        self.assertNotIn("risk", response.getheader("Content-Disposition"))
+        response.read()
+
+    def test_tasks_and_projects_carry_the_servers_today(self):
+        # FKVHH8 review M1: Home, My Work and the calendar read "today" from the server, never the browser.
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        cookie, csrf = self._owner_session()
+        self.request("POST", "/api/projects", {"name": "Clock", "timezone": "Pacific/Pago_Pago"}, cookie=cookie, csrf=csrf)
+        karachi = lambda: datetime.now(ZoneInfo("Asia/Karachi")).date().isoformat()
+        before = karachi()
+        _, tasks = self.request("GET", "/api/tasks", cookie=cookie)
+        self.assertIn(tasks["today"], {before, karachi()})  # both sides of a midnight during the request
+        _, projects = self.request("GET", "/api/projects", cookie=cookie)
+        clock = next(p for p in projects["projects"] if p["name"] == "Clock")
+        self.assertEqual(clock["today"], datetime.now(ZoneInfo(clock["timezone"])).date().isoformat())
+
+    def test_export_risk_rules_each_on_their_own(self):
+        # Review L3: one task per rule, so each filter is proven by a task that only it matches.
+        from astra.service import AstraService
+        svc = AstraService.__new__(AstraService)
+        base = {"project_id": "p", "status": "in_progress", "due_state": "scheduled", "is_blocked": False, "is_critical_path": False}
+        tasks = [{**base, "title": "Only blocked", "is_blocked": True}, {**base, "title": "Only critical", "is_critical_path": True},
+                 {**base, "title": "Only delayed", "status": "delayed"}, {**base, "title": "Only overdue", "due_state": "overdue"},
+                 {**base, "title": "Healthy"}]
+        svc.list_tasks = lambda actor, project=None, sort="criticality": [dict(t) for t in tasks]
+        titles = lambda risk: sorted(t["title"] for t in svc.export_tasks({"id": "u"}, {"risk": risk})["tasks"])
+        self.assertEqual(titles("blocked"), ["Only blocked"])
+        self.assertEqual(titles("critical"), ["Only critical"])
+        self.assertEqual(titles("atrisk"), ["Only blocked", "Only critical", "Only delayed", "Only overdue"])
+        self.assertEqual(len(titles("anything")), 5)
+        self.assertIsNone(svc.export_tasks({"id": "u"}, {"risk": "anything"})["filters"]["risk"])
 
     def test_search_and_export_over_http(self):
         cookie, csrf = self._owner_session()
@@ -1939,12 +1975,25 @@ class AstraFoundationStaticTests(unittest.TestCase):
         pairs += [("text-2", "surface-3"), ("rail-text", "navy"), ("teal-light", "navy"), ("navy", "badge"), ("teal", "surface")]
         pairs += [(f"chip-{c}", f"chip-{c}-bg") for c in ("red", "amber", "purple", "teal", "blue", "gray", "green")]
         pairs += [("chip-teal", "teal-soft")]
+        # FKVHH8 review L1: links in unread Inbox rows sit on the unread tint.
+        pairs += [("teal-dark", "teal-soft")]
+        self.assertIn(".note-row.unread button.link { color: var(--teal-dark); }", self.css)
+        self.assertRegex(self.css, r"\.note-row\.unread \{[^}]*background: var\(--teal-soft\)")
         for fg, bg in pairs:
             self.assertGreaterEqual(contrast_ratio(tok[fg], tok[bg]), 4.5, f"--{fg} on --{bg}")
         self.assertGreaterEqual(contrast_ratio("#FFFFFF", tok["teal"]), 4.5, "white on --teal buttons")
         # One muted grey: no literal copy of the old grey is left outside the token block.
         self.assertNotIn("#667085", self.css)
         self.assertNotRegex(self.css[self.css.index("}\n* { box-sizing"):], r"(?<![\w-])color: var\(--(amber|gray)\)")
+
+    def test_task_links_are_44px_targets_on_phones_and_tablets(self):
+        # Lock #10 review L2 (WCAG 2.5.8; lock #9 set 44px below 1024px).
+        block = self.css[self.css.index("/* 44px targets wherever the panel is full screen"):]
+        block = block[:block.index("\n}\n")]
+        self.assertRegex(block, r"\.note-actions button\.link, \.board-card \.card-title, \.home-row \.row-title, "
+                                r"\.work-row \.work-title \{[^}]*min-height: 44px;")
+        self.assertRegex(block, r"\.cal-nav \.button-link \{[^}]*min-height: 44px;")
+        self.assertIn("#board-divide, #cal-scope { min-height: 44px; }", block)
 
     def test_toolbar_wraps_instead_of_scrolling_sideways(self):
         self.assertRegex(self.css, r"(?m)^\.toolbar \{[^}]*flex-wrap: wrap;")
@@ -1959,6 +2008,9 @@ class AstraFoundationStaticTests(unittest.TestCase):
 SHELL_DRIVER = r"""
 const fs=require("fs");
 const src=fs.readFileSync(process.argv[2],"utf8"),mode=process.argv[3];
+// FKVHH8 review M1: a browser whose clock and timezone disagree with the server (run with TZ and FAKE_NOW).
+if(process.env.FAKE_NOW){const RealDate=Date,NOW=RealDate.parse(process.env.FAKE_NOW);
+  globalThis.Date=class extends RealDate{constructor(...a){if(a.length)super(...a);else super(NOW)}static now(){return NOW}}}
 const store={},docListeners={};
 function el(id){
   const cls=new Set(),listeners={};
@@ -2006,10 +2058,12 @@ if(mode==="home"){
     T({id:"t2",title:"Waiting",is_blocked:true}),T({id:"t3",title:"Tight",is_critical_path:true,days_to_due:2}),
     T({id:"t4",title:"No date",due_state:"undated",days_to_due:null,due_date:null,owner_user_id:"u1"}),
     T({id:"t5",title:"Soon",owner_user_id:"u1",days_to_due:3}),T({id:"t6",title:"Now",owner_user_id:"u1",due_state:"today",days_to_due:0}),
-    T({id:"t7",title:"Done late",status:"completed",due_state:"closed",days_to_due:-9,is_critical_path:true})];
+    T({id:"t7",title:"Done late",status:"completed",due_state:"closed",days_to_due:-9,is_critical_path:true}),
+    T({id:"t8",title:"Edge of the week",days_to_due:7,due_date:"2026-10-02"}),T({id:"t9",title:"Past the week",days_to_due:8,due_date:"2026-10-03"})];
+  a.state.today="2026-09-25";
   a.state.ownerRequests=[{id:"r1",action:"update_task_status",task_id:U1,task_title:"<b>Tax</b>",project_name:"P",requested_by_name:"Mia Manager",requested_at:"2026-09-23T10:00:00Z",reason:"why",payload:{status:"cancelled"}}];
   const q=s=>document.querySelector(s),grab=()=>({strip:q("#home-strip").innerHTML,decisions:q("#home-decisions").innerHTML,decisionsHidden:q("#home-decisions-card").hidden,
-    next:q("#home-next").innerHTML,risk:q("#home-risk").innerHTML,week:q("#home-week").innerHTML,empty:q("#home-empty").hidden,grid:q("#home-grid").hidden});
+    next:q("#home-next").innerHTML,risk:q("#home-risk").innerHTML,week:q("#home-week").innerHTML,empty:q("#home-empty").hidden,grid:q("#home-grid").hidden,asof:q("#home-asof").textContent});
   a.state.user={id:"u1",display_name:"Aly J",global_role:"owner"};a.renderHome();out.owner=grab();
   a.state.user={id:"u1",display_name:"Omar M",global_role:"member"};a.renderHome();out.member=grab();
   a.state.projects=[];a.renderHome();out.emptyMember=grab();
@@ -2020,8 +2074,13 @@ if(mode==="home"){
   click({"[data-home-decision]":{dataset:{requestId:"r1",homeDecision:"approved"}}});
   click({"[data-detail]":{dataset:{detail:U1}}});
   await tick();out.clicks=fetches.slice();
+  // Review L7: one /api/portfolio fetch per Home visit, even when the Inbox refresh redraws Home.
+  a.state.projects=[{id:"p1",name:"P"}];location.hash="#/home";a.panelState.rendered=null;fetches.splice(0);
+  try{a.applyRoute(false,false)}catch(e){out.homeRouteError=String(e)}
+  for(let i=0;i<5;i++)await tick();a.renderHome();a.renderHome();await tick();
+  out.portfolioFetches=fetches.filter(u=>String(u).startsWith("/api/portfolio")).length;
   // Old #/home?<filters> links land on the portfolio timeline.
-  a.state.projects=[{id:"p1",name:"P"}];location.hash="#/home?due=7&open=1";calls.splice(0);
+  location.hash="#/home?due=7&open=1";calls.splice(0);
   try{a.applyRoute(false,false)}catch(e){out.routeError=String(e)}
   out.redirect=[calls.filter(c=>c[0]==="replace").slice(0,1),location.hash];
   process.stdout.write(JSON.stringify(out));return;
@@ -2038,6 +2097,7 @@ if(mode==="board"){
     T({id:"e",title:"Step two",parent_task_id:"b"}),T({id:"f",title:"Drop",status:"cancelled",owner_name:"Omar Malik",criticality:"low"})];
   out.board=a.renderBoard(tasks,"");out.byOwner=a.renderBoard(tasks,"owner");out.byCrit=a.renderBoard(tasks,"criticality");
   out.emptyBoard=a.renderBoard([],"");
+  out.evilLanes=a.renderBoard([T({id:"z",title:"Z",owner_name:"<b>x</b>"})],"owner");
   out.tabs=a.PROJECT_TABS.map(([k])=>k);
   out.routes=["#/project/"+U1+"/board?divide=owner","#/project/"+U1,"#/project/"+U1+"/nope","#/project/p1/board","#/my-work/calendar","#/my-work/other"]
     .map(h=>{const r=a.parseRoute(h);return [r.name,r.id,r.tab,r.path,r.params.toString()]});
@@ -2049,14 +2109,19 @@ if(mode==="board"){
   a.state.user.global_role="owner";a.renderProject(a.parseRoute("#/project/"+U1+"/overview"));
   out.ownerActions=["#project-capture","#project-save-template","#project-close"].map(s=>document.querySelector(s).hidden);
   out.facts=document.querySelector("#project-facts").textContent;out.overview=document.querySelector("#project-body").innerHTML;
+  // Review L8: an unknown tab shows Overview and the link is rewritten to say so.
+  location.hash="#/project/"+U1+"/nope?divide=owner";calls.splice(0);
+  try{a.applyRoute(false,false)}catch(e){out.tabRouteError=String(e)}
+  out.tabFix=[calls.filter(c=>c[0]==="replace"),location.hash];
   process.stdout.write(JSON.stringify(out));return;
 }
 if(mode==="work"){
   // FKVHH8: My Work groups, the month calendar and the Inbox tabs.
   const T=o=>({project_id:"p1",project_name:"P",status:"in_progress",owner_user_id:"u1",due_state:"scheduled",days_to_due:20,due_date:"2026-10-15",...o});
   const body=()=>document.querySelector("#my-work-body").innerHTML,inbox=()=>document.querySelector("#inbox-body").innerHTML;
-  a.state.user={id:"u1",display_name:"Omar M",global_role:"member"};
-  a.state.tasks=[T({id:"o1",title:"Late",due_state:"overdue",days_to_due:-2,due_date:"2026-09-23"}),T({id:"d1",title:"Now",due_state:"today",days_to_due:0,due_date:"2026-09-25"}),
+  a.state.user={id:"u1",display_name:"Omar M",global_role:"member"};a.state.today="2026-09-25";
+  a.state.tasks=[T({id:"w7",title:"Edge",days_to_due:7,due_date:"2026-10-02"}),T({id:"l8",title:"Past edge",days_to_due:8,due_date:"2026-10-03"}),
+    T({id:"o1",title:"Late",due_state:"overdue",days_to_due:-2,due_date:"2026-09-23"}),T({id:"d1",title:"Now",due_state:"today",days_to_due:0,due_date:"2026-09-25"}),
     T({id:"w1",title:"Soon",days_to_due:4,due_date:"2026-09-29"}),T({id:"l1",title:"Later <b>x</b>"}),T({id:"n1t",title:"Someday",due_state:"undated",days_to_due:null,due_date:null}),
     T({id:"x1",title:"Not mine",owner_user_id:"u2",days_to_due:5,due_date:"2026-09-30"}),T({id:"c1",title:"Done",status:"completed",due_state:"closed"})];
   location.hash="#/my-work";a.renderMyWork(a.parseRoute("#/my-work"));out.list=body();
@@ -2069,6 +2134,9 @@ if(mode==="work"){
   out.feb=a.calendarMonth([],2027,1,"2026-09-25","mine");
   location.hash="#/my-work/calendar?month=2026-10&scope=all";a.renderMyWork(a.parseRoute(location.hash));out.calRoute=body();
   location.hash="#/my-work";a.renderMyWork(a.parseRoute("#/my-work"));out.listAfterCal=body();
+  // No month in the link: the server's today decides the month and the today ring, not the browser's clock.
+  location.hash="#/my-work/calendar";a.renderMyWork(a.parseRoute(location.hash));out.calDefault=body();
+  a.state.today="2026-10-01";a.renderMyWork(a.parseRoute(location.hash));out.calNewMonth=body();a.state.today="2026-09-25";
   a.state.tasks=[];a.renderMyWork(a.parseRoute("#/my-work"));out.emptyList=body();
   const N=[{id:"n1",summary:"task assigned: Alpha",task_id:U1,task_title:"Alpha",created_at:new Date().toISOString(),read_at:null},
     {id:"n2",summary:"old <i>note</i>",task_id:null,task_title:null,created_at:"2026-01-02T10:00:00Z",read_at:"2026-01-03T00:00:00Z"}];
@@ -2186,12 +2254,18 @@ process.stdout.write(JSON.stringify(out));
 """
 
 
-def _run_shell_driver(mode):
+# FKVHH8 review M1: the browser is in Pago Pago (UTC-11) at 10:00 on 24 Sep while the server's day
+# (Asia/Karachi) is already 25 Sep; anything that trusts the browser's clock lands a day early.
+BROWSER_ELSEWHERE = {"TZ": "Pacific/Pago_Pago", "FAKE_NOW": "2026-09-24T21:00:00Z"}
+
+
+def _run_shell_driver(mode, env=None):
     with tempfile.TemporaryDirectory() as tmp:
         driver = Path(tmp) / "shell.js"
         driver.write_text(SHELL_DRIVER, encoding="utf-8")
         result = subprocess.run(["node", str(driver), str(STATIC / "app.js"), mode],
-                                capture_output=True, text=True, timeout=60)
+                                capture_output=True, text=True, timeout=60,
+                                env={**os.environ, **(env or {})})
     if result.returncode != 0:
         raise AssertionError(result.stderr)
     return json.loads(result.stdout)
@@ -2287,15 +2361,18 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertFalse(out["login"])
 
     def test_home_command_center_for_owner_member_and_empty_install(self):
-        out = _run_shell_driver("home")
+        out = _run_shell_driver("home", BROWSER_ELSEWHERE)
         owner, member = out["owner"], out["member"]
         tiles = dict(re.findall(r'data-tile="(\w+)" data-tone="\w+" href="([^"]+)"><strong>(\d+)</strong>', owner["strip"]) and
                      [(k, (h, int(n))) for k, h, n in re.findall(r'data-tile="(\w+)" data-tone="\w+" href="([^"]+)"><strong>(\d+)</strong>', owner["strip"])])
         self.assertEqual(tiles, {
             "overdue": ("#/portfolio?due=overdue&open=1", 1), "blocked": ("#/portfolio?risk=blocked&open=1", 1),
-            "awaiting": ("#/inbox", 1), "week": ("#/portfolio?due=7&open=1", 3),
+            "awaiting": ("#/inbox", 1), "week": ("#/portfolio?due=7&open=1", 4),
             "critical": ("#/portfolio?risk=critical&open=1", 1), "undated": ("#/portfolio?due=undated&open=1", 1)})
-        self.assertIn("Open work past its due date · as of ", owner["strip"])
+        # Review L5: "as of" is said once for the row, not on every tile.
+        self.assertIn("Open work past its due date</span>", owner["strip"])
+        self.assertNotIn("as of", owner["strip"])
+        self.assertTrue(owner["asof"].startswith("Counts as of "))
         # Owner decisions: live buttons, a Review that opens the task, text escaped.
         self.assertFalse(owner["decisionsHidden"])
         self.assertIn('data-home-decision="approved" data-request-id="r1"', owner["decisions"])
@@ -2317,7 +2394,17 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertIn("▲ 3 days overdue", risk)
         self.assertIn("⊘ Blocked", risk)
         self.assertIn("◆ Critical path", risk)
-        self.assertEqual(len(re.findall(r'class="week-day', owner["week"])), 7)
+        # Review M1/M2: the strip is today plus the next 7 days, labelled from the server's today (25 Sep)
+        # although the browser's clock says 24 Sep, and its bars add up to the "Due in 7 days" tile.
+        week = owner["week"]
+        days = re.findall(r'<strong>(\d+)</strong><span>([^<]+)</span>', week)
+        self.assertEqual([d for _, d in days], ["Today", "Sat 26", "Sun 27", "Mon 28", "Tue 29", "Wed 30", "Thu 1", "Fri 2"])
+        self.assertEqual(sum(int(n) for n, _ in days), tiles["week"][1])
+        self.assertEqual(days[7][0], "1")  # t8, due in exactly 7 days, is inside the week
+        self.assertIn("due Friday 2 October", week)
+        self.assertIn("Today and the next 7 days · 4 open items due", week)
+        self.assertEqual(out["portfolioFetches"], 1)
+        self.assertNotIn("homeRouteError", out)
         # A member sees no Awaiting Owner tile and no decisions.
         self.assertNotIn('data-tile="awaiting"', member["strip"])
         self.assertTrue(member["decisionsHidden"])
@@ -2407,6 +2494,17 @@ class AstraProjectPageTests(unittest.TestCase):
         self.assertEqual(lanes(self.out["byCrit"]), [("High", "2"), ("Low", "1"), ("Unrated", "1")])
         self.assertEqual(lanes(self.out["board"]), [])
         self.assertIn('<option value="owner" selected>Owner</option>', self.out["byOwner"])
+        # Review L3: owner names can come from an import file, so lane names are escaped.
+        self.assertIn('<h3 class="lane-head">&lt;b&gt;x&lt;/b&gt; <span class="count">1</span></h3>', self.out["evilLanes"])
+        self.assertNotIn("<b>x</b>", self.out["evilLanes"])
+        # Review L6: an unrated card shows no rating badge; the task panel still flags it.
+        self.assertNotIn("Unrated", self.out["board"].split("board-card", 1)[1].split("</article>", 1)[0])
+        css = (STATIC / "style.css").read_text(encoding="utf-8")
+        self.assertIn(".lane-head { position: sticky; left: 0;", css)
+
+    def test_an_unknown_project_tab_is_rewritten_to_overview(self):
+        self.assertNotIn("tabRouteError", self.out)
+        self.assertEqual(self.out["tabFix"], [[["replace", f"#/project/{U1}/overview?divide=owner"]], f"#/project/{U1}/overview?divide=owner"])
 
     def test_header_and_every_lane_share_one_grid_template(self):
         html = self.out["byOwner"]
@@ -2445,13 +2543,17 @@ class AstraMyWorkInboxTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.out = _run_shell_driver("work")
+        cls.out = _run_shell_driver("work", BROWSER_ELSEWHERE)
 
     def test_my_work_lists_five_groups_with_counts_and_only_my_open_work(self):
         html = self.out["list"]
         groups = re.findall(r'<h3>([\w ]+) <span class="count">(\d+)</span>', html)
-        self.assertEqual(groups, [("Overdue", "1"), ("Today", "1"), ("This week", "1"), ("Later", "1"), ("No date", "1")])
-        self.assertIn('<h2>Open work you own <span class="count">5</span></h2>', html)
+        self.assertEqual(groups, [("Overdue", "1"), ("Today", "1"), ("This week", "2"), ("Later", "2"), ("No date", "1")])
+        self.assertIn('<h2>Open work you own <span class="count">7</span></h2>', html)
+        # Review M2: "This week" ends 7 days out, inclusive, as on the "Due in 7 days" tile.
+        section = lambda key: re.search(rf'data-group="{key}">(.*?)</section>', html, re.S).group(1)
+        self.assertIn('data-detail="w7"', section("week"))
+        self.assertIn('data-detail="l8"', section("later"))
         self.assertNotIn("Not mine", html)
         self.assertNotIn(">Done<", html)
         self.assertIn("Later &lt;b&gt;x&lt;/b&gt;", html)
@@ -2498,6 +2600,12 @@ class AstraMyWorkInboxTests(unittest.TestCase):
         self.assertIn('aria-current="page">Calendar</a>', route)
         # The List tab's Calendar link returns to the month last shown.
         self.assertIn('href="#/my-work/calendar?month=2026-10&amp;scope=all">Calendar</a>', self.out["listAfterCal"])
+        # Review M1: with no month in the link, the server's today picks the month and the today ring
+        # (the browser's clock says 24 Sep; the server says 25 Sep, then 1 Oct).
+        self.assertIn('<h2 class="cal-title" id="cal-title">September 2026</h2>', self.out["calDefault"])
+        self.assertIn('<li class="cal-day today"><p class="cal-date"><span aria-hidden="true">25</span>', self.out["calDefault"])
+        self.assertIn('<h2 class="cal-title" id="cal-title">October 2026</h2>', self.out["calNewMonth"])
+        self.assertIn('<li class="cal-day today"><p class="cal-date"><span aria-hidden="true">1</span>', self.out["calNewMonth"])
         feb = self.out["feb"]
         self.assertEqual(len(re.findall(r'<li class="cal-day', feb)), 28)  # February 2027 is exactly four weeks
         self.assertNotIn("cal-day out", feb)
@@ -2799,7 +2907,7 @@ globalThis.__run=async(sc)=>{
     renderDetail(sc.taskAfter||sc.task,[]);return sc.taskAfter||sc.task};
   globalThis.prompt=()=>sc.prompt??"";globalThis.alert=m=>{calls.push({alert:m})};
   globalThis.__reason=sc.reason||"";
-  if(sc.requests){state.user={global_role:"owner"};state.loads=1;renderInbox([],sc.requests)}
+  if(sc.requests){state.user={global_role:"owner"};state.loads=1;location.hash=sc.hash||"";renderInbox(sc.notes||[],sc.requests);location.hash=""}
   else{detailTaskId=sc.task.id;renderDetail(sc.task,[])}
   const pick=sc.click||sc.submitAt;
   // 5GK6SB: match the named attribute only, so data-remove-pred="t1" never matches data-remove-succ="t1".
@@ -3049,6 +3157,13 @@ class AstraDetailDialogWiringTests(unittest.TestCase):
             "inbox-decision-conflict": {"requests": INBOX_REQUESTS, "click": ["data-request-decision", "approved"],
                                         "prompt": "ok", "status": 409,
                                         "fail": "Task revision conflict: request expected 1, current revision is 2."},
+            # FKVHH8 review L3: opening a notification's task marks that notification read.
+            "inbox-open-marks-read": {"requests": [], "task": owner_open, "click": ["data-detail", U1], "notes": [
+                {"id": "n1", "summary": "task assigned: Alpha", "task_id": U1, "task_title": "Alpha",
+                 "created_at": "2026-09-25T08:00:00Z", "read_at": None}]},
+            "inbox-open-read-note": {"requests": [], "task": owner_open, "hash": "#/inbox?tab=all", "click": ["data-detail", U1], "notes": [
+                {"id": "n2", "summary": "task assigned: Alpha", "task_id": U1, "task_title": "Alpha",
+                 "created_at": "2026-09-25T08:00:00Z", "read_at": "2026-09-25T09:00:00Z"}]},
             "inbox-decision-refused": {"requests": INBOX_REQUESTS, "click": ["data-request-decision", "approved"],
                                        "prompt": "ok", "status": 400, "fail": "Owner cannot do that."},
             # 0D9Q3X round 2: the plain line names what to do; the server's reason follows it.
@@ -3200,6 +3315,15 @@ class AstraDetailDialogWiringTests(unittest.TestCase):
         self.assertIn({"reloadInbox": True}, run["calls"])
         self.assertFalse([c for c in run["calls"] if "alert" in c])
         self.assertIn("can no longer be approved", run["messages"].get("inbox-error", ""))
+
+    def test_opening_a_notification_task_marks_it_read(self):
+        calls = self._ran("inbox-open-marks-read")["calls"]
+        self.assertIn({"reload": True}, calls)
+        self.assertIn({"path": "/api/notifications/n1/read", "method": "POST", "body": {}}, calls)
+        # An already-read notification is not marked again.
+        calls = self._ran("inbox-open-read-note")["calls"]
+        self.assertIn({"reload": True}, calls)
+        self.assertFalse([c for c in calls if "path" in c])
 
     def test_a_refused_inbox_decision_shows_the_reason_inline(self):
         run = self._ran("inbox-decision-refused")

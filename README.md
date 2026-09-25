@@ -110,11 +110,12 @@ This first vertical slice provides:
   results, Templates, Import, Export CSV and, with one project selected, Project history,
   Save project as template and Close project are in the portfolio timeline's "More" menu;
 - a Command Center Home: six health tiles (Overdue, Blocked, Awaiting Owner for owners, Due in
-  7 days, Critical path, Undated), each stating what it counts and when, and each opening the
-  matching filtered list; for owners, "Needs Owner decision" with working Approve and Reject
+  7 days, Critical path, Undated), each stating what it counts (one "Counts as of" time for
+  the row), and each opening the matching filtered list; for owners, "Needs Owner decision" with working Approve and Reject
   and a Review button that opens the task; "My next actions" (Today, This week, Later); "At
   risk" (overdue, blocked, critical path or delayed, worst first); a "This week" strip of open
-  items due per day; and "Portfolio by entity". A new install shows one "No projects yet"
+  items due today and on each of the next 7 days (8 bars that add up to the "Due in 7 days"
+  tile); and "Portfolio by entity". A new install shows one "No projects yet"
   card instead;
 - a page per project (`#/project/<id>/<tab>`, opened from Projects) with tabs Overview
   (status, dates, progress, open, overdue, blocked and critical-path counts, next due), List
@@ -125,18 +126,22 @@ This first vertical slice provides:
   waiting on an unfinished predecessor; Submitted = submitted; Accepted = completed; Closed =
   cancelled, abandoned (closed statuses win over everything, Submitted over Blocked).
   Accepted and Closed are Owner-decided and start collapsed. Cards show the title, owner
-  initials, due date, criticality, "Waits on …", on hold, delayed, critical path and "Steps n
+  initials, due date, criticality when it is set (the task panel flags unrated work), "Waits on …", on hold, delayed, critical path and "Steps n
   of m done" (steps are counted on their parent, not drawn as cards). "Divide by" splits the
   board into swimlanes by owner or criticality and is kept in the link. Status still changes
   only through the task's own lifecycle actions. Every column keeps the same width in the
   header and in every swimlane; a wide board scrolls sideways inside its own frame;
 - My Work with two tabs. List (`#/my-work`) groups the open tasks you own into Overdue,
-  Today, This week (due in the next 7 days, as on Home), Later and No date, each with a
+  Today, This week (due within the next 7 days, day 7 included, as on Home), Later and No date, each with a
   count, soonest first, with a filter box. Calendar (`#/my-work/calendar?month=YYYY-MM`) is a
   Monday-first month grid of open tasks on their due day, with Previous, Today and Next and a
   "Show" choice (my tasks, or all tasks you can see; `&scope=all`); a day with more than 3
   tasks shows 3 and "+N more", which opens the rest in place. On a phone the month is an
-  agenda of the days that have work. Every row and calendar item opens the task panel;
+  agenda of the days that have work. Every row and calendar item opens the task panel.
+  "Today" on Home, in My Work and on the calendar is the server's date in the app's timezone
+  (Asia/Karachi, sent with `/api/tasks`; each project also carries its own `today`), and
+  each task's days until due are counted in its project's timezone, so a browser in another
+  timezone never moves work to another day;
 - an Inbox with tabs: Needs action (owners only: the requests waiting for a decision, with
   working Approve and Reject), Unread and All, each with a count; `?tab=` keeps the choice.
   Owners land on Needs action while a request waits, everyone else on Unread while anything

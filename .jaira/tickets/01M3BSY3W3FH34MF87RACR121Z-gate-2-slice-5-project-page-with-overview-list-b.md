@@ -26,7 +26,7 @@ related:
   - 01M3BS57ZY3F4GP2D6K1VPYGY5
 commits: []
 created-at: 2026-09-25T08:12:00Z
-updated-at: 2026-09-25T08:32:22Z
+updated-at: 2026-09-25T09:48:07Z
 updated-by: Claude
 claimed-by: vm-4417
 claimed-at: 2026-09-25T08:12:20Z
@@ -70,3 +70,4 @@ outcome-resolves: "All five DoD items ticked with proof; Ran 490 tests, OK; Chro
 - **2026-09-25 08:12 · Claude** — Plan reasoning (Claude, 2026-09-25): (1) The Gantt renderer and its listeners are bound to #gantt/#schedule-table, so the project page moves the same nodes (one #gantt-host) into its slot instead of copying the renderer; the portfolio moves them back when it renders. (2) The board lists top-level tasks only; steps show as 'Steps n of m' on their parent card, so a card never appears twice. (3) Columns are flex items with fixed widths (no inline styles under the CSP), so collapsed columns line up across swimlanes. (4) Divide by lives in the link (?divide=owner) like the portfolio filters.
 - **2026-09-25 08:27 · Claude** — Found while building (Claude, 2026-09-25): (1) the cards' sr-only owner text is position:absolute; inside the horizontally scrolling board it escaped the scroller and made the whole page 997px wide on phones; .board is now position:relative. (2) Collapsed columns are 128px so name, count and lock fit on one line and the header row stays short. (3) Members see 'Add a task' like the rail Capture; the server decides whether they may create. Not built: an Activity filter by person or type (research 5.8), Divide by entity (one project shares its entities).
 - **2026-09-25 08:32 · Claude** — Coordinator review: with Divide by = Owner the lane cells drifted out from under the column headers. Cause: .board-cols had min-width:max-content, so each lane row sized itself to its own unwrapped card titles and its fr tracks grew differently from the header's. Fix: one template for header and every lane, repeat(7, minmax(180px,1fr)) with a fixed row min-width (1332px; 1280/1228 with Accepted/Closed collapsed to 128px), the board scrolls sideways inside its own container. Measured with Playwright at 1440/1024/390: every row's column left+width identical, no page overflow. Also: lane names stick to the left edge while scrolling, and long 'Waits on' tags wrap inside the card.
+- **2026-09-25 09:48 · Claude** — Review 10 follow-ups (fix commit): L6, unrated cards no longer carry an UNRATED badge (the panel still flags it); L3, lane names are tested for escaping and the sticky lane rule is asserted; L2, card titles are 44px targets below 1024px; L8, an unknown tab (#/project/<id>/nope) is rewritten to /overview with replaceState.

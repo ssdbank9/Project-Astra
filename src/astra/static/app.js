@@ -2,7 +2,7 @@ const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:
 async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.error||"Request failed");err.status=response.status;throw err}return data}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
 function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);document.querySelector("#new-project").hidden=document.querySelector("#people").hidden=!isOwner();projectActions();refreshImportAccess()}
-async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
+async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.today=t.today||null;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
 function updateBell(){const n=state.unread||0,badge=document.querySelector("#unread-count"),inbox=document.querySelector("#inbox");badge.textContent=n;badge.hidden=!n;inbox.classList.toggle("has-unread",n>0);inbox.setAttribute("aria-label",n?`Inbox, ${n} unread`:"Inbox")}
 function fillFilters(){const pf=document.querySelector("#project-filter"),tp=document.querySelector('#task-form select[name="project_id"]');const selected=pf.value;pf.innerHTML='<option value="">All projects</option>';tp.innerHTML="";for(const p of state.projects){pf.add(new Option(p.status==="closed"?`${p.name} (closed)`:p.name,p.id));if(p.status!=="closed")tp.add(new Option(p.name,p.id))}pf.value=selected;const statuses=[...new Set(state.tasks.map(t=>t.status))].sort();document.querySelector("#status-filter").innerHTML='<option value="">All statuses</option>'+statuses.map(s=>`<option>${escapeHtml(s)}</option>`).join("");const ef=document.querySelector("#entity-filter"),efSel=ef.value;ef.innerHTML='<option value="">All entities</option>'+(state.entities||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`).join("");ef.value=efSel;fillPredecessors()}
 function projectEntityIds(projectId){const p=state.projects.find(p=>p.id===projectId);return new Set((p&&p.entities?p.entities:[]).map(e=>e.id))}
@@ -449,6 +449,9 @@ function applyRoute(moveFocus,fromLoad){
   const old=currentRoute();
   if(old.name==="home"&&[...FILTER_PARAMS.map(([k])=>k),"open"].some(k=>old.params.has(k))&&history.replaceState)
     history.replaceState(null,"",`#/portfolio?${old.params.toString()}`);
+  // An unknown project tab shows Overview, and the link says so.
+  const pr=currentRoute(),rawPath=String(location.hash||"").replace(/^#\/?/,"").split("?")[0];
+  if(pr.name==="project"&&rawPath!==pr.path&&history.replaceState){const q=String(location.hash).indexOf("?");history.replaceState(null,"",`#/${pr.path}${q<0?"":String(location.hash).slice(q)}`)}
   const r=currentRoute(),linked=r.name==="task"?r.id:r.params.get("task"),taskId=isTaskId(linked)?linked:null;
   const viewHash=routeHash(r,null),sameView=!fromLoad&&viewHash===panelState.rendered;
   if(r.name!=="task"){panelState.lastView=viewHash;panelState.rendered=viewHash}
@@ -467,6 +470,7 @@ function applyRoute(moveFocus,fromLoad){
     render();
   }else if(r.name==="home"){
     renderHome();
+    if((state.projects||[]).length)loadHomePortfolio();
     if(isOwner()&&(!fromLoad||state.inboxLoads===undefined))openInbox();
   }else if(r.name==="my-work")renderMyWork(r);
   else if(r.name==="projects")renderProjects();
@@ -479,9 +483,18 @@ window.addEventListener("hashchange",()=>{closeMenus();if(toastView&&toastView!=
 // FKVHH8: My Work has two tabs over the same open work. List groups the tasks you own by when they are
 // due; Calendar lays them on a month grid (#/my-work/calendar?month=YYYY-MM&scope=all). "This week" means
 // due in the next 7 days, the same rule as Home.
+// FKVHH8 (review M1, M2): one "today" and one "this week" for Home, My Work and the calendar. Today is
+// the server's date in the app's timezone (/api/tasks "today"), never the browser's clock; each task's
+// days_to_due is computed by the server in its project's timezone. "This week" is today through the
+// next 7 days, the same span as the "Due in 7 days" tile and its link (?due=7).
+const WEEK_AHEAD=7;
+function dueThisWeek(t){return t.days_to_due!=null&&t.days_to_due>=0&&t.days_to_due<=WEEK_AHEAD}
+function appToday(){return /^\d{4}-\d{2}-\d{2}$/.test(state.today||"")?state.today:dayKey(new Date())}
+function utcDay(key,plus=0){return new Date(Date.UTC(+key.slice(0,4),+key.slice(5,7)-1,+key.slice(8,10)+plus))}
+function utcKey(d){return d.toISOString().slice(0,10)}
 const WORK_GROUPS=[["overdue","Overdue"],["today","Today"],["week","This week"],["later","Later"],["undated","No date"]];
 const WORK_EMPTY={overdue:"Nothing overdue.",today:"Nothing due today.",week:"Nothing due in the next 7 days.",later:"Nothing due later.",undated:"Every task has a due date."};
-function workGroup(t){if(t.due_state==="overdue")return "overdue";if(t.due_state==="today")return "today";if(!t.due_date)return "undated";return t.days_to_due!=null&&t.days_to_due<=7?"week":"later"}
+function workGroup(t){if(t.due_state==="overdue")return "overdue";if(t.due_state==="today")return "today";if(!t.due_date)return "undated";return dueThisWeek(t)?"week":"later"}
 function workRow(t){
   const group=workGroup(t);
   return `<li class="work-row"><button type="button" class="link work-title" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>
@@ -505,7 +518,7 @@ function filteredWorkHtml(mine){
   return shown.length?workGroupsHtml(shown):`<p class="empty-line">No open work you own matches “${escapeHtml(q.trim())}”.</p>`;
 }
 function myWorkTabs(r){
-  const cal=r.id==="calendar",keep=new URLSearchParams(r.params);keep.delete("task");
+  const cal=r.id==="calendar";
   const calHash=cal?routeHash(r,null):state.calendarHash||"#/my-work/calendar";
   return `<nav class="tabs" aria-label="My Work views"><a href="#/my-work"${cal?"":' aria-current="page"'}>List</a><a href="${escapeHtml(calHash)}"${cal?' aria-current="page"':""}>Calendar</a></nav>`;
 }
@@ -527,7 +540,7 @@ const WEEKDAYS=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","S
 const CAL_LIMIT=3,calExpanded=new Set();
 function dayKey(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`}
 function monthParam(s){const m=/^(\d{4})-(0[1-9]|1[0-2])$/.exec(s||"");return m?[+m[1],+m[2]-1]:null}
-function calHref(year,month,scope){const d=new Date(year,month,1),p=new URLSearchParams();p.set("month",`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);if(scope==="all")p.set("scope","all");return "#/my-work/calendar?"+p.toString()}
+function calHref(year,month,scope){const d=new Date(Date.UTC(year,month,1)),p=new URLSearchParams();p.set("month",utcKey(d).slice(0,7));if(scope==="all")p.set("scope","all");return "#/my-work/calendar?"+p.toString()}
 function calTone(t){return t.due_state==="overdue"?"overdue":t.due_state==="today"?"today":t.is_critical_path||t.criticality==="critical"?"critical":""}
 function calItem(t){const tone=calTone(t);
   return `<button type="button" class="cal-item" data-detail="${escapeHtml(t.id)}"${tone?` data-tone="${tone}"`:""} title="${escapeHtml(t.title)}">${escapeHtml(t.title)}${tone==="overdue"?'<span class="sr-only"> (overdue)</span>':tone==="critical"?'<span class="sr-only"> (critical)</span>':""}</button>`}
@@ -536,17 +549,18 @@ function calendarMonth(tasks,year,month,todayKey,scope){
   for(const t of tasks)if(t.due_date){const k=String(t.due_date).slice(0,10);(byDay[k]=byDay[k]||[]).push(t)}
   const rank=t=>(calTone(t)==="overdue"?0:calTone(t)==="critical"?1:2);
   for(const k in byDay)byDay[k].sort((a,b)=>rank(a)-rank(b)||String(a.title).localeCompare(String(b.title)));
-  const first=new Date(year,month,1),lead=(first.getDay()+6)%7,days=new Date(year,month+1,0).getDate(),weeks=Math.ceil((lead+days)/7);
-  const title=`${MONTHS[month]} ${year}`,inMonth=Object.keys(byDay).filter(k=>k.startsWith(dayKey(first).slice(0,8)));
+  // Dates are built in UTC so the browser's timezone cannot shift a day.
+  const first=new Date(Date.UTC(year,month,1)),lead=(first.getUTCDay()+6)%7,days=new Date(Date.UTC(year,month+1,0)).getUTCDate(),weeks=Math.ceil((lead+days)/7);
+  const title=`${MONTHS[month]} ${year}`,inMonth=Object.keys(byDay).filter(k=>k.startsWith(utcKey(first).slice(0,8)));
   const count=inMonth.reduce((n,k)=>n+byDay[k].length,0),undated=tasks.filter(t=>!t.due_date).length;
   const cells=[...Array(weeks*7)].map((_,i)=>{
-    const d=new Date(year,month,1-lead+i),k=dayKey(d),items=byDay[k]||[],out=d.getMonth()!==month,open=calExpanded.has(k);
+    const d=new Date(Date.UTC(year,month,1-lead+i)),k=utcKey(d),items=byDay[k]||[],out=d.getUTCMonth()!==month,open=calExpanded.has(k);
     const shown=open||items.length<=CAL_LIMIT?items:items.slice(0,CAL_LIMIT);
     const more=items.length>CAL_LIMIT?`<button type="button" class="link cal-more" data-cal-more="${k}" aria-expanded="${open}">${open?"Show fewer":`+${items.length-CAL_LIMIT} more`}</button>`:"";
-    return `<li class="cal-day${out?" out":""}${k===todayKey?" today":""}"><p class="cal-date"><span aria-hidden="true">${d.getDate()}</span><span class="sr-only">${WEEKDAYS[(d.getDay()+6)%7]} ${d.getDate()} ${MONTHS[d.getMonth()]}${k===todayKey?", today":""}, ${items.length} task${items.length===1?"":"s"}</span></p>${shown.map(calItem).join("")}${more}</li>`;
+    return `<li class="cal-day${out?" out":""}${k===todayKey?" today":""}"><p class="cal-date"><span aria-hidden="true">${d.getUTCDate()}</span><span class="sr-only">${WEEKDAYS[(d.getUTCDay()+6)%7]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}${k===todayKey?", today":""}, ${items.length} task${items.length===1?"":"s"}</span></p>${shown.map(calItem).join("")}${more}</li>`;
   }).join("");
-  const agenda=inMonth.sort().map(k=>{const d=new Date(+k.slice(0,4),+k.slice(5,7)-1,+k.slice(8,10));
-    return `<li><h3 class="agenda-date">${WEEKDAYS[(d.getDay()+6)%7].slice(0,3)} ${d.getDate()} ${MONTHS[d.getMonth()].slice(0,3)}${k===todayKey?' <span class="badge" data-level="info">Today</span>':""} <span class="count">${byDay[k].length}</span></h3><ul class="work-list">${byDay[k].map(workRow).join("")}</ul></li>`}).join("");
+  const agenda=inMonth.sort().map(k=>{const d=utcDay(k);
+    return `<li><h3 class="agenda-date">${WEEKDAYS[(d.getUTCDay()+6)%7].slice(0,3)} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].slice(0,3)}${k===todayKey?' <span class="badge" data-level="info">Today</span>':""} <span class="count">${byDay[k].length}</span></h3><ul class="work-list">${byDay[k].map(workRow).join("")}</ul></li>`}).join("");
   const [py,pm]=[year,month-1],[ny,nm]=[year,month+1];
   return `<div class="cal-bar"><h2 class="cal-title" id="cal-title">${title}</h2>
     <nav class="cal-nav" aria-label="Month"><a class="button-link quiet" href="${calHref(py,pm,scope)}"><span aria-hidden="true">‹</span> Previous</a><a class="button-link quiet" href="${calHref(+todayKey.slice(0,4),+todayKey.slice(5,7)-1,scope)}">Today</a><a class="button-link quiet" href="${calHref(ny,nm,scope)}">Next <span aria-hidden="true">›</span></a></nav>
@@ -556,7 +570,7 @@ function calendarMonth(tasks,year,month,todayKey,scope){
     <ol class="cal-agenda" aria-labelledby="cal-title">${agenda||`<li><p class="empty-line">Nothing is due in ${title}.</p></li>`}</ol>`;
 }
 function workCalendar(r){
-  const today=dayKey(new Date()),[y,m]=monthParam(r.params.get("month"))||[+today.slice(0,4),+today.slice(5,7)-1],scope=r.params.get("scope")==="all"?"all":"mine";
+  const today=appToday(),[y,m]=monthParam(r.params.get("month"))||[+today.slice(0,4),+today.slice(5,7)-1],scope=r.params.get("scope")==="all"?"all":"mine";
   return calendarMonth(openWork(scope),y,m,today,scope);
 }
 // Projects: every project the person can see; a row opens it on Home (its own workspace comes later).
@@ -600,7 +614,7 @@ function boardCard(t,kids){
   if(col==="closed")tags.push(`<span class="tag">× ${escapeHtml(statusLabel(t.status))}</span>`);
   const due=CLOSED_STATUSES.includes(t.status)?"":`<span class="due-chip" data-due="${workGroup(t)}">${escapeHtml(dueText(t)||"No due date")}</span>`;
   return `<article class="board-card"><button type="button" class="link card-title" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>
-    <div class="card-meta"><span class="avatar-sm" aria-hidden="true">${escapeHtml(initials(t.owner_name)||"–")}</span><span class="sr-only">Owner: ${escapeHtml(t.owner_name||"Unassigned")}.</span>${due}${t.criticality?`<span class="card-crit">${escapeHtml(t.criticality.charAt(0).toUpperCase()+t.criticality.slice(1))}</span>`:critLabel("")}</div>
+    <div class="card-meta"><span class="avatar-sm" aria-hidden="true">${escapeHtml(initials(t.owner_name)||"–")}</span><span class="sr-only">Owner: ${escapeHtml(t.owner_name||"Unassigned")}.</span>${due}${t.criticality?`<span class="card-crit">${escapeHtml(t.criticality.charAt(0).toUpperCase()+t.criticality.slice(1))}</span>`:""}</div>
     ${tags.length?`<div class="tags">${tags.join("")}</div>`:""}${kids.length?`<p class="card-steps">Steps ${done} of ${kids.length} done</p>`:""}</article>`;
 }
 function renderBoard(tasks,divide){
@@ -705,7 +719,7 @@ function homeTiles(){
     ["overdue","Overdue","red",n(t=>t.due_state==="overdue"),"#/portfolio?due=overdue&open=1","Open work past its due date"],
     ["blocked","Blocked","purple",n(t=>t.is_blocked),"#/portfolio?risk=blocked&open=1","Open work waiting on an unfinished predecessor"],
     isOwner()&&["awaiting","Awaiting Owner","amber",(state.ownerRequests||[]).length,"#/inbox","Requests only you can decide"],
-    ["week","Due in 7 days","blue",n(t=>t.days_to_due!=null&&t.days_to_due>=0&&t.days_to_due<=7),"#/portfolio?due=7&open=1","Open work due today or in the next 7 days"],
+    ["week","Due in 7 days","blue",n(dueThisWeek),"#/portfolio?due=7&open=1","Open work due today or in the next 7 days"],
     ["critical","Critical path","red",n(t=>t.is_critical_path),"#/portfolio?risk=critical&open=1","Open tasks with no slack on a project's critical path"],
     ["undated","Undated","gray",n(t=>t.due_state==="undated"),"#/portfolio?due=undated&open=1","Open tasks and steps without a due date"],
   ].filter(Boolean);
@@ -730,9 +744,9 @@ function renderHome(){
       ?'<p>Start a project to see its health, decisions and deadlines here.</p><a class="button-link primary" href="#/projects">Go to Projects</a>'
       :"<p>You will see work here once the App Owner adds you to a project.</p>"}</div>`;
   }
-  const at=hhmm();
+  box("#home-asof").textContent=empty?"":`Counts as of ${hhmm()}`;
   box("#home-strip").innerHTML=homeTiles().map(([key,label,tone,count,href,def])=>
-    `<a class="tile" data-tile="${key}" data-tone="${tone}" href="${href}"><strong>${count}</strong><span class="tile-label">${escapeHtml(label)}</span><span class="tile-def">${escapeHtml(def)} · as of ${escapeHtml(at)}</span></a>`).join("");
+    `<a class="tile" data-tile="${key}" data-tone="${tone}" href="${href}"><strong>${count}</strong><span class="tile-label">${escapeHtml(label)}</span><span class="tile-def">${escapeHtml(def)}</span></a>`).join("");
   // Needs Owner decision: owners only, with the live Approve / Reject of the Inbox.
   box("#home-decisions-card").hidden=!owner||empty;
   if(owner){
@@ -747,7 +761,7 @@ function renderHome(){
   // My next actions: my open work, soonest first, grouped Today (overdue and today) / This week / Later.
   const me=state.user&&state.user.id,mine=tasks.filter(t=>t.owner_user_id===me&&isOpen(t))
     .sort((a,b)=>String(a.due_date||"9999").localeCompare(String(b.due_date||"9999")));
-  const when=t=>t.due_state==="overdue"||t.due_state==="today"?"Today":t.days_to_due!=null&&t.days_to_due<=7?"This week":"Later";
+  const when=t=>t.due_state==="overdue"||t.due_state==="today"?"Today":dueThisWeek(t)?"This week":"Later";
   const next=mine.slice(0,7);
   box("#home-next").innerHTML=next.length?["Today","This week","Later"].map(g=>{const rows=next.filter(t=>when(t)===g);
     return rows.length?`<h3 class="group-head">${g}</h3><ul class="home-list">${rows.map(t=>homeRow(t,`<span class="due-chip" data-due="${workGroup(t)}">${escapeHtml(dueText(t)||"No due date")}</span>`)).join("")}</ul>`:""}).join("")+
@@ -757,22 +771,25 @@ function renderHome(){
   const risk=tasks.filter(t=>isOpen(t)&&isAtRisk(t)).sort((a,b)=>riskRank(a)-riskRank(b)||(a.days_to_due??9999)-(b.days_to_due??9999));
   box("#home-risk").innerHTML=risk.length?`<ul class="home-list">${risk.slice(0,6).map(t=>homeRow(t,riskChip(t))).join("")}</ul>${risk.length>6?`<p class="fine"><a href="#/portfolio?risk=atrisk&amp;open=1">${risk.length-6} more at risk</a></p>`:""}`
     :'<p class="empty-line">Nothing is overdue, blocked, delayed or on the critical path.</p>';
-  // This week: open items due on each of the next 7 days.
-  const days=[...Array(7)].map((_,i)=>{const d=new Date();d.setDate(d.getDate()+i);return {i,d,n:tasks.filter(t=>isOpen(t)&&t.days_to_due===i).length}});
-  const peak=Math.max(1,...days.map(x=>x.n));
-  box("#home-week").innerHTML=`<ol class="week-strip">${days.map(({i,d,n})=>`<li class="week-day${i===0?" is-today":""}"><span class="week-bar" data-h="${Math.round(n/peak*4)}" aria-hidden="true"></span><strong>${n}</strong><span>${escapeHtml(d.toLocaleDateString(undefined,{weekday:"short",day:"numeric"}))}</span><span class="sr-only"> open item${n===1?"":"s"} due</span></li>`).join("")}</ol>`;
-  if(!empty)renderHomePortfolio();
+  // This week: open items due today and on each of the next 7 days, labelled from the server's today;
+  // the bars add up to the "Due in 7 days" tile.
+  const today=appToday(),days=[...Array(WEEK_AHEAD+1)].map((_,i)=>({i,d:utcDay(today,i),n:tasks.filter(t=>isOpen(t)&&t.days_to_due===i).length}));
+  const peak=Math.max(1,...days.map(x=>x.n)),total=days.reduce((a,x)=>a+x.n,0);
+  box("#home-week").innerHTML=`<p class="fine week-note">Today and the next ${WEEK_AHEAD} days · ${total} open item${total===1?"":"s"} due</p><ol class="week-strip">${days.map(({i,d,n})=>`<li class="week-day${i===0?" is-today":""}"><span class="week-bar" data-h="${Math.round(n/peak*4)}" aria-hidden="true"></span><strong>${n}</strong><span>${i===0?"Today":`${WEEKDAYS[(d.getUTCDay()+6)%7].slice(0,3)} ${d.getUTCDate()}`}</span><span class="sr-only"> open item${n===1?"":"s"} due${i===0?"":` ${WEEKDAYS[(d.getUTCDay()+6)%7]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`}</span></li>`).join("")}</ol>`;
+  if(!empty)box("#home-portfolio").innerHTML=state.portfolio?portfolioCards(state.portfolio):'<p class="fine">Loading…</p>';
 }
-async function renderHomePortfolio(){
-  const box=document.querySelector("#home-portfolio");
-  try{
-    const {portfolio}=await api("/api/portfolio");
-    box.innerHTML=(portfolio||[]).length?`<div class="entity-cards">${portfolio.map(b=>{
-      const budgets=Object.entries(b.budgets||{}).map(([c,a])=>`<span>${escapeHtml(c)} <strong>${Number(a).toLocaleString()}</strong></span>`).join("")||'<span class="muted">No budget set</span>';
-      return `<div class="entity-card"><h3>${escapeHtml(b.entity_name)}</h3><p class="work-meta">${b.project_count} project${b.project_count===1?"":"s"} · ${b.open} open · ${b.overdue} overdue · ${b.critical} critical</p><div class="entity-budget">${budgets}</div></div>`}).join("")}</div>
-      <p class="fine">Each project is counted once, under its primary entity. Budgets are per currency, never blended.</p>`
-      :'<p class="empty-line">No projects are filed under an entity yet.</p>';
-  }catch(err){box.innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`}
+// Portfolio by entity: one renderer for the Home card and the More-menu dialog. Home fetches it once per
+// visit (applyRoute), so the Inbox refresh that redraws Home does not fetch it again.
+function portfolioCards(portfolio){
+  return (portfolio||[]).length?`<div class="entity-cards">${portfolio.map(b=>{
+    const budgets=Object.entries(b.budgets||{}).map(([c,a])=>`<span>${escapeHtml(c)} <strong>${Number(a).toLocaleString()}</strong></span>`).join("")||'<span class="muted">No budget set</span>';
+    return `<div class="entity-card"><h3>${escapeHtml(b.entity_name)}</h3><p class="work-meta">${b.project_count} project${b.project_count===1?"":"s"} · ${b.open} open · ${b.overdue} overdue · ${b.critical} critical</p><div class="entity-budget">${budgets}</div></div>`}).join("")}</div>
+    <p class="fine">Each project is counted once, under its primary entity. Budgets are per currency, never blended.</p>`
+    :'<p class="empty-line">No projects are filed under an entity yet.</p>';
+}
+async function loadHomePortfolio(){
+  try{const {portfolio}=await api("/api/portfolio");state.portfolio=portfolio||[];if(currentRoute().name==="home")document.querySelector("#home-portfolio").innerHTML=portfolioCards(state.portfolio)}
+  catch(err){document.querySelector("#home-portfolio").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`}
 }
 document.querySelector("#home-view").addEventListener("click",e=>{
   const d=e.target.closest("[data-home-decision]");if(d){decideOwnerRequest(d.dataset.requestId,d.dataset.homeDecision,"home-decision-error");return}
@@ -790,7 +807,7 @@ document.querySelector("#my-work-body").addEventListener("input",e=>{
 });
 document.querySelector("#my-work-body").addEventListener("change",e=>{
   if(e.target.id!=="cal-scope")return;
-  const r=currentRoute(),today=dayKey(new Date()),[y,m]=monthParam(r.params.get("month"))||[+today.slice(0,4),+today.slice(5,7)-1];
+  const r=currentRoute(),today=appToday(),[y,m]=monthParam(r.params.get("month"))||[+today.slice(0,4),+today.slice(5,7)-1];
   location.hash=calHref(y,m,e.target.value);
 });
 // Capture: the task form with the optional fields folded away; the Home project filter is preselected.
@@ -890,14 +907,8 @@ function renderProjectEvent(ev){
 }
 async function openPortfolio(){
   try{
-    const {portfolio}=await api("/api/portfolio");
-    const cards=portfolio.map(b=>{
-      const budgets=Object.entries(b.budgets||{}).map(([c,a])=>`${escapeHtml(c)} ${Number(a).toLocaleString()}`).join(" · ")||"—";
-      return `<div class="pf-card"><h3>${escapeHtml(b.entity_name)}</h3>
-        <div class="facts">${fact("Projects",String(b.project_count))}${fact("Open",String(b.open))}${fact("Overdue",String(b.overdue))}${fact("Critical",String(b.critical))}</div>
-        <div class="pf-budget">Budget roll-up: <strong>${budgets}</strong></div></div>`;
-    }).join("")||"<p>No projects yet.</p>";
-    document.querySelector("#portfolio-body").innerHTML=`<h2>Portfolio by entity</h2><p class="fine">Each project is counted once, under its primary entity. Budgets shown per currency (never blended).</p>${cards}`;
+    const {portfolio}=await api("/api/portfolio");state.portfolio=portfolio||[];
+    document.querySelector("#portfolio-body").innerHTML=`<h2>Portfolio by entity</h2>${portfolioCards(state.portfolio)}`;
     const d=document.querySelector("#portfolio-dialog");if(!d.open)d.showModal();
   }catch(err){document.querySelector("#portfolio-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`;document.querySelector("#portfolio-dialog").showModal()}
 }

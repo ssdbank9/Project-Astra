@@ -27,7 +27,7 @@ related:
   - 01M3BSY3W3FH34MF87RACR121Z
 commits: []
 created-at: 2026-09-25T08:37:44Z
-updated-at: 2026-09-25T08:53:48Z
+updated-at: 2026-09-25T09:48:07Z
 updated-by: Claude
 claimed-by: vm-10500
 claimed-at: 2026-09-25T08:38:56Z
@@ -43,7 +43,7 @@ outcome-resolves: FKVHH8 definition of done 1-5; Gate 2 slice 6 for X8FNA5/JQY55
 - [x] My Work list groups open tasks into Overdue, Today, This week, Later and No date with counts, soonest first; each row opens the task panel; a good empty state
   proof: src/astra/static/app.js:482 WORK_GROUPS, :512 renderMyWork; test_web.AstraMyWorkInboxTests.test_my_work_lists_five_groups_with_counts_and_only_my_open_work, test_filter_keeps_empty_groups_and_says_when_nothing_matches
 - [x] My Work has List and Calendar tabs (#/my-work and #/my-work/calendar); the calendar is a Monday-first month grid with previous, next and today, shows due tasks on their day, collapses more than 3 per day into '+N more', and every item opens the task panel; month kept in the link
-  proof: src/astra/static/app.js:534 calendarMonth; test_month_grid_starts_on_monday_marks_today_and_folds_busy_days, test_month_links_keep_scope_and_the_route_reads_month; shots slice6-owner-my-work-calendar-*.png, slice6-owner-calendar-day-expanded-*.png
+  proof: app.js calendarMonth (UTC date arithmetic) and workCalendar (default month and today ring from the server's today, /api/tasks 'today'). Corrected after review 10: at 6e9d079 'shows due tasks on their day' held only when the browser was in the project's timezone (M1); the fix commit takes today from the server. Tests: test_month_grid_starts_on_monday_marks_today_and_folds_busy_days, test_month_links_keep_scope_and_the_route_reads_month (run with the browser in Pacific/Pago_Pago); shots lock10-shots/slice6-owner-my-work-calendar-*.png, lock10-fix-shots/slice-fix-owner-pagopago-calendar-1440.png
 - [x] On a phone the calendar becomes an agenda list of the month's days that have work; no page-level sideways scroll
   proof: src/astra/static/style.css:707 phone rule; test_phone_agenda_lists_only_days_with_work; slice6-*-my-work-calendar-390.png, page overflow 0 at 390/1024/1440
 - [x] Inbox: tabs Needs action (owners only), Unread and All with counts; unread rows are styled distinctly; each row can open its task and be marked read; Mark all read; owners see requests first with live Approve/Reject
@@ -70,3 +70,4 @@ outcome-resolves: FKVHH8 definition of done 1-5; Gate 2 slice 6 for X8FNA5/JQY55
 ## Progress
 - **2026-09-25 08:39 · Claude** — Plan choices: calendar and inbox tabs are links (route-driven, like the project tabs) rather than ARIA tablists, so Back works and a link can be shared. The phone agenda is rendered alongside the grid and CSS shows one of them, so there is no width detection in JS. 'Hide done' from research 6.1 and 'Undo mark read' from 6.3 are left out: My Work lists open work only, and Aly ruled Undo out of these slices.
 - **2026-09-25 08:53 · Claude** — Found while building: app.js already had a function renderCalendar (the project working-days dialog, about line 1800). A second declaration with the same name is silently replaced by the later one, so the month view first drew nothing and threw in the browser. The month view's entry point is workCalendar. Screenshots used a copy of the lock #9 demo database (scratchpad l10cal, port 8797) with extra tasks due 2026-09-30 so the '+N more' fold shows; the shared demo on 8795 was not changed.
+- **2026-09-25 09:48 · Claude** — Review 10 follow-ups (fix commit): M1, the calendar's today ring and default month come from the server's today, and the grid is built with UTC dates; M2, My Work 'This week' uses the shared dueThisWeek rule (day 7 included, pinned by a test); L1, unread Inbox links use --teal-dark (contrast test extended); L2, Inbox, My Work and Home task links are 44px targets below 1024px; L3, a wiring test proves that Open task marks the notification read; L8, the unused 'keep' variable is gone. Browser-timezone tests run node with TZ=Pacific/Pago_Pago and a faked clock (BROWSER_ELSEWHERE in tests/test_web.py).

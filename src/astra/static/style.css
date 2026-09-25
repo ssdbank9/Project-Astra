@@ -145,7 +145,10 @@ main { grid-column: 2; width: 100%; max-width: 1480px; margin: 0 auto; padding: 
 .tile[data-tone="purple"] { border-top-color: var(--purple); }
 .tile[data-tone="amber"] { border-top-color: var(--amber); }
 .tile[data-tone="blue"] { border-top-color: var(--blue); }
-.home-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+.home-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; margin-bottom: 16px; }  /* a card is as tall as its content, not its neighbour */
+.home-asof { margin: 0 0 8px; }
+.home-asof:empty { display: none; }
+.week-note { margin: 0 0 8px; }
 .home-list { list-style: none; margin: 0; padding: 0; }
 .home-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title chip" "meta chip"; column-gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line-2); }
 .home-row:last-child, .decision-row:last-child { border-bottom: 0; }
@@ -283,6 +286,7 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-strong); border-bottom-widt
 .note-row.unread { margin-bottom: 4px; border-bottom-color: transparent; border-radius: var(--radius-sm); background: var(--teal-soft); }
 .note-dot { width: 8px; height: 8px; margin-top: 7px; border-radius: 999px; }
 .note-row.unread .note-dot { background: var(--teal); }
+.note-row.unread button.link { color: var(--teal-dark); }  /* 4.5:1 or better on the unread tint */
 .note-summary { margin: 0; color: var(--text-2); }
 .note-summary::first-letter { text-transform: uppercase; }  /* the server writes "task submitted: ..." */
 .note-row.unread .note-summary { color: var(--ink); font-weight: 650; }
@@ -409,6 +413,10 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   /* 44px targets wherever the panel is full screen (phones and tablets). */
   .avatar, .panel-close { min-width: 44px; min-height: 44px; }
   .task-panel { left: 0; z-index: 45; width: auto; border-left: 0; box-shadow: none; }
+  /* Review L2: text links that open a task are 44px tall targets on phones and tablets. */
+  .note-actions button.link, .board-card .card-title, .home-row .row-title, .work-row .work-title { display: inline-flex; min-height: 44px; align-items: center; }
+  .cal-nav .button-link { display: inline-flex; min-height: 44px; align-items: center; }
+  #board-divide, #cal-scope { min-height: 44px; }
 }
 /* #/task/<id>: the same panel as the page itself. */
 .task-page .task-panel { position: static; width: auto; max-width: 860px; margin: 0 auto; border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: none; animation: none; }
