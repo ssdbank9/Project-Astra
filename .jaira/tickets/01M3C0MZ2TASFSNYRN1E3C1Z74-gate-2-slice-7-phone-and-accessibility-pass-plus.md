@@ -1,7 +1,7 @@
 ---
 id: 01M3C0MZ2TASFSNYRN1E3C1Z74
 title: "Gate 2 slice 7: phone and accessibility pass, plus the Gate 2 leftovers"
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -30,13 +30,17 @@ related:
   - 01M3BVD71SMNH4E0M2CRFKVHH8
 commits: []
 created-at: 2026-09-25T10:09:20Z
-updated-at: 2026-09-25T11:52:43Z
+updated-at: 2026-09-25T12:08:14Z
 updated-by: Claude
 claimed-by: vm-14196
 claimed-at: 2026-09-25T10:09:31Z
 outcome-what: "Phone/tablet and accessibility pass across every Gate 2 route (one touch-width CSS block: 44px targets, 16px fields, safe-area room, wrapping titles and People rows; sign-in main landmark; legend keys kept whole; Gantt project flag and brand contrast), plus the leftovers: Open full page hidden on touch widths, owner lanes by user id, Gantt today line and portfolio As of from the server's today, an SVG favicon, a visible Portfolio Gantt button on Home"
 outcome-why: "Gate 2 slice 7 in Aly's lock #11: finish Gate 2 so it works on phones, tablets, keyboards and screen readers, and close the review 9/10 gaps"
 outcome-resolves: 3C1Z74 definition of done 1-4; Gate 2 slice 7 for X8FNA5/JQY55P
+review-summary: "Review 11 (2026-09-25, session file lock11-review.md) of febb3b9 on 46ec9f4: approve with follow-ups, no High. Server changes small and safe (favicon allowlisted with strict headers, a constant timezone field); desktop layout unchanged; lock 10 features intact; rendered contrast passes at 320, landscape and sign-in; every requested revert experiment fails a test. Two Mediums: M1 below 1024px and at 200% zoom Tab could move focus to links hidden behind the full-screen panel; M2 calendar items clipped at 761-1023px by the 44px rule. Lows: L1 three class-styled fields under 16px (found once dependencies exist), L2 project Timeline used the app timezone, L3 four untested changes, L4 three 1023px blocks, L5 inline links inflated to 44px boxes. All fixed in 5d39d19bb7fcc1c7281382613dca75554f308814 with behaviour tests where testable; Ran 510 tests, OK; the scratch audit (now seeded with dependencies and a schedule proposal) and keyboard check report nothing; M1 verified in Chromium at 900x800, 720x450@2x and 390x844."
+review-gaps: "Left for later: the reviewer's 7px sideways scroll on the portfolio at 390 under WCAG text-spacing overrides was not reproduced or fixed (it needs a CSP bypass in the test browser); 200% zoom was checked through 720x450@2x only, not with real browser zoom on every screen; no screen-reader run with NVDA or VoiceOver; iOS Safari and Android Chrome were not run on devices (Chromium emulation only); the import template settings dialog was not opened in the audit (its field is covered by the 16px rule); the Inbox day groups use the browser's day (accepted in review 10). The fix commit was not re-reviewed."
+review-verdict: "approve with follow-ups; M1-M2 and L1-L5 fixed in 5d39d19bb7fcc1c7281382613dca75554f308814, not re-reviewed"
+review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 510 tests' and 'OK'. 2. Start Astra, sign in as the owner on a phone (or narrow the browser below 1024px): buttons and fields are finger-sized and tapping a field does not zoom the page. 3. Open any task: it fills the screen without an 'Open full page' button; press Tab and Shift+Tab many times: focus never lands on anything behind the panel; press Esc: the panel closes and focus is back where you were. 4. Open My Work > Calendar on a tablet width (800-1000px): a list of days with work, nothing cut off. 5. On a laptop press Ctrl and + to 200% and open a task: same as step 3. 6. Open Projects > a project > Board, Divide by Owner: two people with the same name have separate lanes. 7. The browser tab shows the small Astra icon. 8. On Home, 'Portfolio Gantt ›' at the top right opens the portfolio timeline, which says 'Due dates as of <today> (Asia/Karachi)'."
 ---
 
 # Gate 2 slice 7: phone and accessibility pass, plus the Gate 2 leftovers
