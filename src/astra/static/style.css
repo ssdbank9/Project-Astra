@@ -409,18 +409,6 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   :root { --panel-w: 380px; }
   #detail-body .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (max-width: 1023px) {
-  .home-grid { grid-template-columns: minmax(0, 1fr); }
-}
-@media (max-width: 1023px) {
-  /* 44px targets wherever the panel is full screen (phones and tablets). */
-  .avatar, .panel-close { min-width: 44px; min-height: 44px; }
-  .task-panel { left: 0; z-index: 45; width: auto; border-left: 0; box-shadow: none; }
-  /* Review L2: text links that open a task are 44px tall targets on phones and tablets. */
-  .note-actions button.link, .board-card .card-title, .home-row .row-title, .work-row .work-title { display: inline-flex; min-height: 44px; align-items: center; }
-  .cal-nav .button-link { display: inline-flex; min-height: 44px; align-items: center; }
-  #board-divide, #cal-scope { min-height: 44px; }
-}
 /* #/task/<id>: the same panel as the page itself. */
 .task-page .task-panel { position: static; width: auto; max-width: 860px; margin: 0 auto; border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: none; animation: none; }
 .task-page #detail-body { overflow: visible; }
@@ -713,10 +701,6 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   .board.shut-closed .board-cols { grid-template-columns: repeat(6, calc(100vw - 88px)) 128px; }
   .board.shut-accepted.shut-closed .board-cols { grid-template-columns: repeat(5, calc(100vw - 88px)) 128px 128px; }
   .board-cols .col { scroll-snap-align: start; }
-  /* FKVHH8: the month becomes an agenda of the days that have work. */
-  .cal-month { display: none; }
-  .cal-agenda { display: block; }
-  .cal-scope { margin-left: 0; }
   .inbox-bar { flex-wrap: wrap; align-items: stretch; }
   .inbox-bar .tabs { flex: 1 1 100%; }
   .inbox-bar #read-all { margin-left: auto; }
@@ -733,14 +717,23 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   .sched-table { font-size: .78rem; }
   .sched-table th, .sched-table td { padding: 8px 6px; }
 }
-/* 3C1Z74: touch widths (phones and tablets). Every control is a 44px target and every field uses 16px
-   text, which also stops iOS zooming in when a field gets focus. Gantt bars are exempt: each bar repeats
-   the task link in the name column of its row, which is a full-size target. */
+/* 3C1Z74: touch widths (phones and tablets), where the task panel fills the screen. One block for every
+   screen. Stand-alone controls are 44px targets; a link inside a sentence, a small print line or a table
+   cell stays inline at 24px or more (the WCAG 2.5.8 inline exception), so rows are not inflated. Fields
+   use 16px text, which also stops iOS zooming in when a field gets focus. Gantt bars are exempt: each bar
+   repeats the task link in the name column of its row, which is a full-size target. */
 @media (max-width: 1023px) {
-  button:not(.step):not(.bar):not(.expand):not(.step-more):not(.track), .button-link, .card-link, .tabs a, .fine a,
+  .avatar, .panel-close { min-width: 44px; }
+  .task-panel { left: 0; z-index: 45; width: auto; border-left: 0; box-shadow: none; }
+  .home-grid { grid-template-columns: minmax(0, 1fr); }
+  button:not(.step):not(.bar):not(.expand):not(.step-more):not(.track):not(.cal-item), .button-link, .card-link, .tabs a, .fine a,
   input:not([type="checkbox"]):not([type="radio"]), select, textarea { min-height: 44px; }
   button.link, .button-link, .card-link, .tabs a, .fine a { display: inline-flex; align-items: center; }
-  input, select, textarea, #search-box { font-size: 16px; }
+  :is(p, small, td, th) button.link:not(.row-title):not(.work-title) { min-height: 24px; }
+  .parent-link button.link { min-height: 44px; }
+  /* :is() takes the weight of #search-box, so no class rule on a field (.dep-remove input, .sched-reject-reason,
+     .tpl-label) can bring it back under 16px. */
+  :is(input, select, textarea, #search-box) { font-size: 16px; }
   label:has(> input[type="checkbox"]) { min-height: 44px; align-items: center; }
   input[type="checkbox"] { flex: none; width: 22px; height: 22px; }  /* the 44px target is its label */
   .skip-link:focus { display: inline-flex; min-height: 44px; align-items: center; }
@@ -750,4 +743,12 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   #people-body .people-list li.user-row { flex-wrap: wrap; }
   #people-body .row-actions { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 0 16px; }
   .cal-nav .button-link { gap: 4px; }
+  .dep-remove { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; max-width: 100%; margin: 6px 0 0; }  /* reason field and actions wrap inside the panel */
+  .dep-remove input { flex: 1 1 160px; min-width: 0; }
+  #board-divide, #cal-scope { min-height: 44px; }
+  /* FKVHH8, review 11 M2: below 1024px the month is an agenda of the days that have work; the 7-column grid
+     would clip two-line items in 44px targets. */
+  .cal-month { display: none; }
+  .cal-agenda { display: block; }
+  .cal-scope { margin-left: 0; }
 }

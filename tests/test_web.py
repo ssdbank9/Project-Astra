@@ -698,6 +698,7 @@ class AstraWebTests(unittest.TestCase):
         before = karachi()
         _, tasks = self.request("GET", "/api/tasks", cookie=cookie)
         self.assertIn(tasks["today"], {before, karachi()})  # both sides of a midnight during the request
+        self.assertEqual(tasks["timezone"], "Asia/Karachi")  # lock #11 review L3: the real field, not a stub
         _, projects = self.request("GET", "/api/projects", cookie=cookie)
         clock = next(p for p in projects["projects"] if p["name"] == "Clock")
         self.assertEqual(clock["today"], datetime.now(ZoneInfo(clock["timezone"])).date().isoformat())
@@ -2004,12 +2005,16 @@ class AstraFoundationStaticTests(unittest.TestCase):
 
     def test_task_links_are_44px_targets_on_phones_and_tablets(self):
         # Lock #10 review L2 (WCAG 2.5.8; lock #9 set 44px below 1024px).
-        block = self.css[self.css.index("/* 44px targets wherever the panel is full screen"):]
+        # Lock #11 review L4/L5: one touch-width block; task links are buttons, so the 44px button rule covers
+        # them (row titles included), and only links inside a sentence, small print or a table cell drop to 24px.
+        self.assertEqual(self.css.count("@media (max-width: 1023px)"), 1)
+        block = self.css[self.css.index("@media (max-width: 1023px) {"):]
         block = block[:block.index("\n}\n")]
-        self.assertRegex(block, r"\.note-actions button\.link, \.board-card \.card-title, \.home-row \.row-title, "
-                                r"\.work-row \.work-title \{[^}]*min-height: 44px;")
-        self.assertRegex(block, r"\.cal-nav \.button-link \{[^}]*min-height: 44px;")
+        self.assertRegex(block, r"button:not\(\.step\):not\(\.bar\):not\(\.expand\):not\(\.step-more\):not\(\.track\):not\(\.cal-item\), "
+                                r"\.button-link, \.card-link, \.tabs a, \.fine a,\s*input[^{]*\{ min-height: 44px; \}")
+        self.assertIn(":is(p, small, td, th) button.link:not(.row-title):not(.work-title) { min-height: 24px; }", block)
         self.assertIn("#board-divide, #cal-scope { min-height: 44px; }", block)
+        self.assertEqual(block.count(".avatar, .panel-close"), 1)
 
     def test_touch_widths_get_44px_targets_16px_fields_and_room_for_the_bottom_bar(self):
         # 3C1Z74: one block for phones and tablets rather than per-screen rules.
@@ -2017,13 +2022,29 @@ class AstraFoundationStaticTests(unittest.TestCase):
         block = block[block.index("@media (max-width: 1023px) {"):]
         block = block[:block.index("\n}\n") if "\n}\n" in block else len(block)]
         self.assertRegex(block, r"button:not\(\.step\)[^{]*\.tabs a, \.fine a,\s*input:not\(\[type=\"checkbox\"\]\)[^{]*select, textarea \{ min-height: 44px; \}")
-        self.assertIn("input, select, textarea, #search-box { font-size: 16px; }", block)
+        # Review 11 L1: :is() takes #search-box's weight, so class rules such as .dep-remove input (12.8px),
+        # .sched-reject-reason and .col-list input.tpl-label cannot win back a smaller size.
+        self.assertIn(":is(input, select, textarea, #search-box) { font-size: 16px; }", block)
+        # No field rule anywhere uses an id selector, so none can outweigh it.
+        self.assertFalse([r for r in re.findall(r"(?m)^[^@{}\n]*#[\w-]+[^{}\n]*\{[^}]*font-size", self.css)
+                          if re.search(r"\b(input|select|textarea)\b", r) and "#search-box" not in r])
         self.assertIn("#detail-full { display: none; }", block)
         self.assertIn("env(safe-area-inset-bottom)", block)
         phone = self.css[self.css.rindex("@media (max-width: 760px)"):]
         self.assertIn(".shell { grid-template-columns: minmax(0, 1fr); padding-bottom: calc(72px + env(safe-area-inset-bottom)); }", self.css)
         self.assertIn("env(safe-area-inset-bottom)", self.css[self.css.index(".rail { position: fixed;"):][:300])
         self.assertTrue(phone)
+
+    def test_legend_keys_and_sign_in_landmark(self):
+        # Lock #11 review L3: each legend swatch is wrapped with its label so it never wraps away from it,
+        # and the sign-in card is a main landmark named by its heading.
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<span class="key"><i class="proj-target-key"></i>Project target</span>', html)
+        self.assertEqual(html.count('<span class="key">'), 8)
+        self.assertRegex(self.css, r"\.legend \.key \{[^}]*white-space: nowrap;")
+        self.assertIn('<main id="login" class="login-card" aria-labelledby="login-title">', html)
+        self.assertIn('<h1 id="login-title">Project command centre</h1>', html)
+        self.assertNotIn('<section id="login"', html)
 
     def test_gantt_project_flags_meet_contrast(self):
         # 3C1Z74: the target flag was white on #d1495b (4.36:1); it now uses --red.
@@ -2073,6 +2094,8 @@ globalThis.window=globalThis;globalThis.addEventListener=(k,f)=>{globalThis["__o
 globalThis.localStorage={getItem(){return null},setItem(){}};
 globalThis.Option=function(t,v){return{text:t,value:v}};
 globalThis.CSS={escape:s=>String(s)};
+// 3C1Z74 review M1: media queries match only the full-screen panel width, and only when __narrow is set.
+globalThis.matchMedia=q=>({get matches(){return !!globalThis.__narrow&&/1023px/.test(q)},addEventListener(){}});
 const fetches=[];
 globalThis.fetch=u=>{fetches.push(u);return new Promise(()=>{})};
 if(mode!=="main"){
@@ -2103,7 +2126,7 @@ if(mode==="home"){
   a.state.today="2026-09-25";
   a.state.ownerRequests=[{id:"r1",action:"update_task_status",task_id:U1,task_title:"<b>Tax</b>",project_name:"P",requested_by_name:"Mia Manager",requested_at:"2026-09-23T10:00:00Z",reason:"why",payload:{status:"cancelled"}}];
   const q=s=>document.querySelector(s),grab=()=>({strip:q("#home-strip").innerHTML,decisions:q("#home-decisions").innerHTML,decisionsHidden:q("#home-decisions-card").hidden,
-    next:q("#home-next").innerHTML,risk:q("#home-risk").innerHTML,week:q("#home-week").innerHTML,empty:q("#home-empty").hidden,grid:q("#home-grid").hidden,asof:q("#home-asof").textContent});
+    next:q("#home-next").innerHTML,risk:q("#home-risk").innerHTML,week:q("#home-week").innerHTML,empty:q("#home-empty").hidden,grid:q("#home-grid").hidden,asof:q("#home-asof").textContent,ganttLinkHidden:q("#home-gantt-link").hidden});
   a.state.user={id:"u1",display_name:"Aly J",global_role:"owner"};a.renderHome();out.owner=grab();
   a.state.user={id:"u1",display_name:"Omar M",global_role:"member"};a.renderHome();out.member=grab();
   a.state.projects=[];a.renderHome();out.emptyMember=grab();
@@ -2151,6 +2174,11 @@ if(mode==="board"){
   a.state.user.global_role="owner";a.renderProject(a.parseRoute("#/project/"+U1+"/overview"));
   out.ownerActions=["#project-capture","#project-save-template","#project-close"].map(s=>document.querySelector(s).hidden);
   out.facts=document.querySelector("#project-facts").textContent;out.overview=document.querySelector("#project-body").innerHTML;
+  // Lock #11 review L2: a project's Timeline uses that project's today and timezone.
+  a.state.today="2026-09-25";a.state.timezone="Asia/Karachi";
+  a.state.projects=[{id:U1,name:"P",status:"active",entities:[],start_date:"2026-09-26",target_date:"2026-10-30",today:"2026-09-26",timezone:"Pacific/Auckland"}];
+  try{a.renderProject(a.parseRoute("#/project/"+U1+"/timeline"));out.timelineAsOf=document.querySelector("#as-of").textContent;out.timelineGantt=document.querySelector("#gantt").innerHTML}catch(e){out.timelineError=String(e.stack)}
+  a.state.projects=[{id:U1,name:"P",status:"active",entities:[]}];
   // Review L8: an unknown tab shows Overview and the link is rewritten to say so.
   location.hash="#/project/"+U1+"/nope?divide=owner";calls.splice(0);
   try{a.applyRoute(false,false)}catch(e){out.tabRouteError=String(e)}
@@ -2282,6 +2310,11 @@ a.stepPanel(1);out.jNext=[calls.splice(0),fetches.splice(0)];
 location.hash="#/my-work?task="+U1;a.panelState.shown=U1;a.stepPanel(-1);out.kPrev=[calls.splice(0),fetches.splice(0)];
 a.panelState.shown=U2;a.stepPanel(1);out.jAtEnd=[calls.splice(0),fetches.splice(0)];
 document.querySelectorAll=realQSA;
+// 3C1Z74 review M1: while the panel covers the screen, the rail, top bar and skip link are inert.
+const inert=()=>[".rail",".topbar","#skip-link"].map(s=>document.querySelector(s).getAttribute("inert"));
+a.closePanel(true);location.hash="#/my-work";globalThis.__narrow=true;a.openPanel(U2);out.inertNarrowOpen=inert();
+a.closePanel(true);out.inertNarrowClosed=inert();
+globalThis.__narrow=false;a.openPanel(U2);out.inertWideOpen=inert();a.closePanel(true);
 // Re-review N1/N2: only a plain notice gets a timer; any notice is cleared when the screen changes.
 const realST=globalThis.setTimeout;let timers=[];globalThis.setTimeout=(f,ms)=>{timers.push(ms);return 0};
 location.hash="#/home";
@@ -2458,6 +2491,9 @@ class AstraShellRouterTests(unittest.TestCase):
         # A new install: one empty state, with the next step only for the owner.
         self.assertFalse(out["emptyOwner"]["empty"])
         self.assertTrue(out["emptyOwner"]["grid"])
+        # Lock #11: the Portfolio Gantt button shows once there is a project, and not on an empty install.
+        self.assertFalse(owner["ganttLinkHidden"])
+        self.assertTrue(out["emptyOwner"]["ganttLinkHidden"])
         self.assertTrue(out["emptyMember"]["decisionsHidden"])
         # Old dashboard links move to the portfolio timeline.
         self.assertNotIn("routeError", out)
@@ -2550,6 +2586,18 @@ class AstraProjectPageTests(unittest.TestCase):
         self.assertNotIn("Unrated", self.out["board"].split("board-card", 1)[1].split("</article>", 1)[0])
         css = (STATIC / "style.css").read_text(encoding="utf-8")
         self.assertIn(".lane-head { position: sticky; left: 0;", css)
+
+    def test_a_project_timeline_uses_its_own_today_and_timezone(self):
+        self.assertNotIn("timelineError", self.out)
+        self.assertTrue(self.out["timelineAsOf"].endswith("(Pacific/Auckland)"), self.out["timelineAsOf"])
+        self.assertIn("26", self.out["timelineAsOf"])
+        gantt = self.out["timelineGantt"]
+        today = re.findall(r'class="today-line" data-x="([^"]+)"', gantt)
+        start = re.findall(r'class="proj-line start" data-x="([^"]+)"', gantt)
+        self.assertTrue(today)
+        self.assertEqual(len(set(today)), 1)  # one line, drawn in every row
+        self.assertAlmostEqual(float(today[0]), float(start[0]), places=6)  # the project's 26 Sep, not the app's 25th
+        self.assertIn('mountGantt(document.querySelector("#gantt-panel"),null);state.ganttDay=null;', (STATIC / "app.js").read_text(encoding="utf-8"))
 
     def test_an_unknown_project_tab_is_rewritten_to_overview(self):
         self.assertNotIn("tabRouteError", self.out)
@@ -2679,9 +2727,12 @@ class AstraMyWorkInboxTests(unittest.TestCase):
         self.assertEqual(re.findall(r'class="agenda-date">(\w+ \d+ \w+)', agenda), ["Wed 23 Sep", "Fri 25 Sep", "Tue 29 Sep", "Wed 30 Sep"])
         self.assertIn('Fri 25 Sep <span class="badge" data-level="info">Today</span>', agenda)
         css = (STATIC / "style.css").read_text(encoding="utf-8")
-        phone = css[css.index("@media (max-width: 760px)", css.index("/* One board column at a time") - 2000):]
-        self.assertIn(".cal-month { display: none; }", phone)
-        self.assertIn(".cal-agenda { display: block; }", phone)
+        # Review 11 M2: the agenda replaces the grid on every touch width (below 1024px), not only phones.
+        touch = css[css.index("@media (max-width: 1023px) {"):]
+        touch = touch[:touch.index("\n}\n")]
+        self.assertIn(".cal-month { display: none; }", touch)
+        self.assertIn(".cal-agenda { display: block; }", touch)
+        self.assertIn(":not(.cal-item)", touch)
         self.assertIn(".cal-agenda { display: none;", css)
 
     def test_inbox_tabs_for_a_member(self):
@@ -2763,6 +2814,15 @@ class AstraTaskPanelTests(unittest.TestCase):
         self.assertEqual(self.out["linkOpen"]["hash"], f"#/inbox?task={U3}")
         self.assertEqual(self.out["linkClose"]["calls"], [["replace", "#/inbox"]])
 
+    def test_what_is_behind_a_full_screen_panel_is_inert(self):
+        # 3C1Z74 review M1: below 1024px the panel covers the screen; Tab must not reach what it hides.
+        self.assertEqual(self.out["inertNarrowOpen"], ["", "", ""])
+        self.assertEqual(self.out["inertNarrowClosed"], [None, None, None])
+        self.assertEqual(self.out["inertWideOpen"], [None, None, None])  # at 1024px+ the page stays usable
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn('...document.querySelectorAll("[data-view]")])', js)
+        self.assertIn('fullMQ.addEventListener("change",syncPanelInert)', js)
+
     def test_the_task_page_is_the_same_panel_and_closes_to_the_last_screen(self):
         self.assertEqual(self.out["pageOpen"]["app"], ["panel-open", "task-page"])
         self.assertEqual(self.out["pageOpen"]["hash"], f"#/task/{U2}")
@@ -2789,7 +2849,8 @@ class AstraTaskPanelTests(unittest.TestCase):
         self.assertRegex(css, r"@media \(min-width: 1024px\) and \(max-width: 1279px\) \{\n  :root \{ --panel-w: 380px; \}")
         self.assertRegex(css, r"@media \(max-width: 1023px\) \{\n[^}]*\}\n  \.task-panel \{ left: 0;")
         # Re-review N3: 44px panel close and avatar wherever the panel is full screen.
-        self.assertRegex(css, r"@media \(max-width: 1023px\) \{\n  /\*[^*]*\*/\n  \.avatar, \.panel-close \{ min-width: 44px; min-height: 44px; \}")
+        # Lock #11 review L4: the button rule gives the 44px height; this keeps the 44px width.
+        self.assertRegex(css, r"@media \(max-width: 1023px\) \{\n  \.avatar, \.panel-close \{ min-width: 44px; \}")
         topbar_z = int(re.search(r"\.topbar \{[^}]*z-index: (\d+)", css).group(1))
         panel_z = int(re.search(r"\.task-panel \{[^}]*z-index: (\d+)", css).group(1))
         self.assertGreater(topbar_z, panel_z)   # the account menu opens over the panel

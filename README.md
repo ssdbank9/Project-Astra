@@ -93,9 +93,12 @@ This first vertical slice provides:
   Content-Security-Policy allows fonts from Astra only; every control shows a keyboard focus
   ring, a reduced-motion setting switches animation off, and the page fits phone (360px) to
   desktop (1440px) widths without sideways scrolling. Below 1024px (phones and tablets) every
-  button, link and field is at least 44px tall and fields use 16px text, so iOS does not zoom
-  in; the phone bottom bar leaves room for the device's safe area and never covers content;
-  "Open full page" is hidden where the task panel already fills the screen. Each screen has
+  stand-alone button, link and field is at least 44px tall (a link inside a sentence, small
+  print or a table cell stays inline at 24px or more, so rows are not inflated) and fields use
+  16px text, so iOS does not zoom in; the phone bottom bar leaves room for the device's safe
+  area and never covers content. There the task panel fills the screen: "Open full page" is
+  hidden, and everything behind the panel is inert while it is open, so Tab stays in the panel
+  until it is closed (the same happens at 200% zoom on a laptop). Each screen has
   one heading 1 (the page title, which takes focus when the screen changes, so screen readers
   announce it), a "Skip to content" link, navigation, main and panel landmarks, a name on
   every control, and text contrast of 4.5:1 or better, including the Gantt project flags.
@@ -146,8 +149,8 @@ This first vertical slice provides:
   count, soonest first, with a filter box. Calendar (`#/my-work/calendar?month=YYYY-MM`) is a
   Monday-first month grid of open tasks on their due day, with Previous, Today and Next and a
   "Show" choice (my tasks, or all tasks you can see; `&scope=all`); a day with more than 3
-  tasks shows 3 and "+N more", which opens the rest in place. On a phone the month is an
-  agenda of the days that have work. Every row and calendar item opens the task panel.
+  tasks shows 3 and "+N more", which opens the rest in place. Below 1024px (phones and
+  tablets) the month is an agenda of the days that have work. Every row and calendar item opens the task panel.
   "Today" on Home, in My Work, on the calendar and on the Gantt's today line is the server's
   date in the app's timezone (Asia/Karachi, sent with `/api/tasks`; each project also carries
   its own `today`), and each task's days until due are counted in its project's timezone, so

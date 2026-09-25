@@ -9,7 +9,7 @@ function projectEntityIds(projectId){const p=state.projects.find(p=>p.id===proje
 function fillPredecessors(){const project=document.querySelector('#task-form select[name="project_id"]').value,select=document.querySelector('#task-form select[name="predecessor_task_id"]'),parent=document.querySelector('#task-form select[name="parent_task_id"]');select.innerHTML='<option value="">No predecessor</option>';parent.innerHTML='<option value="">No parent</option>';for(const task of state.tasks.filter(t=>t.project_id===project)){select.add(new Option(task.title,task.id));parent.add(new Option(task.title,task.id))}}
 function render(){
   // The Gantt nodes may be on a project page; the portfolio takes them back.
-  mountGantt(document.querySelector("#gantt-panel"),null);
+  mountGantt(document.querySelector("#gantt-panel"),null);state.ganttDay=null;
   projectActions();
   const tasks=visibleTasks();
   document.querySelector("#project-count").textContent=state.projects.length;
@@ -82,6 +82,16 @@ const storage={get(k,f){try{const v=localStorage.getItem(k);return v==null?f:JSO
 const storedExpanded=storage.get("astra.gantt.expanded",[]);
 const expandedParents=new Set(Array.isArray(storedExpanded)?storedExpanded:[]);
 const phoneMQ=window.matchMedia?window.matchMedia("(max-width: 760px)"):{matches:false};
+// 3C1Z74 review M1: below 1024px (and at 200% zoom) the task panel covers the screen, so everything behind it
+// is made inert while it is open: Tab stays in the panel and nothing hidden behind it can take focus.
+const fullMQ=window.matchMedia?window.matchMedia("(max-width: 1023px)"):{matches:false};
+function syncPanelInert(){
+  const panel=document.querySelector("#detail-dialog"),app=document.querySelector("#app");
+  const covers=!!panel&&!panel.hidden&&fullMQ.matches&&!app.classList.contains("task-page");
+  for(const el of [document.querySelector(".rail"),document.querySelector(".topbar"),document.querySelector("#skip-link"),...document.querySelectorAll("[data-view]")])
+    if(el){if(covers)el.setAttribute("inert","");else el.removeAttribute("inert")}
+}
+if(fullMQ.addEventListener)fullMQ.addEventListener("change",syncPanelInert);
 function currentView(){if(state.viewOverride)return state.viewOverride;const stored=storage.get("astra.gantt.view",null);if(stored==="table"||stored==="chart")return stored;return phoneMQ.matches?"table":"chart"}
 // ISO dates parse as UTC midnight, so format them in UTC too or viewers west of UTC see the day before.
 function fmtDay(iso){if(!iso)return "—";return new Date(iso).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"})}
@@ -173,7 +183,7 @@ function renderGantt(tasks){
   // Task dates parse as UTC midnight, so ticks and the today line are in UTC too; today is the server's.
   const ticks=[];const t0=new Date(min);t0.setUTCHours(0,0,0,0);
   for(let t=t0.getTime();t<=max.getTime();t+=7*86400000)ticks.push(new Date(t));
-  const todayPct=pct(Date.parse(appToday()));const showToday=todayPct>=0&&todayPct<=100;
+  const todayPct=pct(Date.parse(ganttToday()));const showToday=todayPct>=0&&todayPct<=100;
   const axis=ticks.map(d=>`<span class="axis-tick" data-x="${pct(d)}"><b>${d.getUTCDate()}</b> ${escapeHtml(d.toLocaleDateString(undefined,{month:"short",timeZone:"UTC"}))}</span>`).join("");
   const todayFlag=showToday?`<span class="today-flag" data-x="${todayPct}">Today</span>`:"";
   const header=`<div class="gantt-row gantt-head"><div class="task-name gantt-head-cap">Project / task</div><div class="task-meta gantt-head-cap">Owner · due · next action</div><div class="timeline axis">${axis}${markerLines}${markerFlags}${todayFlag}</div></div>`;
@@ -457,7 +467,7 @@ function applyRoute(moveFocus,fromLoad){
   if(r.name!=="task"){panelState.lastView=viewHash;panelState.rendered=viewHash}
   // The first load after sign-in always fetches the task again: nothing rendered earlier is trusted.
   if(taskId&&(taskId!==panelState.shown||(fromLoad&&state.loads===1)))openDetail(taskId);else if(!taskId)closePanel(true);
-  else document.querySelector("#app").classList.toggle("task-page",r.name==="task");
+  else{document.querySelector("#app").classList.toggle("task-page",r.name==="task");syncPanelInert()}
   document.querySelectorAll("[data-view]").forEach(v=>{v.hidden=v.dataset.view!==r.name});
   const nav=NAV_OF[r.name]||r.name;
   document.querySelectorAll("[data-nav]").forEach(a=>{if(a.dataset.nav===nav)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current")});
@@ -492,8 +502,10 @@ function dueThisWeek(t){return t.days_to_due!=null&&t.days_to_due>=0&&t.days_to_
 function appToday(){return /^\d{4}-\d{2}-\d{2}$/.test(state.today||"")?state.today:dayKey(new Date())}
 function utcDay(key,plus=0){return new Date(Date.UTC(+key.slice(0,4),+key.slice(5,7)-1,+key.slice(8,10)+plus))}
 function utcKey(d){return d.toISOString().slice(0,10)}
-// 3C1Z74: the portfolio's "As of" names the server's date and timezone that due states are counted in.
-function asOfText(){return `Due dates as of ${fmtDay(appToday())}${state.timezone?` (${state.timezone})`:""}`}
+// 3C1Z74: "As of" names the server's date and timezone that due states are counted in. A project's own
+// Timeline uses that project's today and timezone (review 11 L2); the portfolio uses the app's.
+function ganttToday(){return state.ganttDay&&state.ganttDay.today||appToday()}
+function asOfText(){const tz=state.ganttDay?state.ganttDay.timezone:state.timezone;return `Due dates as of ${fmtDay(ganttToday())}${tz?` (${tz})`:""}`}
 const WORK_GROUPS=[["overdue","Overdue"],["today","Today"],["week","This week"],["later","Later"],["undated","No date"]];
 const WORK_EMPTY={overdue:"Nothing overdue.",today:"Nothing due today.",week:"Nothing due in the next 7 days.",later:"Nothing due later.",undated:"Every task has a due date."};
 function workGroup(t){if(t.due_state==="overdue")return "overdue";if(t.due_state==="today")return "today";if(!t.due_date)return "undated";return dueThisWeek(t)?"week":"later"}
@@ -686,6 +698,7 @@ function renderProject(r){
     return `${top} task${top===1?"":"s"}${steps?`, ${steps} step${steps===1?"":"s"}`:""}`})()].filter(Boolean).join(" · ");
   if(!slot.hidden){
     mountGantt(slot,r.tab==="list"||phoneMQ.matches?"table":"chart");
+    state.ganttDay=/^\d{4}-\d{2}-\d{2}$/.test(p.today||"")?{today:p.today,timezone:p.timezone||null}:null;
     document.querySelector("#as-of").textContent=asOfText();
     renderBands(tasks);renderGantt(tasks);return;
   }
@@ -1243,6 +1256,7 @@ function openPanel(taskId){
   // A first open adds a history entry (Back closes the panel); swapping tasks while it is open replaces it.
   if(r.name!=="task"&&r.params.get("task")!==taskId){const h=routeHash(r,taskId);
     if(wasHidden){panelState.pushed=h;location.hash=h}else{if(history.replaceState)history.replaceState(null,"",h);if(panelState.pushed)panelState.pushed=h}}
+  syncPanelInert();
   if(isNew)document.querySelector("#detail-heading")?.focus({preventScroll:true});
 }
 function closePanel(fromRoute){
@@ -1250,6 +1264,7 @@ function closePanel(fromRoute){
   if(panel.hidden)return;
   panel.hidden=true;panelState.shown=null;
   document.querySelector("#app").classList.remove("panel-open","task-page");
+  syncPanelInert();
   panel.dispatchEvent(new Event("close"));
   if(!fromRoute){
     const r=currentRoute();
