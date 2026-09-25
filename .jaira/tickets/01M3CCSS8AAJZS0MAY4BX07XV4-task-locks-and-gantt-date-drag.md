@@ -1,7 +1,7 @@
 ---
 id: 01M3CCSS8AAJZS0MAY4BX07XV4
 title: Task locks and Gantt date drag
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -28,13 +28,17 @@ related:
   - 01M3C0MZ2TASFSNYRN1E3C1Z74
 commits: []
 created-at: 2026-09-25T13:41:41Z
-updated-at: 2026-09-25T17:27:33Z
+updated-at: 2026-09-25T17:47:12Z
 updated-by: Claude
 claimed-by: vm-32647
 claimed-at: 2026-09-25T13:41:59Z
 outcome-what: "Tasks now take renewable 60-second leases (task_locks, schema v19). Board and Gantt drags take a drag lease and the panel's Edit form an edit lease; they renew every 20 s while in use and are released on drop, save or close. Every task write checks the lease inside its write transaction (_event guard) and refuses with a 409 naming the holder and expiry. Cards show a lock chip, the panel a banner, and owners may Force unlock (task_lock_forced, holder noticed). Gantt bars can be dragged or resized by owners and managers, with a live date tip. Ordinary moves have a 15 s Undo (undo_move, generalised from the board). Moves that break a dependency, touch the critical path or pass the project target confirm first and notify the other owners (schedule_impact_confirmed). Invalid dates are refused and audited (gantt_move_blocked)."
 outcome-why: "Aly's lock #12 (Slack ts 1790341004.453539), item B, under the JQY55P 2026-09-19 decisions on multi-user locks, lock expiry and Gantt dragging."
 outcome-resolves: "Ticket B of lock #12: task locks and Gantt date drag."
+review-summary: "Reviews 12b, 12d and 12e (2026-09-25) of 34eeca1, 55ddf3c and 89e9229. Task locks are 60-second leases (schema v19 task_locks): a board or Gantt drag takes a drag lease and typing in the panel's Edit form an edit lease, renewed every 20 seconds and released on drop, cancel, save or close (an idle form lets go after a minute). While someone else holds one, every task write is refused with 409 naming the holder and the local expiry time; the check sits in _event inside the write transaction and now also covers reviewer changes (reviewer_added and reviewer_removed are task events), links from a locked predecessor and board reorders. An expired lease cannot be renewed; a drag borrows your own edit lease; any owner can force unlock (task_lock_forced, holder told). The Gantt gains bar drag and resize with a live tip; the server validates the dates, applies ordinary moves with a 15-second Undo (move_kind gantt) and asks first when a move breaks a finish-to-start link, touches the critical path or passes the project target, writing schedule_impact_confirmed in the same transaction. That date rule now holds on every path: panel, API, reopen with a revised due date and approving a schedule proposal (12d L1). A successor may start on its predecessor's due day. A drag loads the project once (12d M1)."
+review-gaps: "Left for later: three revert experiments no test catches (review 12e L1): dropping the board-source-status check in undo_move, dropping the per-row revision check inside _write_bulk, and showing members the bulk checkboxes. Not tried on a real touch device (tablet long press, Playwright emulation only), no screen-reader run, and no live refresh (lock chips, banners and Inbox gate lines show the last load; the server rechecks at write and decision time). Review 12c I3: bulk assign, like the panel, accepts the chairman and project viewers; ask Aly whether viewers should be assignable. The Blocked WIP exemption: a card that enters Blocked because of a dependency is not refused, so a Blocked limit can be exceeded by an added link or a reopened predecessor. A manager's accept request on a waiting task is filed and the owner is asked at decision time (not refused at filing). An owner's own board Undo passes the dependency override itself (12d I1); the importer and templates bypass the WIP and dependency gates (owner-only, 12d I2)."
+review-verdict: "approve with follow-ups: reviews 12a, 12b, 12c and re-review 12d each approved with follow-ups (no High); every finding fixed in 55ddf3cba30d4ce1cfe34603f25413aa9f32eb0a and 89e92295337e0edf7016e1fb1b2a85aeb0cae825; review 12e of 89e9229 approves (0 High, 0 Medium, 1 Low: three uncaught revert experiments, left as follow-ups); Ran 639 tests, OK"
+review-check: "1. Repo root: .venv/bin/python tests/run.py (Windows: .venv\\Scripts\\python.exe tests\\run.py); expect 'Ran 639 tests' and 'OK'. 2. Sign in as a manager in one browser and open a task's Edit form, then type in the title. 3. Sign in as the owner in a second browser (private window) and drag the same card on the Board: it snaps back with 'is in use. <manager> is changing this task … until <local time>'. 4. Open that task as the owner: an amber banner names the holder; press Force unlock and give a reason: the manager is told. 5. Open the project's Timeline and drag a bar a few days right: the tip shows the new dates and a toast offers Undo. 6. Drag a bar's right end past the project target: 'Confirm the new dates' lists the consequence; confirm, and task History shows schedule_impact_confirmed. 7. Reopen a completed task with a due date past the target: the same confirm appears."
 ---
 
 # Task locks and Gantt date drag

@@ -74,8 +74,8 @@ Locks so far:
   fixed in `5d39d19` (not re-reviewed); the ticket is in signoff; pushed after review 11.
   With it Gate 2 is complete (slices 1-7), apart from Aly's signoff.
 - Lock #12 (granted 12:56 UTC 2026-09-25, Slack ts 1790341004.453539): from `77fcfce`, the
-  post-Gate-2 batch under the JQY55P 2026-09-19 owner decisions, **not pushed** at the time
-  of writing. Five commits:
+  post-Gate-2 batch under the JQY55P 2026-09-19 owner decisions, pushed after review 12e.
+  Six commits:
   - `a2161a0` JN1QYG board drag and drop, Move to and 15-second Undo (schema v18,
     `tasks.board_rank`), with Aly's on-hold decision (ts 1790342529.695749: a project manager
     puts work on hold directly; leaving hold is still an Owner request).
@@ -93,9 +93,14 @@ Locks so far:
     about 0.2 s). Approving a request re-runs the dependency, WIP and date rules at decision
     time and asks the owner to confirm each one; the Inbox and Home request cards show what
     approving would override. Reopen with a new due date and approving a schedule proposal
-    ask about date consequences too.
-  - The three tickets are in review. Tests: `Ran 639 tests`, `OK`. Evidence (screenshots
-    and a short video) lives in the session scratchpad, `lock12-shots/`.
+    ask about date consequences too. That is `89e9229`.
+  - A chore commit recording reviews 12a-12e ("chore(JN1QYG, X07XV4, XV92JJ): record reviews
+    12a-12e (approve with follow-ups) and move to signoff"). Review 12e of `89e9229` approves:
+    0 High, 0 Medium, 1 Low (three revert experiments no test catches, left as follow-ups;
+    see section 6, item 10).
+  - The three tickets are in signoff, waiting for Aly. Tests: `Ran 639 tests`, `OK`.
+    Evidence (screenshots and a short video) lives in the session scratchpad,
+    `lock12-shots/`.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
 
@@ -243,6 +248,24 @@ old handoff's top section marked superseded; (b) the jaira sync fix as local set
    "could not open directory 'tmpXXXX/': Permission denied" warnings; do not delete until
    checked.
 9. Signoff on the 18 tickets plus the 4 human-lane tickets.
+10. Lock #12 (JN1QYG, X07XV4, XV92JJ in signoff) follow-ups, not built:
+    - Three revert experiments no test catches (review 12e L1): dropping the
+      board-source-status check in `undo_move` (test: undo a board move out of
+      `changes_requested`); dropping the per-row revision check in `_write_bulk` (test: bump
+      one task's revision between the recheck and the write); showing members the bulk
+      checkboxes (driver case where `bulkScope()` returns null for a member).
+    - Not tried on a real touch device (tablet long press), no screen-reader run, and no
+      live refresh: lock chips, banners and the Inbox "Approving overrides" lines show the
+      last load (the server rechecks at write and decision time).
+    - Ask Aly (review 12c I3): bulk assign, like the task panel, accepts the chairman and
+      project viewers. Should viewers be assignable at all?
+    - The Blocked WIP exemption: a card that enters Blocked because of a dependency is not
+      refused, so a Blocked limit can be exceeded by an added link or a reopened
+      predecessor (documented in the README).
+    - A manager's accept request on a waiting task is filed, and the owner is asked at
+      decision time (not refused at filing). An owner's own board Undo passes the
+      dependency override itself (12d I1). The importer and templates bypass the WIP and
+      dependency gates (owner-only, 12d I2).
 - Unfiled lows (from the previous thread, unverified): 409 reload on the remaining
   task-dialog forms; `test_db` handle cleanup; AYW0QC arrows and UTC/DST.
 - Delivery plan artifact (from the previous thread):

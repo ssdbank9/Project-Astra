@@ -4,7 +4,7 @@
 > [`CLAUDE_HANDOFF_2026-09-24.md`](CLAUDE_HANDOFF_2026-09-24.md) before
 > reviewing or changing `codex/migration-safety-remediation`. It has the
 > current branch and head, the 2026-09-24 commits, the test evidence (639 tests
-> with lock #12, not pushed at the time of writing), schema v20, the board by lane,
+> with lock #12, pushed after review 12e, tickets in signoff), schema v20, the board by lane,
 > the write-lock rules and the open asks.
 > `CLAUDE_REMEDIATION_HANDOFF_2026-09-23.md` is kept as history.
 

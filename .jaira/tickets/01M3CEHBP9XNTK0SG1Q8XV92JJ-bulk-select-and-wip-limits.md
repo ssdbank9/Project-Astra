@@ -1,7 +1,7 @@
 ---
 id: 01M3CEHBP9XNTK0SG1Q8XV92JJ
 title: Bulk select and WIP limits
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -27,13 +27,17 @@ related:
   - 01M3BSY3W3FH34MF87RACR121Z
 commits: []
 created-at: 2026-09-25T14:12:02Z
-updated-at: 2026-09-25T17:27:33Z
+updated-at: 2026-09-25T17:47:14Z
 updated-by: Claude
 claimed-by: vm-26940
 claimed-at: 2026-09-25T14:12:18Z
 outcome-what: "Owners and the project's managers tick tasks on a project's Board or List (Shift-click range, Space and Shift+Arrow in the list) and change status (Draft/Ready/In progress), assignee or due dates in bulk. A preview names every blocked task and any schedule consequences. Apply is all-or-nothing: bulk leases on every task first, then one transaction holding the writes, per-task task_updated events and one bulk_change project event with one owner notice. There is a 15 s bulk Undo. Owners set optional WIP limits per open column (wip_limits, schema v20; wip_limit_changed). Board moves and bulk status changes over a limit are refused with the reason, and owners may override after a confirm (wip_limit_override). Column heads show n / limit. update_task's write body became _apply_task_update so bulk can share it."
 outcome-why: "Aly's lock #12 (Slack ts 1790341004.453539), item C, under the JQY55P 2026-09-19 decisions on bulk dragging, bulk locking and workflow configuration authority."
 outcome-resolves: "Ticket C of lock #12: bulk select and WIP limits."
+review-summary: "Reviews 12c, 12d and 12e (2026-09-25) of 50e139d, 55ddf3c and 89e9229. Owners and a project's managers tick tasks on the Board or List (Shift-click and Shift+Arrow take ranges) and change Status (Draft, Ready, In progress), Assignee or a due-date offset in bulk. Review change previews counts and names every blocked task with its reason, schedule consequences and a WIP overflow; apply is all or nothing: bulk leases first (skipping tasks the actor already holds), then, in one transaction, the plan is rebuilt and any drift since the preview refuses the change, every task write, one bulk_change event and one notice; schedule consequences need confirmed. Undo within 15 seconds restores every task or none. The write reads the board once before and once after (_board_snapshot), so a 200-task change in a 1000-task project applies in about 0.2 s instead of 33 s (12d M1). Optional WIP limits per board column (schema v20 wip_limits, owners only, whole numbers, one request and one transaction) are a rule of every status-changing write a person makes, including approving a request: anyone but an owner is refused, an owner confirms and wip_limit_override is written in the same transaction; a dependency-driven entry into Blocked is exempt."
+review-gaps: "Left for later: three revert experiments no test catches (review 12e L1): dropping the board-source-status check in undo_move, dropping the per-row revision check inside _write_bulk, and showing members the bulk checkboxes. Not tried on a real touch device (tablet long press, Playwright emulation only), no screen-reader run, and no live refresh (lock chips, banners and Inbox gate lines show the last load; the server rechecks at write and decision time). Review 12c I3: bulk assign, like the panel, accepts the chairman and project viewers; ask Aly whether viewers should be assignable. The Blocked WIP exemption: a card that enters Blocked because of a dependency is not refused, so a Blocked limit can be exceeded by an added link or a reopened predecessor. A manager's accept request on a waiting task is filed and the owner is asked at decision time (not refused at filing). An owner's own board Undo passes the dependency override itself (12d I1); the importer and templates bypass the WIP and dependency gates (owner-only, 12d I2)."
+review-verdict: "approve with follow-ups: reviews 12a, 12b, 12c and re-review 12d each approved with follow-ups (no High); every finding fixed in 55ddf3cba30d4ce1cfe34603f25413aa9f32eb0a and 89e92295337e0edf7016e1fb1b2a85aeb0cae825; review 12e of 89e9229 approves (0 High, 0 Medium, 1 Low: three uncaught revert experiments, left as follow-ups); Ran 639 tests, OK"
+review-check: "1. Repo root: .venv/bin/python tests/run.py (Windows: .venv\\Scripts\\python.exe tests\\run.py); expect 'Ran 639 tests' and 'OK'; test_board Review12dTests.test_m1_a_200_task_bulk_in_a_1000_task_project_is_quick is the speed check. 2. Sign in as the owner, open a project's Board, press Limits…, set Ready to 1 and Save: the Ready head shows 'n / 1'. 3. Use a card's Move to… to put a second card in Ready: 'Go over the limit' asks first. 4. Sign in as a manager and try the same: refused with 'Ready is at its work-in-progress limit'. 5. As the manager open the List, tick three Draft tasks, choose Status > Ready and press Review change: the preview names the limit and any blocked task with its reason; nothing changes until they are removed. 6. As the owner tick three tasks, set them to In progress, tick 'Go over the limit' if asked, Apply: one toast 'Changed 3 tasks' with Undo; press Undo: all three go back."
 ---
 
 # Bulk select and WIP limits
