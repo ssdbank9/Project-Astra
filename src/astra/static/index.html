@@ -94,11 +94,19 @@
         <div class="page-actions"><button type="button" id="new-project" hidden>New project</button></div>
         <div id="projects-body" class="page-card"></div>
       </section>
+      <aside id="detail-dialog" class="task-panel" aria-labelledby="detail-heading" hidden>
+        <div class="panel-bar">
+          <span class="panel-kicker">Task</span>
+          <button type="button" class="quiet" id="detail-copy">Copy link</button>
+          <a class="quiet button-link" id="detail-full" href="#/home">Open full page</a>
+          <button type="button" class="panel-close" id="detail-close" aria-label="Close task"><span aria-hidden="true">×</span></button>
+        </div>
+        <div id="detail-body"></div>
+      </aside>
     </main>
   </div>
   <dialog id="project-dialog"><form method="dialog" id="project-form"><h2>Create project</h2><label>Name<input name="name" required></label><label>Description<textarea name="description"></textarea></label><div class="actions"><button value="cancel" class="quiet">Cancel</button><button value="default">Create</button></div><div class="error"></div></form></dialog>
   <dialog id="task-dialog" aria-labelledby="task-dialog-title"><form method="dialog" id="task-form"><h2 id="task-dialog-title">Capture a task</h2><label>Task title<input name="title" required></label><div class="grid"><label>Project<select name="project_id" required></select></label><label>Due date<input name="due_date" type="date"></label></div><details class="more-fields"><summary>More fields</summary><label>Owner<select name="owner_user_id"><option value="">Unassigned</option></select></label><div class="grid"><label>Start date<input name="start_date" type="date"></label><label>Criticality<select name="criticality"><option value="">Unrated</option><option value="critical">Critical</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select></label><label>Progress<input name="progress" type="number" min="0" max="100"></label></div><label>Depends on (finish-to-start)<select name="predecessor_task_id"><option value="">No predecessor</option></select></label><label>Parent task (optional)<select name="parent_task_id"><option value="">No parent</option></select></label><label>Description<textarea name="description"></textarea></label></details><div class="actions"><button value="cancel" class="quiet">Cancel</button><button value="default">Add task</button></div><div class="error"></div></form></dialog>
-  <dialog id="detail-dialog"><div id="detail-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
   <dialog id="people-dialog"><div id="people-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
   <dialog id="search-dialog"><div id="search-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
   <dialog id="project-history-dialog"><div id="project-history-body"></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
@@ -119,7 +127,8 @@
   </dialog>
   <dialog id="keys-dialog" aria-labelledby="keys-title"><div class="dialog-body"><h2 id="keys-title">Keyboard shortcuts</h2><dl class="keys">
     <dt><kbd>Ctrl</kbd> <kbd>K</kbd> or <kbd>/</kbd></dt><dd>Search tasks and projects</dd>
-    <dt><kbd>Esc</kbd></dt><dd>Close a menu or dialog</dd>
+    <dt><kbd>Esc</kbd></dt><dd>Close a menu, a dialog or the task panel</dd>
+    <dt><kbd>j</kbd> / <kbd>k</kbd></dt><dd>Next or previous task while the task panel is open</dd>
     <dt><kbd>?</kbd></dt><dd>Show these shortcuts</dd>
   </dl><p class="fine">Single keys work only when you are not typing in a field.</p></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

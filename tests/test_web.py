@@ -1980,7 +1980,7 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertEqual(self.out["parsed"], [
             ["home", None, ""], ["home", None, ""], ["home", None, ""], ["home", None, ""],
             ["my-work", None, ""], ["inbox", None, ""], ["projects", None, ""], ["home", None, ""],
-            ["home", None, ""], ["home", None, "status=delayed&open=1"], ["home", "a/b", ""]])
+            ["home", None, ""], ["home", None, "status=delayed&open=1"], ["task", "a/b", ""]])
 
     def test_filters_round_trip_through_the_url_with_replace_state(self):
         self.assertEqual(self.out["values"], ["p1", "delayed", "e1", "unrated", "7", "Sara K", "due_date"])
@@ -1998,7 +1998,7 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertEqual(self.out["hashchange"], "function")
         self.assertTrue(self.out["noUser"])
         self.assertNotRegex(self.js, r"\.pushState\(")
-        self.assertIn('window.addEventListener("hashchange",()=>{closeMenus();applyRoute(true)});', self.js)
+        self.assertIn('window.addEventListener("hashchange",()=>{closeMenus();const quiet=panelState.quiet;panelState.quiet=false;applyRoute(!quiet)});', self.js)
 
     def test_shell_landmarks_rail_top_bar_and_menus(self):
         html = self.html
@@ -2050,6 +2050,129 @@ class AstraShellRouterTests(unittest.TestCase):
         # Approve/Reject stay live on the Inbox page.
         self.assertIn('data-request-decision="approved"', js)
         self.assertIn("Nothing is waiting for your decision.", js)
+
+
+# DR3PKR: the task panel's link and history handling, run under node with the minimal globals plus
+# history.back (which the panel uses only when it added the entry itself).
+PANEL_DRIVER = r"""
+const fs=require("fs");
+const src=fs.readFileSync(process.argv[2],"utf8");
+const store={};
+function el(){
+  const cls=new Set(),listeners={};
+  const t={innerHTML:"",textContent:"",value:"",checked:false,hidden:false,style:{},dataset:{},_attrs:{},isConnected:true,
+    setAttribute(k,v){t._attrs[k]=String(v)},getAttribute(k){return t._attrs[k]??null},removeAttribute(k){delete t._attrs[k]},
+    addEventListener(k,f){(listeners[k]=listeners[k]||[]).push(f)},dispatchEvent(e){(listeners[e.type]||[]).forEach(f=>f(e));return true},
+    classList:{add:(...c)=>c.forEach(x=>cls.add(x)),remove:(...c)=>c.forEach(x=>cls.delete(x)),toggle:(c,on)=>{if(on===undefined?!cls.has(c):on)cls.add(c);else cls.delete(c)},contains:c=>cls.has(c)},
+    _classes:()=>[...cls].sort(),_listeners:listeners,focus(){globalThis.__focused=t._id},contains(){return false},closest(){return null}};
+  return new Proxy(t,{get(o,k){if(k===Symbol.toPrimitive)return()=>"";if(k in o)return o[k];return function(){return el()}}});
+}
+globalThis.document={querySelector(s){if(!store[s]){store[s]=el();store[s]._id=s}return store[s]},querySelectorAll(){return[]},
+  getElementById(s){return document.querySelector("#"+s)},createElement(){return el()},addEventListener(){},body:el(),documentElement:el()};
+document.activeElement=document.body;
+globalThis.window=globalThis;globalThis.addEventListener=()=>{};
+globalThis.localStorage={getItem(){return null},setItem(){}};
+globalThis.fetch=()=>new Promise(()=>{});
+globalThis.Option=function(t,v){return{text:t,value:v}};
+globalThis.CSS={escape:s=>String(s)};
+const calls=[];
+globalThis.location={hash:"",search:""};
+globalThis.history={replaceState(a,b,url){calls.push(["replace",url]);location.hash=url},back(){calls.push(["back"])}};
+(0,eval)(src+";globalThis.__p={openPanel,closePanel,routeHash,taskLink,parseRoute,panelState,state};");
+const p=globalThis.__p,panel=document.querySelector("#detail-dialog"),app=document.querySelector("#app"),out={};
+panel.hidden=true;let closes=0;panel.addEventListener("close",()=>closes++);
+const snap=()=>({hash:location.hash,hidden:panel.hidden,app:app._classes(),calls:calls.splice(0),closes,full:document.querySelector("#detail-full").getAttribute("href"),focused:globalThis.__focused||null});
+location.hash="#/home?status=delayed";
+p.openPanel("t1");out.open=snap();
+p.openPanel("t2");out.swap=snap();
+p.closePanel(false);out.close=snap();
+location.hash="#/inbox?task=t9";p.panelState.pushed=null;
+p.openPanel("t9");out.linkOpen=snap();
+p.closePanel(false);out.linkClose=snap();
+location.hash="#/task/t3";p.panelState.lastView="#/my-work";
+p.openPanel("t3");out.pageOpen=snap();
+p.closePanel(false);out.pageClose=snap();
+p.closePanel(false);out.closeTwice=snap();
+out.links=[p.taskLink("a/b"),p.routeHash(p.parseRoute("#/home?due=7&task=x"),null),p.routeHash(p.parseRoute("#/my-work"),"y z")];
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")
+class AstraTaskPanelTests(unittest.TestCase):
+    """DR3PKR: the docked task panel has its own link, and Back, close and reload agree with it."""
+
+    @classmethod
+    def setUpClass(cls):
+        with tempfile.TemporaryDirectory() as tmp:
+            driver = Path(tmp) / "panel.js"
+            driver.write_text(PANEL_DRIVER, encoding="utf-8")
+            result = subprocess.run(["node", str(driver), str(STATIC / "app.js")],
+                                    capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise AssertionError(result.stderr)
+        cls.out = json.loads(result.stdout)
+        cls.js = (STATIC / "app.js").read_text(encoding="utf-8")
+        cls.html = (STATIC / "index.html").read_text(encoding="utf-8")
+        cls.css = (STATIC / "style.css").read_text(encoding="utf-8")
+
+    def test_opening_adds_the_task_to_the_link_and_swapping_replaces_it(self):
+        opened = self.out["open"]
+        self.assertEqual(opened["hash"], "#/home?status=delayed&task=t1")
+        self.assertFalse(opened["hidden"])
+        self.assertEqual(opened["app"], ["panel-open"])
+        self.assertEqual(opened["calls"], [])          # a first open assigns the hash: a history entry of its own
+        self.assertEqual(opened["full"], "#/task/t1")
+        self.assertEqual(opened["focused"], "#detail-heading")
+        swapped = self.out["swap"]
+        self.assertEqual(swapped["calls"], [["replace", "#/home?status=delayed&task=t2"]])
+        self.assertEqual(swapped["full"], "#/task/t2")
+
+    def test_closing_goes_back_when_the_panel_added_the_entry_and_fires_close(self):
+        closed = self.out["close"]
+        self.assertTrue(closed["hidden"])
+        self.assertEqual(closed["app"], [])
+        self.assertEqual(closed["calls"], [["back"]])
+        self.assertEqual(closed["closes"], 1)
+        self.assertEqual(closed["focused"], "#page-title")   # no opener was focused in this run
+
+    def test_a_panel_opened_from_a_link_closes_without_leaving_the_app(self):
+        self.assertEqual(self.out["linkOpen"]["calls"], [])
+        self.assertEqual(self.out["linkOpen"]["hash"], "#/inbox?task=t9")
+        self.assertEqual(self.out["linkClose"]["calls"], [["replace", "#/inbox"]])
+        self.assertEqual(self.out["linkClose"]["closes"], 2)
+
+    def test_the_task_page_is_the_same_panel_and_closes_to_the_last_screen(self):
+        self.assertEqual(self.out["pageOpen"]["app"], ["panel-open", "task-page"])
+        self.assertEqual(self.out["pageOpen"]["hash"], "#/task/t3")
+        self.assertEqual(self.out["pageClose"]["hash"], "#/my-work")
+        self.assertEqual(self.out["pageClose"]["app"], [])
+        self.assertEqual(self.out["closeTwice"]["closes"], 3)   # closing a closed panel does nothing
+        self.assertEqual(self.out["links"], ["#/task/a%2Fb", "#/home?due=7", "#/my-work?task=y+z"])
+
+    def test_panel_markup_keys_and_layout(self):
+        html, js, css = self.html, self.js, self.css
+        self.assertNotIn('<dialog id="detail-dialog"', html)
+        self.assertRegex(html, r'<aside id="detail-dialog" class="task-panel" aria-labelledby="detail-heading" hidden>')
+        panel = html[html.index('<aside id="detail-dialog"'):html.index("</aside>")]
+        for part in ('id="detail-copy"', 'id="detail-full"', 'id="detail-close" aria-label="Close task"', '<div id="detail-body"></div>'):
+            self.assertIn(part, panel)
+        self.assertIn('<h2 id="detail-heading" tabindex="-1">', js)
+        self.assertIn('<p class="role-line">${escapeHtml(roleLine(perms))}</p>', js)
+        self.assertIn('if(e.key==="Escape"){e.preventDefault();if(inField&&panel.contains(e.target))e.target.blur();else closePanel(false)}', js)
+        self.assertIn('else if(!inField&&(e.key==="j"||e.key==="k")){e.preventDefault();stepPanel(e.key==="j"?1:-1)}', js)
+        self.assertIn(".task-panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 25; display: flex; flex-direction: column; width: 460px;", css)
+        self.assertRegex(css, r"@media \(min-width: 1024px\) \{\n  \.panel-open:not\(\.task-page\) main \{ padding-right: calc\(28px \+ 460px\); \}")
+        self.assertRegex(css, r"@media \(max-width: 1023px\) \{\n  \.task-panel \{ left: 0;")
+        # One lifecycle block, placed before the rest of the task.
+        body = js[js.index('document.querySelector("#detail-body").innerHTML=`'):]
+        self.assertLess(body.index("${lifecycle}"), body.index('<p class="desc">'))
+        self.assertEqual(body[:body.index('document.querySelector("#detail-edit")?.addEventListener')].count("${lifecycle}"), 1)
+
+    def test_state_chips_carry_a_glyph_or_word(self):
+        chips = self.js[self.js.index("function stateTags(task){"):self.js.index("function roleLine(perms){")]
+        for text in ('`▲ ${due||"Overdue"}`', '"⊘ Blocked"', '"◆ Critical path"', '"◆ Critical"', '"✓ "', '"∥ "'):
+            self.assertIn(text, chips)
 
 
 # ARZWV7: renderDetail is run under node against a permissive DOM stub, so these tests read the

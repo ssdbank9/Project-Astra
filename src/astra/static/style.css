@@ -64,7 +64,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 .login-card h1 { margin: .6rem 0; }
 .login-card p { color: var(--muted); }
 label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-2); margin: 12px 0; }
-input, select, textarea { font: inherit; font-size: var(--fs-body); font-weight: 400; color: var(--ink); padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); }
+input, select, textarea { min-width: 0; max-width: 100%; font: inherit; font-size: var(--fs-body); font-weight: 400; color: var(--ink); padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); }
 textarea { min-height: 76px; }
 button { font: inherit; font-weight: 600; padding: 9px 16px; border: 0; border-radius: var(--radius); background: var(--teal); color: white; cursor: pointer; transition: background-color var(--dur-1) ease; }
 button:not([class]):hover { background: var(--teal-dark); }
@@ -215,14 +215,47 @@ button.bar.plain { display: flex; align-items: center; margin: 0; border: 0; fon
 dialog { border: 0; border-radius: 14px; padding: 0; box-shadow: var(--shadow-3); width: min(560px, 92vw); color: var(--ink); }
 dialog::backdrop { background: #172a4670; }
 dialog form { padding: 26px; }
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
 .more-fields { margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
 .more-fields summary { padding: 6px 0; color: var(--teal); font-size: 13px; font-weight: 600; cursor: pointer; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem; font-weight: 650; text-decoration: underline; }
-#detail-dialog { width: min(680px, 94vw); }
-#detail-body { padding: 26px 26px 0; max-height: 76vh; overflow: auto; }
-#detail-body h2 { margin: 0 0 6px; }
+/* DR3PKR: the task panel is docked on the right and non-modal; the screen behind moves over to stay visible. */
+.task-panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 25; display: flex; flex-direction: column; width: 460px; max-width: 100vw; background: var(--surface); border-left: 1px solid var(--line); box-shadow: var(--shadow-2); animation: panel-in var(--dur-3) var(--ease-enter); }
+@keyframes panel-in { from { transform: translateX(24px); opacity: 0; } }
+.panel-bar { display: flex; align-items: center; gap: 8px; min-height: 60px; padding: 10px 12px 10px 20px; border-bottom: 1px solid var(--line); }
+.panel-kicker { margin-right: auto; color: var(--muted); font-size: var(--fs-caption); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.panel-bar .quiet { padding: 7px 11px; font-size: 13px; }
+.button-link { display: inline-block; border-radius: var(--radius); font-weight: 600; text-decoration: none; }
+.panel-close { width: 36px; height: 36px; padding: 0; background: none; color: var(--text-2); font-size: 24px; font-weight: 400; line-height: 1; }
+.panel-close:hover { background: var(--surface-3); }
+#detail-body { flex: 1 1 auto; overflow: auto; padding: 18px 20px 32px; }
+#detail-body h2 { margin: 0 0 8px; font-size: var(--fs-title); }
+#detail-heading:focus { outline: none; }
+.panel-crumb { margin: 0 0 4px; color: var(--muted); font-size: var(--fs-small); }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.tag { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; background: var(--chip-gray-bg); color: var(--chip-gray); font-size: var(--fs-small); font-weight: 600; white-space: nowrap; }
+.tag[data-tone="red"] { background: var(--chip-red-bg); color: var(--chip-red); }
+.tag[data-tone="amber"] { background: var(--chip-amber-bg); color: var(--chip-amber); }
+.tag[data-tone="purple"] { background: var(--chip-purple-bg); color: var(--chip-purple); }
+.tag[data-tone="teal"] { background: var(--chip-teal-bg); color: var(--chip-teal); }
+.tag[data-tone="blue"] { background: var(--chip-blue-bg); color: var(--chip-blue); }
+.tag[data-tone="green"] { background: var(--chip-green-bg); color: var(--chip-green); }
+.role-line { margin: 0 0 12px; padding: 8px 12px; border-radius: var(--radius); background: var(--teal-soft); color: var(--chip-teal); font-size: 13px; font-weight: 600; }
+#detail-body .facts { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.panel-sections { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 0; padding: 6px 0 0; }
+.panel-sections .link { font-size: 13px; text-decoration: none; }
+.panel-sections .link:hover { text-decoration: underline; }
+@media (min-width: 1024px) {
+  .panel-open:not(.task-page) main { padding-right: calc(28px + 460px); }
+}
+@media (max-width: 1023px) {
+  .task-panel { left: 0; z-index: 45; width: auto; border-left: 0; box-shadow: none; }
+}
+/* #/task/<id>: the same panel as the page itself. */
+.task-page .task-panel { position: static; width: auto; max-width: 860px; margin: 0 auto; border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: none; animation: none; }
+.task-page #detail-body { overflow: visible; }
+.task-page #detail-full { display: none; }
 #detail-body h3 { margin: 22px 0 6px; border-top: 1px solid #e3e7ee; padding-top: 16px; }
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 12px 0; }
 .fact { background: #f3f5f8; border-radius: 8px; padding: 8px 10px; }
@@ -491,6 +524,7 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   .rail-item { flex: 1 1 0; padding: 6px 0; }
   .rail-item[aria-current="page"]::before { left: 14px; right: 14px; top: -4px; bottom: auto; width: auto; height: 3px; border-radius: 0 0 3px 3px; }
   .toast { bottom: 80px; }
+  #detail-body .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #new-task.rail-item { margin-top: 0; }
   .topbar, main { grid-column: 1; }
   .topbar { flex-wrap: wrap; gap: 8px 12px; padding: 8px 16px; }

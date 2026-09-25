@@ -53,6 +53,9 @@ Locks so far:
   independent review 7.
 - Lock #8: from `caf261a` (3M2AYA sign-in without lockout, in-app password reset,
   8-character minimum); pushed after independent review 8.
+- Lock #9: from `f8f0f69` (Gate 2 slices 1-3: 4T4DEA design foundation and self-hosted
+  Inter, PZTYC9 shell frame with rail, top bar and hash router, DR3PKR docked task panel);
+  three local commits, not yet pushed and not yet independently reviewed.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
 
@@ -88,7 +91,8 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   (server commands `transfer-primary` and `reset-password`, no schema change):
   `Ran 438 tests`, `OK`. With XX9RFM (project close and date-change notices):
   `Ran 444 tests`, `OK`. With 3M2AYA (no sign-in lockout, in-app password reset,
-  8-character minimum): `Ran 456 tests`, `OK`.
+  8-character minimum): `Ran 456 tests`, `OK`. With lock #9 (Gate 2 slices 1-3, no schema
+  change): `Ran 472 tests`, `OK`.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 
@@ -179,7 +183,10 @@ old handoff's top section marked superseded; (b) the jaira sync fix as local set
 6. PR #4 extra work, merge, then this branch's PR (option 6). Merge order from the
    previous thread: PR #4, then this branch into `main`, then the review-report branch;
    PR #4's tests will need `expected_revision` updates (unverified here).
-7. Adopt the Gate 2 shell (JQY55P / X8FNA5) (option 7).
+7. Adopt the Gate 2 shell (JQY55P / X8FNA5) (option 7). Slices 1-3 (foundation, shell
+   frame, task panel) were built under lock #9 as 4T4DEA, PZTYC9 and DR3PKR (review lane,
+   related to X8FNA5 and JQY55P, which stay Aly's). Slices 4-7 (Command Center Home, project
+   tabs and read-only board, My Work and Inbox pages, phone and accessibility pass) remain.
 8. The `tmp*` folders in Aly's checkout (option 8): `git status` there prints about 35
    "could not open directory 'tmpXXXX/': Permission denied" warnings; do not delete until
    checked.

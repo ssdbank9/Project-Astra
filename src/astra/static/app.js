@@ -341,12 +341,12 @@ function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":
 // the Home link with history.replaceState, so nothing here needs pushState. Home filters ride in the query
 // (#/home?status=delayed&open=1), so reload, Back and a pasted link restore them.
 const VIEWS=["home","my-work","inbox","projects"];
-const VIEW_TITLES={home:["Home","Portfolio"],"my-work":["My Work","Assigned to me"],inbox:["Inbox","Needs action and activity"],projects:["Projects","All projects"]};
+const VIEW_TITLES={home:["Home","Portfolio"],"my-work":["My Work","Assigned to me"],inbox:["Inbox","Needs action and activity"],projects:["Projects","All projects"],task:["Task","Task"]};
 const FILTER_PARAMS=[["project","#project-filter"],["status","#status-filter"],["entity","#entity-filter"],["crit","#crit-filter"],["due","#band-filter"],["owner","#owner-filter"],["sort","#sort-filter"]];
 function parseRoute(hash){
   const raw=String(hash||"").replace(/^#\/?/,""),q=raw.indexOf("?");
   const [name,id]=(q<0?raw:raw.slice(0,q)).split("/");
-  return {name:VIEWS.includes(name)?name:"home",id:id?decodeURIComponent(id):null,params:new URLSearchParams(q<0?"":raw.slice(q+1))};
+  return {name:VIEWS.includes(name)||(name==="task"&&id)?name:"home",id:id?decodeURIComponent(id):null,params:new URLSearchParams(q<0?"":raw.slice(q+1))};
 }
 function currentRoute(){return parseRoute(location.hash)}
 function filtersFromUrl(params){
@@ -360,14 +360,17 @@ function homeQuery(){
   return p.toString();
 }
 function syncFilters(){
-  const q=homeQuery(),hash="#/home"+(q?"?"+q:"");
-  if(location.hash!==hash&&history.replaceState)history.replaceState(null,"",hash);
+  const q=homeQuery(),hash="#/home"+(q?"?"+q:""),task=currentRoute().params.get("task"),full=task?routeHash(parseRoute(hash),task):hash;
+  if(location.hash!==full&&history.replaceState)history.replaceState(null,"",full);
+  if(task&&panelState.pushed)panelState.pushed=full;
+  panelState.rendered=hash;
   document.querySelector('[data-nav="home"]').setAttribute("href",hash);
 }
 function filtersChanged(){syncFilters();render();shellTitle(currentRoute())}
 function roleLabel(u){if(u.is_primary_owner)return "Primary owner";const r=String(u.global_role||"");return r.charAt(0).toUpperCase()+r.slice(1)}
 function shellTitle(r){
   let [crumb,title]=VIEW_TITLES[r.name];
+  if(r.name==="task"&&panelState.task){crumb=`Task · ${panelState.task.project_name||""}`;title=panelState.task.title}
   const pid=r.name==="home"&&document.querySelector("#project-filter").value,proj=pid&&state.projects.find(p=>p.id===pid);
   if(proj){crumb="Home · Projects";title=proj.name}
   document.querySelector("#crumb").textContent=crumb;document.querySelector("#page-title").textContent=title;document.title=`${title} · Astra`;
@@ -408,22 +411,27 @@ function showToast(text,actionLabel,action){
 }
 function applyRoute(moveFocus,fromLoad){
   if(!state.user)return;
-  const r=currentRoute();
+  const r=currentRoute(),taskId=r.name==="task"?r.id:r.params.get("task");
+  const viewHash=routeHash(r,null),sameView=!fromLoad&&viewHash===panelState.rendered;
+  if(r.name!=="task"){panelState.lastView=viewHash;panelState.rendered=viewHash}
+  if(taskId&&taskId!==panelState.shown)openDetail(taskId);else if(!taskId)closePanel(true);
+  else document.querySelector("#app").classList.toggle("task-page",r.name==="task");
   document.querySelectorAll("[data-view]").forEach(v=>{v.hidden=v.dataset.view!==r.name});
   document.querySelectorAll("[data-nav]").forEach(a=>{if(a.dataset.nav===r.name)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current")});
+  if(sameView){shellTitle(r);return}
   if(r.name==="home"){
     filtersFromUrl(r.params);
     const sort=r.params.get("sort")==="due_date"?"due_date":"criticality";
     if(sort!==state.sort){state.sort=sort;load();return}
-    document.querySelector('[data-nav="home"]').setAttribute("href",location.hash||"#/home");
+    document.querySelector('[data-nav="home"]').setAttribute("href",routeHash(r,null));
     render();
   }else if(r.name==="my-work")renderMyWork();
   else if(r.name==="projects")renderProjects();
   else if(r.name==="inbox"&&(!fromLoad||state.inboxLoads===undefined))openInbox();
   shellTitle(r);
-  if(moveFocus)document.querySelector("#page-title").focus();
+  if(moveFocus&&!taskId)document.querySelector("#page-title").focus();
 }
-window.addEventListener("hashchange",()=>{closeMenus();applyRoute(true)});
+window.addEventListener("hashchange",()=>{closeMenus();const quiet=panelState.quiet;panelState.quiet=false;applyRoute(!quiet)});
 // My Work: open tasks the signed-in person owns, soonest first, grouped by when they are due.
 const WORK_GROUPS=[["overdue","Overdue"],["today","Today"],["week","Next 7 days"],["later","Later"],["undated","No due date"]];
 function workGroup(t){if(t.due_state==="overdue")return "overdue";if(t.due_state==="today")return "today";if(!t.due_date)return "undated";return t.days_to_due!=null&&t.days_to_due<=7?"week":"later"}
@@ -487,7 +495,7 @@ wireMenu("#more-btn");wireMenu("#user-menu-btn");
 document.querySelector("#skip-link").addEventListener("click",e=>{e.preventDefault();document.querySelector("#main").focus()});
 document.addEventListener("click",e=>{if(!e.target.closest(".menu-wrap"))closeMenus()});
 document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;const menu=document.querySelector(".menu:not([hidden])");if(!menu)return;
-  const btn=document.querySelector(`[aria-controls="${menu.id}"]`),held=menu.contains(document.activeElement)||document.activeElement===btn;closeMenus();if(held&&btn)btn.focus()});
+  const btn=document.querySelector(`[aria-controls="${menu.id}"]`),held=menu.contains(document.activeElement)||document.activeElement===btn;e.preventDefault();closeMenus();if(held&&btn)btn.focus()});
 // Ctrl/Cmd+K or / jumps to search and ? lists the shortcuts. Single keys never fire while typing in a field
 // or while a dialog is open.
 function focusSearch(){const box=document.querySelector("#search-box");box.focus();box.select()}
@@ -838,11 +846,69 @@ async function openDetail(taskId){
   try{
     const [d,ev]=await Promise.all([api(`/api/tasks/${taskId}`),api(`/api/tasks/${taskId}/events`)]);
     renderDetail(d.task,ev.events);
-    const dialog=document.querySelector("#detail-dialog");
-    if(!dialog.open)dialog.showModal();
+    openPanel(taskId);
+    panelState.task=d.task;if(currentRoute().name==="task")shellTitle(currentRoute());
     return d.task;
-  }catch(err){document.querySelector("#detail-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`;return null}
+  }catch(err){document.querySelector("#detail-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`;openPanel(taskId);return null}
 }
+// DR3PKR: the task panel. It is docked on the right (non-modal) and has its own link: ?task=<id> over the
+// current screen, or #/task/<id> as a full page. Opening adds a history entry, so Back closes it; closing
+// fires "close" (as the old dialog did) so the Inbox can refresh. The aside keeps the id detail-dialog.
+const panelState={shown:null,opener:null,openerKey:null,pushed:null,lastView:"#/home",quiet:false,task:null};
+function taskLink(id){return `#/task/${encodeURIComponent(id)}`}
+function routeHash(r,taskId){const p=new URLSearchParams(r.params);p.delete("task");if(taskId)p.set("task",taskId);const q=p.toString();return `#/${r.name}${q?"?"+q:""}`}
+function openPanel(taskId){
+  const panel=document.querySelector("#detail-dialog"),app=document.querySelector("#app"),r=currentRoute(),isNew=panelState.shown!==taskId,wasHidden=panel.hidden;
+  if(wasHidden){const a=document.activeElement,ok=a&&a!==document.body&&!panel.contains(a);panelState.opener=ok?a:null;
+    // A re-render can replace the opener, so also keep a selector that finds its replacement (as GF-6 does).
+    const kind=ok&&a.hasAttribute("data-detail")?[...FOCUS_KINDS,"work-title"].find(k=>a.classList.contains(k)):null;
+    panelState.openerKey=ok&&a.hasAttribute("data-detail")?`${kind?"."+kind:""}[data-detail="${CSS.escape(a.dataset.detail)}"]`:null}
+  panel.hidden=false;panelState.shown=taskId;
+  app.classList.add("panel-open");app.classList.toggle("task-page",r.name==="task");
+  document.querySelector("#detail-full").setAttribute("href",taskLink(taskId));
+  // A first open adds a history entry (Back closes the panel); swapping tasks while it is open replaces it.
+  if(r.name!=="task"&&r.params.get("task")!==taskId){const h=routeHash(r,taskId);
+    if(wasHidden){panelState.pushed=h;location.hash=h}else{if(history.replaceState)history.replaceState(null,"",h);if(panelState.pushed)panelState.pushed=h}}
+  if(isNew)document.querySelector("#detail-heading")?.focus({preventScroll:true});
+}
+function closePanel(fromRoute){
+  const panel=document.querySelector("#detail-dialog");
+  if(panel.hidden)return;
+  panel.hidden=true;panelState.shown=null;
+  document.querySelector("#app").classList.remove("panel-open","task-page");
+  panel.dispatchEvent(new Event("close"));
+  if(!fromRoute){
+    const r=currentRoute();
+    if(r.name==="task"){panelState.quiet=true;location.hash=panelState.lastView}
+    else if(location.hash===panelState.pushed&&history.back){panelState.quiet=true;history.back()}
+    else if(history.replaceState)history.replaceState(null,"",routeHash(r,null));
+  }
+  panelState.pushed=null;
+  let back=panelState.opener;
+  if((!back||!back.isConnected)&&panelState.openerKey)back=document.querySelector(`[data-view]:not([hidden]) ${panelState.openerKey}`);
+  panelState.opener=panelState.openerKey=null;
+  if(back&&back.isConnected&&!back.closest("[hidden]"))back.focus({preventScroll:true});else document.querySelector("#page-title").focus();
+}
+// j/k: the next or previous task of the screen behind the panel, in the order it lists them.
+function panelSequence(){const r=currentRoute();if(r.name==="my-work"){const me=state.user&&state.user.id;return state.tasks.filter(t=>t.owner_user_id===me&&!CLOSED_STATUSES.includes(t.status)).sort((a,b)=>String(a.due_date||"9999").localeCompare(String(b.due_date||"9999")))}return r.name==="home"?visibleTasks():state.tasks}
+function stepPanel(delta){
+  const list=panelSequence(),i=list.findIndex(t=>t.id===panelState.shown),next=list[i+delta];
+  if(i<0||!next)return;
+  const r=currentRoute();if(r.name!=="task"&&history.replaceState){const h=routeHash(r,next.id);history.replaceState(null,"",h);if(panelState.pushed)panelState.pushed=h}
+  openDetail(next.id);
+}
+document.querySelector("#detail-close").addEventListener("click",()=>closePanel(false));
+document.querySelector("#detail-copy").addEventListener("click",async()=>{
+  const url=location.origin+location.pathname+taskLink(panelState.shown||detailTaskId);
+  try{await navigator.clipboard.writeText(url);showToast("Link to this task copied.")}catch{showToast(`Copy this link: ${url}`)}
+});
+document.addEventListener("keydown",e=>{
+  const panel=document.querySelector("#detail-dialog");
+  if(panel.hidden||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||document.querySelector("dialog[open]")||document.querySelector(".menu:not([hidden])"))return;
+  const inField=e.target.closest("input,textarea,select,[contenteditable]");
+  if(e.key==="Escape"){e.preventDefault();if(inField&&panel.contains(e.target))e.target.blur();else closePanel(false)}
+  else if(!inField&&(e.key==="j"||e.key==="k")){e.preventDefault();stepPanel(e.key==="j"?1:-1)}
+});
 
 // QY0WG2: an Unrated task has no confirmed consequence yet, so it must stand out rather than read
 // like a level. It reuses the shared warning badge; rated levels keep their plain text.
@@ -852,6 +918,26 @@ function critLabel(level,strong){
 }
 
 function fact(label,value){return `<div class="fact"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`}
+// DR3PKR: state chips under the title: tint + dark text, and a glyph or word so colour is never the only cue.
+function stateTags(task){
+  const tag=(tone,text)=>`<span class="tag" data-tone="${tone}">${escapeHtml(text)}</span>`;
+  const tone={draft:"gray",assigned:"blue",in_progress:"teal",submitted:"amber",changes_requested:"amber",completed:"green",on_hold:"purple",delayed:"red",cancelled:"gray",abandoned:"gray",reopened:"teal"}[task.status]||"gray";
+  const out=[tag(tone,(task.status==="completed"?"✓ ":task.status==="on_hold"?"∥ ":"")+statusLabel(task.status))];
+  const due=dueText(task);
+  if(task.due_state==="overdue")out.push(tag("red",`▲ ${due||"Overdue"}`));
+  else if(task.due_state==="today")out.push(tag("amber",due||"Due today"));
+  else if(task.due_state!=="closed")out.push(tag("gray",due||(task.due_date?`Due ${fmtDay(task.due_date)}`:"No due date")));
+  if(task.is_blocked)out.push(tag("purple","⊘ Blocked"));
+  if(task.is_critical_path)out.push(tag("red","◆ Critical path"));
+  if(task.criticality==="critical")out.push(tag("red","◆ Critical"));
+  return out.join("");
+}
+function roleLine(perms){
+  if(perms.can_decide_protected)return "You are the App Owner. Changes apply directly and are recorded in History.";
+  if(perms.can_request_protected)return "You manage this project. Protected changes go to the App Owner as requests.";
+  if(perms.can_edit_ordinary)return "You can edit this task. Changes are recorded in History.";
+  return "You can view this task.";
+}
 
 function renderDetail(task,events){
   const perms=task.permissions||{};
@@ -861,12 +947,16 @@ function renderDetail(task,events){
   if(!editable.includes(task.status))editable.unshift(task.status);
   const opts=editable.map(s=>`<option${s===task.status?" selected":""}>${escapeHtml(s)}</option>`).join("");
   const crit=CRITICALITIES.map(([v,l])=>`<option value="${v}"${v===(task.criticality||"")?" selected":""}>${escapeHtml(l)}</option>`).join("");
+  // DR3PKR: the panel opens on who, when and how far; the project and parent sit in the crumb above the title.
+  // Critical path, blocked and days-to-due are computed for the task list, not the detail record, so read them there.
+  const roll=task.subtask_rollup,listed=state.tasks.find(t=>t.id===task.id)||task;
   const facts=[
-    fact("Project",task.project_name),
     fact("Owner",task.owner_name||"Unassigned"),
-    fact("Parent",task.parent_title||"None"),
-    fact("Revision",String(task.revision)),
-    fact("Due state",task.due_state),
+    fact("Start",task.start_date?fmtDay(task.start_date):"Not set"),
+    fact("Due",task.due_date?fmtDay(task.due_date):"Not set"),
+    fact("Criticality",task.criticality?task.criticality.charAt(0).toUpperCase()+task.criticality.slice(1):"Unrated"),
+    fact("Progress",`${task.progress==null?"—":task.progress+"%"}${roll&&roll.total?` · ${roll.completed}/${roll.total} steps`:""}`),
+    fact("Critical path",listed.is_critical_path?"Yes":"No"),
   ].join("");
   const deps=(task.dependencies||[]).map(dep=>{
     const other=dep.direction==="incoming"?dep.predecessor_title:dep.successor_title;
@@ -933,16 +1023,20 @@ function renderDetail(task,events){
   const parentLink=task.parent_task_id?`<p class="parent-link"><button type="button" class="link" data-detail="${escapeHtml(task.parent_task_id)}">◂ Parent: ${escapeHtml(task.parent_title||"parent task")}</button></p>`:"";
   document.querySelector("#detail-body").innerHTML=`
     ${parentLink}
-    <h2>${escapeHtml(task.title)}</h2>
+    <p class="panel-crumb">${escapeHtml(task.project_name||"")} · ${escapeHtml(statusLabel(task.status))}</p>
+    <h2 id="detail-heading" tabindex="-1">${escapeHtml(task.title)}</h2>
+    <div class="tags">${stateTags({...listed,...task,is_blocked:listed.is_blocked,is_critical_path:listed.is_critical_path,days_to_due:listed.days_to_due})}</div>
+    <p class="role-line">${escapeHtml(roleLine(perms))}</p>
     <div class="facts">${facts}</div>
+    <div class="panel-sections" role="group" aria-label="Jump to a section">${[["desc","Details"],["subtasks","Steps"],["deps","Dependencies"],["attachments","Files"],["history","History"]].map(([c,l])=>`<button type="button" class="link" data-jump="${c}">${l}</button>`).join("")}</div>
     ${closedNote}
+    ${lifecycle}
     <p class="desc">${escapeHtml(task.description||"No description.")}</p>
     ${buildImportedFields(task)}
     <p><button type="button" class="link" id="save-task-template">Save this task (and its subtasks) as a template</button></p>
     ${critForm}
     ${schedule}
     ${subtasks}
-    ${lifecycle}
     ${reviewers}
     ${attachments}
     ${editForm}
@@ -954,6 +1048,7 @@ function renderDetail(task,events){
     </div>
     <div class="history"><h3>History</h3><ul>${timeline}</ul></div>`;
   document.querySelector("#detail-edit")?.addEventListener("submit",e=>submitDetailEdit(e,{statusLocked:submitted}));
+  document.querySelectorAll("#detail-body [data-jump]").forEach(b=>b.addEventListener("click",()=>document.querySelector(`#detail-body .${b.dataset.jump}`)?.scrollIntoView({block:"start"})));
   document.querySelector("#add-dep-button")?.addEventListener("click",addDependency);
   document.querySelector("#detail-body [data-goto-reopen]")?.addEventListener("click",()=>{const f=document.querySelector("#reopen-form");if(!f)return;f.scrollIntoView({behavior:"smooth",block:"center"});f.querySelector("input")?.focus({preventScroll:true})});
   document.querySelector("#detail-body").querySelectorAll("[data-remove-pred]").forEach(b=>b.addEventListener("click",removeDependency));
@@ -1088,7 +1183,7 @@ function buildLifecycle(task,extra=""){
     actions+=`<form data-life="hold"><label>On-hold reason<input name="reason" required></label><label>Follow-up checkpoint<input name="checkpoint_date" type="date" required></label><label>Responsible owner<select name="owner_user_id"><option value="">Unassigned</option></select></label><div class="actions"><button>${canDecide?"Put on hold":"Request Owner hold"}</button></div></form>`;
   }
   return `<div class="lifecycle"><h3>Lifecycle</h3>
-    <p>Status: <strong>${escapeHtml(task.status)}</strong></p>
+    <p>Status: <strong>${escapeHtml(statusLabel(task.status))}</strong></p>
     <ul class="submissions">${subs}</ul>${actions}
     <div class="error" id="lifecycle-error"></div>${extra}</div>`;
 }

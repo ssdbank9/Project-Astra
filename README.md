@@ -104,6 +104,13 @@ This first vertical slice provides:
   fields fold under More fields) and says so if the current filters hide it. Portfolio, Final
   results, Templates, Import, Export CSV and, with one project selected, Project history,
   Save project as template and Close project are in the Home "More" menu;
+- a task panel docked on the right: a task opens beside the current screen, which stays
+  visible and usable, and has a link of its own (`?task=<id>` on that screen, or
+  `#/task/<id>` as a full page) that survives reload and Back/Forward and can be copied with
+  Copy link. Esc or × closes it and puts focus back where you were, `j`/`k` step to the next
+  or previous task, and below 1024px it fills the screen. It opens on the title, state chips
+  (with a glyph or word, never colour alone), a line saying what you may do, six facts (owner,
+  start, due, criticality, progress, critical path) and the one Lifecycle block;
 - a final-results repository: the App Owner marks an accepted submission or an attachment
   by hand (acceptance alone adds nothing), and the Final results dialog filters by project,
   entity, type, marked date (from/to, whole days in UTC, both ends inclusive) and a search,
@@ -133,7 +140,7 @@ closes while such a write (or a Manager's request for one) is in flight is refus
 and an import row for a closed task is skipped with `W_CLOSED_TASK`. Attachment links and
 final-result marking stay available on closed tasks, and a closed task may still be added
 as a predecessor of an open one, or have an open task moved under or out of it as a
-subtask, since the closed task's own row does not change. The task dialog follows these
+subtask, since the closed task's own row does not change. The task panel follows these
 rules (ARZWV7): on a closed task it drops the forms the server refuses and says "Reopen this
 task to change it", with a link to the reopen form (offered on completed, cancelled and
 abandoned tasks); a Manager there can only request a move back into draft, assigned, in
