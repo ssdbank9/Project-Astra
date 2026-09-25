@@ -103,8 +103,8 @@ This first vertical slice provides:
   Gantt and the schedule table; its filters live in the link, so reload, Back and a shared
   link keep them (older `#/home?...` filter links are sent there), and active filters show as
   removable chips beside "Showing X of Y", with Clear all. Its Risk filter (at risk, blocked,
-  critical path) and "No due date" option also narrow Export CSV. My Work lists your open
-  tasks by due date; the Inbox is a page (Approve and Reject work there); Projects lists the
+  critical path) and "No due date" option also narrow Export CSV. My Work and the Inbox are
+  described below; Projects lists the
   projects you can see; Capture adds a task with a title and project (the other fields fold
   under More fields) and says so if the current filters hide it. Portfolio by entity, Final
   results, Templates, Import, Export CSV and, with one project selected, Project history,
@@ -128,7 +128,21 @@ This first vertical slice provides:
   initials, due date, criticality, "Waits on …", on hold, delayed, critical path and "Steps n
   of m done" (steps are counted on their parent, not drawn as cards). "Divide by" splits the
   board into swimlanes by owner or criticality and is kept in the link. Status still changes
-  only through the task's own lifecycle actions;
+  only through the task's own lifecycle actions. Every column keeps the same width in the
+  header and in every swimlane; a wide board scrolls sideways inside its own frame;
+- My Work with two tabs. List (`#/my-work`) groups the open tasks you own into Overdue,
+  Today, This week (due in the next 7 days, as on Home), Later and No date, each with a
+  count, soonest first, with a filter box. Calendar (`#/my-work/calendar?month=YYYY-MM`) is a
+  Monday-first month grid of open tasks on their due day, with Previous, Today and Next and a
+  "Show" choice (my tasks, or all tasks you can see; `&scope=all`); a day with more than 3
+  tasks shows 3 and "+N more", which opens the rest in place. On a phone the month is an
+  agenda of the days that have work. Every row and calendar item opens the task panel;
+- an Inbox with tabs: Needs action (owners only: the requests waiting for a decision, with
+  working Approve and Reject), Unread and All, each with a count; `?tab=` keeps the choice.
+  Owners land on Needs action while a request waits, everyone else on Unread while anything
+  is unread. Notifications are grouped Today, Yesterday and Earlier; unread ones are
+  highlighted and have Mark read; Open task opens the task and marks that notification read;
+  Mark all read clears the rest. Marking read never approves or changes anything;
 - a task panel docked on the right: a task opens beside the current screen, which stays
   visible and usable, and has a link of its own (`?task=<id>` on that screen, or
   `#/task/<id>` as a full page) that survives reload and Back/Forward and can be copied with

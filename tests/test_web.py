@@ -1993,7 +1993,7 @@ globalThis.history={replaceState(a,b,url){calls.push(["replace",url]);location.h
 // Seed what the menu wiring reads at load time.
 document.querySelector("#more-btn").setAttribute("aria-controls","more-menu");document.querySelector("#more-menu").hidden=true;
 document.querySelector("#detail-dialog").hidden=true;
-(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel,renderHome,boardColumn,renderBoard,renderProject,PROJECT_TABS};");
+(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp,stepPanel,renderHome,boardColumn,renderBoard,renderProject,PROJECT_TABS,renderMyWork,calendarMonth,calExpanded,renderInbox};");
 const a=globalThis.__a,out={},tick=()=>new Promise(r=>setTimeout(r,0));
 const keydown=(key,target,extra={})=>{const e={key,target,ctrlKey:false,metaKey:false,altKey:false,defaultPrevented:false,prevented:false,preventDefault(){this.prevented=true;this.defaultPrevented=true},stopPropagation(){},...extra};(docListeners.keydown||[]).forEach(f=>f(e));return e.prevented};
 const U1="11111111-1111-4111-8111-111111111111",U2="22222222-2222-4222-8222-222222222222",U3="33333333-3333-4333-8333-333333333333";
@@ -2049,6 +2049,39 @@ if(mode==="board"){
   a.state.user.global_role="owner";a.renderProject(a.parseRoute("#/project/"+U1+"/overview"));
   out.ownerActions=["#project-capture","#project-save-template","#project-close"].map(s=>document.querySelector(s).hidden);
   out.facts=document.querySelector("#project-facts").textContent;out.overview=document.querySelector("#project-body").innerHTML;
+  process.stdout.write(JSON.stringify(out));return;
+}
+if(mode==="work"){
+  // FKVHH8: My Work groups, the month calendar and the Inbox tabs.
+  const T=o=>({project_id:"p1",project_name:"P",status:"in_progress",owner_user_id:"u1",due_state:"scheduled",days_to_due:20,due_date:"2026-10-15",...o});
+  const body=()=>document.querySelector("#my-work-body").innerHTML,inbox=()=>document.querySelector("#inbox-body").innerHTML;
+  a.state.user={id:"u1",display_name:"Omar M",global_role:"member"};
+  a.state.tasks=[T({id:"o1",title:"Late",due_state:"overdue",days_to_due:-2,due_date:"2026-09-23"}),T({id:"d1",title:"Now",due_state:"today",days_to_due:0,due_date:"2026-09-25"}),
+    T({id:"w1",title:"Soon",days_to_due:4,due_date:"2026-09-29"}),T({id:"l1",title:"Later <b>x</b>"}),T({id:"n1t",title:"Someday",due_state:"undated",days_to_due:null,due_date:null}),
+    T({id:"x1",title:"Not mine",owner_user_id:"u2",days_to_due:5,due_date:"2026-09-30"}),T({id:"c1",title:"Done",status:"completed",due_state:"closed"})];
+  location.hash="#/my-work";a.renderMyWork(a.parseRoute("#/my-work"));out.list=body();
+  a.state.workQuery="soon";a.renderMyWork(a.parseRoute("#/my-work"));out.filtered=body();
+  a.state.workQuery="zzz";a.renderMyWork(a.parseRoute("#/my-work"));out.noMatch=body();a.state.workQuery="";
+  const mine=a.state.tasks.filter(t=>t.owner_user_id==="u1"&&t.status!=="completed");
+  const many=[...Array(5)].map((_,i)=>T({id:"m"+i,title:i?"Many "+i:"Many <img src=x>",due_date:"2026-09-30",days_to_due:5}));
+  out.month=a.calendarMonth([...mine,...many],2026,8,"2026-09-25","mine");
+  a.calExpanded.add("2026-09-30");out.expanded=a.calendarMonth([...mine,...many],2026,8,"2026-09-25","all");a.calExpanded.clear();
+  out.feb=a.calendarMonth([],2027,1,"2026-09-25","mine");
+  location.hash="#/my-work/calendar?month=2026-10&scope=all";a.renderMyWork(a.parseRoute(location.hash));out.calRoute=body();
+  location.hash="#/my-work";a.renderMyWork(a.parseRoute("#/my-work"));out.listAfterCal=body();
+  a.state.tasks=[];a.renderMyWork(a.parseRoute("#/my-work"));out.emptyList=body();
+  const N=[{id:"n1",summary:"task assigned: Alpha",task_id:U1,task_title:"Alpha",created_at:new Date().toISOString(),read_at:null},
+    {id:"n2",summary:"old <i>note</i>",task_id:null,task_title:null,created_at:"2026-01-02T10:00:00Z",read_at:"2026-01-03T00:00:00Z"}];
+  const R=[{id:"r1",action:"close_project",project_name:"P",requested_by_name:"Mia",requested_at:"2026-09-24T10:00:00Z",reason:"done",payload:{}}];
+  location.hash="#/inbox";a.renderInbox(N,[]);out.memberDefault=inbox();
+  location.hash="#/inbox?tab=all";a.renderInbox(N,[]);out.memberAll=inbox();
+  location.hash="#/inbox?tab=needs";a.renderInbox(N,[]);out.memberNeeds=inbox();
+  location.hash="#/inbox";a.renderInbox(N.map(n=>({...n,read_at:"2026-09-25T00:00:00Z"})),[]);out.memberAllRead=inbox();
+  a.state.user.global_role="owner";
+  location.hash="#/inbox";a.renderInbox(N,R);out.ownerDefault=inbox();
+  location.hash="#/inbox?tab=all";a.renderInbox(N,R);out.ownerAll=inbox();
+  location.hash="#/inbox?tab=unread";a.renderInbox(N,R);out.ownerUnread=inbox();
+  location.hash="#/inbox";a.renderInbox([],[]);out.ownerEmpty=inbox();
   process.stdout.write(JSON.stringify(out));return;
 }
 if(mode!=="main"){
@@ -2404,6 +2437,108 @@ class AstraProjectPageTests(unittest.TestCase):
         self.assertEqual(self.out["ownerActions"], [False, False, False])
         self.assertIn("tasks, 2 steps", self.out["facts"])
         self.assertIn('<progress id="project-progress" max="100" value="33">', self.out["overview"])
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")
+class AstraMyWorkInboxTests(unittest.TestCase):
+    """FKVHH8: My Work groups and month calendar, and the Inbox tabs."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out = _run_shell_driver("work")
+
+    def test_my_work_lists_five_groups_with_counts_and_only_my_open_work(self):
+        html = self.out["list"]
+        groups = re.findall(r'<h3>([\w ]+) <span class="count">(\d+)</span>', html)
+        self.assertEqual(groups, [("Overdue", "1"), ("Today", "1"), ("This week", "1"), ("Later", "1"), ("No date", "1")])
+        self.assertIn('<h2>Open work you own <span class="count">5</span></h2>', html)
+        self.assertNotIn("Not mine", html)
+        self.assertNotIn(">Done<", html)
+        self.assertIn("Later &lt;b&gt;x&lt;/b&gt;", html)
+        self.assertIn('data-detail="o1"', html)
+        self.assertIn('<a href="#/my-work" aria-current="page">List</a>', html)
+        self.assertIn('id="my-work-search"', html)
+
+    def test_filter_keeps_empty_groups_and_says_when_nothing_matches(self):
+        groups = re.findall(r'<h3>([\w ]+) <span class="count">(\d+)</span>', self.out["filtered"])
+        self.assertEqual(groups, [("Overdue", "0"), ("Today", "0"), ("This week", "1"), ("Later", "0"), ("No date", "0")])
+        self.assertIn("Nothing overdue.", self.out["filtered"])
+        self.assertIn("No open work you own matches “zzz”.", self.out["noMatch"])
+        self.assertIn("Nothing is assigned to you", self.out["emptyList"])
+
+    def test_month_grid_starts_on_monday_marks_today_and_folds_busy_days(self):
+        html = self.out["month"]
+        cells = re.findall(r'<li class="cal-day([^"]*)"><p class="cal-date"><span aria-hidden="true">(\d+)</span>', html)
+        self.assertEqual(len(cells), 35)  # September 2026 starts on a Tuesday: Aug 31 to Oct 4
+        self.assertEqual(cells[0], (" out", "31"))
+        self.assertEqual(cells[1], ("", "1"))
+        self.assertIn((" today", "25"), cells)
+        self.assertIn("<span>Mon</span><span>Tue</span>", html)
+        day = re.search(r'Wednesday 30 September, 5 tasks</span></p>(.*?)</li>', html).group(1)
+        self.assertEqual(day.count('class="cal-item"'), 3)
+        self.assertIn('data-cal-more="2026-09-30" aria-expanded="false">+2 more</button>', day)
+        self.assertIn('data-detail="o1" data-tone="overdue"', html)
+        self.assertIn('data-detail="d1" data-tone="today"', html)
+        self.assertIn("Many &lt;img src=x&gt;", html)
+        self.assertNotIn("<img", html)
+        self.assertIn("8 open tasks due in September · 1 with no due date", html)
+        expanded = re.search(r'Wednesday 30 September, 5 tasks</span></p>(.*?)</li>', self.out["expanded"]).group(1)
+        self.assertEqual(expanded.count('class="cal-item"'), 5)
+        self.assertIn('aria-expanded="true">Show fewer</button>', expanded)
+
+    def test_month_links_keep_scope_and_the_route_reads_month(self):
+        html = self.out["month"]
+        self.assertIn('href="#/my-work/calendar?month=2026-08">', html)
+        self.assertIn('href="#/my-work/calendar?month=2026-10">', html)
+        self.assertIn('href="#/my-work/calendar?month=2026-09">Today</a>', html)
+        self.assertIn('href="#/my-work/calendar?month=2026-10&scope=all">Next', self.out["expanded"])
+        route = self.out["calRoute"]
+        self.assertIn('<h2 class="cal-title" id="cal-title">October 2026</h2>', route)
+        self.assertIn('<option value="all" selected>', route)
+        self.assertIn('aria-current="page">Calendar</a>', route)
+        # The List tab's Calendar link returns to the month last shown.
+        self.assertIn('href="#/my-work/calendar?month=2026-10&amp;scope=all">Calendar</a>', self.out["listAfterCal"])
+        feb = self.out["feb"]
+        self.assertEqual(len(re.findall(r'<li class="cal-day', feb)), 28)  # February 2027 is exactly four weeks
+        self.assertNotIn("cal-day out", feb)
+        self.assertIn("Nothing is due in February 2027.", feb)
+
+    def test_phone_agenda_lists_only_days_with_work(self):
+        agenda = self.out["month"].split('<ol class="cal-agenda"', 1)[1]
+        self.assertEqual(re.findall(r'class="agenda-date">(\w+ \d+ \w+)', agenda), ["Wed 23 Sep", "Fri 25 Sep", "Tue 29 Sep", "Wed 30 Sep"])
+        self.assertIn('Fri 25 Sep <span class="badge" data-level="info">Today</span>', agenda)
+        css = (STATIC / "style.css").read_text(encoding="utf-8")
+        phone = css[css.index("@media (max-width: 760px)", css.index("/* One board column at a time") - 2000):]
+        self.assertIn(".cal-month { display: none; }", phone)
+        self.assertIn(".cal-agenda { display: block; }", phone)
+        self.assertIn(".cal-agenda { display: none;", css)
+
+    def test_inbox_tabs_for_a_member(self):
+        html = self.out["memberDefault"]
+        self.assertNotIn("Needs action", html)
+        self.assertIn('<a href="#/inbox?tab=unread" aria-current="page">Unread <span class="count">1</span></a>', html)
+        self.assertIn('class="note-row unread"', html)
+        self.assertIn(f'data-detail="{U1}" data-read-on-open="n1">Open task</button>', html)
+        self.assertIn('data-read="n1">Mark read</button>', html)
+        self.assertNotIn("old &lt;i&gt;", html)
+        self.assertIn('id="read-all" class="quiet">', html)
+        every = self.out["memberAll"]
+        self.assertIn("old &lt;i&gt;note&lt;/i&gt;", every)
+        self.assertIn('<h3 class="note-day">Earlier</h3>', every)
+        self.assertNotIn('data-read="n2"', every)
+        self.assertIn('aria-current="page">Unread', self.out["memberNeeds"])  # Needs action is for Owners only
+        self.assertIn('aria-current="page">All', self.out["memberAllRead"])
+        self.assertIn('id="read-all" class="quiet" disabled>', self.out["memberAllRead"])
+
+    def test_inbox_puts_owner_requests_first(self):
+        html = self.out["ownerDefault"]
+        self.assertIn('<a href="#/inbox?tab=needs" aria-current="page">Needs action <span class="count">1</span></a>', html)
+        self.assertIn('data-request-decision="approved" data-request-id="r1"', html)
+        self.assertIn('id="inbox-error"', html)
+        every = self.out["ownerAll"]
+        self.assertLess(every.index("Needs your decision"), every.index("<h2>Notifications</h2>"))
+        self.assertNotIn("data-request-decision", self.out["ownerUnread"])
+        self.assertIn("Nothing is waiting for your decision", self.out["ownerEmpty"])
 
 
 @unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")

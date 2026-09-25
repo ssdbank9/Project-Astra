@@ -468,7 +468,7 @@ function applyRoute(moveFocus,fromLoad){
   }else if(r.name==="home"){
     renderHome();
     if(isOwner()&&(!fromLoad||state.inboxLoads===undefined))openInbox();
-  }else if(r.name==="my-work")renderMyWork();
+  }else if(r.name==="my-work")renderMyWork(r);
   else if(r.name==="projects")renderProjects();
   else if(r.name==="project")renderProject(r);
   else if(r.name==="inbox"&&(!fromLoad||state.inboxLoads===undefined))openInbox();
@@ -476,8 +476,11 @@ function applyRoute(moveFocus,fromLoad){
   if(moveFocus&&!taskId)document.querySelector("#page-title").focus();
 }
 window.addEventListener("hashchange",()=>{closeMenus();if(toastView&&toastView!==currentRoute().name)clearToast();const quiet=panelState.quiet;panelState.quiet=false;applyRoute(!quiet)});
-// My Work: open tasks the signed-in person owns, soonest first, grouped by when they are due.
-const WORK_GROUPS=[["overdue","Overdue"],["today","Today"],["week","Next 7 days"],["later","Later"],["undated","No due date"]];
+// FKVHH8: My Work has two tabs over the same open work. List groups the tasks you own by when they are
+// due; Calendar lays them on a month grid (#/my-work/calendar?month=YYYY-MM&scope=all). "This week" means
+// due in the next 7 days, the same rule as Home.
+const WORK_GROUPS=[["overdue","Overdue"],["today","Today"],["week","This week"],["later","Later"],["undated","No date"]];
+const WORK_EMPTY={overdue:"Nothing overdue.",today:"Nothing due today.",week:"Nothing due in the next 7 days.",later:"Nothing due later.",undated:"Every task has a due date."};
 function workGroup(t){if(t.due_state==="overdue")return "overdue";if(t.due_state==="today")return "today";if(!t.due_date)return "undated";return t.days_to_due!=null&&t.days_to_due<=7?"week":"later"}
 function workRow(t){
   const group=workGroup(t);
@@ -485,14 +488,76 @@ function workRow(t){
     <span class="work-meta">${escapeHtml(t.project_name||"")}${t.parent_title?` · step of ${escapeHtml(t.parent_title)}`:""} · ${escapeHtml(statusLabel(t.status))}</span>
     <span class="due-chip" data-due="${group}">${escapeHtml(dueText(t)||"No due date")}</span></li>`;
 }
-function renderMyWork(){
+function openWork(scope){
   const me=state.user&&state.user.id;
-  const mine=state.tasks.filter(t=>t.owner_user_id===me&&!CLOSED_STATUSES.includes(t.status))
-    .sort((a,b)=>String(a.due_date||"9999").localeCompare(String(b.due_date||"9999")));
-  const groups=WORK_GROUPS.map(([key,label])=>{const rows=mine.filter(t=>workGroup(t)===key);
-    return rows.length?`<h3>${label} <span class="count">${rows.length}</span></h3><ul class="work-list">${rows.map(workRow).join("")}</ul>`:""}).join("");
-  document.querySelector("#my-work-body").innerHTML=`<h2>Open work you own <span class="count">${mine.length}</span></h2>`+
-    (groups||`<p class="empty">Nothing is assigned to you right now. Tasks you own show up here, soonest first.</p>`);
+  return state.tasks.filter(t=>!CLOSED_STATUSES.includes(t.status)&&(scope==="all"||t.owner_user_id===me))
+    .sort((a,b)=>String(a.due_date||"9999").localeCompare(String(b.due_date||"9999"))||String(a.title).localeCompare(String(b.title)));
+}
+// Every group is listed with its count, so an empty Overdue reads as good news rather than a missing heading.
+function workGroupsHtml(tasks){
+  return WORK_GROUPS.map(([key,label])=>{const rows=tasks.filter(t=>workGroup(t)===key);
+    return `<section class="work-group" data-group="${key}"><h3>${label} <span class="count">${rows.length}</span></h3>`+
+      (rows.length?`<ul class="work-list">${rows.map(workRow).join("")}</ul>`:`<p class="empty-line">${WORK_EMPTY[key]}</p>`)+"</section>"}).join("");
+}
+function workMatches(t,q){q=q.trim().toLowerCase();return !q||[t.title,t.project_name,t.parent_title].some(v=>String(v||"").toLowerCase().includes(q))}
+function filteredWorkHtml(mine){
+  const q=state.workQuery||"",shown=mine.filter(t=>workMatches(t,q));
+  return shown.length?workGroupsHtml(shown):`<p class="empty-line">No open work you own matches “${escapeHtml(q.trim())}”.</p>`;
+}
+function myWorkTabs(r){
+  const cal=r.id==="calendar",keep=new URLSearchParams(r.params);keep.delete("task");
+  const calHash=cal?routeHash(r,null):state.calendarHash||"#/my-work/calendar";
+  return `<nav class="tabs" aria-label="My Work views"><a href="#/my-work"${cal?"":' aria-current="page"'}>List</a><a href="${escapeHtml(calHash)}"${cal?' aria-current="page"':""}>Calendar</a></nav>`;
+}
+function renderMyWork(r=currentRoute()){
+  const body=document.querySelector("#my-work-body");
+  if(r.id==="calendar"){state.calendarHash=routeHash(r,null);body.innerHTML=myWorkTabs(r)+workCalendar(r);return}
+  const mine=openWork("mine");
+  body.innerHTML=myWorkTabs(r)+(mine.length
+    ?`<div class="work-head"><h2>Open work you own <span class="count">${mine.length}</span></h2>
+      <label class="work-search"><span class="sr-only">Filter my work</span><input type="search" id="my-work-search" placeholder="Filter by task or project" autocomplete="off" value="${escapeHtml(state.workQuery||"")}"></label></div>
+      <div id="my-work-groups" aria-live="polite">${filteredWorkHtml(mine)}</div>`
+    :`<div class="empty-state"><h2>Nothing is assigned to you</h2><p>Open tasks you own show up here, soonest first.</p><a class="button-link primary" href="#/projects">Browse projects</a></div>`);
+}
+// The month grid: Monday first, whole weeks, open tasks on their due day. More than 3 in a day fold into
+// "+N more", which opens that day in place. The same month is also written as an agenda (days with work
+// only); CSS shows the grid on wide screens and the agenda on phones.
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const WEEKDAYS=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const CAL_LIMIT=3,calExpanded=new Set();
+function dayKey(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`}
+function monthParam(s){const m=/^(\d{4})-(0[1-9]|1[0-2])$/.exec(s||"");return m?[+m[1],+m[2]-1]:null}
+function calHref(year,month,scope){const d=new Date(year,month,1),p=new URLSearchParams();p.set("month",`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);if(scope==="all")p.set("scope","all");return "#/my-work/calendar?"+p.toString()}
+function calTone(t){return t.due_state==="overdue"?"overdue":t.due_state==="today"?"today":t.is_critical_path||t.criticality==="critical"?"critical":""}
+function calItem(t){const tone=calTone(t);
+  return `<button type="button" class="cal-item" data-detail="${escapeHtml(t.id)}"${tone?` data-tone="${tone}"`:""} title="${escapeHtml(t.title)}">${escapeHtml(t.title)}${tone==="overdue"?'<span class="sr-only"> (overdue)</span>':tone==="critical"?'<span class="sr-only"> (critical)</span>':""}</button>`}
+function calendarMonth(tasks,year,month,todayKey,scope){
+  const byDay={};
+  for(const t of tasks)if(t.due_date){const k=String(t.due_date).slice(0,10);(byDay[k]=byDay[k]||[]).push(t)}
+  const rank=t=>(calTone(t)==="overdue"?0:calTone(t)==="critical"?1:2);
+  for(const k in byDay)byDay[k].sort((a,b)=>rank(a)-rank(b)||String(a.title).localeCompare(String(b.title)));
+  const first=new Date(year,month,1),lead=(first.getDay()+6)%7,days=new Date(year,month+1,0).getDate(),weeks=Math.ceil((lead+days)/7);
+  const title=`${MONTHS[month]} ${year}`,inMonth=Object.keys(byDay).filter(k=>k.startsWith(dayKey(first).slice(0,8)));
+  const count=inMonth.reduce((n,k)=>n+byDay[k].length,0),undated=tasks.filter(t=>!t.due_date).length;
+  const cells=[...Array(weeks*7)].map((_,i)=>{
+    const d=new Date(year,month,1-lead+i),k=dayKey(d),items=byDay[k]||[],out=d.getMonth()!==month,open=calExpanded.has(k);
+    const shown=open||items.length<=CAL_LIMIT?items:items.slice(0,CAL_LIMIT);
+    const more=items.length>CAL_LIMIT?`<button type="button" class="link cal-more" data-cal-more="${k}" aria-expanded="${open}">${open?"Show fewer":`+${items.length-CAL_LIMIT} more`}</button>`:"";
+    return `<li class="cal-day${out?" out":""}${k===todayKey?" today":""}"><p class="cal-date"><span aria-hidden="true">${d.getDate()}</span><span class="sr-only">${WEEKDAYS[(d.getDay()+6)%7]} ${d.getDate()} ${MONTHS[d.getMonth()]}${k===todayKey?", today":""}, ${items.length} task${items.length===1?"":"s"}</span></p>${shown.map(calItem).join("")}${more}</li>`;
+  }).join("");
+  const agenda=inMonth.sort().map(k=>{const d=new Date(+k.slice(0,4),+k.slice(5,7)-1,+k.slice(8,10));
+    return `<li><h3 class="agenda-date">${WEEKDAYS[(d.getDay()+6)%7].slice(0,3)} ${d.getDate()} ${MONTHS[d.getMonth()].slice(0,3)}${k===todayKey?' <span class="badge" data-level="info">Today</span>':""} <span class="count">${byDay[k].length}</span></h3><ul class="work-list">${byDay[k].map(workRow).join("")}</ul></li>`}).join("");
+  const [py,pm]=[year,month-1],[ny,nm]=[year,month+1];
+  return `<div class="cal-bar"><h2 class="cal-title" id="cal-title">${title}</h2>
+    <nav class="cal-nav" aria-label="Month"><a class="button-link quiet" href="${calHref(py,pm,scope)}"><span aria-hidden="true">‹</span> Previous</a><a class="button-link quiet" href="${calHref(+todayKey.slice(0,4),+todayKey.slice(5,7)-1,scope)}">Today</a><a class="button-link quiet" href="${calHref(ny,nm,scope)}">Next <span aria-hidden="true">›</span></a></nav>
+    <label class="cal-scope">Show<select id="cal-scope"><option value="mine"${scope==="all"?"":" selected"}>My tasks</option><option value="all"${scope==="all"?" selected":""}>All tasks I can see</option></select></label></div>
+    <p class="fine cal-summary">${count} open task${count===1?"":"s"} due in ${MONTHS[month]}${undated?` · ${undated} with no due date (<a href="#/my-work">see List</a>)`:""}</p>
+    <div class="cal-month" aria-labelledby="cal-title"><div class="cal-weekdays" aria-hidden="true">${WEEKDAYS.map(w=>`<span>${w.slice(0,3)}</span>`).join("")}</div><ol class="cal-grid">${cells}</ol></div>
+    <ol class="cal-agenda" aria-labelledby="cal-title">${agenda||`<li><p class="empty-line">Nothing is due in ${title}.</p></li>`}</ol>`;
+}
+function workCalendar(r){
+  const today=dayKey(new Date()),[y,m]=monthParam(r.params.get("month"))||[+today.slice(0,4),+today.slice(5,7)-1],scope=r.params.get("scope")==="all"?"all":"mine";
+  return calendarMonth(openWork(scope),y,m,today,scope);
 }
 // Projects: every project the person can see; a row opens it on Home (its own workspace comes later).
 function renderProjects(){
@@ -713,7 +778,21 @@ document.querySelector("#home-view").addEventListener("click",e=>{
   const d=e.target.closest("[data-home-decision]");if(d){decideOwnerRequest(d.dataset.requestId,d.dataset.homeDecision,"home-decision-error");return}
   const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail);
 });
-document.querySelector("#my-work-body").addEventListener("click",e=>{const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail)});
+document.querySelector("#my-work-body").addEventListener("click",e=>{
+  const more=e.target.closest("[data-cal-more]");
+  if(more){const k=more.dataset.calMore;if(calExpanded.has(k))calExpanded.delete(k);else calExpanded.add(k);renderMyWork();document.querySelector(`[data-cal-more="${k}"]`)?.focus?.();return}
+  const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail);
+});
+// The filter box stays put while the groups under it redraw, so typing never loses focus.
+document.querySelector("#my-work-body").addEventListener("input",e=>{
+  if(e.target.id!=="my-work-search")return;
+  state.workQuery=e.target.value;document.querySelector("#my-work-groups").innerHTML=filteredWorkHtml(openWork("mine"));
+});
+document.querySelector("#my-work-body").addEventListener("change",e=>{
+  if(e.target.id!=="cal-scope")return;
+  const r=currentRoute(),today=dayKey(new Date()),[y,m]=monthParam(r.params.get("month"))||[+today.slice(0,4),+today.slice(5,7)-1];
+  location.hash=calHref(y,m,e.target.value);
+});
 // Capture: the task form with the optional fields folded away; the Home project filter is preselected.
 function openCapture(pidArg){
   const r=currentRoute(),pid=typeof pidArg==="string"?pidArg:r.name==="project"?r.id:r.name==="portfolio"?document.querySelector("#project-filter").value:"";
@@ -985,23 +1064,50 @@ async function openInbox(){
     if(currentRoute().name==="home")renderHome();   // Home shows the same cached requests
   }catch(err){document.querySelector("#inbox-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`}
 }
+// FKVHH8: the Inbox has tabs. Needs action (Owners) holds the requests waiting for a decision; Unread and All
+// hold notifications, grouped by day. An Owner lands on Needs action while anything waits there, anyone
+// else on Unread while anything is unread. Opening a notification's task marks it read; nothing else does.
+const INBOX_TABS=[["needs","Needs action"],["unread","Unread"],["all","All"]];
+function inboxTab(items,requests){
+  const owner=isOwner(),asked=currentRoute().params.get("tab"),tabs=INBOX_TABS.map(([k])=>k).filter(k=>k!=="needs"||owner);
+  if(tabs.includes(asked))return asked;
+  return owner&&requests.length?"needs":items.some(n=>!n.read_at)?"unread":owner?"needs":"all";
+}
+function noteDay(iso){
+  const d=new Date(iso),today=new Date(),y=new Date();y.setDate(today.getDate()-1);
+  return dayKey(d)===dayKey(today)?"Today":dayKey(d)===dayKey(y)?"Yesterday":"Earlier";
+}
+function noteRow(n){
+  const unread=!n.read_at,when=new Date(n.created_at).toLocaleString([], {day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
+  const open=n.task_id?`<button type="button" class="link" data-detail="${escapeHtml(n.task_id)}"${unread?` data-read-on-open="${escapeHtml(n.id)}"`:""}>Open task</button>`:"";
+  const mark=unread?`<button type="button" class="link" data-read="${escapeHtml(n.id)}">Mark read</button>`:"";
+  return `<li class="note-row${unread?" unread":""}"><span class="note-dot" aria-hidden="true"></span><div class="note-main"><p class="note-summary">${unread?'<span class="sr-only">Unread: </span>':""}${escapeHtml(n.summary)}</p>
+    <p class="note-meta">${n.task_title&&!String(n.summary||"").includes(n.task_title)?`${escapeHtml(n.task_title)} · `:""}<time datetime="${escapeHtml(n.created_at)}">${escapeHtml(when)}</time></p></div><div class="note-actions">${open}${mark}</div></li>`;
+}
+function noteList(items){
+  const days=["Today","Yesterday","Earlier"].map(label=>[label,items.filter(n=>noteDay(n.created_at)===label)]).filter(([,rows])=>rows.length);
+  return days.map(([label,rows])=>`<h3 class="note-day">${label}</h3><ul class="note-list">${rows.map(noteRow).join("")}</ul>`).join("");
+}
+function requestRow(r){
+  return `<li class="unread owner-request"><strong>${escapeHtml(requestTitle(r))}</strong>${requestDetail(r)}
+    <small>Requested by ${escapeHtml(r.requested_by_name)} · ${escapeHtml(new Date(r.requested_at).toLocaleString())}${r.task_id?` · <button type="button" class="link" data-detail="${escapeHtml(r.task_id)}">Open task</button>`:""}</small><div class="actions"><button type="button" data-request-decision="approved" data-request-id="${escapeHtml(r.id)}">Approve</button><button type="button" class="quiet" data-request-decision="rejected" data-request-id="${escapeHtml(r.id)}">Reject</button><button type="button" class="quiet" data-request-decision="cancelled" data-request-id="${escapeHtml(r.id)}">Cancel request</button></div></li>`;
+}
 function renderInbox(items,requests=[]){
-  const rows=items.map(n=>{
-    const when=new Date(n.created_at).toLocaleString();
-    const unread=!n.read_at;
-    const mark=unread?`<button type="button" class="link" data-read="${escapeHtml(n.id)}">Mark read</button>`:"read";
-    return `<li class="${unread?"unread":""}"><strong>${escapeHtml(n.summary)}</strong><br><small>${escapeHtml(when)}</small> · ${mark}</li>`;
-  }).join("")||"<li>No notifications.</li>";
   state.ownerRequests=requests;state.inboxLoads=state.loads;
-  const requestRows=requests.map(r=>`<li class="unread owner-request"><strong>${escapeHtml(requestTitle(r))}</strong>${requestDetail(r)}
-    <small>Requested by ${escapeHtml(r.requested_by_name)} · ${escapeHtml(new Date(r.requested_at).toLocaleString())}${r.task_id?` · <button type="button" class="link" data-detail="${escapeHtml(r.task_id)}">Open task</button>`:""}</small><div class="actions"><button type="button" data-request-decision="approved" data-request-id="${escapeHtml(r.id)}">Approve</button><button type="button" class="quiet" data-request-decision="rejected" data-request-id="${escapeHtml(r.id)}">Reject</button><button type="button" class="quiet" data-request-decision="cancelled" data-request-id="${escapeHtml(r.id)}">Cancel request</button></div></li>`).join("")||"<li>No pending Owner requests.</li>";
-  document.querySelector("#inbox-body").innerHTML=`<h2>Needs action</h2><div class="error" id="inbox-error" role="alert" tabindex="-1"></div><ul class="people-list">${requestRows||'<li class="muted">Nothing is waiting for your decision.</li>'}</ul>
-    <div class="section-head"><h2>Activity</h2><button type="button" id="read-all" class="quiet">Mark all read</button></div>
-    <ul class="people-list">${rows}</ul>`;
+  const tab=inboxTab(items,requests),unread=items.filter(n=>!n.read_at),owner=isOwner();
+  const counts={needs:requests.length,unread:unread.length,all:items.length};
+  const tabs=INBOX_TABS.filter(([k])=>k!=="needs"||owner).map(([k,label])=>`<a href="#/inbox?tab=${k}"${k===tab?' aria-current="page"':""}>${label} <span class="count">${counts[k]}</span></a>`).join("");
+  const requestBlock=requests.length?`<section class="inbox-section"><h2>Needs your decision <span class="count">${requests.length}</span></h2><ul class="people-list">${requests.map(requestRow).join("")}</ul></section>`:"";
+  const empty=(title,text)=>`<div class="empty-state"><h2>${title}</h2><p>${text}</p></div>`;
+  const content=tab==="needs"?(requestBlock||empty("Nothing is waiting for your decision","Requests from managers and members to change a task or close a project appear here."))
+    :tab==="unread"?(unread.length?noteList(unread):empty("You are all caught up","Nothing unread. <a href=\"#/inbox?tab=all\">See all notifications</a>."))
+    :(owner?requestBlock:"")+(items.length?`<section class="inbox-section">${owner&&requests.length?"<h2>Notifications</h2>":""}${noteList(items)}</section>`:empty("No notifications yet","Assignments, reviews and changes to your tasks appear here."));
+  document.querySelector("#inbox-body").innerHTML=`<div class="inbox-bar"><nav class="tabs" aria-label="Inbox views">${tabs}</nav><button type="button" id="read-all" class="quiet"${unread.length?"":" disabled"}>Mark all read</button></div>
+    <div class="error" id="inbox-error" role="alert" tabindex="-1"></div>${content}`;
   document.querySelector("#read-all").addEventListener("click",markAllRead);
   document.querySelectorAll("#inbox-body [data-read]").forEach(b=>b.addEventListener("click",()=>markRead(b.dataset.read)));
   document.querySelectorAll("#inbox-body [data-request-decision]").forEach(b=>b.addEventListener("click",()=>decideOwnerRequest(b.dataset.requestId,b.dataset.requestDecision)));
-  document.querySelectorAll("#inbox-body [data-detail]").forEach(b=>b.addEventListener("click",()=>openDetail(b.dataset.detail)));
+  document.querySelectorAll("#inbox-body [data-detail]").forEach(b=>b.addEventListener("click",()=>{openDetail(b.dataset.detail);if(b.dataset.readOnOpen)markRead(b.dataset.readOnOpen)}));
 }
 // 0D9Q3X: the Owner decides from the inbox, so each request says what it would change and why.
 const REQUEST_LABELS={update_task_status:"Status change",accept_submission:"Accept submission",request_changes:"Request changes",reopen_task:"Reopen task",set_on_hold:"Put on hold",approve_schedule_proposal:"Approve schedule change",reject_schedule_proposal:"Reject schedule change",close_project:"Close project"};

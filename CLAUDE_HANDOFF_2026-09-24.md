@@ -58,6 +58,12 @@ Locks so far:
   three commits, independent review 9 ("request changes": sign-out leak H1, M1-M5, L1-L10),
   fix commit `c47062b`, a focused re-review ("approve with follow-ups"), N1-N3 fixed in
   `03acafc`; the three tickets are in signoff; pushed after the re-review.
+- Lock #10: from `79d350d` (Gate 2 slices 4-6, front end apart from one small export
+  filter change): VPYGY5 Command Center Home (the filtered dashboard moves to
+  `#/portfolio`), CR121Z project page with tabs and a read-only board with swimlanes,
+  FKVHH8 My Work groups and month calendar plus Inbox tabs. Three commits, one per slice;
+  the three tickets are in review. Not yet pushed: waiting for an independent review and
+  Aly's word.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
 
@@ -95,7 +101,8 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   `Ran 444 tests`, `OK`. With 3M2AYA (no sign-in lockout, in-app password reset,
   8-character minimum): `Ran 456 tests`, `OK`. With lock #9 (Gate 2 slices 1-3, no schema
   change): `Ran 472 tests`, `OK`; with the review 9 fixes: `Ran 482 tests`, `OK`; with the re-review
-  follow-ups N1-N3: `Ran 484 tests`, `OK`.
+  follow-ups N1-N3: `Ran 484 tests`, `OK`. With lock #10 (Gate 2 slices 4-6, no schema
+  change): `Ran 498 tests`, `OK`.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 
@@ -188,8 +195,12 @@ old handoff's top section marked superseded; (b) the jaira sync fix as local set
    PR #4's tests will need `expected_revision` updates (unverified here).
 7. Adopt the Gate 2 shell (JQY55P / X8FNA5) (option 7). Slices 1-3 (foundation, shell
    frame, task panel) were built under lock #9 as 4T4DEA, PZTYC9 and DR3PKR (signoff lane,
-   related to X8FNA5 and JQY55P, which stay Aly's). Slices 4-7 (Command Center Home, project
-   tabs and read-only board, My Work and Inbox pages, phone and accessibility pass) remain.
+   related to X8FNA5 and JQY55P, which stay Aly's). Slices 4-6 (Command Center Home, project
+   tabs and read-only board, My Work and Inbox pages) were built under lock #10 as VPYGY5,
+   CR121Z and FKVHH8 (review lane, not yet pushed). Aly's lock #10 decisions: Approve and
+   Reject stay live on Home; Workload is dropped; drag and drop, Undo, bulk select and WIP
+   limits are not in these slices; swimlanes and the Calendar month view are. Slice 7 (phone
+   and accessibility pass) remains.
 8. The `tmp*` folders in Aly's checkout (option 8): `git status` there prints about 35
    "could not open directory 'tmpXXXX/': Permission denied" warnings; do not delete until
    checked.
