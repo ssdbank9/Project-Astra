@@ -1,18 +1,14 @@
 const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality"};
 async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.error||"Request failed");err.status=response.status;throw err}return data}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
-function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);const isOwner=state.user.global_role==="owner";document.querySelector("#new-project").hidden=!isOwner;document.querySelector("#people").hidden=!isOwner;document.querySelector("#close-project").hidden=!isOwner;document.querySelector("#save-template-btn").hidden=!isOwner;refreshImportAccess()}
+function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);const isOwner=state.user.global_role==="owner";document.querySelector("#new-project").hidden=!isOwner;document.querySelector("#people").hidden=!isOwner;projectActions();refreshImportAccess()}
 async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
 function updateBell(){const n=state.unread||0,badge=document.querySelector("#unread-count"),inbox=document.querySelector("#inbox");badge.textContent=n;badge.hidden=!n;inbox.classList.toggle("has-unread",n>0);inbox.setAttribute("aria-label",n?`Inbox, ${n} unread`:"Inbox")}
 function fillFilters(){const pf=document.querySelector("#project-filter"),tp=document.querySelector('#task-form select[name="project_id"]');const selected=pf.value;pf.innerHTML='<option value="">All projects</option>';tp.innerHTML="";for(const p of state.projects){pf.add(new Option(p.status==="closed"?`${p.name} (closed)`:p.name,p.id));if(p.status!=="closed")tp.add(new Option(p.name,p.id))}pf.value=selected;const statuses=[...new Set(state.tasks.map(t=>t.status))].sort();document.querySelector("#status-filter").innerHTML='<option value="">All statuses</option>'+statuses.map(s=>`<option>${escapeHtml(s)}</option>`).join("");const ef=document.querySelector("#entity-filter"),efSel=ef.value;ef.innerHTML='<option value="">All entities</option>'+(state.entities||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`).join("");ef.value=efSel;fillPredecessors()}
 function projectEntityIds(projectId){const p=state.projects.find(p=>p.id===projectId);return new Set((p&&p.entities?p.entities:[]).map(e=>e.id))}
 function fillPredecessors(){const project=document.querySelector('#task-form select[name="project_id"]').value,select=document.querySelector('#task-form select[name="predecessor_task_id"]'),parent=document.querySelector('#task-form select[name="parent_task_id"]');select.innerHTML='<option value="">No predecessor</option>';parent.innerHTML='<option value="">No parent</option>';for(const task of state.tasks.filter(t=>t.project_id===project)){select.add(new Option(task.title,task.id));parent.add(new Option(task.title,task.id))}}
 function render(){
-  // 5WZ4A8: project history is per project, so the button shows only when one project is selected.
-  document.querySelector("#project-history-btn").hidden=!document.querySelector("#project-filter").value;
-  // PZTYC9: the More menu offers project actions only while one project is selected.
-  const oneProject=!!document.querySelector("#project-filter").value,owner=!!state.user&&state.user.global_role==="owner";
-  document.querySelector("#close-project").hidden=document.querySelector("#save-template-btn").hidden=!(oneProject&&owner);
+  projectActions();
   const tasks=visibleTasks();
   document.querySelector("#project-count").textContent=state.projects.length;
   document.querySelector("#task-count").textContent=tasks.length;
@@ -22,6 +18,13 @@ function render(){
   renderBands(tasks);
   renderGantt(tasks);
   noteFilters(tasks.length);
+}
+function projectActions(){
+  // 5WZ4A8: project history is per project, so the button shows only when one project is selected.
+  document.querySelector("#project-history-btn").hidden=!document.querySelector("#project-filter").value;
+  // PZTYC9: the More menu offers the owner's project actions only while one project is selected.
+  const oneProject=!!document.querySelector("#project-filter").value,owner=!!state.user&&state.user.global_role==="owner";
+  document.querySelector("#close-project").hidden=document.querySelector("#save-template-btn").hidden=!(oneProject&&owner);
 }
 // The Home filters, applied to the loaded tasks (the same rules the export reuses on the server).
 function visibleTasks(){
@@ -341,12 +344,17 @@ function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":
 // the Home link with history.replaceState, so nothing here needs pushState. Home filters ride in the query
 // (#/home?status=delayed&open=1), so reload, Back and a pasted link restore them.
 const VIEWS=["home","my-work","inbox","projects"];
-const VIEW_TITLES={home:["Home","Portfolio"],"my-work":["My Work","Assigned to me"],inbox:["Inbox","Needs action and activity"],projects:["Projects","All projects"],task:["Task","Task"]};
+const VIEW_TITLES={home:["All projects","Home"],"my-work":["My Work","Assigned to me"],inbox:["Inbox","Needs action and activity"],projects:["Projects","All projects"],task:["Task","Task"]};
 const FILTER_PARAMS=[["project","#project-filter"],["status","#status-filter"],["entity","#entity-filter"],["crit","#crit-filter"],["due","#band-filter"],["owner","#owner-filter"],["sort","#sort-filter"]];
+// Task ids are UUIDs; anything else in a link is ignored rather than sent to the server.
+const TASK_ID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isTaskId(id){return typeof id==="string"&&TASK_ID.test(id)}
 function parseRoute(hash){
   const raw=String(hash||"").replace(/^#\/?/,""),q=raw.indexOf("?");
-  const [name,id]=(q<0?raw:raw.slice(0,q)).split("/");
-  return {name:VIEWS.includes(name)||(name==="task"&&id)?name:"home",id:id?decodeURIComponent(id):null,params:new URLSearchParams(q<0?"":raw.slice(q+1))};
+  const [name,rawId]=(q<0?raw:raw.slice(0,q)).split("/");
+  let id=null;try{id=rawId?decodeURIComponent(rawId):null}catch{id=null}   // a truncated %-escape is an unknown route, not an error
+  const known=VIEWS.includes(name)||(name==="task"&&isTaskId(id));
+  return {name:known?name:"home",id:known?id:null,params:new URLSearchParams(q<0?"":raw.slice(q+1))};
 }
 function currentRoute(){return parseRoute(location.hash)}
 function filtersFromUrl(params){
@@ -361,8 +369,9 @@ function homeQuery(){
 }
 function syncFilters(){
   const q=homeQuery(),hash="#/home"+(q?"?"+q:""),task=currentRoute().params.get("task"),full=task?routeHash(parseRoute(hash),task):hash;
-  if(location.hash!==full&&history.replaceState)history.replaceState(null,"",full);
-  if(task&&panelState.pushed)panelState.pushed=full;
+  // A filter changed while a task is open: closing must keep it, so the panel no longer goes Back to the
+  // entry from before it opened; it strips ?task from this link instead.
+  if(location.hash!==full){if(history.replaceState)history.replaceState(null,"",full);if(task)panelState.pushed=null}
   panelState.rendered=hash;
   document.querySelector('[data-nav="home"]').setAttribute("href",hash);
 }
@@ -389,11 +398,12 @@ function activeFilters(){
 }
 function noteFilters(shown){
   const chips=activeFilters(),total=state.tasks.length;
-  document.querySelector("#clear-filters").hidden=!chips.length;
   document.querySelector("#filter-note").innerHTML=chips.length?`<span>Showing <strong>${shown} of ${total}</strong> task${total===1?"":"s"}</span>`+
-    chips.map(([key,text])=>`<button type="button" class="filter-chip" data-clear="${key}" aria-label="Remove filter ${escapeHtml(text)}">${escapeHtml(text)}<span aria-hidden="true">×</span></button>`).join(""):"";
+    chips.map(([key,text])=>`<button type="button" class="filter-chip" data-clear="${key}" aria-label="Remove filter ${escapeHtml(text)}">${escapeHtml(text)}<span aria-hidden="true">×</span></button>`).join("")+
+    '<button type="button" class="link" id="clear-filters" data-clear="all">Clear all</button>':"";
 }
 function clearFilter(key){
+  if(key==="all"){clearAllFilters();document.querySelector("#project-filter").focus();return}
   if(key==="open")document.querySelector("#open-only").checked=false;
   else{const f=FILTER_PARAMS.find(([k])=>k===key);if(f)document.querySelector(f[1]).value=""}
   filtersChanged();
@@ -401,20 +411,24 @@ function clearFilter(key){
 }
 function clearAllFilters(){filtersFromUrl(new URLSearchParams());const sorted=state.sort!=="criticality";state.sort="criticality";syncFilters();shellTitle(currentRoute());if(sorted)load();else render()}
 document.querySelector("#filter-note").addEventListener("click",e=>{const b=e.target.closest("[data-clear]");if(b)clearFilter(b.dataset.clear)});
-// A short notice at the bottom of the screen, with at most one action.
+// A short notice at the bottom of the screen. A plain notice fades after 6 seconds; one with an action
+// stays until it is used or dismissed (WCAG 2.2.1).
 let toastTimer=null;
 function showToast(text,actionLabel,action){
   const box=document.querySelector("#toast");clearTimeout(toastTimer);
-  box.innerHTML=`<span>${escapeHtml(text)}</span>${actionLabel?`<button type="button" class="link" id="toast-action">${escapeHtml(actionLabel)}</button>`:""}`;
-  if(actionLabel)document.querySelector("#toast-action").addEventListener("click",()=>{box.innerHTML="";action()});
-  toastTimer=setTimeout(()=>{box.innerHTML=""},10000);
+  box.innerHTML=`<span>${escapeHtml(text)}</span>${actionLabel?`<button type="button" class="link" id="toast-action">${escapeHtml(actionLabel)}</button><button type="button" class="link" id="toast-dismiss" aria-label="Dismiss">×</button>`:""}`;
+  if(actionLabel){
+    document.querySelector("#toast-action").addEventListener("click",()=>{box.innerHTML="";action()});
+    document.querySelector("#toast-dismiss").addEventListener("click",()=>{box.innerHTML=""});
+  }else toastTimer=setTimeout(()=>{box.innerHTML=""},6000);
 }
 function applyRoute(moveFocus,fromLoad){
   if(!state.user)return;
-  const r=currentRoute(),taskId=r.name==="task"?r.id:r.params.get("task");
+  const r=currentRoute(),linked=r.name==="task"?r.id:r.params.get("task"),taskId=isTaskId(linked)?linked:null;
   const viewHash=routeHash(r,null),sameView=!fromLoad&&viewHash===panelState.rendered;
   if(r.name!=="task"){panelState.lastView=viewHash;panelState.rendered=viewHash}
-  if(taskId&&taskId!==panelState.shown)openDetail(taskId);else if(!taskId)closePanel(true);
+  // The first load after sign-in always fetches the task again: nothing rendered earlier is trusted.
+  if(taskId&&(taskId!==panelState.shown||(fromLoad&&state.loads===1)))openDetail(taskId);else if(!taskId)closePanel(true);
   else document.querySelector("#app").classList.toggle("task-page",r.name==="task");
   document.querySelectorAll("[data-view]").forEach(v=>{v.hidden=v.dataset.view!==r.name});
   document.querySelectorAll("[data-nav]").forEach(a=>{if(a.dataset.nav===r.name)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current")});
@@ -496,19 +510,19 @@ document.querySelector("#skip-link").addEventListener("click",e=>{e.preventDefau
 document.addEventListener("click",e=>{if(!e.target.closest(".menu-wrap"))closeMenus()});
 document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;const menu=document.querySelector(".menu:not([hidden])");if(!menu)return;
   const btn=document.querySelector(`[aria-controls="${menu.id}"]`),held=menu.contains(document.activeElement)||document.activeElement===btn;e.preventDefault();closeMenus();if(held&&btn)btn.focus()});
-// Ctrl/Cmd+K or / jumps to search and ? lists the shortcuts. Single keys never fire while typing in a field
-// or while a dialog is open.
+// Ctrl/Cmd+K jumps to search. There are no page-wide single-key shortcuts (WCAG 2.1.4); j/k work only while
+// focus is inside the task panel. The account menu lists the keys.
 function focusSearch(){const box=document.querySelector("#search-box");box.focus();box.select()}
 document.addEventListener("keydown",e=>{
-  if(!state.user)return;
-  if((e.ctrlKey||e.metaKey)&&!e.altKey&&String(e.key).toLowerCase()==="k"){e.preventDefault();focusSearch();return}
-  if(e.ctrlKey||e.metaKey||e.altKey||e.defaultPrevented||e.target.closest("input,textarea,select,[contenteditable]")||document.querySelector("dialog[open]"))return;
-  if(e.key==="/"){e.preventDefault();focusSearch()}
-  else if(e.key==="?"){e.preventDefault();document.querySelector("#keys-dialog").showModal()}
+  if(state.user&&(e.ctrlKey||e.metaKey)&&!e.altKey&&String(e.key).toLowerCase()==="k"){e.preventDefault();focusSearch()}
 });
-document.querySelector("#login-form").addEventListener("submit",async e=>{e.preventDefault();try{const data=await api("/api/login",{method:"POST",body:JSON.stringify({email:e.target.querySelector("#email").value,password:e.target.querySelector("#password").value})});Object.assign(state,data);showApp();await load()}catch(err){document.querySelector("#login-error").textContent=err.message}});
-document.querySelector("#logout").onclick=async()=>{await api("/api/logout",{method:"POST",body:"{}"});state.user=state.csrf=null;showLogin()};
-document.querySelector("#logout-all").onclick=async()=>{await api("/api/logout-all",{method:"POST",body:"{}"});state.user=state.csrf=null;showLogin()};
+document.querySelector("#keys-btn").addEventListener("click",()=>document.querySelector("#keys-dialog").showModal());
+document.querySelector("#login-form").addEventListener("submit",async e=>{e.preventDefault();try{const data=await api("/api/login",{method:"POST",body:JSON.stringify({email:e.target.querySelector("#email").value,password:e.target.querySelector("#password").value})});Object.assign(state,data)}catch(err){document.querySelector("#login-error").textContent=err.message;return}showApp();await loadOrSay()});
+// H1: after signing out, reload the page so nothing the previous person saw (Inbox, requests, an open task,
+// loaded tasks) survives for the next person on this browser. The hash is dropped too.
+function signedOut(){state.user=state.csrf=null;location.replace(location.pathname)}
+document.querySelector("#logout").onclick=async()=>{await api("/api/logout",{method:"POST",body:"{}"});signedOut()};
+document.querySelector("#logout-all").onclick=async()=>{await api("/api/logout-all",{method:"POST",body:"{}"});signedOut()};
 document.querySelector("#close-project").onclick=async()=>{
   const pid=document.querySelector("#project-filter").value;
   if(!pid){alert("Select a single project in the filter to close it.");return}
@@ -526,7 +540,6 @@ document.querySelector("#close-project").onclick=async()=>{
 for(const id of ["project-filter","status-filter","entity-filter","crit-filter","band-filter"]){document.querySelector(`#${id}`).onchange=filtersChanged}document.querySelector("#open-only").onchange=filtersChanged;document.querySelector("#owner-filter").oninput=filtersChanged;
 // QY0WG2: changing the sort re-fetches the list in the chosen server-side order.
 document.querySelector("#sort-filter").onchange=e=>{state.sort=e.target.value;syncFilters();load()};
-document.querySelector("#clear-filters").onclick=()=>{clearAllFilters();document.querySelector("#project-filter").focus()};
 document.querySelector("#new-project").onclick=()=>document.querySelector("#project-dialog").showModal();document.querySelector("#new-task").onclick=openCapture;
 document.querySelector("#portfolio-btn").onclick=openPortfolio;
 // 5WZ4A8: project history (schedule changes, closure, imports, owner-action decisions).
@@ -844,7 +857,7 @@ document.querySelector("#schedule-table").addEventListener("click",e=>{const b=e
 async function openDetail(taskId){
   detailTaskId=taskId;
   try{
-    const [d,ev]=await Promise.all([api(`/api/tasks/${taskId}`),api(`/api/tasks/${taskId}/events`)]);
+    const [d,ev]=await Promise.all([api(taskApi(taskId)),api(taskApi(taskId,"/events"))]);
     renderDetail(d.task,ev.events);
     openPanel(taskId);
     panelState.task=d.task;if(currentRoute().name==="task")shellTitle(currentRoute());
@@ -856,6 +869,7 @@ async function openDetail(taskId){
 // fires "close" (as the old dialog did) so the Inbox can refresh. The aside keeps the id detail-dialog.
 const panelState={shown:null,opener:null,openerKey:null,pushed:null,lastView:"#/home",quiet:false,task:null};
 function taskLink(id){return `#/task/${encodeURIComponent(id)}`}
+function taskApi(id,suffix=""){return `/api/tasks/${encodeURIComponent(id)}${suffix}`}
 function routeHash(r,taskId){const p=new URLSearchParams(r.params);p.delete("task");if(taskId)p.set("task",taskId);const q=p.toString();return `#/${r.name}${q?"?"+q:""}`}
 function openPanel(taskId){
   const panel=document.querySelector("#detail-dialog"),app=document.querySelector("#app"),r=currentRoute(),isNew=panelState.shown!==taskId,wasHidden=panel.hidden;
@@ -889,13 +903,17 @@ function closePanel(fromRoute){
   panelState.opener=panelState.openerKey=null;
   if(back&&back.isConnected&&!back.closest("[hidden]"))back.focus({preventScroll:true});else document.querySelector("#page-title").focus();
 }
-// j/k: the next or previous task of the screen behind the panel, in the order it lists them.
-function panelSequence(){const r=currentRoute();if(r.name==="my-work"){const me=state.user&&state.user.id;return state.tasks.filter(t=>t.owner_user_id===me&&!CLOSED_STATUSES.includes(t.status)).sort((a,b)=>String(a.due_date||"9999").localeCompare(String(b.due_date||"9999")))}return r.name==="home"?visibleTasks():state.tasks}
+// j/k: the next or previous task in the order the screen behind shows them (its visible task links).
+function panelSequence(){
+  const ids=[];
+  document.querySelectorAll("[data-view]:not([hidden]) [data-detail]").forEach(n=>{if(!n.closest("[hidden]")&&!ids.includes(n.dataset.detail))ids.push(n.dataset.detail)});
+  return ids;
+}
 function stepPanel(delta){
-  const list=panelSequence(),i=list.findIndex(t=>t.id===panelState.shown),next=list[i+delta];
+  const list=panelSequence(),i=list.indexOf(panelState.shown),next=list[i+delta];
   if(i<0||!next)return;
-  const r=currentRoute();if(r.name!=="task"&&history.replaceState){const h=routeHash(r,next.id);history.replaceState(null,"",h);if(panelState.pushed)panelState.pushed=h}
-  openDetail(next.id);
+  const r=currentRoute();if(r.name!=="task"&&history.replaceState){const h=routeHash(r,next);history.replaceState(null,"",h);if(panelState.pushed)panelState.pushed=h}
+  openDetail(next);
 }
 document.querySelector("#detail-close").addEventListener("click",()=>closePanel(false));
 document.querySelector("#detail-copy").addEventListener("click",async()=>{
@@ -905,9 +923,10 @@ document.querySelector("#detail-copy").addEventListener("click",async()=>{
 document.addEventListener("keydown",e=>{
   const panel=document.querySelector("#detail-dialog");
   if(panel.hidden||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||document.querySelector("dialog[open]")||document.querySelector(".menu:not([hidden])"))return;
-  const inField=e.target.closest("input,textarea,select,[contenteditable]");
-  if(e.key==="Escape"){e.preventDefault();if(inField&&panel.contains(e.target))e.target.blur();else closePanel(false)}
-  else if(!inField&&(e.key==="j"||e.key==="k")){e.preventDefault();stepPanel(e.key==="j"?1:-1)}
+  const inField=e.target.closest("input,textarea,select,[contenteditable]"),inPanel=panel.contains(e.target);
+  // A first Esc in a panel field leaves the field but stays in the panel; the next one closes it.
+  if(e.key==="Escape"){e.preventDefault();if(inField&&inPanel)document.querySelector("#detail-heading")?.focus();else closePanel(false)}
+  else if(inPanel&&!inField&&(e.key==="j"||e.key==="k")){e.preventDefault();stepPanel(e.key==="j"?1:-1)}
 });
 
 // QY0WG2: an Unrated task has no confirmed consequence yet, so it must stand out rather than read
@@ -929,7 +948,6 @@ function stateTags(task){
   else if(task.due_state!=="closed")out.push(tag("gray",due||(task.due_date?`Due ${fmtDay(task.due_date)}`:"No due date")));
   if(task.is_blocked)out.push(tag("purple","⊘ Blocked"));
   if(task.is_critical_path)out.push(tag("red","◆ Critical path"));
-  if(task.criticality==="critical")out.push(tag("red","◆ Critical"));
   return out.join("");
 }
 function roleLine(perms){
@@ -955,8 +973,8 @@ function renderDetail(task,events){
     fact("Start",task.start_date?fmtDay(task.start_date):"Not set"),
     fact("Due",task.due_date?fmtDay(task.due_date):"Not set"),
     fact("Criticality",task.criticality?task.criticality.charAt(0).toUpperCase()+task.criticality.slice(1):"Unrated"),
-    fact("Progress",`${task.progress==null?"—":task.progress+"%"}${roll&&roll.total?` · ${roll.completed}/${roll.total} steps`:""}`),
-    fact("Critical path",listed.is_critical_path?"Yes":"No"),
+    fact("Progress",task.progress==null?"—":`${task.progress}%`),
+    fact("Steps",roll&&roll.total?`${roll.completed} of ${roll.total} done`:"None"),
   ].join("");
   const deps=(task.dependencies||[]).map(dep=>{
     const other=dep.direction==="incoming"?dep.predecessor_title:dep.successor_title;
@@ -1023,29 +1041,29 @@ function renderDetail(task,events){
   const parentLink=task.parent_task_id?`<p class="parent-link"><button type="button" class="link" data-detail="${escapeHtml(task.parent_task_id)}">◂ Parent: ${escapeHtml(task.parent_title||"parent task")}</button></p>`:"";
   document.querySelector("#detail-body").innerHTML=`
     ${parentLink}
-    <p class="panel-crumb">${escapeHtml(task.project_name||"")} · ${escapeHtml(statusLabel(task.status))}</p>
+    <p class="panel-crumb">${escapeHtml(task.project_name||"")}</p>
     <h2 id="detail-heading" tabindex="-1">${escapeHtml(task.title)}</h2>
     <div class="tags">${stateTags({...listed,...task,is_blocked:listed.is_blocked,is_critical_path:listed.is_critical_path,days_to_due:listed.days_to_due})}</div>
     <p class="role-line">${escapeHtml(roleLine(perms))}</p>
     <div class="facts">${facts}</div>
     <div class="panel-sections" role="group" aria-label="Jump to a section">${[["desc","Details"],["subtasks","Steps"],["deps","Dependencies"],["attachments","Files"],["history","History"]].map(([c,l])=>`<button type="button" class="link" data-jump="${c}">${l}</button>`).join("")}</div>
     ${closedNote}
-    ${lifecycle}
     <p class="desc">${escapeHtml(task.description||"No description.")}</p>
     ${buildImportedFields(task)}
-    <p><button type="button" class="link" id="save-task-template">Save this task (and its subtasks) as a template</button></p>
-    ${critForm}
-    ${schedule}
     ${subtasks}
-    ${reviewers}
-    ${attachments}
-    ${editForm}
     <div class="deps">
       <h3>Dependencies</h3>
       <ul>${deps}</ul>
       ${addDep}
       <div class="error" id="dep-error" role="alert"></div>
     </div>
+    ${lifecycle}
+    ${reviewers}
+    ${attachments}
+    ${critForm}
+    ${schedule}
+    ${editForm}
+    <p><button type="button" class="link" id="save-task-template">Save this task (and its subtasks) as a template</button></p>
     <div class="history"><h3>History</h3><ul>${timeline}</ul></div>`;
   document.querySelector("#detail-edit")?.addEventListener("submit",e=>submitDetailEdit(e,{statusLocked:submitted}));
   document.querySelectorAll("#detail-body [data-jump]").forEach(b=>b.addEventListener("click",()=>document.querySelector(`#detail-body .${b.dataset.jump}`)?.scrollIntoView({block:"start"})));
@@ -1099,7 +1117,7 @@ function buildSchedule(task,closed){
 async function submitSchedule(e){
   e.preventDefault();const err=document.querySelector("#sched-error");err.textContent="";err.style.color="";
   try{
-    const {proposal}=await api(`/api/tasks/${detailTaskId}/schedule-proposals`,{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
+    const {proposal}=await api(taskApi(detailTaskId,"/schedule-proposals"),{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
     const impacted=proposal.impacted_successors||[];
     await load();await openDetail(detailTaskId);
     if(impacted.length){const el=document.querySelector("#sched-error");if(el){el.style.color="#667085";el.textContent=`Heads up — approving this may affect: ${impacted.map(t=>t.title).join(", ")} (they are not moved automatically).`;}}
@@ -1132,13 +1150,13 @@ function buildSubtasks(task,closed){
 async function submitParent(e){
   e.preventDefault();const err=document.querySelector("#parent-error");err.textContent="";
   const parent_task_id=e.target.querySelector('select[name="parent_task_id"]').value;
-  try{await api(`/api/tasks/${detailTaskId}/parent`,{method:"POST",body:JSON.stringify({parent_task_id})});await load();await openDetail(detailTaskId)}
+  try{await api(taskApi(detailTaskId,"/parent"),{method:"POST",body:JSON.stringify({parent_task_id})});await load();await openDetail(detailTaskId)}
   catch(x){err.textContent=x.message}
 }
 
 async function submitCriticality(e){
   e.preventDefault();const err=document.querySelector("#crit-error");err.textContent="";
-  try{await api(`/api/tasks/${detailTaskId}/criticality`,{method:"POST",body:JSON.stringify({...Object.fromEntries(new FormData(e.target)),expected_revision:Number(e.target.dataset.revision)})});await load();await openDetail(detailTaskId)}
+  try{await api(taskApi(detailTaskId,"/criticality"),{method:"POST",body:JSON.stringify({...Object.fromEntries(new FormData(e.target)),expected_revision:Number(e.target.dataset.revision)})});await load();await openDetail(detailTaskId)}
   catch(x){err.textContent=x.message}
 }
 
@@ -1183,7 +1201,6 @@ function buildLifecycle(task,extra=""){
     actions+=`<form data-life="hold"><label>On-hold reason<input name="reason" required></label><label>Follow-up checkpoint<input name="checkpoint_date" type="date" required></label><label>Responsible owner<select name="owner_user_id"><option value="">Unassigned</option></select></label><div class="actions"><button>${canDecide?"Put on hold":"Request Owner hold"}</button></div></form>`;
   }
   return `<div class="lifecycle"><h3>Lifecycle</h3>
-    <p>Status: <strong>${escapeHtml(statusLabel(task.status))}</strong></p>
     <ul class="submissions">${subs}</ul>${actions}
     <div class="error" id="lifecycle-error"></div>${extra}</div>`;
 }
@@ -1213,11 +1230,11 @@ async function lifecycleAction(e,task){
   const body=Object.fromEntries(new FormData(form));
   try{
     let outcome;
-    if(kind==="submit")outcome=await api(`/api/tasks/${task.id}/submit`,{method:"POST",body:JSON.stringify(body)});
+    if(kind==="submit")outcome=await api(taskApi(task.id,"/submit"),{method:"POST",body:JSON.stringify(body)});
     else if(kind==="accept")outcome=await api(`/api/submissions/${form.dataset.sid}/accept`,{method:"POST",body:JSON.stringify(body)});
     else if(kind==="changes")outcome=await api(`/api/submissions/${form.dataset.sid}/request-changes`,{method:"POST",body:JSON.stringify(body)});
-    else if(kind==="reopen")outcome=await api(`/api/tasks/${task.id}/reopen`,{method:"POST",body:JSON.stringify(body)});
-    else if(kind==="hold")outcome=await api(`/api/tasks/${task.id}/hold`,{method:"POST",body:JSON.stringify(body)});
+    else if(kind==="reopen")outcome=await api(taskApi(task.id,"/reopen"),{method:"POST",body:JSON.stringify(body)});
+    else if(kind==="hold")outcome=await api(taskApi(task.id,"/hold"),{method:"POST",body:JSON.stringify(body)});
     await load();await openDetail(task.id);
     if(outcome?.request){const current=document.querySelector("#lifecycle-error");current.style.color="#0c7c86";current.textContent="Owner request created; accepted live state is unchanged."}
   }catch(x){if(x.status===409)return reloadTaskAfterConflict(task.id,"lifecycle-error",x.message);err.textContent=x.message}
@@ -1255,7 +1272,7 @@ function buildAttachments(task){
 async function wireAttachments(task){
   document.querySelector("#attachment-form")?.addEventListener("submit",async e=>{
     e.preventDefault();const err=document.querySelector("#attachment-error");err.textContent="";
-    try{await api(`/api/tasks/${task.id}/attachments`,{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});await openDetail(task.id)}
+    try{await api(taskApi(task.id,"/attachments"),{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});await openDetail(task.id)}
     catch(x){err.textContent=x.message}
   });
   document.querySelectorAll("#detail-body [data-remove-attachment]").forEach(b=>b.addEventListener("click",async()=>{
@@ -1310,7 +1327,7 @@ async function submitDetailEdit(e,{statusLocked=false}={}){
   if(statusLocked)delete body.status; // shown for context only; Accept or Request changes moves it
   body.expected_revision=Number(body.expected_revision);
   try{
-    const outcome=await api(`/api/tasks/${detailTaskId}`,{method:"POST",body:JSON.stringify(body)});
+    const outcome=await api(taskApi(detailTaskId),{method:"POST",body:JSON.stringify(body)});
     await load();await openDetail(detailTaskId);
     if(outcome.request){const current=document.querySelector("#detail-edit-error");current.style.color="#0c7c86";current.textContent="Owner request created; accepted live state is unchanged."}
   }catch(err){if(err.status===409)return reloadTaskAfterConflict(detailTaskId,"detail-edit-error",err.message);error.textContent=err.message}
@@ -1847,4 +1864,6 @@ function buildImportedFields(task){
   return `<div class="import-fields"><h3>Imported fields</h3><p class="muted">Custom template columns from the last import (read-only; re-import to change them).</p><dl>${rows}</dl></div>`;
 }
 
-(async()=>{try{const data=await api("/api/me");Object.assign(state,data);showApp();await load()}catch{showLogin()}})();
+// M3: only a failed /api/me means "signed out"; a failed first load says so and keeps the session.
+async function loadOrSay(){try{await load()}catch(err){showToast(`Astra could not load your work (${err.message}). Reload the page to try again.`)}}
+(async()=>{let data;try{data=await api("/api/me")}catch{showLogin();return}Object.assign(state,data);showApp();await loadOrSay()})();

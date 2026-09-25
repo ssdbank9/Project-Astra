@@ -94,8 +94,10 @@ This first vertical slice provides:
   ring, a reduced-motion setting switches animation off, and the page fits phone (390px) to
   desktop (1440px) widths without sideways scrolling;
 - a navigation shell: a left rail (Home, My Work, Inbox, Projects, Capture; a bottom bar on
-  phones) and a top bar with the page title, search (`Ctrl K` or `/`; `?` lists the shortcuts)
-  and an account menu (People and access for owners, Sign out, Sign out everywhere). Each
+  phones) and a top bar with the page title, search (`Ctrl K`, or `Cmd K` on a Mac) and an
+  account menu (People and access for owners, Keyboard shortcuts, Sign out, Sign out
+  everywhere; signing out reloads the page, so nothing of the last person's session stays on
+  screen). There are no page-wide single-key shortcuts. Each
   screen has its own link (`#/home`, `#/my-work`, `#/inbox`, `#/projects`). The Home filters
   live in that link, so reload, Back and a shared link keep them; active filters show as
   removable chips beside "Showing X of Y", with Clear all. My Work lists your open tasks by
@@ -107,10 +109,14 @@ This first vertical slice provides:
 - a task panel docked on the right: a task opens beside the current screen, which stays
   visible and usable, and has a link of its own (`?task=<id>` on that screen, or
   `#/task/<id>` as a full page) that survives reload and Back/Forward and can be copied with
-  Copy link. Esc or × closes it and puts focus back where you were, `j`/`k` step to the next
-  or previous task, and below 1024px it fills the screen. It opens on the title, state chips
-  (with a glyph or word, never colour alone), a line saying what you may do, six facts (owner,
-  start, due, criticality, progress, critical path) and the one Lifecycle block;
+  Copy link; a link with anything but a task id opens nothing. It sits below the top bar, so
+  search and the account menu stay usable (380px wide up to 1279px, 460px above). Esc or ×
+  closes it and puts focus back where you were (in a panel field the first Esc only leaves
+  the field), `j`/`k` step to the next or previous task on the screen behind while focus is
+  in the panel, and below 1024px it fills the screen. It opens on the title, state chips (with
+  a glyph or word, never colour alone), a line saying what you may do and six facts (owner,
+  start, due, criticality, progress, steps), then the description, steps and dependencies,
+  and then the one Lifecycle block;
 - a final-results repository: the App Owner marks an accepted submission or an attachment
   by hand (acceptance alone adds nothing), and the Final results dialog filters by project,
   entity, type, marked date (from/to, whole days in UTC, both ends inclusive) and a search,

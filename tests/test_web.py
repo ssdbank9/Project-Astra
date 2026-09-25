@@ -1911,6 +1911,21 @@ class AstraFoundationStaticTests(unittest.TestCase):
         self.assertIn("*, *::before, *::after { transition-duration: .01ms !important;", motion)
         self.assertIn("animation-duration: .01ms !important", motion)
 
+    def test_text_tokens_meet_contrast_on_their_backgrounds(self):
+        # Lock #9 review M5: recompute every text/background token pair from style.css (WCAG 1.4.3, 4.5:1).
+        root = self.css[self.css.index(":root {"):self.css.index("}\n* { box-sizing")]
+        tok = dict(re.findall(rf"--([a-z0-9-]+):\s*({HEX})", root, flags=re.I))
+        pairs = [("muted", bg) for bg in ("surface", "canvas", "surface-2", "surface-3")]
+        pairs += [("text-2", "surface-3"), ("rail-text", "navy"), ("teal-light", "navy"), ("navy", "badge"), ("teal", "surface")]
+        pairs += [(f"chip-{c}", f"chip-{c}-bg") for c in ("red", "amber", "purple", "teal", "blue", "gray", "green")]
+        pairs += [("chip-teal", "teal-soft")]
+        for fg, bg in pairs:
+            self.assertGreaterEqual(contrast_ratio(tok[fg], tok[bg]), 4.5, f"--{fg} on --{bg}")
+        self.assertGreaterEqual(contrast_ratio("#FFFFFF", tok["teal"]), 4.5, "white on --teal buttons")
+        # One muted grey: no literal copy of the old grey is left outside the token block.
+        self.assertNotIn("#667085", self.css)
+        self.assertNotRegex(self.css[self.css.index("}\n* { box-sizing"):], r"(?<![\w-])color: var\(--(amber|gray)\)")
+
     def test_toolbar_wraps_instead_of_scrolling_sideways(self):
         self.assertRegex(self.css, r"(?m)^\.toolbar \{[^}]*flex-wrap: wrap;")
         # PZTYC9: the header became the top bar; on phones it wraps the search onto its own row.
@@ -1918,45 +1933,148 @@ class AstraFoundationStaticTests(unittest.TestCase):
         self.assertRegex(phone, r"\.topbar \{[^}]*flex-wrap: wrap;")
 
 
-# PZTYC9: the shell's router is run under node with the same minimal globals as the other drivers
-# (location.hash and history.replaceState only; no pushState), so it has to work without them.
-ROUTER_DRIVER = r"""
+# PZTYC9 / DR3PKR: the shell and the task panel run under node with a small DOM stub that records
+# listeners, focus and history. Like the other drivers it offers only location.hash, history.replaceState
+# and history.back (no pushState), so the router has to work without pushState.
+SHELL_DRIVER = r"""
 const fs=require("fs");
-const src=fs.readFileSync(process.argv[2],"utf8");
-const store={};
-function el(){
-  const t={innerHTML:"",textContent:"",value:"",checked:false,hidden:false,style:{},dataset:{},_attrs:{}};
-  t.setAttribute=(k,v)=>{t._attrs[k]=String(v)};t.getAttribute=k=>t._attrs[k]??null;t.removeAttribute=k=>{delete t._attrs[k]};
-  t.addEventListener=()=>{};t.classList={add(){},remove(){},toggle(){},contains(){return false}};
-  return new Proxy(t,{get(o,k){if(k===Symbol.toPrimitive)return()=>"";if(k in o)return o[k];return function(){return el()}}});
+const src=fs.readFileSync(process.argv[2],"utf8"),mode=process.argv[3];
+const store={},docListeners={};
+function el(id){
+  const cls=new Set(),listeners={};
+  const t={_id:id,innerHTML:"",textContent:"",value:"",checked:false,hidden:false,open:false,style:{},dataset:{},_attrs:{},isConnected:true,
+    setAttribute(k,v){t._attrs[k]=String(v)},getAttribute(k){return t._attrs[k]??null},removeAttribute(k){delete t._attrs[k]},hasAttribute(k){return k in t._attrs},
+    addEventListener(k,f){(listeners[k]=listeners[k]||[]).push(f)},dispatchEvent(e){(listeners[e.type]||[]).forEach(f=>f(e));return true},
+    classList:{add:(...c)=>c.forEach(x=>cls.add(x)),remove:(...c)=>c.forEach(x=>cls.delete(x)),toggle:(c,on)=>{if(on===undefined?!cls.has(c):on)cls.add(c);else cls.delete(c)},contains:c=>cls.has(c)},
+    _classes:()=>[...cls].sort(),_listeners:listeners,
+    focus(){globalThis.__focused=t._id;document.activeElement=p},blur(){},select(){},showModal(){t.open=true},close(){t.open=false},
+    contains(n){return n===p},closest(){return null},querySelector(s){return document.querySelector(s)},querySelectorAll(){return[]}};
+  const p=new Proxy(t,{get(o,k){if(k===Symbol.toPrimitive)return()=>"";if(k in o)return o[k];return function(){return el()}}});
+  return p;
 }
-globalThis.document={querySelector(s){return store[s]||(store[s]=el())},querySelectorAll(){return[]},
-  getElementById(s){return document.querySelector("#"+s)},createElement(){return el()},addEventListener(){},body:el(),documentElement:el()};
-const listeners={};globalThis.window=globalThis;globalThis.addEventListener=(k,f)=>{listeners[k]=f};
+globalThis.document={
+  querySelector(s){if(store[s])return store[s];if(s.includes(":not([hidden])")||s.includes("[open]"))return null;return store[s]=el(s)},
+  querySelectorAll(){return[]},getElementById(s){return document.querySelector("#"+s)},createElement(){return el()},
+  addEventListener(k,f){(docListeners[k]=docListeners[k]||[]).push(f)},body:el("body"),documentElement:el("html")};
+document.activeElement=document.body;
+globalThis.window=globalThis;globalThis.addEventListener=(k,f)=>{globalThis["__on_"+k]=f};
 globalThis.localStorage={getItem(){return null},setItem(){}};
-globalThis.fetch=()=>new Promise(()=>{});
 globalThis.Option=function(t,v){return{text:t,value:v}};
-const replaced=[];
-globalThis.location={hash:"",search:""};globalThis.history={replaceState(a,b,url){replaced.push(url);location.hash=url}};
-(0,eval)(src+";globalThis.__r={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state};");
-const r=globalThis.__r,out={};
-out.parsed=["","#","#/","#/home","#/my-work","#/inbox","#/projects","#/nope","#main","#/home?status=delayed&open=1","#/task/a%2Fb"]
-  .map(h=>{const p=r.parseRoute(h);return [p.name,p.id,p.params.toString()]});
-r.filtersFromUrl(new URLSearchParams("project=p1&status=delayed&entity=e1&crit=unrated&due=7&owner=Sara%20K&sort=due_date&open=1"));
+globalThis.CSS={escape:s=>String(s)};
+const fetches=[];
+globalThis.fetch=u=>{fetches.push(u);return new Promise(()=>{})};
+if(mode!=="main"){
+  const me=mode==="boot-me-fails"?null:{user:{id:"u1",display_name:"Omar Malik",global_role:"member"},csrf:"c"};
+  globalThis.fetch=async u=>{fetches.push(u);const ok=u==="/api/me"&&!!me;return {ok,status:ok?200:500,json:async()=>ok?me:{error:"server down"}}};
+}
+const calls=[];
+globalThis.location={hash:"",search:"",pathname:"/",origin:"http://astra",replace(u){calls.push(["location.replace",u])}};
+globalThis.history={replaceState(a,b,url){calls.push(["replace",url]);location.hash=url},back(){calls.push(["back"])}};
+// Seed what the menu wiring reads at load time.
+document.querySelector("#more-btn").setAttribute("aria-controls","more-menu");document.querySelector("#more-menu").hidden=true;
+document.querySelector("#detail-dialog").hidden=true;
+(0,eval)(src+";globalThis.__a={parseRoute,filtersFromUrl,homeQuery,syncFilters,applyRoute,state,openPanel,closePanel,routeHash,taskLink,taskApi,panelState,noteFilters,showToast,projectActions,showApp};");
+const a=globalThis.__a,out={},tick=()=>new Promise(r=>setTimeout(r,0));
+const keydown=(key,target,extra={})=>{const e={key,target,ctrlKey:false,metaKey:false,altKey:false,defaultPrevented:false,prevented:false,preventDefault(){this.prevented=true;this.defaultPrevented=true},stopPropagation(){},...extra};(docListeners.keydown||[]).forEach(f=>f(e));return e.prevented};
+(async()=>{
+if(mode!=="main"){
+  for(let i=0;i<10;i++)await tick();
+  out.login=document.querySelector("#login").hidden;out.app=document.querySelector("#app").hidden;
+  out.toast=document.querySelector("#toast").innerHTML;out.fetches=fetches.slice(0,1);
+  process.stdout.write(JSON.stringify(out));return;
+}
+const U1="11111111-1111-4111-8111-111111111111",U2="22222222-2222-4222-8222-222222222222",U3="33333333-3333-4333-8333-333333333333";
+const panel=document.querySelector("#detail-dialog"),app=document.querySelector("#app");
+let closes=0;panel.addEventListener("close",()=>closes++);
+const snap=()=>({hash:location.hash,hidden:panel.hidden,app:app._classes(),calls:calls.splice(0),closes,full:document.querySelector("#detail-full").getAttribute("href"),focused:globalThis.__focused||null});
+// Router
+out.parsed=["","#","#/","#/home","#/my-work","#/inbox","#/projects","#/nope","#main","#/home?status=delayed&open=1",
+  "#/task/"+U1,"#/task/a%2Fb","#/task/%E0%A4%A","#/home/%zz","#/task/"]
+  .map(h=>{const p=a.parseRoute(h);return [p.name,p.id,p.params.toString()]});
+a.filtersFromUrl(new URLSearchParams("project=p1&status=delayed&entity=e1&crit=unrated&due=7&owner=Sara%20K&sort=due_date&open=1"));
 out.values=["#project-filter","#status-filter","#entity-filter","#crit-filter","#band-filter","#owner-filter","#sort-filter"].map(s=>document.querySelector(s).value);
 out.open=document.querySelector("#open-only").checked;
-out.query=r.homeQuery();
-r.syncFilters();
-out.replaced=replaced.slice();out.hash=location.hash;
-out.homeHref=document.querySelector('[data-nav="home"]').getAttribute("href");
-r.filtersFromUrl(new URLSearchParams(""));
-out.cleared=r.homeQuery();
-out.sortDefault=document.querySelector("#sort-filter").value;
-out.hashchange=typeof listeners.hashchange;
-out.pushState=typeof history.pushState;
-r.state.user=null;out.noUser=r.applyRoute(true)===undefined;
+out.query=a.homeQuery();a.syncFilters();
+out.replaced=calls.splice(0);out.homeHref=document.querySelector('[data-nav="home"]').getAttribute("href");
+a.filtersFromUrl(new URLSearchParams(""));out.cleared=a.homeQuery();out.sortDefault=document.querySelector("#sort-filter").value;
+out.hashchange=typeof globalThis.__on_hashchange;out.pushState=typeof history.pushState;
+a.state.user=null;out.noUser=a.applyRoute(true)===undefined;
+// Escaping: a filter value and a toast text written as markup must come back as text.
+document.querySelector("#owner-filter").value='<img src=x onerror=alert(1)>';a.state.tasks=[];a.noteFilters(0);
+out.chips=document.querySelector("#filter-note").innerHTML;
+a.showToast('“<img src=x onerror=alert(2)>” was added',"Show <b>it</b>",()=>{});out.toast=document.querySelector("#toast").innerHTML;
+document.querySelector("#owner-filter").value="";calls.splice(0);
+// Role gating: owner-only items in the More menu and the account menu.
+out.roles={};
+for(const [role,pid] of [["member","p1"],["owner",""],["owner","p1"]]){
+  a.state.user={id:"u",display_name:"A B",global_role:role};document.querySelector("#project-filter").value=pid;a.projectActions();a.showApp();
+  out.roles[role+(pid?"+project":"")]=["#close-project","#save-template-btn","#project-history-btn","#people","#new-project"].map(s=>document.querySelector(s).hidden);
+}
+document.querySelector("#project-filter").value="";
+// Menus toggle aria-expanded.
+const more=document.querySelector("#more-btn");
+more._listeners.click[0]({detail:1});out.menuOpen=[more.getAttribute("aria-expanded"),document.querySelector("#more-menu").hidden];
+more._listeners.click[0]({detail:1});out.menuClosed=[more.getAttribute("aria-expanded"),document.querySelector("#more-menu").hidden];
+// Keys: no page-wide single-key shortcuts; Ctrl K still focuses search.
+a.state.user={id:"u",display_name:"A B",global_role:"owner"};globalThis.__focused=null;
+out.slash=[keydown("/",document.body),globalThis.__focused,document.querySelector("#keys-dialog").open];
+out.question=[keydown("?",document.body),document.querySelector("#keys-dialog").open];
+keydown("k",document.body,{ctrlKey:true});out.ctrlK=globalThis.__focused;
+// Panel: open, swap, close; focus returns to the opener.
+location.hash="#/home?status=delayed";calls.splice(0);
+const opener=document.querySelector("#opener");opener.focus();
+a.openPanel(U1);out.open1=snap();
+a.openPanel(U2);out.swap=snap();
+out.jOutside=keydown("j",document.body);
+out.jInside=keydown("j",panel);
+const field=el("#field");field.closest=s=>s.includes("input")?field:null;panel.contains=n=>n===panel||n===field;field.focus();
+out.escField=[keydown("Escape",field),globalThis.__focused,panel.hidden];
+a.closePanel(false);out.close=snap();
+// A re-rendered opener is found again by its task id.
+const gone=document.querySelector("#gone");gone.focus();gone.setAttribute("data-detail",U1);gone.dataset.detail=U1;gone.classList.add("link");
+a.openPanel(U1);gone.isConnected=false;
+const again=document.querySelector(`[data-view]:not([hidden]) .link[data-detail="${U1}"]`)||(store[`[data-view]:not([hidden]) .link[data-detail="${U1}"]`]=el("replacement"));
+a.closePanel(false);out.reopenedFocus=snap();
+// M2: a filter picked while the panel is open survives closing it.
+location.hash="#/home";calls.splice(0);document.querySelector("#body").focus();
+a.openPanel(U1);document.querySelector("#crit-filter").value="critical";a.syncFilters();out.filterWhileOpen=snap();
+a.closePanel(false);out.filterKept=snap();
+document.querySelector("#crit-filter").value="";
+// A panel opened from a link closes with replaceState, never leaving the app.
+location.hash="#/inbox?task="+U3;a.panelState.pushed=null;calls.splice(0);
+a.openPanel(U3);out.linkOpen=snap();a.closePanel(false);out.linkClose=snap();
+// The task page is the same panel and closes to the last screen.
+location.hash="#/task/"+U2;a.panelState.lastView="#/my-work";calls.splice(0);
+a.openPanel(U2);out.pageOpen=snap();a.closePanel(false);out.pageClose=snap();
+a.closePanel(false);out.closeTwice=snap();
+out.links=[a.taskLink("a/b"),a.taskApi("a/b","/events"),a.routeHash(a.parseRoute("#/home?due=7&task=x"),null),a.routeHash(a.parseRoute("#/my-work"),"y z")];
+// L1: a link whose task id is not a task id fetches nothing; the first load after sign-in fetches the task again.
+a.state.user={id:"u",display_name:"A B",global_role:"owner"};a.state.projects=[];a.state.tasks=[];
+fetches.splice(0);location.hash="#/home?task=..%2F..%2Fapi%2Fusers";a.applyRoute(false,false);out.badIdFetches=fetches.slice();
+a.closePanel(true);a.panelState.shown=U1;panel.hidden=false;fetches.splice(0);location.hash="#/home?task="+U1;a.state.loads=1;a.applyRoute(false,true);
+out.firstLoadFetches=fetches.slice();
+// H1: signing out reloads the page (no DOM or state survives for the next person).
+calls.splice(0);globalThis.fetch=async u=>({ok:true,status:200,json:async()=>({})});
+await document.querySelector("#logout").onclick();await document.querySelector("#logout-all").onclick();
+out.signOut=[calls.filter(c=>c[0]==="location.replace"),a.state.user];
 process.stdout.write(JSON.stringify(out));
+})().catch(e=>{console.error(e);process.exit(1)});
 """
+
+
+def _run_shell_driver(mode):
+    with tempfile.TemporaryDirectory() as tmp:
+        driver = Path(tmp) / "shell.js"
+        driver.write_text(SHELL_DRIVER, encoding="utf-8")
+        result = subprocess.run(["node", str(driver), str(STATIC / "app.js"), mode],
+                                capture_output=True, text=True, timeout=60)
+    if result.returncode != 0:
+        raise AssertionError(result.stderr)
+    return json.loads(result.stdout)
+
+
+U1, U2, U3 = ("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222",
+              "33333333-3333-4333-8333-333333333333")
 
 
 @unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")
@@ -1965,31 +2083,24 @@ class AstraShellRouterTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        with tempfile.TemporaryDirectory() as tmp:
-            driver = Path(tmp) / "router.js"
-            driver.write_text(ROUTER_DRIVER, encoding="utf-8")
-            result = subprocess.run(["node", str(driver), str(STATIC / "app.js")],
-                                    capture_output=True, text=True, timeout=60)
-        if result.returncode != 0:
-            raise AssertionError(result.stderr)
-        cls.out = json.loads(result.stdout)
+        cls.out = _run_shell_driver("main")
         cls.js = (STATIC / "app.js").read_text(encoding="utf-8")
         cls.html = (STATIC / "index.html").read_text(encoding="utf-8")
 
-    def test_routes_parse_and_unknown_hashes_fall_back_to_home(self):
+    def test_routes_parse_and_unknown_or_malformed_hashes_fall_back_to_home(self):
+        home = ["home", None, ""]
         self.assertEqual(self.out["parsed"], [
-            ["home", None, ""], ["home", None, ""], ["home", None, ""], ["home", None, ""],
-            ["my-work", None, ""], ["inbox", None, ""], ["projects", None, ""], ["home", None, ""],
-            ["home", None, ""], ["home", None, "status=delayed&open=1"], ["task", "a/b", ""]])
+            home, home, home, home, ["my-work", None, ""], ["inbox", None, ""], ["projects", None, ""], home,
+            home, ["home", None, "status=delayed&open=1"], ["task", U1, ""],
+            home, home, home, home])   # not a task id; truncated %-escape (review M3); bad escape; no id
 
     def test_filters_round_trip_through_the_url_with_replace_state(self):
         self.assertEqual(self.out["values"], ["p1", "delayed", "e1", "unrated", "7", "Sara K", "due_date"])
         self.assertTrue(self.out["open"])
         query = "project=p1&status=delayed&entity=e1&crit=unrated&due=7&owner=Sara+K&sort=due_date&open=1"
         self.assertEqual(self.out["query"], query)
-        self.assertEqual(self.out["replaced"], ["#/home?" + query])
+        self.assertEqual(self.out["replaced"], [["replace", "#/home?" + query]])
         self.assertEqual(self.out["homeHref"], "#/home?" + query)
-        # Defaults are left out of the link: no filters and the default sort make a bare #/home.
         self.assertEqual(self.out["cleared"], "")
         self.assertEqual(self.out["sortDefault"], "criticality")
 
@@ -1998,7 +2109,50 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertEqual(self.out["hashchange"], "function")
         self.assertTrue(self.out["noUser"])
         self.assertNotRegex(self.js, r"\.pushState\(")
-        self.assertIn('window.addEventListener("hashchange",()=>{closeMenus();const quiet=panelState.quiet;panelState.quiet=false;applyRoute(!quiet)});', self.js)
+
+    def test_chip_and_toast_text_is_escaped(self):
+        # Lock #9 review M5: a filter value or task title written as markup comes back as text.
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;<span", self.out["chips"])
+        self.assertIn('id="clear-filters" data-clear="all">Clear all</button>', self.out["chips"])
+        self.assertIn("&lt;img src=x onerror=alert(2)&gt;", self.out["toast"])
+        self.assertIn("Show &lt;b&gt;it&lt;/b&gt;", self.out["toast"])
+        self.assertIn('id="toast-dismiss"', self.out["toast"])
+        for html in (self.out["chips"], self.out["toast"]):
+            self.assertNotIn("<img", html)
+            self.assertNotIn("<b>", html)
+
+    def test_owner_only_items_are_hidden_for_other_roles(self):
+        # [close project, save as template, project history, people, new project] hidden?
+        self.assertEqual(self.out["roles"]["member+project"], [True, True, False, True, True])
+        self.assertEqual(self.out["roles"]["owner"], [True, True, True, False, False])
+        self.assertEqual(self.out["roles"]["owner+project"], [False, False, False, False, False])
+
+    def test_menus_toggle_aria_expanded(self):
+        self.assertEqual(self.out["menuOpen"], ["true", False])
+        self.assertEqual(self.out["menuClosed"], ["false", True])
+
+    def test_no_page_wide_single_key_shortcuts(self):
+        # Lock #9 review M4 (WCAG 2.1.4): / and ? do nothing; Ctrl K still reaches search.
+        self.assertEqual(self.out["slash"], [False, None, False])
+        self.assertEqual(self.out["question"], [False, False])
+        self.assertEqual(self.out["ctrlK"], "#search-box")
+        self.assertIn('aria-keyshortcuts="Control+K"', self.html)
+        self.assertIn('role="menuitem" id="keys-btn">Keyboard shortcuts</button>', self.html)
+
+    def test_signing_out_reloads_the_page(self):
+        # Lock #9 review H1: nothing the previous person saw survives for the next one.
+        replaced, user = self.out["signOut"]
+        self.assertEqual(replaced, [["location.replace", "/"], ["location.replace", "/"]])
+        self.assertIsNone(user)
+
+    def test_a_failed_first_load_is_not_a_sign_out(self):
+        # Lock #9 review M3: /api/me succeeded, the task load failed: stay signed in and say so.
+        out = _run_shell_driver("boot-load-fails")
+        self.assertTrue(out["login"])
+        self.assertFalse(out["app"])
+        self.assertIn("could not load your work (server down)", out["toast"])
+        out = _run_shell_driver("boot-me-fails")
+        self.assertFalse(out["login"])
 
     def test_shell_landmarks_rail_top_bar_and_menus(self):
         html = self.html
@@ -2008,94 +2162,32 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertRegex(html, r'<button type="button" class="rail-item" id="new-task">.*?<span>Capture</span></button>')
         self.assertIn('<a class="skip-link" id="skip-link" href="#main">Skip to content</a>', html)
         self.assertIn('<main id="main" tabindex="-1">', html)
-        self.assertIn('aria-keyshortcuts="Control+K /"', html)
-        self.assertIn('<dialog id="keys-dialog"', html)
-        self.assertIn('<div id="toast" class="toast" role="status" aria-live="polite"></div>', html)
         user_menu = html[html.index('id="user-menu"'):]
         user_menu = user_menu[:user_menu.index("</div>\n      </div>")]
-        for item in ('id="people"', 'id="logout"', 'id="logout-all"'):
+        for item in ('id="people"', 'id="keys-btn"', 'id="logout"', 'id="logout-all"'):
             self.assertIn(item, user_menu)
         more = html[html.index('id="more-menu"'):]
         more = more[:more.index("</div>")]
         for item in ("portfolio-btn", "final-results-btn", "templates-btn", "import-btn", "export-btn",
                      "project-history-btn", "save-template-btn", "close-project"):
             self.assertIn(f'role="menuitem" id="{item}"', more)
-        # The filter bar keeps only filters and Clear filters.
+        # The filter bar holds filters only; Clear all is rendered at the end of the chip row.
         toolbar = html[html.index('<section class="toolbar"'):]
         toolbar = toolbar[:toolbar.index("</section>")]
-        self.assertEqual(re.findall(r"<button[^>]*id=\"([^\"]+)\"", toolbar), ["clear-filters"])
-        # The inbox is a page; the new project button lives on the Projects page.
+        self.assertNotIn("<button", toolbar)
         self.assertNotIn('id="inbox-dialog"', html)
         self.assertRegex(html, r'data-view="inbox"[^>]*><div id="inbox-body"')
         self.assertRegex(html, r'data-view="projects"[^>]*>\s*<div class="page-actions"><button type="button" id="new-project" hidden>')
         self.assertIn("Portfolio Gantt", html)
+        self.assertIn('<dialog id="keys-dialog"', html)
+        self.assertIn('<div id="toast" class="toast" role="status" aria-live="polite"></div>', html)
 
-    def test_views_capture_and_menu_behaviour_are_wired(self):
-        js = self.js
-        self.assertIn("const mine=state.tasks.filter(t=>t.owner_user_id===me&&!CLOSED_STATUSES.includes(t.status))", js)
-        self.assertIn('href="#/home?project=${encodeURIComponent(p.id)}"', js)
-        self.assertIn('document.querySelector("#new-task").onclick=openCapture;', js)
-        self.assertIn('if(pid&&[...project.options].some(o=>o.value===pid))project.value=pid;', js)
-        self.assertIn('showToast(`“${task.title}” was added · the current filters hide it`,"Show it",clearAllFilters)', js)
-        # Active filters show as removable chips next to "Showing X of Y"; single keys never fire while typing.
-        self.assertIn('class="filter-chip" data-clear="${key}" aria-label="Remove filter ${escapeHtml(text)}"', js)
-        self.assertIn("<span>Showing <strong>${shown} of ${total}</strong> task", js)
-        self.assertIn('e.target.closest("input,textarea,select,[contenteditable]")||document.querySelector("dialog[open]")', js)
-        self.assertIn('if(e.key==="Escape"){e.preventDefault();e.stopPropagation();close(true)}', js)
-        self.assertIn('menu.addEventListener("click",e=>{if(e.target.closest(\'[role="menuitem"]\'))close(true)},true);', js)
-        self.assertIn('(e.ctrlKey||e.metaKey)&&!e.altKey&&String(e.key).toLowerCase()==="k"', js)
-        # Capture reuses the one create form; optional fields fold away.
+    def test_capture_reuses_the_create_form(self):
         self.assertIn('<h2 id="task-dialog-title">Capture a task</h2>', self.html)
         self.assertIn('<details class="more-fields"><summary>More fields</summary>', self.html)
-        # Approve/Reject stay live on the Inbox page.
-        self.assertIn('data-request-decision="approved"', js)
-        self.assertIn("Nothing is waiting for your decision.", js)
-
-
-# DR3PKR: the task panel's link and history handling, run under node with the minimal globals plus
-# history.back (which the panel uses only when it added the entry itself).
-PANEL_DRIVER = r"""
-const fs=require("fs");
-const src=fs.readFileSync(process.argv[2],"utf8");
-const store={};
-function el(){
-  const cls=new Set(),listeners={};
-  const t={innerHTML:"",textContent:"",value:"",checked:false,hidden:false,style:{},dataset:{},_attrs:{},isConnected:true,
-    setAttribute(k,v){t._attrs[k]=String(v)},getAttribute(k){return t._attrs[k]??null},removeAttribute(k){delete t._attrs[k]},
-    addEventListener(k,f){(listeners[k]=listeners[k]||[]).push(f)},dispatchEvent(e){(listeners[e.type]||[]).forEach(f=>f(e));return true},
-    classList:{add:(...c)=>c.forEach(x=>cls.add(x)),remove:(...c)=>c.forEach(x=>cls.delete(x)),toggle:(c,on)=>{if(on===undefined?!cls.has(c):on)cls.add(c);else cls.delete(c)},contains:c=>cls.has(c)},
-    _classes:()=>[...cls].sort(),_listeners:listeners,focus(){globalThis.__focused=t._id},contains(){return false},closest(){return null}};
-  return new Proxy(t,{get(o,k){if(k===Symbol.toPrimitive)return()=>"";if(k in o)return o[k];return function(){return el()}}});
-}
-globalThis.document={querySelector(s){if(!store[s]){store[s]=el();store[s]._id=s}return store[s]},querySelectorAll(){return[]},
-  getElementById(s){return document.querySelector("#"+s)},createElement(){return el()},addEventListener(){},body:el(),documentElement:el()};
-document.activeElement=document.body;
-globalThis.window=globalThis;globalThis.addEventListener=()=>{};
-globalThis.localStorage={getItem(){return null},setItem(){}};
-globalThis.fetch=()=>new Promise(()=>{});
-globalThis.Option=function(t,v){return{text:t,value:v}};
-globalThis.CSS={escape:s=>String(s)};
-const calls=[];
-globalThis.location={hash:"",search:""};
-globalThis.history={replaceState(a,b,url){calls.push(["replace",url]);location.hash=url},back(){calls.push(["back"])}};
-(0,eval)(src+";globalThis.__p={openPanel,closePanel,routeHash,taskLink,parseRoute,panelState,state};");
-const p=globalThis.__p,panel=document.querySelector("#detail-dialog"),app=document.querySelector("#app"),out={};
-panel.hidden=true;let closes=0;panel.addEventListener("close",()=>closes++);
-const snap=()=>({hash:location.hash,hidden:panel.hidden,app:app._classes(),calls:calls.splice(0),closes,full:document.querySelector("#detail-full").getAttribute("href"),focused:globalThis.__focused||null});
-location.hash="#/home?status=delayed";
-p.openPanel("t1");out.open=snap();
-p.openPanel("t2");out.swap=snap();
-p.closePanel(false);out.close=snap();
-location.hash="#/inbox?task=t9";p.panelState.pushed=null;
-p.openPanel("t9");out.linkOpen=snap();
-p.closePanel(false);out.linkClose=snap();
-location.hash="#/task/t3";p.panelState.lastView="#/my-work";
-p.openPanel("t3");out.pageOpen=snap();
-p.closePanel(false);out.pageClose=snap();
-p.closePanel(false);out.closeTwice=snap();
-out.links=[p.taskLink("a/b"),p.routeHash(p.parseRoute("#/home?due=7&task=x"),null),p.routeHash(p.parseRoute("#/my-work"),"y z")];
-process.stdout.write(JSON.stringify(out));
-"""
+        self.assertIn('document.querySelector("#new-task").onclick=openCapture;', self.js)
+        self.assertIn('showToast(`“${task.title}” was added · the current filters hide it`,"Show it",clearAllFilters)', self.js)
+        self.assertIn('data-request-decision="approved"', self.js)
 
 
 @unittest.skipUnless(shutil.which("node"), "node is needed to run app.js")
@@ -2104,74 +2196,91 @@ class AstraTaskPanelTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        with tempfile.TemporaryDirectory() as tmp:
-            driver = Path(tmp) / "panel.js"
-            driver.write_text(PANEL_DRIVER, encoding="utf-8")
-            result = subprocess.run(["node", str(driver), str(STATIC / "app.js")],
-                                    capture_output=True, text=True, timeout=60)
-        if result.returncode != 0:
-            raise AssertionError(result.stderr)
-        cls.out = json.loads(result.stdout)
+        cls.out = _run_shell_driver("main")
         cls.js = (STATIC / "app.js").read_text(encoding="utf-8")
         cls.html = (STATIC / "index.html").read_text(encoding="utf-8")
         cls.css = (STATIC / "style.css").read_text(encoding="utf-8")
 
     def test_opening_adds_the_task_to_the_link_and_swapping_replaces_it(self):
-        opened = self.out["open"]
-        self.assertEqual(opened["hash"], "#/home?status=delayed&task=t1")
+        opened = self.out["open1"]
+        self.assertEqual(opened["hash"], f"#/home?status=delayed&task={U1}")
         self.assertFalse(opened["hidden"])
         self.assertEqual(opened["app"], ["panel-open"])
         self.assertEqual(opened["calls"], [])          # a first open assigns the hash: a history entry of its own
-        self.assertEqual(opened["full"], "#/task/t1")
+        self.assertEqual(opened["full"], f"#/task/{U1}")
         self.assertEqual(opened["focused"], "#detail-heading")
         swapped = self.out["swap"]
-        self.assertEqual(swapped["calls"], [["replace", "#/home?status=delayed&task=t2"]])
-        self.assertEqual(swapped["full"], "#/task/t2")
+        self.assertEqual(swapped["calls"], [["replace", f"#/home?status=delayed&task={U2}"]])
+        self.assertEqual(swapped["full"], f"#/task/{U2}")
 
-    def test_closing_goes_back_when_the_panel_added_the_entry_and_fires_close(self):
+    def test_closing_goes_back_and_returns_focus_to_the_opener(self):
         closed = self.out["close"]
         self.assertTrue(closed["hidden"])
         self.assertEqual(closed["app"], [])
         self.assertEqual(closed["calls"], [["back"]])
         self.assertEqual(closed["closes"], 1)
-        self.assertEqual(closed["focused"], "#page-title")   # no opener was focused in this run
+        self.assertEqual(closed["focused"], "#opener")
+        # The opener was re-rendered while the panel was open: its replacement gets focus.
+        self.assertEqual(self.out["reopenedFocus"]["focused"], "replacement")
+
+    def test_keys_inside_and_outside_the_panel(self):
+        self.assertFalse(self.out["jOutside"])   # j does nothing unless focus is in the panel (review M4)
+        self.assertTrue(self.out["jInside"])
+        # Esc in a panel field keeps focus in the panel; the panel stays open (review L2).
+        self.assertEqual(self.out["escField"], [True, "#detail-heading", False])
+
+    def test_a_filter_picked_while_the_panel_is_open_survives_closing_it(self):
+        # Lock #9 review M2.
+        self.assertEqual(self.out["filterWhileOpen"]["hash"], f"#/home?crit=critical&task={U1}")
+        kept = self.out["filterKept"]
+        self.assertEqual(kept["calls"], [["replace", "#/home?crit=critical"]])
+        self.assertEqual(kept["hash"], "#/home?crit=critical")
 
     def test_a_panel_opened_from_a_link_closes_without_leaving_the_app(self):
         self.assertEqual(self.out["linkOpen"]["calls"], [])
-        self.assertEqual(self.out["linkOpen"]["hash"], "#/inbox?task=t9")
+        self.assertEqual(self.out["linkOpen"]["hash"], f"#/inbox?task={U3}")
         self.assertEqual(self.out["linkClose"]["calls"], [["replace", "#/inbox"]])
-        self.assertEqual(self.out["linkClose"]["closes"], 2)
 
     def test_the_task_page_is_the_same_panel_and_closes_to_the_last_screen(self):
         self.assertEqual(self.out["pageOpen"]["app"], ["panel-open", "task-page"])
-        self.assertEqual(self.out["pageOpen"]["hash"], "#/task/t3")
+        self.assertEqual(self.out["pageOpen"]["hash"], f"#/task/{U2}")
         self.assertEqual(self.out["pageClose"]["hash"], "#/my-work")
         self.assertEqual(self.out["pageClose"]["app"], [])
-        self.assertEqual(self.out["closeTwice"]["closes"], 3)   # closing a closed panel does nothing
-        self.assertEqual(self.out["links"], ["#/task/a%2Fb", "#/home?due=7", "#/my-work?task=y+z"])
+        closes = self.out["pageClose"]["closes"]
+        self.assertEqual(self.out["closeTwice"]["closes"], closes)   # closing a closed panel does nothing
+        self.assertEqual(self.out["links"], ["#/task/a%2Fb", "/api/tasks/a%2Fb/events", "#/home?due=7", "#/my-work?task=y+z"])
 
-    def test_panel_markup_keys_and_layout(self):
+    def test_task_ids_from_a_link_are_checked_and_fetched_fresh(self):
+        # Lock #9 review L1 and H1: a non-id fetches nothing; the first load after sign-in re-fetches.
+        self.assertEqual(self.out["badIdFetches"], [])
+        self.assertEqual(self.out["firstLoadFetches"], [f"/api/tasks/{U1}", f"/api/tasks/{U1}/events"])
+
+    def test_panel_markup_order_and_layout(self):
         html, js, css = self.html, self.js, self.css
         self.assertNotIn('<dialog id="detail-dialog"', html)
         self.assertRegex(html, r'<aside id="detail-dialog" class="task-panel" aria-labelledby="detail-heading" hidden>')
         panel = html[html.index('<aside id="detail-dialog"'):html.index("</aside>")]
         for part in ('id="detail-copy"', 'id="detail-full"', 'id="detail-close" aria-label="Close task"', '<div id="detail-body"></div>'):
             self.assertIn(part, panel)
-        self.assertIn('<h2 id="detail-heading" tabindex="-1">', js)
-        self.assertIn('<p class="role-line">${escapeHtml(roleLine(perms))}</p>', js)
-        self.assertIn('if(e.key==="Escape"){e.preventDefault();if(inField&&panel.contains(e.target))e.target.blur();else closePanel(false)}', js)
-        self.assertIn('else if(!inField&&(e.key==="j"||e.key==="k")){e.preventDefault();stepPanel(e.key==="j"?1:-1)}', js)
-        self.assertIn(".task-panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 25; display: flex; flex-direction: column; width: 460px;", css)
-        self.assertRegex(css, r"@media \(min-width: 1024px\) \{\n  \.panel-open:not\(\.task-page\) main \{ padding-right: calc\(28px \+ 460px\); \}")
+        # At 1024px and wider the panel sits below the top bar (review M1) and is narrower up to 1279px (L5).
+        self.assertRegex(css, r"@media \(min-width: 1024px\) \{\n  \.task-panel \{ top: var\(--topbar-h\); \}")
+        self.assertRegex(css, r"@media \(min-width: 1024px\) and \(max-width: 1279px\) \{\n  :root \{ --panel-w: 380px; \}")
         self.assertRegex(css, r"@media \(max-width: 1023px\) \{\n  \.task-panel \{ left: 0;")
-        # One lifecycle block, placed before the rest of the task.
+        topbar_z = int(re.search(r"\.topbar \{[^}]*z-index: (\d+)", css).group(1))
+        panel_z = int(re.search(r"\.task-panel \{[^}]*z-index: (\d+)", css).group(1))
+        self.assertGreater(topbar_z, panel_z)   # the account menu opens over the panel
+        # Details, steps and dependencies come before the one Lifecycle block (review L6).
         body = js[js.index('document.querySelector("#detail-body").innerHTML=`'):]
-        self.assertLess(body.index("${lifecycle}"), body.index('<p class="desc">'))
-        self.assertEqual(body[:body.index('document.querySelector("#detail-edit")?.addEventListener')].count("${lifecycle}"), 1)
+        body = body[:body.index('document.querySelector("#detail-edit")?.addEventListener')]
+        self.assertEqual(body.count("${lifecycle}"), 1)
+        self.assertLess(body.index('<p class="desc">'), body.index("${subtasks}"))
+        self.assertLess(body.index("${subtasks}"), body.index('<div class="deps">'))
+        self.assertLess(body.index('<div class="deps">'), body.index("${lifecycle}"))
+        self.assertLess(body.index("${lifecycle}"), body.index("${reviewers}"))
 
     def test_state_chips_carry_a_glyph_or_word(self):
         chips = self.js[self.js.index("function stateTags(task){"):self.js.index("function roleLine(perms){")]
-        for text in ('`▲ ${due||"Overdue"}`', '"⊘ Blocked"', '"◆ Critical path"', '"◆ Critical"', '"✓ "', '"∥ "'):
+        for text in ('`▲ ${due||"Overdue"}`', '"⊘ Blocked"', '"◆ Critical path"', '"✓ "', '"∥ "'):
             self.assertIn(text, chips)
 
 
@@ -2738,7 +2847,8 @@ class AstraDetailDialogWiringTests(unittest.TestCase):
 
     def test_no_reason_given_is_muted_inside_a_request(self):
         css = (STATIC / "style.css").read_text(encoding="utf-8")
-        self.assertIn(".owner-request .request-detail p.muted { color: #667085; }", css)
+        # Lock #9 review L8: one muted grey token everywhere (its contrast is checked in AstraFoundationStaticTests).
+        self.assertIn(".owner-request .request-detail p.muted { color: var(--muted); }", css)
 
     def test_inbox_request_shows_target_status_from_status_and_reason_escaped(self):
         html = self._ran("inbox-decision-refused")["html"]

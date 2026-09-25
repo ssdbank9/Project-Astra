@@ -30,12 +30,13 @@
     </nav>
     <header class="topbar">
       <div class="topbar-title"><div class="crumb" id="crumb">Portfolio</div><h1 id="page-title" tabindex="-1">Home</h1></div>
-      <div class="jump"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="search-box" type="search" placeholder="Search tasks and projects" aria-label="Search tasks and projects" aria-keyshortcuts="Control+K /"><kbd>Ctrl K</kbd></div>
+      <div class="jump"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="search-box" type="search" placeholder="Search tasks and projects" aria-label="Search tasks and projects" aria-keyshortcuts="Control+K"><kbd>Ctrl K</kbd></div>
       <div class="menu-wrap">
         <button type="button" class="avatar" id="user-menu-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="user-menu" aria-label="Account menu"><span id="user-initials"></span></button>
         <div class="menu menu-right" id="user-menu" role="menu" aria-labelledby="user-menu-btn" hidden>
           <div class="menu-head"><strong id="user-name"></strong><span id="user-role"></span></div>
           <button type="button" role="menuitem" id="people" hidden>People and access</button>
+          <button type="button" role="menuitem" id="keys-btn">Keyboard shortcuts</button>
           <button type="button" role="menuitem" id="logout">Sign out</button>
           <button type="button" role="menuitem" id="logout-all">Sign out everywhere</button>
         </div>
@@ -58,7 +59,6 @@
           <label>Owner<input id="owner-filter" placeholder="Filter by person"></label>
           <label>Sort by<select id="sort-filter"><option value="criticality">Criticality</option><option value="due_date">Due date</option></select></label>
           <label class="inline"><input type="checkbox" id="open-only"> Open work only</label>
-          <button type="button" id="clear-filters" class="link" hidden>Clear all</button>
         </section>
         <div id="filter-note" class="filter-note" role="status"></div>
         <section class="panel">
@@ -126,11 +126,10 @@
     <form method="dialog" class="detail-close"><button value="cancel" class="quiet" id="import-close">Close</button></form>
   </dialog>
   <dialog id="keys-dialog" aria-labelledby="keys-title"><div class="dialog-body"><h2 id="keys-title">Keyboard shortcuts</h2><dl class="keys">
-    <dt><kbd>Ctrl</kbd> <kbd>K</kbd> or <kbd>/</kbd></dt><dd>Search tasks and projects</dd>
-    <dt><kbd>Esc</kbd></dt><dd>Close a menu, a dialog or the task panel</dd>
-    <dt><kbd>j</kbd> / <kbd>k</kbd></dt><dd>Next or previous task while the task panel is open</dd>
-    <dt><kbd>?</kbd></dt><dd>Show these shortcuts</dd>
-  </dl><p class="fine">Single keys work only when you are not typing in a field.</p></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
+    <dt><kbd>Ctrl</kbd> <kbd>K</kbd> (<kbd>⌘</kbd> <kbd>K</kbd> on a Mac)</dt><dd>Search tasks and projects</dd>
+    <dt><kbd>Esc</kbd></dt><dd>Close a menu, a dialog or the task panel; in a panel field, the first Esc leaves the field</dd>
+    <dt><kbd>j</kbd> / <kbd>k</kbd></dt><dd>Next or previous task, while focus is in the task panel and not in a field</dd>
+  </dl><p class="fine">No single-key shortcut works anywhere else on the page.</p></div><form method="dialog" class="detail-close"><button value="cancel" class="quiet">Close</button></form></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="step-tip" role="tooltip" hidden></div>
   <script src="/static/app.js"></script>
