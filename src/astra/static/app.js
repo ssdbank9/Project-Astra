@@ -1951,7 +1951,7 @@ function renderDetail(task,events){
   const reviewers=buildReviewers(task,fixed);
   const attachments=buildAttachments(task);
   const subtasks=buildSubtasks(task,fixed);
-  const schedule=buildSchedule(task,fixed);
+  const schedule=buildSchedule(task,closed,{canPropose:!ro});
   const critForm=fixed?`<div class="crit-confirm"><h3>Criticality</h3><p>Current: ${critLabel(task.criticality,true)}</p></div>`:`<div class="crit-confirm"><h3>Criticality</h3>
     <p>Current: ${critLabel(task.criticality,true)} — changes are confirmed with a reason and recorded.</p>
     <form id="crit-form" data-revision="${escapeHtml(String(task.revision))}"><label>Set level<select name="criticality">${crit}</select></label>
@@ -2060,7 +2060,9 @@ function renderDetail(task,events){
   document.querySelectorAll("#detail-body [data-reject-sched]").forEach(b=>b.addEventListener("click",()=>decideSchedule(b.dataset.rejectSched,"reject",b)));
 }
 
-function buildSchedule(task,closed){
+// Review 13b M1: the proposal form needs edit rights; a pending proposal's Approve / Request
+// controls need only the right to decide or request (an owner, a manager, a designated approver).
+function buildSchedule(task,closed,{canPropose=true}={}){
   const b=task.baseline||{};
   const props=task.schedule_proposals||[];
   const pending=props.filter(p=>p.status==="pending");
@@ -2081,7 +2083,7 @@ function buildSchedule(task,closed){
     </div>
     <h4 class="sched-h">Pending proposals</h4>
     <ul>${pendingRows}</ul>
-    ${closed?`<div class="error" id="sched-error"></div>`:`<form id="sched-form"><h4 class="sched-h">Propose a schedule change</h4>
+    ${closed||!canPropose?`<div class="error" id="sched-error"></div>`:`<form id="sched-form"><h4 class="sched-h">Propose a schedule change</h4>
       <div class="grid"><label>New start<input name="start_date" type="date"></label><label>New due<input name="due_date" type="date"></label></div>
       <label>Reason<input name="reason" required></label>
       <div class="actions"><button>Propose</button></div><div class="error" id="sched-error"></div></form>`}

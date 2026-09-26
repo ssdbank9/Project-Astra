@@ -2636,6 +2636,11 @@ if(mode==="bulk"){
   a.state.tasks=[flagged,T({id:"q",title:"Other"})];
   const tiles=()=>homeTiles().map(t=>t[0]+":"+t[3]);
   a.state.user={id:"u9",display_name:"Aly",global_role:"owner"};out.tilesOwner=tiles();
+  // Review 13b L1: a task flagged only for its collaborator counts too, and matches risk=reassign.
+  const collabOnly=T({id:"co",title:"Collab only",needs_new_collaborator:true});
+  a.state.tasks=[collabOnly,T({id:"q2",title:"Other"})];out.tilesCollabOnly=tiles();
+  out.riskCollabOnly=[matchesRisk(collabOnly,"reassign"),matchesRisk(flagged,"reassign"),matchesRisk(T({id:"z"}),"reassign")];
+  a.state.tasks=[flagged,T({id:"q",title:"Other"})];
   a.state.user={id:"u2",display_name:"PM",global_role:"member"};out.tilesManager=tiles();
   a.state.projects[0].can_manage=false;a.state.projects[0].can_assign=true;out.tilesChairman=tiles();
   // The Chairman's bulk bar offers Assign only.
@@ -3346,6 +3351,8 @@ class AstraBulkDriverTests(unittest.TestCase):
         self.assertNotIn("reassign-chip", self.out["plainCard"])
         self.assertIn(f"Chair Person {chip}</td>", self.out["flaggedRow"])
         self.assertIn("reassign:1", self.out["tilesOwner"])
+        self.assertIn("reassign:1", self.out["tilesCollabOnly"])  # review 13b L1
+        self.assertEqual(self.out["riskCollabOnly"], [True, True, False])
         self.assertIn("reassign:1", self.out["tilesManager"])
         self.assertNotIn("reassign:1", self.out["tilesChairman"])  # the Chairman manages no project
 
@@ -3880,6 +3887,8 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
         cases["chairman-in_progress"]["needs_new_assignee"] = True
         # Review 13a: a viewer who is a valid collaborator may submit; a flagged collaborator row is marked.
         cases["viewer-collaborator"] = _detail_task("in_progress", {**VIEWER_PERMS, "can_submit": True})
+        # Review 13b M1: a designated approver may request the Owner's approval of a pending proposal.
+        cases["approver-in_progress"] = _detail_task("in_progress", {**VIEWER_PERMS, "can_request_protected": True})
         cases["viewer-collaborator"]["needs_new_collaborator"] = True
         cases["viewer-collaborator"]["reviewers"] = [{"display_name": "Chair <b>", "role": "collaborator", "user_id": "u3",
                                                       "not_allowed": True}]
@@ -3907,6 +3916,17 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
         self.assertNotIn('data-life="submit"', self.html["chairman-in_progress"])
         self.assertIn('data-life="submit"', self.html["viewer-collaborator"])
         self.assertIn('data-life="submit"', self.html["owner-in_progress"])  # no can_submit key: unchanged
+
+    def test_review_13b_an_approver_requests_approval_of_a_pending_proposal(self):
+        html = self.html["approver-in_progress"]
+        self.assertIn('data-approve-sched="sp1">Request Owner approval</button>', html)
+        self.assertIn('data-reject-sched="sp1"', html)
+        self.assertNotIn('id="sched-form"', html)  # proposing needs edit rights
+        for case in ("chairman-in_progress", "viewer-collaborator", "viewer-unchecked"):
+            with self.subTest(case=case):
+                self.assertNotIn("data-approve-sched", self.html[case])
+        self.assertIn('id="sched-form"', self.html["manager-in_progress"])
+        self.assertIn('data-approve-sched="sp1">Request Owner approval</button>', self.html["manager-in_progress"])
 
     def test_review_13a_the_panel_sends_empty_dates_as_null(self):
         js = (REPO / "src" / "astra" / "static" / "app.js").read_text(encoding="utf-8")

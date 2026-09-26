@@ -118,8 +118,10 @@ Locks so far:
   hides the forms the server refuses for the Chairman and viewers, the Chairman selects in
   the List only, and an empty date no longer demands a reason (an older bug). A follow-up
   commit makes the Chairman never submit, not even on a task assigned to them before the
-  rules (it stays flagged). The ticket
-  stays in review. Tests: `Ran 675 tests`, `OK`. Screenshots in the session scratchpad,
+  rules (it stays flagged). Review 13b approved with follow-ups (0 High, 1 Medium, 2 Low),
+  all fixed: a designated approver keeps "Request Owner approval" on pending schedule
+  proposals, and the Home tile and `risk=reassign` pin the collaborator flag. The ticket
+  stays in review. Tests: `Ran 676 tests`, `OK`. Screenshots in the session scratchpad,
   `lock13-shots/`.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
@@ -165,7 +167,7 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   tests after each feature commit, `Ran 619 tests`, `OK` with the review 12a-12c fixes, and
   `Ran 639 tests`, `OK` with the re-review 12d fixes. With lock #13 (3FQEKB and the review
   12e test gaps, no schema change): `Ran 663 tests`, `OK`; with the review 13a fixes:
-  `Ran 675 tests`, `OK`.
+  `Ran 676 tests`, `OK`.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 
