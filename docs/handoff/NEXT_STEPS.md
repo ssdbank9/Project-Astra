@@ -1,7 +1,8 @@
 # Astra next steps — from today to distribution
 
-This plan runs from the current state (branch head `0b90ceb`, schema v20,
-676 tests, 33 tickets in signoff) to Astra being online for real users and
+This plan runs from the current state (branch head `0b90ceb` when it was
+written, schema v20, 676 tests then and 680 after G1PPV7, 34 tickets in
+signoff) to Astra being online for real users and
 operated safely. It follows the order Aly set on 2026-09-25: finish the UI and
 the whole app first, then move it to the server and put it online for everyone
 (Slack ts 1790310312.798809). Hosting stays Oracle Cloud Always Free with a
@@ -19,7 +20,8 @@ How to read each phase:
 - **Risks** lists what could go wrong.
 
 The phases map onto the Delivery Plan artifact
-(https://claude.ai/artifact/WoAfB3Q9gT2piSaWbNppTi): its A Consolidate and
+(https://claude.ai/artifact/WoAfB3Q9gT2piSaWbNppTi, a private page in Aly's
+account; ask Aly to share or export it): its A Consolidate and
 B Finish core are phase A here, C Production readiness is phases B and C,
 D Deployment pilot is phase D, and E Operate is phases E and F.
 
@@ -46,9 +48,10 @@ after the pilot unless Aly pulls one in.
 
 1. Pull the branch and run the local test sequence (`HANDOFF_2026-09-26.md`
    section 2.1).
-2. Work through the 33 signoff tickets. Each ticket's `review-check` field has a
+2. Work through the 34 signoff tickets. Each ticket's `review-check` field has a
    short manual check list. Suggested order, newest first, because newer work
    builds on older work:
+   - After the pack: G1PPV7.
    - Lock #13: 3FQEKB.
    - Lock #12: JN1QYG, X07XV4, XV92JJ.
    - Gate 2: 3C1Z74, VPYGY5, CR121Z, FKVHH8, 4T4DEA, PZTYC9, DR3PKR.
@@ -491,9 +494,12 @@ home region; an Always Free shape that is actually available; Ubuntu LTS (24.04
 recommended because Astra needs Python 3.11 or newer; verify the image's Python
 version); a public IP; SSH key only.
 
-D2. Network: OCI security list or network security group open for 22 (Aly's
-address only, per the 2026-09-20 decision), 80 and 443. Check the host firewall on the image as
-well.
+D2. Network: OCI security list or network security group open for 22 from
+Aly's own address only (`<aly-ip>/32`, per the 2026-09-20 decision; a wider
+range only if Aly decides it and it is logged in `DECISIONS_LOG.md`), and 80
+and 443 from anywhere. Check that no rule opens 22 from `0.0.0.0/0`, `::/0`
+or any other range, in the security lists and in any network security group.
+Check the host firewall on the image as well.
 
 D3. OS hardening: updates, unattended security upgrades, SSH without passwords
 or root login, a firewall, fail2ban for SSH.

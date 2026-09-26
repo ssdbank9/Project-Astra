@@ -71,6 +71,9 @@ if the two ever differ, this file wins and the copy should be fixed.
 - Do not deploy, provision anything, expose the server, create real users,
   send external notifications or turn on external AI unless Aly says so. Aly
   does every account and credential step.
+- Never keep a live SQLite database in a file-sync folder (Dropbox, OneDrive).
+- Authorization lives in `service.py`; hiding a control in the UI is never the
+  check; add service and HTTP tests for every role affected.
 - Every fact you report must come from the repository, git, the tests or Aly.
   Say "unverified" when you cannot check something.
 

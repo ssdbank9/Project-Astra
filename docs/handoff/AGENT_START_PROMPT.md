@@ -16,9 +16,9 @@ person who makes decisions. Work only from GitHub, never from an old local copy.
 - Repository: https://github.com/ssdbank9/Project-Astra.git (public)
 - Branch: `codex/migration-safety-remediation` (the name is historical; it is
   the working branch for every agent)
-- Expected head: `0b90ceb4a8677ef331f1b12f8cbc5ee4c39f9f33` or a later commit.
-  The later commits so far are listed in `HANDOFF_2026-09-26.md` section 1,
-  "Since the pack was written".
+- Head: the head you pull. The pack was written at `0b90ceb`; the commits
+  made since are listed in `HANDOFF_2026-09-26.md` section 1, "Since the pack
+  was written". Tell me the head you pulled in the preflight.
 - Schema v20; the full suite is `Ran 680 tests`, `OK` (676 at `0b90ceb`)
 - My Windows checkout: `C:\Users\Aly Jafferani\Documents\ChatGPT\Project-Astra`.
   Never use `...\ChatGPT\New project`; it is an old, unrelated repository.
@@ -105,8 +105,8 @@ jaira validate --json
 Expect `Ran 680 tests` and `OK` (about 6 to 11 minutes). Node must be
 installed, or the UI driver tests are skipped. Then list the board by lane
 with `jaira next --per-lane --json`, or from the ticket files' `status:`
-lines. Expect 33 in signoff, 1 in review (G1PPV7, or in signoff once
-reviewed), 4 in human, 1 in todo, 15 in backlog and 15 in done.
+lines. Expect 34 in signoff, 4 in human, 1 in todo, 15 in backlog and 15 in
+done, unless I have accepted or sent back tickets since.
 
 ## 4. Your first task
 

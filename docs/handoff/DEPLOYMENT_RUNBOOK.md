@@ -110,11 +110,11 @@ Rollback: terminate the instance in the console. Nothing else exists yet.
 **[ALY]** In the OCI console, on the instance's subnet security list or network
 security group, allow inbound TCP:
 
-- 22 only from Aly's own public address or ISP range (`<aly-ip>/32`). This
-  was decided on 2026-09-20. If Aly's address changes, update the rule in
-  the console before connecting, or use the OCI Bastion service. Never open
-  22 to `0.0.0.0/0` unless Aly decides it explicitly, and write that
-  decision in `DECISIONS_LOG.md`;
+- 22 only from Aly's own public address, as `<aly-ip>/32`. This was
+  decided on 2026-09-20. A wider range is allowed only if Aly decides it and
+  it is logged in `DECISIONS_LOG.md`. If Aly's address changes, update the
+  rule in the console before connecting, or use the OCI Bastion service.
+  Never open 22 to `0.0.0.0/0` or `::/0`;
 - 80 from anywhere (Caddy needs it for certificates and redirects);
 - 443 from anywhere.
 
@@ -125,8 +125,11 @@ A new network's default security list usually already has an ingress rule for
 
 Do not open 8765. Astra listens only on `127.0.0.1`.
 
-Verification: the security list (and any network security group on the
-instance) has no ingress rule for 22 whose source is `0.0.0.0/0`.
+Verification: the only ingress rule for 22, in every security list on the
+subnet and in any network security group on the instance's VNIC, has source
+`<aly-ip>/32`. There is no rule for 22 from `0.0.0.0/0`, from `::/0`, or from
+any other range wider than Aly's address (unless Aly's logged decision names
+it).
 
 **[AGENT]** On the VM, check the host firewall. Oracle's Ubuntu images are
 known to ship their own `iptables` rules (verify on the actual image):

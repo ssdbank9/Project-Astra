@@ -136,7 +136,7 @@ Sources:
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
 These are choices Claude made and reported; Aly has not overruled them. They
-are not Aly's decisions. Codex may keep them, or raise any of them with Aly.
+are not Aly's decisions. The agent may keep them, or raise any of them with Aly.
 
 ### Lock #12 (from the lock #12 plan and writer report)
 

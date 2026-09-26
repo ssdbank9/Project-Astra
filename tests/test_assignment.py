@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from astra.db import connect
-from astra.service import AstraService, Forbidden, TaskLocked
+from astra.service import AstraService, Conflict, Forbidden, TaskLocked
 
 
 class AssignmentFixture(unittest.TestCase):
@@ -292,7 +292,7 @@ class ExistingAssignmentsTests(AssignmentFixture):
             return real(*args, **kwargs)
         s._dependency_gate = demote_then_gate
         try:
-            with self.assertRaises(Exception) as caught:
+            with self.assertRaises(Conflict) as caught:
                 s.submit_task(self.member, top["id"], "done")
         finally:
             s._dependency_gate = real

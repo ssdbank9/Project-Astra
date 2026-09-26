@@ -1,7 +1,7 @@
 ---
 id: 01M3E863QH4ZJSR22J2SG1PPV7
 title: A viewer assigned a top-level task before 3FQEKB can still submit it
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -26,13 +26,17 @@ related:
   - 01M3DP7RSN7ZHDRR7SCC3FQEKB
 commits: []
 created-at: 2026-09-26T06:59:31Z
-updated-at: 2026-09-26T07:08:44Z
+updated-at: 2026-09-26T07:47:02Z
 updated-by: Claude
 claimed-by: vm-797
 claimed-at: 2026-09-26T06:59:43Z
 outcome-what: "_may_submit (src/astra/service.py) now runs the 3FQEKB assignee rule for the task's assignee as well as for collaborators, so a project viewer who holds a top-level task (assigned before the rules, or kept after a demotion from member) cannot submit it; permissions.can_submit follows, so the panel hides Submit. Three service tests and one HTTP test; README, HANDOFF and NEXT_STEPS updated."
 outcome-why: "The fact-check of the handoff pack (H2) found the assignee branch returned True before any role check. Aly's rule (Slack ts 1790386492.402489): viewers get subtasks only. Aly asked for the fix on 2026-09-26 (ts 1790405773.430749)."
 outcome-resolves: "Every DoD item: refusal before and inside the submit transaction, own subtask and member and manager submits unchanged, demote/restore, can_submit false with the flag kept, all paths into submitted walked (note), tests failing before and passing after, full suite 680 OK, docs updated."
+review-summary: "G1PPV7 routes the assignee through `_assignee_refusal` with role and parent read at submit time; every path into submitted probed (27/27), the 4 real reverts caught (M4 equivalent mutant), 680 tests OK; docs tool-neutral, AGENTS.md matches CLAUDE.md byte for byte."
+review-gaps: "5 Lows (older rules not restated, one Codex line, SSH check missed ::/0 and wide ranges, one broad assertRaises, private artifact link without caveat), all fixed in the follow-up commit on top of 0f0511b (the same commit that moves this ticket to signoff; its SHA is in git log for this ticket)."
+review-verdict: "approve with follow-ups (0 High, 0 Medium, 5 Low; Lows fixed)"
+review-check: independent probe14.py 27/27 at 0f0511b and reproduces the bug at 146a5b3; M1-M5 reverts; full suite Ran 680 tests OK; diff-check and CR scan clean
 ---
 
 # A viewer assigned a top-level task before 3FQEKB can still submit it
