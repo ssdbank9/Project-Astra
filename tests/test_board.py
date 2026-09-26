@@ -939,6 +939,60 @@ class Review12dTests(BoardFixture):
         self.assertEqual(cascades["wip_limits"].get("projects"), "CASCADE")
 
 
+class Review12eTests(BoardFixture):
+    """Review 12e L1: the two server checks no test pinned. (The third, member checkbox hiding,
+    is a driver case in test_web.py.)"""
+
+    def test_undo_is_refused_for_every_status_the_board_never_undoes(self):
+        # Why test_l2_a_board_move_out_of_changes_requested_is_not_undoable looked unpinned: the
+        # review's revert experiment left a dangling line continuation, so the module failed to
+        # import and the harness saw no FAIL line. With the check removed cleanly that test fails.
+        # This one pins the check for each source status the board does not undo.
+        s = self.service
+        for source in ("changes_requested", "on_hold", "submitted", "reopened"):
+            with self.subTest(source=source):
+                task = s.create_task(self.owner, {"project_id": self.project["id"], "title": f"From {source}"})
+                self.db.execute("UPDATE tasks SET status=? WHERE id=?", (source, task["id"]))
+                before = self.fresh(task["id"])
+                after = {**before, "status": "assigned", "revision": before["revision"] + 1, "move_kind": "board"}
+                self.db.execute("UPDATE tasks SET status='assigned', revision=revision+1 WHERE id=?", (task["id"],))
+                event = s._event(task["id"], self.owner["id"], "task_updated", before, after, "Board move: forged")
+                with self.assertRaisesRegex(ValueError, "no move of yours to undo"):
+                    s.undo_move(self.owner, task["id"], {"event_id": event})
+                self.assertEqual(self.fresh(task["id"])["status"], "assigned")
+        # An ordinary source still undoes, so the refusal above is the source check at work.
+        out = self.move(self.owner, "ready")
+        s.undo_move(self.owner, self.task["id"], {"event_id": out["undo"]["event_id"]})
+        self.assertEqual(self.fresh()["status"], "draft")
+
+    def test_a_revision_bumped_between_the_recheck_and_the_write_refuses_the_bulk(self):
+        # _write_bulk compares each task's revision inside the transaction, after the recheck:
+        # the recheck compares the plan (ids, blocked items, limits), not revisions.
+        s, pid = self.service, self.project["id"]
+        other = s.create_task(self.owner, {"project_id": pid, "title": "Other"})
+        ids = [self.task["id"], other["id"]]
+        body = {"task_ids": ids, "action": "status", "value": "ready"}
+        plan = s.bulk_preview(self.manager, pid, body)
+        real = s._bulk_plan
+        calls = []
+
+        def plan_then_bump(*args, **kwargs):
+            result = real(*args, **kwargs)
+            calls.append(1)
+            if len(calls) == 2:  # the recheck, inside the write transaction
+                self.db.execute("UPDATE tasks SET revision=revision+1 WHERE id=?", (other["id"],))
+            return result
+        s._bulk_plan = plan_then_bump
+        try:
+            with self.assertRaisesRegex(Conflict, "“Other” changed since the preview; nothing was changed"):
+                s.bulk_apply(self.manager, pid, {**body, "expected_revisions": {i["id"]: i["revision"] for i in plan["ok"]}})
+        finally:
+            s._bulk_plan = real
+        self.assertEqual(len(calls), 2)
+        self.assertEqual({self.fresh(i)["status"] for i in ids}, {"draft"})  # nothing written
+        self.assertEqual(self.fresh(other["id"])["revision"], plan["ok"][1]["revision"])  # the bump rolled back too
+
+
 class TaskLockTests(BoardFixture):
     """X07XV4: a lock is a renewable lease; others cannot change the task while it lives."""
 
