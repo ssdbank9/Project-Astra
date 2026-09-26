@@ -3,7 +3,7 @@
 > **Current handoff:** Read
 > [`CLAUDE_HANDOFF_2026-09-24.md`](CLAUDE_HANDOFF_2026-09-24.md) before
 > reviewing or changing `codex/migration-safety-remediation`. It has the
-> current branch and head, the 2026-09-24 commits, the test evidence (674 tests
+> current branch and head, the 2026-09-24 commits, the test evidence (675 tests
 > with lock #13, not pushed at the time of writing; lock #12 pushed, tickets in signoff),
 > schema v20, the board by lane,
 > the write-lock rules and the open asks.

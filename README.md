@@ -27,7 +27,8 @@ This first vertical slice provides:
   (`E_COLLABORATOR_CHAIRMAN`, `E_COLLABORATOR_VIEWER`). An older collaborator row that breaks
   this stays, is marked in the panel's reviewer list, flags the task "Collaborator not
   allowed" (`needs_new_collaborator`, counted in the same Home tile, "Needs reassigning"),
-  and no longer lets that person submit. A viewer collaborator also blocks promoting a
+  and no longer lets that person submit. The Chairman never submits, not even on a task
+  assigned to them before these rules (it stays flagged for someone else to reassign). A viewer collaborator also blocks promoting a
   subtask to top level until removed.
 
   The Chairman's right adds the assignee and nothing else: creating tasks, status, dates,

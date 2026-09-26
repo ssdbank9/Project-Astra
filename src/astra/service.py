@@ -2404,6 +2404,10 @@ class AstraService:
     def _may_submit(self, actor: dict, task) -> bool:
         """Project Manager (or Owner), the Task Owner, or a task collaborator. The caller
         has already established that the actor can view the task's project."""
+        # 3FQEKB: the Chairman never receives work, so never submits it, not even as an assignee
+        # from before the rules (that task stays flagged "Needs a new assignee").
+        if actor.get("global_role") == "chairman":
+            return False
         if self.can_manage_project(actor, task["project_id"]) or actor["id"] == task["owner_user_id"]:
             return True
         if not self.db.execute(

@@ -231,6 +231,16 @@ class ExistingAssignmentsTests(AssignmentFixture):
         exported = s.export_tasks(self.owner, {"project_id": self.pid, "risk": "reassign"})
         self.assertEqual([t["title"] for t in exported["tasks"]], ["Viewer top"])
 
+    def test_the_chairman_never_submits_even_as_a_legacy_assignee(self):
+        s = self.service
+        self.legacy_owner(self.parent["id"], self.chair["id"])
+        self.assertFalse(s.task_detail(self.chair, self.parent["id"])["permissions"]["can_submit"])
+        with self.assertRaises(Forbidden):
+            s.submit_task(self.chair, self.parent["id"], "done")
+        self.assertEqual(self.fresh(self.parent["id"])["status"], "draft")
+        self.assertTrue(self.listed(self.parent["id"])["needs_new_assignee"])  # still flagged for someone to reassign
+        self.assertEqual(s.submit_task(self.manager, self.parent["id"], "done")["status"], "submitted")
+
     def test_a_closed_task_is_not_flagged(self):
         s = self.service
         task = s.create_task(self.owner, {"project_id": self.pid, "title": "Done"})
