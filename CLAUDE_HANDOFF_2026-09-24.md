@@ -101,6 +101,19 @@ Locks so far:
   - The three tickets are in signoff, waiting for Aly. Tests: `Ran 639 tests`, `OK`.
     Evidence (screenshots and a short video) lives in the session scratchpad,
     `lock12-shots/`.
+- Lock #13 (granted 01:38 UTC 2026-09-26, Slack ts 1790386688.768309): from `d082faf`
+  (baseline `Ran 639 tests`, `OK`), **not pushed** at the time of writing. Ticket 3FQEKB,
+  assignment rules from Aly's answers to review 12c I3 (ts 1790386228.535829 and
+  1790386492.402489): the Chairman may assign tasks and subtasks in any project (the
+  assignee only: panel and bulk Assign; `can_assign`, `can_manage_project` unchanged) and is
+  never an assignee; a project viewer may be given subtasks only; older assignments that
+  break the rules are kept and flagged "Needs a new assignee" (card, List row, panel, Home
+  count). Every path follows it: create, panel, bulk, importer (`E_OWNER_CHAIRMAN`,
+  `E_OWNER_VIEWER`), hold owner, promotion of a viewer's subtask, templates (the Chairman
+  role is no longer offered or filled). No schema change. Two commits: a test-only commit
+  closing the three review 12e test gaps, then the 3FQEKB feature commit with the ticket in
+  review. Tests: `Ran 663 tests`, `OK`. Screenshots in the session scratchpad,
+  `lock13-shots/`.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
 
@@ -143,7 +156,8 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   (Gate 2 slice 7, no schema change): `Ran 507 tests`, `OK`; with the review 11 fixes:
   `Ran 510 tests`, `OK`. With lock #12 (schema v18 to v20): `Ran 540`, `564` and `586`
   tests after each feature commit, `Ran 619 tests`, `OK` with the review 12a-12c fixes, and
-  `Ran 639 tests`, `OK` with the re-review 12d fixes.
+  `Ran 639 tests`, `OK` with the re-review 12d fixes. With lock #13 (3FQEKB and the review
+  12e test gaps, no schema change): `Ran 663 tests`, `OK`.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 
@@ -249,16 +263,14 @@ old handoff's top section marked superseded; (b) the jaira sync fix as local set
    checked.
 9. Signoff on the 18 tickets plus the 4 human-lane tickets.
 10. Lock #12 (JN1QYG, X07XV4, XV92JJ in signoff) follow-ups, not built:
-    - Three revert experiments no test catches (review 12e L1): dropping the
-      board-source-status check in `undo_move` (test: undo a board move out of
-      `changes_requested`); dropping the per-row revision check in `_write_bulk` (test: bump
-      one task's revision between the recheck and the write); showing members the bulk
-      checkboxes (driver case where `bulkScope()` returns null for a member).
+    - Closed in lock #13: the three revert experiments review 12e reported as uncaught
+      (the undo source-status check, the per-row revision check in `_write_bulk`, member
+      checkbox hiding) now have tests. The undo one was already caught: the review's revert
+      experiment left a dangling line continuation, so the module failed to import.
     - Not tried on a real touch device (tablet long press), no screen-reader run, and no
       live refresh: lock chips, banners and the Inbox "Approving overrides" lines show the
       last load (the server rechecks at write and decision time).
-    - Ask Aly (review 12c I3): bulk assign, like the task panel, accepts the chairman and
-      project viewers. Should viewers be assignable at all?
+    - Review 12c I3 answered by Aly on 2026-09-26 and built as 3FQEKB under lock #13.
     - The Blocked WIP exemption: a card that enters Blocked because of a dependency is not
       refused, so a Blocked limit can be exceeded by an added link or a reopened
       predecessor (documented in the README).

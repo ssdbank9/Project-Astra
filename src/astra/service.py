@@ -714,20 +714,43 @@ class AstraService:
             rows += self.db.execute(base.format("e.event_type=?"), (kind, 50)).fetchall()
         return [dict(row) for row in rows]
 
-    def list_assignable_users(self, actor: dict, project_id: str) -> list[dict]:
-        if not self.can_manage_project(actor, project_id):
+    ASSIGNABLE_PURPOSES = ("task", "subtask", "reviewer")
+
+    def list_assignable_users(self, actor: dict, project_id: str, purpose: str = "task") -> list[dict]:
+        """The people a picker offers. 3FQEKB (Aly 2026-09-26): an assignee picker never lists
+        the Chairman, and lists a project viewer only for a subtask, labelled by project_role.
+        The reviewer picker ("reviewer") keeps its earlier list: reviewing is not assignment."""
+        if purpose not in self.ASSIGNABLE_PURPOSES:
+            raise ValueError("purpose must be task, subtask or reviewer.")
+        allowed = self.can_manage_project(actor, project_id) or (
+            purpose != "reviewer" and self.can_assign(actor, project_id))
+        if not allowed:
             raise Forbidden("Task-management access denied.")
         self._require_project(project_id)
         rows = self.db.execute(
-            """SELECT DISTINCT u.id, u.display_name, u.email FROM users u
+            """SELECT DISTINCT u.id, u.display_name, u.email, u.global_role,
+                      (SELECT m.role FROM memberships m WHERE m.user_id=u.id AND m.project_id=?) project_role
+               FROM users u
                WHERE u.active=1 AND (
                    u.global_role IN ('owner','chairman')
                    OR EXISTS(SELECT 1 FROM memberships m WHERE m.user_id=u.id AND m.project_id=?)
                )
                ORDER BY u.display_name COLLATE NOCASE""",
-            (project_id,),
+            (project_id, project_id),
         ).fetchall()
-        return [dict(row) for row in rows]
+        result = []
+        for row in rows:
+            user = dict(row)
+            role = user.pop("global_role")
+            if role in {"owner", "chairman"}:
+                user["project_role"] = None
+            if purpose != "reviewer":
+                if role == "chairman":
+                    continue
+                if user["project_role"] == "viewer" and purpose != "subtask":
+                    continue
+            result.append(user)
+        return result
 
     def revoke_project_access(self, actor: dict, project_id: str, user_id: str) -> None:
         self.require_owner(actor)
@@ -1034,6 +1057,14 @@ class AstraService:
         ).fetchone()
         return bool(row and row["role"] == "manager")
 
+    def can_assign(self, actor: dict, project_id: str) -> bool:
+        """3FQEKB (Aly 2026-09-26, Slack ts 1790386228.535829): who may set or change a task's
+        assignee: an owner, the project's manager, or the Chairman. The Chairman's right is
+        narrow: it adds the assignee and nothing else (can_manage_project is unchanged)."""
+        if actor.get("global_role") == "chairman" and actor.get("active", 1):
+            return self.can_view_project(actor, project_id)
+        return self.can_manage_project(actor, project_id)
+
     def create_project(self, actor: dict, name: str, description: str = "", timezone_name: str = "Asia/Karachi") -> dict:
         self.require_owner(actor)
         if not name.strip():
@@ -1066,6 +1097,7 @@ class AstraService:
             project["today"] = self._today_in_timezone(project.get("timezone"))
             # JN1QYG: the board offers dragging only where the server would allow the move.
             project["can_manage"] = self.can_manage_project(actor, project["id"])
+            project["can_assign"] = self.can_assign(actor, project["id"])  # 3FQEKB
             project["wip_limits"] = self.wip_limits(project["id"])
         return projects
 
@@ -1082,7 +1114,44 @@ class AstraService:
         if not self.db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise KeyError("Project not found.")
 
-    def _validate_assignee(self, project_id: str, owner_user_id: str | None) -> str | None:
+    def _validate_assignee(self, project_id: str, owner_user_id: str | None, *, subtask: bool = False) -> str | None:
+        """An assignee for a task (``subtask`` when the task has a parent). 3FQEKB (Aly
+        2026-09-26, ts 1790386492.402489): nobody is ever assigned to the Chairman, and a
+        project viewer may be given subtasks only, never a top-level task."""
+        owner_user_id = self._validate_project_user(project_id, owner_user_id)
+        refusal = self._assignee_refusal(project_id, owner_user_id, subtask=subtask)
+        if refusal:
+            raise ValueError(refusal)
+        return owner_user_id
+
+    def _assignee_refusal(self, project_id: str, user_id: str | None, *, subtask: bool) -> str | None:
+        """Why ``user_id`` may not be this task's assignee, or None."""
+        if not user_id:
+            return None
+        row = self.db.execute(
+            """SELECT u.display_name, u.global_role,
+                      (SELECT m.role FROM memberships m WHERE m.project_id=? AND m.user_id=u.id) project_role
+               FROM users u WHERE u.id=?""", (project_id, user_id)).fetchone()
+        if not row:
+            return None
+        if row["global_role"] == "chairman":
+            return (f"“{row['display_name']}” is the Chairman. The Chairman assigns work but is never assigned "
+                    "a task or subtask; choose someone else.")
+        if row["global_role"] == "member" and row["project_role"] == "viewer" and not subtask:
+            return (f"“{row['display_name']}” is a viewer on this project. A viewer can be given subtasks only, "
+                    "not a top-level task; choose someone else, or make this a subtask first.")
+        return None
+
+    def _is_project_viewer(self, project_id: str, user_id: str | None) -> bool:
+        if not user_id:
+            return False
+        return bool(self.db.execute(
+            """SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id
+               WHERE m.project_id=? AND m.user_id=? AND m.role='viewer' AND u.global_role='member'""",
+            (project_id, user_id)).fetchone())
+
+    def _validate_project_user(self, project_id: str, owner_user_id: str | None) -> str | None:
+        """An active user with access to the project (the App Owner and Chairman always have it)."""
         if not owner_user_id:
             return None
         row = self.db.execute(
@@ -1109,7 +1178,6 @@ class AstraService:
         title = str(payload.get("title", "")).strip()
         if not title:
             raise ValueError("Task title is required.")
-        owner_user_id = self._validate_assignee(project_id, payload.get("owner_user_id") or None)
         status = payload.get("status", "draft")
         criticality = payload.get("criticality") or None
         if status not in STATUSES or criticality not in CRITICALITIES:
@@ -1126,6 +1194,8 @@ class AstraService:
             parent = self.get_task(actor, parent_task_id)
             if parent["project_id"] != project_id:
                 raise ValueError("A parent task must belong to the same project.")
+        owner_user_id = self._validate_assignee(project_id, payload.get("owner_user_id") or None,
+                                                subtask=bool(parent_task_id))
         if predecessor_task_id:
             predecessor = self.get_task(actor, predecessor_task_id)
             if predecessor["project_id"] != project_id:
@@ -1244,7 +1314,9 @@ class AstraService:
         """Load the task, require task-management access and an up-to-date expected_revision."""
         before = self.get_task(actor, task_id)
         if not self.can_manage_project(actor, before["project_id"]):
-            raise Forbidden("Task-management access denied.")
+            if not self.can_assign(actor, before["project_id"]):
+                raise Forbidden("Task-management access denied.")
+            self._assert_assign_only(before, payload)
         expected_revision = payload.get("expected_revision")
         if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
             raise ValueError("An integer expected_revision is required to update a task.")
@@ -1253,6 +1325,20 @@ class AstraService:
                 f"Task revision conflict: expected {expected_revision}, current revision is {before['revision']}."
             )
         return before, expected_revision
+
+    ASSIGN_ONLY_KEYS = frozenset({"owner_user_id", "expected_revision", "reason"})
+
+    @staticmethod
+    def _assert_assign_only(before: dict, payload: dict) -> None:
+        """3FQEKB: the Chairman's update may change the assignee and nothing else. Any other
+        field sent must equal the stored value (a panel form may echo it back)."""
+        if "owner_user_id" not in payload:
+            raise Forbidden("The Chairman may change only who a task is assigned to.")
+        for key, value in payload.items():
+            if key in AstraService.ASSIGN_ONLY_KEYS:
+                continue
+            if (value if value not in ("",) else None) != (before.get(key) if before.get(key) not in ("",) else None):
+                raise Forbidden("The Chairman may change only who a task is assigned to.")
 
     def _validate_task_update(self, before: dict, payload: dict) -> dict:
         """Merge the payload over the task, apply the lifecycle policy and field rules, and
@@ -1291,10 +1377,15 @@ class AstraService:
         title = str(merged.get("title", "")).strip()
         if not title:
             raise ValueError("Task title is required.")
+        # 3FQEKB: only a changed assignee meets the assignment rules, so a task already assigned
+        # to the Chairman or (top level) to a viewer keeps its owner until someone reassigns it.
+        owner_user_id = before.get("owner_user_id")
         if "owner_user_id" in payload:
-            owner_user_id = self._validate_assignee(before["project_id"], payload.get("owner_user_id") or None)
-        else:
-            owner_user_id = before.get("owner_user_id")
+            if (payload.get("owner_user_id") or None) != (owner_user_id or None):
+                owner_user_id = self._validate_assignee(before["project_id"], payload.get("owner_user_id") or None,
+                                                        subtask=bool(before.get("parent_task_id")))
+            else:  # unchanged: still an active user with access, as before
+                owner_user_id = self._validate_project_user(before["project_id"], owner_user_id)
         return {
             "status": status,
             "status_changed": status_changed,
@@ -1470,7 +1561,10 @@ class AstraService:
         else:
             order_by = f" ORDER BY {self._CRITICALITY_RANK}, {self._DUE_DATE_KEY}, t.title COLLATE NOCASE"
         rows = self.db.execute(
-            """SELECT t.*, u.display_name owner_name, p.name project_name, p.timezone project_timezone FROM tasks t
+            """SELECT t.*, u.display_name owner_name, p.name project_name, p.timezone project_timezone,
+                      u.global_role owner_global_role,
+                      (SELECT m2.role FROM memberships m2 WHERE m2.project_id=t.project_id AND m2.user_id=t.owner_user_id)
+                      owner_project_role FROM tasks t
                LEFT JOIN users u ON u.id=t.owner_user_id JOIN projects p ON p.id=t.project_id"""
             + where
             + order_by,
@@ -1495,7 +1589,20 @@ class AstraService:
         self._add_lock_state(result)
         for item in result:
             item["next_action"] = self._next_action(item)
+            item["needs_new_assignee"] = self._needs_new_assignee(
+                item, item.pop("owner_global_role", None), item.pop("owner_project_role", None))
         return result
+
+    @staticmethod
+    def _needs_new_assignee(task: dict, owner_global_role: str | None, owner_project_role: str | None) -> bool:
+        """3FQEKB: an open task assigned before the assignment rules to someone they now forbid:
+        the Chairman, or (a top-level task) a project viewer. Nothing is changed; the task is
+        flagged until someone reassigns it."""
+        if not task.get("owner_user_id") or task["status"] in REOPEN_ONLY_STATUSES:
+            return False
+        if owner_global_role == "chairman":
+            return True
+        return owner_global_role == "member" and owner_project_role == "viewer" and not task.get("parent_task_id")
 
     @staticmethod
     def _duration_days(task: dict) -> int:
@@ -1635,7 +1742,7 @@ class AstraService:
             ).fetchall()
         return {"tasks": [dict(r) for r in task_rows], "projects": [dict(r) for r in project_rows]}
 
-    EXPORT_RISKS = ("atrisk", "blocked", "critical")
+    EXPORT_RISKS = ("atrisk", "blocked", "critical", "reassign")
 
     def export_tasks(self, actor: dict, filters: dict) -> dict:
         # Authorization is inherited from list_tasks; only the actor's visible tasks are ever returned.
@@ -1680,6 +1787,8 @@ class AstraService:
                 return False
             if risk == "critical" and not t.get("is_critical_path"):
                 return False
+            if risk == "reassign" and not t.get("needs_new_assignee"):  # 3FQEKB, the Home tile's filter
+                return False
             if risk == "atrisk" and not (t.get("due_state") == "overdue" or t.get("is_blocked")
                                          or t.get("is_critical_path") or t["status"] == "delayed"):
                 return False
@@ -1695,14 +1804,23 @@ class AstraService:
         task = self.get_task(actor, task_id)
         is_owner = actor["global_role"] == "owner"
         is_manager = self._is_project_manager(actor, task["project_id"])
+        can_assign = self.can_assign(actor, task["project_id"])
         task["permissions"] = {
             "can_edit_ordinary": is_owner or is_manager,
+            # 3FQEKB: the Chairman sees the assignee control and nothing else new.
+            "can_assign": can_assign,
+            "assign_only": can_assign and not (is_owner or is_manager),
             "can_request_protected": is_manager or self._is_approver(task_id, actor["id"]),
             "can_decide_protected": is_owner,
             "can_manage_files": is_owner,
             "can_read_files": True,
             "can_force_unlock": is_owner,
         }
+        owner_row = self.db.execute(
+            """SELECT u.global_role, (SELECT m.role FROM memberships m WHERE m.project_id=? AND m.user_id=u.id) project_role
+               FROM users u WHERE u.id=?""", (task["project_id"], task.get("owner_user_id"))).fetchone()
+        task["needs_new_assignee"] = self._needs_new_assignee(
+            task, owner_row["global_role"] if owner_row else None, owner_row["project_role"] if owner_row else None)
         task["lock"] = self._active_lock(task_id)
         task["due_state"] = self._due_state(
             task.get("due_date"), task["status"], self._today_in_timezone(task.get("project_timezone"))
@@ -2510,7 +2628,8 @@ class AstraService:
         checkpoint = self._date(checkpoint_date)
         if not checkpoint:
             raise ValueError("On-hold work requires a mandatory follow-up checkpoint date.")
-        hold_owner = self._validate_assignee(task["project_id"], hold_owner_id or task.get("owner_user_id"))
+        hold_owner = self._validate_assignee(task["project_id"], hold_owner_id or task.get("owner_user_id"),
+                                             subtask=bool(task.get("parent_task_id")))
         if not hold_owner:
             raise ValueError("On-hold work requires a responsible owner.")
         # Aly 2026-09-25 (Slack ts 1790342529.695749): a manager of the project puts work on hold
@@ -3140,9 +3259,11 @@ class AstraService:
         fields, or why the task is blocked. Preview and apply share it."""
         if not self.can_view_project(actor, project_id):
             raise KeyError("Project not found.")
-        if not self.can_manage_project(actor, project_id):
-            raise Forbidden("Only an owner or a manager of this project can change tasks in bulk.")
         action, value = payload.get("action"), payload.get("value")
+        # 3FQEKB: the Chairman may use bulk Assign, and only that.
+        if not self.can_manage_project(actor, project_id) and not (
+                action == "assignee" and self.can_assign(actor, project_id)):
+            raise Forbidden("Only an owner or a manager of this project can change tasks in bulk.")
         ids = payload.get("task_ids")
         if action not in BULK_ACTIONS:
             raise ValueError("Choose status, assignee or due-date offset.")
@@ -3158,7 +3279,8 @@ class AstraService:
             reason = f"Bulk change: status to {BOARD_COLUMN_LABELS[value]}"
             summary = f"status to {BOARD_COLUMN_LABELS[value]}"
         elif action == "assignee":
-            owner_id = self._validate_assignee(project_id, value or None)
+            # The Chairman is refused for every task; a viewer is checked per task below (subtasks only).
+            owner_id = self._validate_assignee(project_id, value or None, subtask=True)
             who = self.db.execute("SELECT display_name FROM users WHERE id=?", (owner_id,)).fetchone() if owner_id else None
             name = who["display_name"] if who else "nobody"
             reason, summary = f"Bulk change: assign to {name}", f"assign to {name}"
@@ -3359,7 +3481,7 @@ class AstraService:
     def bulk_undo(self, actor: dict, project_id: str, payload: dict) -> dict:
         """Reverse one bulk change of yours, every task or none: refused if any of them
         changed since, or once the Undo window has passed."""
-        if not self.can_manage_project(actor, project_id):
+        if not self.can_assign(actor, project_id):
             raise Forbidden("Only an owner or a manager of this project can change tasks in bulk.")
         bulk_id = str(payload.get("bulk_id", ""))
         row = next((r for r in self.db.execute(
@@ -3376,6 +3498,8 @@ class AstraService:
         if any(json.loads(d["detail_json"] or "{}").get("undoes") == bulk_id for d in done):
             raise ValueError("That bulk change has already been undone.")
         detail = json.loads(row["detail_json"])
+        if not self.can_manage_project(actor, project_id) and detail.get("action") != "assignee":
+            raise Forbidden("Only an owner or a manager of this project can change tasks in bulk.")
         rows = []
         for item in detail["tasks"]:
             current = self.get_task(actor, item["id"])
@@ -3430,6 +3554,10 @@ class AstraService:
             # Reject if the proposed parent is a descendant of this task (would form a cycle).
             if task_id in self._task_ancestors(parent_task_id):
                 raise ValueError("That parent would create a subtask cycle.")
+        elif task.get("parent_task_id") and self._is_project_viewer(task["project_id"], task.get("owner_user_id")):
+            # 3FQEKB: a viewer may hold a subtask only, so promoting it would break the rule.
+            raise ValueError(f"“{task['title']}” is assigned to a project viewer, who can be given subtasks only. "
+                             "Reassign it first, then make it a top-level task.")
         timestamp = now_text()
         before = {"parent_task_id": task.get("parent_task_id")}
         with transaction(self.db):
@@ -3495,7 +3623,7 @@ class AstraService:
             raise ValueError("Invalid reviewer role.")
         if not user_id:
             raise ValueError("A user is required.")
-        self._validate_assignee(task["project_id"], user_id)
+        self._validate_project_user(task["project_id"], user_id)  # reviewing is not assignment (3FQEKB)
         with transaction(self.db):
             self._refuse_closed_in_transaction(task_id)
             cursor = self.db.execute(
@@ -3695,6 +3823,8 @@ class AstraService:
             # owner — the role the task's owner held (App Owner, Chairman, or their
             # role on this project) — never the person, who changes each cycle.
             suggested_role = self._owner_role(row["project_id"], row["owner_user_id"])
+            if suggested_role == "chairman":  # 3FQEKB: the Chairman is never an assignee, so no suggestion
+                suggested_role = None
             tasks.append({
                 "local_id": local_of[row["id"]],
                 "title": row["title"],
@@ -3826,8 +3956,10 @@ class AstraService:
         return None
 
     def _template_roles(self, body: dict) -> list[str]:
+        """The roles a template offers to fill. 3FQEKB: 'chairman' is never offered (older
+        templates may still carry it; those tasks are created unassigned)."""
         used = {self._task_role(task) for task in body.get("tasks", [])}
-        return [role for role in TEMPLATE_ROLES if role in used]
+        return [role for role in TEMPLATE_ROLES if role in used and role != "chairman"]
 
     def _check_role_assignments(self, body: dict, project_id: str | None, role_assignments,
                                 *, grants_membership: bool) -> dict[str, str]:
@@ -3847,6 +3979,9 @@ class AstraService:
                 continue
             if role not in TEMPLATE_ROLES or role == "owner":
                 raise ValueError(f"'{role}' is not a role that can be assigned here.")
+            if role == "chairman":
+                raise ValueError("The Chairman is never assigned tasks, so the 'chairman' role cannot be filled; "
+                                 "those tasks are created unassigned.")
             if role not in used:
                 raise ValueError(f"This template has no '{role}' tasks.")
             user = self.db.execute(
@@ -3854,10 +3989,7 @@ class AstraService:
             ).fetchone()
             if not user or not user["active"]:
                 raise ValueError(f"The person picked for '{role}' is not an active user.")
-            if role == "chairman":
-                if user["global_role"] != "chairman":
-                    raise ValueError("Only a Chairman can fill the 'chairman' role.")
-            elif user["global_role"] != "member":
+            if user["global_role"] != "member":
                 raise ValueError(f"Only an ordinary user can fill the project role '{role}'.")
             elif not grants_membership and self._owner_role(project_id, str(user_id)) != role:
                 raise ValueError(f"The person picked for '{role}' must hold that role on the project.")
@@ -3870,14 +4002,10 @@ class AstraService:
     def _resolve_role(self, project_id: str, role: str | None, picks: dict[str, str]) -> str | None:
         """A role -> the Owner's pick ('owner' is the acting owner), else its single
         active holder, else None."""
-        if not role:
+        if not role or role == "chairman":  # 3FQEKB: the Chairman is never an assignee
             return None
         if role in picks:
             return picks[role]
-        if role == "chairman":
-            rows = self.db.execute(
-                "SELECT id FROM users WHERE global_role='chairman' AND active=1"
-            ).fetchall()
         else:
             rows = self.db.execute(
                 """SELECT u.id FROM memberships m JOIN users u ON u.id=m.user_id
@@ -3886,16 +4014,22 @@ class AstraService:
             ).fetchall()
         return rows[0]["id"] if len(rows) == 1 else None  # none or ambiguous -> unassigned
 
-    def _suggested_owner(self, project_id: str, task: dict, picks: dict[str, str]) -> tuple[str | None, str | None]:
-        """(owner_user_id, role) to pre-fill for one template task."""
+    def _suggested_owner(self, project_id: str, task: dict, picks: dict[str, str],
+                         *, subtask: bool = False) -> tuple[str | None, str | None]:
+        """(owner_user_id, role) to pre-fill for one template task. 3FQEKB: a person the
+        assignment rules forbid here (the Chairman; a viewer on a top-level task) leaves the
+        task unassigned rather than refusing the whole template."""
         role = self._task_role(task)
         if role:
-            return self._resolve_role(project_id, role, picks), role
+            user_id = self._resolve_role(project_id, role, picks)
+            if self._assignee_refusal(project_id, user_id, subtask=subtask):
+                return None, role
+            return user_id, role
         # Legacy name for an ordinary user: pre-filled only while still assignable.
         legacy = self._legacy_suggested_user(task.get("suggested_owner"))
         if legacy:
             try:
-                return self._validate_assignee(project_id, legacy["id"]), None
+                return self._validate_assignee(project_id, legacy["id"], subtask=subtask), None
             except (ValueError, Forbidden):
                 pass
         return None, None
@@ -3915,7 +4049,9 @@ class AstraService:
             due_date = self._apply_offset(anchor_date, task.get("due_offset"))
             # Resolve the suggested role to a person (the pick, else the single
             # holder); otherwise leave the task unassigned.
-            owner_user_id, role = self._suggested_owner(project_id, task, picks)
+            owner_user_id, role = self._suggested_owner(
+                project_id, task, picks,
+                subtask=task.get("parent_local_id") is not None or bool(root_parent_id))
             owners[task["local_id"]] = (owner_user_id, role)
             self.db.execute(
                 """INSERT INTO tasks(id,project_id,parent_task_id,title,description,owner_user_id,status,criticality,

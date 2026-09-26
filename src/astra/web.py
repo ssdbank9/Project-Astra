@@ -148,7 +148,8 @@ class AstraHandler(BaseHTTPRequestHandler):
                 project = parse_qs(urlparse(self.path).query).get("project_id", [""])[0]
                 if not project:
                     raise ValueError("project_id is required.")
-                return self._json({"users": self.service.list_assignable_users(user, project)})
+                purpose = parse_qs(urlparse(self.path).query).get("for", ["task"])[0]
+                return self._json({"users": self.service.list_assignable_users(user, project, purpose)})
             if path == "/api/entities":
                 user, _ = self._require_user()
                 return self._json({"entities": self.service.list_entities(user)})

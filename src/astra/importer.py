@@ -2040,12 +2040,14 @@ class ImportEngine:
         self.existing_attachments: dict[str, set] = {}
         self.existing_reviewers: set[tuple] = set()
         self.filed_entities: set[str] = set()
+        self.member_roles: dict[str, str] = {}
         if self.project_id:
-            self.members = {
-                row["user_id"] for row in self.db.execute(
-                    "SELECT user_id FROM memberships WHERE project_id=?", (self.project_id,)
+            self.member_roles = {
+                row["user_id"]: row["role"] for row in self.db.execute(
+                    "SELECT user_id, role FROM memberships WHERE project_id=?", (self.project_id,)
                 )
             }
+            self.members = set(self.member_roles)
             for row in self.db.execute("SELECT * FROM tasks WHERE project_id=?", (self.project_id,)):
                 task = dict(row)
                 self.existing_by_id[task["id"]] = task
@@ -2129,6 +2131,26 @@ class ImportEngine:
             return self._person_miss(text, result, column, "W_PERSON_NOT_ELIGIBLE", f"{user['email']} {what}.")
         self._note_grant(user, result, column)
         return user
+
+    def _check_owner_rules(self, owner, result: RowResult, text: dict, existing):
+        """3FQEKB (Aly 2026-09-26): nobody is assigned to the Chairman, and a project viewer
+        owns steps only (a row with a Parent Key), never a top-level task. The row is refused
+        with the reason, as other invalid values are. A re-imported row that names the owner
+        the task already has is left alone, so existing data is not refused."""
+        if not owner or (existing and existing.get("owner_user_id") == owner["id"]):
+            return owner
+        if owner.get("global_role") == "chairman":
+            result.add("error", "E_OWNER_CHAIRMAN",
+                       f"{owner['email']} is the Chairman. The Chairman assigns work but is never assigned a task "
+                       "or step; choose another owner.", "Owner Email")
+            return None
+        step = bool(text.get("parent_key")) or bool(existing and existing.get("parent_task_id"))
+        if owner.get("global_role") == "member" and self.member_roles.get(owner["id"]) == "viewer" and not step:
+            result.add("error", "E_OWNER_VIEWER",
+                       f"{owner['email']} is a viewer on this project. A viewer can own a step (give the row a "
+                       "Parent Key) but not a top-level task; choose another owner.", "Owner Email")
+            return None
+        return owner
 
     def _person_miss(self, text: str, result: RowResult, column: str, code: str, detail: str):
         """Record that ``text`` names nobody the row may be assigned to: the detailed finding
@@ -2255,6 +2277,7 @@ class ImportEngine:
         owner = None
         if text.get("owner_email"):
             owner = self._resolve_person(text["owner_email"], result, "Owner Email")
+            owner = self._check_owner_rules(owner, result, text, existing)
         people_lists = {}
         for list_key, role in (("collaborators", "collaborator"), ("reviewers", "reviewer"), ("approvers", "approver")):
             ids = []

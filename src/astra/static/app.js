@@ -30,7 +30,7 @@ function projectActions(){
 }
 // VPYGY5: the Risk filter behind the Home tiles (service.py export_tasks applies the same rules).
 function isAtRisk(t){return t.due_state==="overdue"||!!t.is_blocked||!!t.is_critical_path||t.status==="delayed"}
-function matchesRisk(t,risk){return risk==="blocked"?!!t.is_blocked:risk==="critical"?!!t.is_critical_path:risk==="atrisk"?isAtRisk(t):true}
+function matchesRisk(t,risk){return risk==="blocked"?!!t.is_blocked:risk==="critical"?!!t.is_critical_path:risk==="atrisk"?isAtRisk(t):risk==="reassign"?!!t.needs_new_assignee:true}
 // The portfolio filters, applied to the loaded tasks (the same rules the export reuses on the server).
 function visibleTasks(){
   const project=document.querySelector("#project-filter").value,status=document.querySelector("#status-filter").value,
@@ -290,7 +290,7 @@ function renderScheduleTable(groups,tableEl){
     const link=`<button type="button" class="link" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>`;
     const stepNo=isStep?`<i class="sw step-c${stepHue(m.idx)}${m.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${m.idx}</i><span class="sr-only">Step ${m.idx}</span> of ${m.total}`:"—";
     const pick=scope?`<td class="pick">${isStep?"":pickBox(t)}</td>`:"";
-    rows.push(`<tr class="${isStep?"step-tr":"task-tr"}${bulk.ids.has(t.id)?" is-picked":""}">${pick}${cell(t.project_name)}<td>${isStep?escapeHtml(parent.title):link}</td><td>${stepNo}</td><td>${isStep?link:"—"}</td>${cell(t.owner_name||"Unassigned")}${cell(t.start_date||"—")}${cell(t.due_date||"—")}${cell(statusLabel(t.status))}<td>${critLabel(t.criticality)}</td>${cell(dueText(t)||t.due_state)}<td>${t.is_critical_path?"Yes":"No"}</td></tr>`);
+    rows.push(`<tr class="${isStep?"step-tr":"task-tr"}${bulk.ids.has(t.id)?" is-picked":""}">${pick}${cell(t.project_name)}<td>${isStep?escapeHtml(parent.title):link}</td><td>${stepNo}</td><td>${isStep?link:"—"}</td><td>${escapeHtml(t.owner_name||"Unassigned")}${t.needs_new_assignee?" "+reassignChip(t):""}</td>${cell(t.start_date||"—")}${cell(t.due_date||"—")}${cell(statusLabel(t.status))}<td>${critLabel(t.criticality)}</td>${cell(dueText(t)||t.due_state)}<td>${t.is_critical_path?"Yes":"No"}</td></tr>`);
     if(isStep)steps++;
     kids.forEach(k=>walk(k,t));
   };
@@ -628,6 +628,11 @@ const boardExpanded=new Set();
 // JN1QYG: a saved order (board_rank) first, then the list order for cards never ranked.
 function byBoardRank(a,b){return (a.board_rank==null)-(b.board_rank==null)||(a.board_rank??0)-(b.board_rank??0)}
 function canMoveOnBoard(pid){const p=(state.projects||[]).find(x=>x.id===pid);return !!(p&&p.can_manage)}
+// 3FQEKB (Aly 2026-09-26): the Chairman may assign but not otherwise manage; the server decides.
+function canAssignIn(pid){const p=(state.projects||[]).find(x=>x.id===pid);return !!(p&&(p.can_manage||p.can_assign))}
+function assignOnly(pid){return canAssignIn(pid)&&!canMoveOnBoard(pid)}
+// An open task assigned before the assignment rules to the Chairman, or (top level) to a viewer.
+function reassignChip(t){return t&&t.needs_new_assignee?'<span class="tag reassign-chip" data-tone="amber">⚠ Needs a new assignee</span>':""}
 function boardCard(t,kids,movable){
   const done=kids.filter(k=>k.status==="completed").length,col=boardColumn(t),tags=[];
   if(t.is_blocked&&!CLOSED_STATUSES.includes(t.status))tags.push(`<span class="tag" data-tone="purple">⊘ Waits on ${escapeHtml((t.blocked_by&&t.blocked_by[0]&&t.blocked_by[0].title)||"a predecessor")}</span>`);
@@ -637,6 +642,7 @@ function boardCard(t,kids,movable){
   if(t.is_critical_path&&!CLOSED_STATUSES.includes(t.status))tags.push('<span class="tag" data-tone="red">◆ Critical path</span>');
   if(col==="accepted")tags.push('<span class="tag" data-tone="green">✓ Accepted</span>');
   if(col==="closed")tags.push(`<span class="tag">× ${escapeHtml(statusLabel(t.status))}</span>`);
+  if(t.needs_new_assignee)tags.push(reassignChip(t));
   if(lockedByOther(t))tags.push(`<span class="tag lock-chip" data-tone="amber">🔒 ${escapeHtml(t.lock.holder_name)}<span class="sr-only"> is changing this task</span></span>`);
   const due=CLOSED_STATUSES.includes(t.status)?"":`<span class="due-chip" data-due="${workGroup(t)}">${escapeHtml(dueText(t)||"No due date")}</span>`;
   const id=escapeHtml(t.id),move=movable?`<button type="button" class="link card-move" data-move-menu="${id}" aria-haspopup="menu" aria-expanded="false" aria-controls="move-menu" aria-label="Move “${escapeHtml(t.title)}” to…">Move to…</button>`:"";
@@ -793,7 +799,7 @@ function askMove(kind,t,column,err){
     dependencies:["Override dependency",`${name} waits on ${escapeHtml(((err&&err.impact)||[]).join(", "))}. Move it to ${COL_LABEL[column]||"its new column"} anyway? The override is recorded and the other owners are told.`,"","Move anyway"],
   }[kind];
   f.innerHTML=`<h2 id="move-dialog-title">${view[0]}</h2><p>${view[1]}</p>${view[2]}<div class="error" id="move-error" role="alert"></div><div class="actions"><button type="button" class="quiet" data-move-cancel>Cancel</button><button type="submit">${view[3]}</button></div>`;
-  if(kind==="hold")fillAssignees(t.project_id,f.querySelector('select[name="owner_user_id"]'),t.owner_user_id);
+  if(kind==="hold")fillAssignees(t.project_id,f.querySelector('select[name="owner_user_id"]'),t.owner_user_id,t.parent_task_id?"subtask":"task",t.owner_name);
   return new Promise(resolve=>{
     let settled=false;const done=v=>{if(settled)return;settled=true;if(d.open)d.close();resolve(v)};
     f.onsubmit=e=>{e.preventDefault();const data=Object.fromEntries(new FormData(f));
@@ -1128,7 +1134,7 @@ ganttEl.addEventListener("click",e=>{if(gdrag.suppressClick){e.preventDefault();
 // (Shift-click for a range, Space to toggle, Shift+Arrow to extend in the list), then change status,
 // assignee or due dates for all of them in one previewed, all-or-nothing, undoable change.
 const bulk={ids:new Set(),pid:null,last:null,action:"status"};
-function bulkScope(){const r=currentRoute();return r.name==="project"&&r.id&&canMoveOnBoard(r.id)?r.id:null}
+function bulkScope(){const r=currentRoute();return r.name==="project"&&r.id&&canAssignIn(r.id)?r.id:null}
 function pickBox(t){return `<input type="checkbox" class="bulk-pick" data-pick="${escapeHtml(t.id)}"${bulk.ids.has(t.id)?" checked":""} aria-label="Select “${escapeHtml(t.title)}”">`}
 function syncPicks(){
   document.querySelectorAll("[data-pick]").forEach(b=>{const on=bulk.ids.has(b.dataset.pick);b.checked=on;b.closest(".board-card,tr")?.classList.toggle("is-picked",on)});
@@ -1164,8 +1170,10 @@ function renderBulkBar(){
   const bar=document.querySelector("#bulk-bar"),n=bulk.ids.size,pid=bulkScope();
   if(!n||!pid){bar.hidden=true;bar.innerHTML="";document.body.classList.remove("has-bulk-bar");return}
   if(bar.hidden||!bar.innerHTML){
+    // 3FQEKB: the Chairman's bulk change is Assign only.
+    const only=assignOnly(pid);if(only)bulk.action="assignee";
     bar.innerHTML=`<span class="bulk-count" id="bulk-count"></span>
-      <label class="bulk-field"><span class="bulk-label">Change</span><select id="bulk-action"><option value="status">Status</option><option value="assignee">Assignee</option><option value="due_shift">Due dates</option></select></label>
+      <label class="bulk-field"><span class="bulk-label">Change</span><select id="bulk-action">${only?'<option value="assignee">Assignee</option>':'<option value="status">Status</option><option value="assignee">Assignee</option><option value="due_shift">Due dates</option>'}</select></label>
       <span id="bulk-value" class="bulk-field"></span>
       <button type="button" id="bulk-review">Review change…</button>
       <button type="button" class="quiet" id="bulk-clear">Clear selection</button>`;
@@ -1272,7 +1280,13 @@ function homeTiles(){
     ["week","Due in 7 days","blue",n(dueThisWeek),"#/portfolio?due=7&open=1","Open work due today or in the next 7 days"],
     ["critical","Critical path","red",n(t=>t.is_critical_path),"#/portfolio?risk=critical&open=1","Open tasks with no slack on a project's critical path"],
     ["undated","Undated","gray",n(t=>t.due_state==="undated"),"#/portfolio?due=undated&open=1","Open tasks and steps without a due date"],
+    // 3FQEKB: owners and managers see how many of their tasks need a new assignee, when any do.
+    ...reassignTile(open),
   ].filter(Boolean);
+}
+function reassignTile(open){
+  const mine=open.filter(t=>t.needs_new_assignee&&canMoveOnBoard(t.project_id));
+  return mine.length?[["reassign","Needs a new assignee","amber",mine.length,"#/portfolio?risk=reassign&open=1","Open tasks assigned to the Chairman, or top-level tasks assigned to a viewer"]]:[];
 }
 function homeRow(t,chip){
   return `<li class="home-row"><button type="button" class="link row-title" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>
@@ -1365,7 +1379,7 @@ function openCapture(pidArg){
   const r=currentRoute(),pid=typeof pidArg==="string"?pidArg:r.name==="project"?r.id:r.name==="portfolio"?document.querySelector("#project-filter").value:"";
   const form=document.querySelector("#task-form"),project=form.querySelector('select[name="project_id"]');
   if(pid&&[...project.options].some(o=>o.value===pid))project.value=pid;
-  fillPredecessors();fillAssignees(project.value,form.querySelector('select[name="owner_user_id"]'));
+  fillPredecessors();fillCaptureAssignees();
   form.querySelector(".error").textContent="";
   document.querySelector("#task-dialog").showModal();
 }
@@ -1484,7 +1498,7 @@ function renderTemplates(templates){
     <br><button type="button" class="link" data-use-template="${escapeHtml(t.id)}" data-kind="${escapeHtml(t.kind)}" data-roles="${escapeHtml((t.roles||[]).join(","))}">Use</button>
     <button type="button" class="link" data-delete-template="${escapeHtml(t.id)}">Delete</button></li>`).join("")||"<li>No templates yet. Save a project or a task as a template to reuse it.</li>";
   document.querySelector("#templates-body").innerHTML=`<h2>Templates</h2>
-    <p class="fine">A template copies structure — titles, hierarchy, dependencies, criticality, attachment links, relative dates and a suggested owner <em>role</em> (App Owner, Chairman, Project manager, member or viewer), never a named person. Never status, history or evidence. New tasks start in draft. When you use a template you pick who fills each role; a role you leave on automatic goes to its only holder on the target project, otherwise the task stays unassigned.</p>
+    <p class="fine">A template copies structure — titles, hierarchy, dependencies, criticality, attachment links, relative dates and a suggested owner <em>role</em> (App Owner, Project manager, member, or viewer for steps), never a named person. The Chairman is never an assignee, so a task last owned by the Chairman carries no suggestion. Never status, history or evidence. New tasks start in draft. When you use a template you pick who fills each role; a role you leave on automatic goes to its only holder on the target project, otherwise the task stays unassigned.</p>
     <ul class="people-list">${rows}</ul><div class="error" id="templates-error"></div>`;
   document.querySelectorAll("#templates-body [data-use-template]").forEach(b=>b.addEventListener("click",()=>useTemplate(b.dataset.useTemplate,b.dataset.kind,(b.dataset.roles||"").split(",").filter(Boolean))));
   document.querySelectorAll("#templates-body [data-delete-template]").forEach(b=>b.addEventListener("click",()=>deleteTemplate(b.dataset.deleteTemplate)));
@@ -1619,7 +1633,13 @@ async function openSearch(q){
     const d=document.querySelector("#search-dialog");if(!d.open)d.showModal();
   }catch(err){document.querySelector("#search-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`;document.querySelector("#search-dialog").showModal()}
 }
-document.querySelector('#task-form select[name="project_id"]').onchange=e=>{fillPredecessors();fillAssignees(e.target.value,document.querySelector('#task-form select[name="owner_user_id"]'))};
+document.querySelector('#task-form select[name="project_id"]').onchange=()=>{fillPredecessors();fillCaptureAssignees()};
+// 3FQEKB: a viewer is offered only once the new task has a parent (a subtask).
+function fillCaptureAssignees(){
+  const form=document.querySelector("#task-form"),owner=form.querySelector('select[name="owner_user_id"]');
+  fillAssignees(form.querySelector('select[name="project_id"]').value,owner,owner.value,form.querySelector('select[name="parent_task_id"]').value?"subtask":"task");
+}
+document.querySelector('#task-form select[name="parent_task_id"]').onchange=fillCaptureAssignees;
 document.querySelector("#people").onclick=openPeople;
 async function openInbox(){
   try{
@@ -1744,13 +1764,17 @@ async function markRead(id){
 async function markAllRead(){
   try{await api("/api/notifications/read-all",{method:"POST",body:"{}"});await openInbox()}catch(x){alert(x.message)}
 }
-async function fillAssignees(projectId,select,selectedId){
+// 3FQEKB: an assignee picker never lists the Chairman and lists a project viewer only for a
+// subtask ("(viewer)"); the reviewer picker keeps everyone with access. A current owner the rules
+// no longer allow stays selected, marked, so saving other fields never unassigns them silently.
+async function fillAssignees(projectId,select,selectedId,purpose="task",currentName=""){
   if(!select)return;
   select.innerHTML='<option value="">Unassigned</option>';
   if(!projectId)return;
   try{
-    const {users}=await api(`/api/assignable-users?project_id=${encodeURIComponent(projectId)}`);
-    for(const u of users){const o=new Option(u.display_name,u.id);if(u.id===selectedId)o.selected=true;select.add(o)}
+    const {users}=await api(`/api/assignable-users?project_id=${encodeURIComponent(projectId)}&for=${encodeURIComponent(purpose)}`);
+    for(const u of users){const o=new Option(u.display_name+(u.project_role==="viewer"?" (viewer)":""),u.id);if(u.id===selectedId)o.selected=true;select.add(o)}
+    if(selectedId&&!users.some(u=>u.id===selectedId)){const o=new Option(`${currentName||"Current owner"} (needs a new assignee)`,selectedId);o.selected=true;select.add(o)}
   }catch{}
 }
 document.querySelector("#project-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{await api("/api/projects",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load()}catch(err){e.target.querySelector(".error").textContent=err.message}});
@@ -1877,10 +1901,12 @@ function stateTags(task){
   else if(task.due_state!=="closed")out.push(tag("gray",due||(task.due_date?`Due ${fmtDay(task.due_date)}`:"No due date")));
   if(task.is_blocked)out.push(tag("purple","⊘ Blocked"));
   if(task.is_critical_path)out.push(tag("red","◆ Critical path"));
+  if(task.needs_new_assignee)out.push(reassignChip(task));
   return out.join("");
 }
 function roleLine(perms){
   if(perms.can_decide_protected)return "You are the App Owner. Changes apply directly and are recorded in History.";
+  if(perms.assign_only)return "You can assign this task to someone. Other changes are made by the project's managers.";
   if(perms.can_request_protected)return "You manage this project. Protected changes go to the App Owner as requests.";
   if(perms.can_edit_ordinary)return "You can edit this task. Changes are recorded in History.";
   return "You can view this task.";
@@ -1945,7 +1971,17 @@ function renderDetail(task,events){
       <div class="actions"><button>Request status change</button></div>
       <div class="error" id="detail-edit-error"></div>
     </form>`:"";
-  const editForm=closed?"":`<form id="detail-edit">
+  // 3FQEKB: the Chairman may change who a task is assigned to, and nothing else.
+  const assignForm=closed?"":`<form id="detail-assign">
+      <h3>Assign</h3>
+      <input name="expected_revision" type="hidden" value="${task.revision}">
+      <label>Assigned to<select name="owner_user_id"><option value="">Unassigned</option></select></label>
+      <label>Reason (optional)<input name="reason" autocomplete="off"></label>
+      <p class="field-hint">You can assign this ${task.parent_task_id?"subtask":"task"} to someone else. Other changes stay with the project's managers.</p>
+      <div class="actions"><button value="save">Save assignee</button></div>
+      <div class="error" id="detail-assign-error" role="alert"></div>
+    </form>`;
+  const editForm=perms.assign_only?assignForm:closed?"":`<form id="detail-edit">
       <h3>Edit</h3>
       <input name="expected_revision" type="hidden" value="${task.revision}">
       <label>Title<input name="title" value="${escapeHtml(task.title)}" required></label>
@@ -1996,11 +2032,13 @@ function renderDetail(task,events){
     <p><button type="button" class="link" id="save-task-template">Save this task (and its subtasks) as a template</button></p>
     <div class="history"><h3>History</h3><ul>${timeline}</ul></div>`;
   document.querySelector("#detail-edit")?.addEventListener("submit",e=>submitDetailEdit(e,{statusLocked:submitted}));
+  document.querySelector("#detail-assign")?.addEventListener("submit",submitAssign);
   document.querySelectorAll("#detail-body [data-jump]").forEach(b=>b.addEventListener("click",()=>document.querySelector(`#detail-body .${b.dataset.jump}`)?.scrollIntoView({block:"start"})));
   document.querySelector("#add-dep-button")?.addEventListener("click",addDependency);
   document.querySelector("#detail-body [data-goto-reopen]")?.addEventListener("click",()=>{const f=document.querySelector("#reopen-form");if(!f)return;f.scrollIntoView({behavior:"smooth",block:"center"});f.querySelector("input")?.focus({preventScroll:true})});
   document.querySelector("#detail-body").querySelectorAll("[data-remove-pred]").forEach(b=>b.addEventListener("click",removeDependency));
-  fillAssignees(task.project_id,document.querySelector('#detail-edit select[name="owner_user_id"]'),task.owner_user_id);
+  const ownerPurpose=task.parent_task_id?"subtask":"task";
+  fillAssignees(task.project_id,document.querySelector('#detail-edit select[name="owner_user_id"],#detail-assign select[name="owner_user_id"]'),task.owner_user_id,ownerPurpose,task.owner_name);
   wireLifecycle(task);
   wireEditLease(task);
   wireReviewers(task);
@@ -2155,7 +2193,7 @@ function buildReviewers(task,closed){
 function wireLifecycle(task){
   document.querySelectorAll("#detail-body [data-life]").forEach(form=>form.addEventListener("submit",e=>lifecycleAction(e,task)));
   const holdOwner=document.querySelector('[data-life="hold"] select[name="owner_user_id"]');
-  if(holdOwner)fillAssignees(task.project_id,holdOwner,task.owner_user_id);
+  if(holdOwner)fillAssignees(task.project_id,holdOwner,task.owner_user_id,task.parent_task_id?"subtask":"task",task.owner_name);
 }
 
 async function lifecycleAction(e,task){
@@ -2222,7 +2260,8 @@ async function wireAttachments(task){
 }
 
 function wireReviewers(task){
-  fillAssignees(task.project_id,document.querySelector("#reviewer-user"));
+  // Only people who may add reviewers load the list (the Chairman and members are refused it).
+  if((task.permissions||{}).can_edit_ordinary)fillAssignees(task.project_id,document.querySelector("#reviewer-user"),"","reviewer");
   document.querySelector("#add-reviewer-button")?.addEventListener("click",async()=>{
     const err=document.querySelector("#reviewer-error");err.textContent="";
     const user_id=document.querySelector("#reviewer-user").value,role=document.querySelector("#reviewer-role").value;
@@ -2291,6 +2330,18 @@ async function submitDetailEdit(e,{statusLocked=false}={}){
     await load();await openDetail(detailTaskId);
     if(outcome.request){const current=document.querySelector("#detail-edit-error");current.style.color="#0c7c86";current.textContent="Owner request created; accepted live state is unchanged."}
   }catch(err){if(err.status===409)return reloadTaskAfterConflict(detailTaskId,"detail-edit-error",err.message);error.textContent=err.message}
+}
+
+// 3FQEKB: the Chairman's assign-only save sends the assignee, a reason and the revision.
+async function submitAssign(e){
+  e.preventDefault();
+  const form=e.target,error=document.querySelector("#detail-assign-error");error.textContent="";
+  const data=Object.fromEntries(new FormData(form));
+  const body={owner_user_id:data.owner_user_id||null,reason:data.reason||"",expected_revision:Number(data.expected_revision)};
+  try{
+    await api(taskApi(detailTaskId),{method:"POST",body:JSON.stringify(body)});
+    await load();await openDetail(detailTaskId);showToast("Assignee saved.");
+  }catch(err){if(err.status===409)return reloadTaskAfterConflict(detailTaskId,"detail-assign-error",err.message);error.textContent=err.message}
 }
 
 async function addDependency(){

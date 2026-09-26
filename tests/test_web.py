@@ -1812,6 +1812,53 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual(parent_row["due_state"], "undated")
 
 
+class AstraAssignmentWebTests(unittest.TestCase):
+    """3FQEKB over HTTP: the pickers' purpose, and the Chairman assigning from the panel."""
+
+    setUp, tearDown = AstraWebTests.setUp, AstraWebTests.tearDown
+    request, _owner_session, _login_as = AstraWebTests.request, AstraWebTests._owner_session, AstraWebTests._login_as
+
+    def test_pickers_and_the_chairmans_assignee_over_http(self):
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "Assign HTTP"}, cookie=cookie, csrf=csrf)
+        pid = project["project"]["id"]
+        made = {}
+        for email, name, role in (("chair@example.org", "Chair", "chairman"), ("vi@example.org", "Vi", "member"),
+                                  ("mo@example.org", "Mo", "member")):
+            _, user = self.request("POST", "/api/users", {"email": email, "display_name": name, "password": "a password safe",
+                                                          "role": role}, cookie=cookie, csrf=csrf)
+            made[name] = user["user"]["id"]
+        for name, role in (("Vi", "viewer"), ("Mo", "member")):
+            self.request("POST", "/api/project-access", {"project_id": pid, "user_id": made[name], "role": role},
+                         cookie=cookie, csrf=csrf)
+        _, task = self.request("POST", "/api/tasks", {"project_id": pid, "title": "Top"}, cookie=cookie, csrf=csrf)
+        task = task["task"]
+
+        def picker(purpose, who=cookie):
+            response, body = self.request("GET", f"/api/assignable-users?project_id={pid}&for={purpose}", cookie=who)
+            return response.status, {u["display_name"]: u["project_role"] for u in body.get("users", [])}
+        self.assertEqual(picker("task")[1], {"Mo": "member", "Owner": None})
+        self.assertEqual(picker("subtask")[1], {"Mo": "member", "Owner": None, "Vi": "viewer"})
+        self.assertEqual(picker("everyone")[0], 400)
+        # The Chairman assigns over the panel's route; other fields are refused (403).
+        ccookie, ccsrf = self._login_as("chair@example.org", "a password safe")
+        self.assertEqual(picker("task", ccookie), (200, {"Mo": "member", "Owner": None}))
+        response, refused = self.request("POST", f"/api/tasks/{task['id']}", {"title": "Mine", "owner_user_id": made["Mo"],
+                                         "expected_revision": task["revision"]}, cookie=ccookie, csrf=ccsrf)
+        self.assertEqual(response.status, 403)
+        response, saved = self.request("POST", f"/api/tasks/{task['id']}", {"owner_user_id": made["Mo"], "reason": "",
+                                       "expected_revision": task["revision"]}, cookie=ccookie, csrf=ccsrf)
+        self.assertEqual((response.status, saved["task"]["owner_user_id"]), (200, made["Mo"]))
+        # Nobody assigns the Chairman, and a viewer gets no top-level task (400 with the reason).
+        for user_id, text in ((made["Chair"], "is the Chairman"), (made["Vi"], "viewer can be given subtasks only")):
+            response, body = self.request("POST", f"/api/tasks/{task['id']}", {"owner_user_id": user_id,
+                                          "expected_revision": saved["task"]["revision"]}, cookie=cookie, csrf=csrf)
+            self.assertEqual(response.status, 400)
+            self.assertIn(text, body["error"])
+        _, detail = self.request("GET", f"/api/tasks/{task['id']}", cookie=ccookie)
+        self.assertEqual((detail["task"]["permissions"]["assign_only"], detail["task"]["needs_new_assignee"]), (True, False))
+
+
 class AstraGovernedDragWebTests(unittest.TestCase):
     """Lock #12 over HTTP: board moves, locks, date drags, bulk changes and WIP limits."""
 
@@ -2538,6 +2585,14 @@ if(mode==="bulk"){
   a.state.user={...a.state.user,global_role:"owner"};out.limitsOwner=a.renderBoard(tasks,"").includes('id="wip-settings"');
   a.state.user={...a.state.user,global_role:"member"};a.state.projects[0].can_manage=false;
   const memberBoard=a.renderBoard(tasks,"");out.memberBoard=[memberBoard.includes("bulk-pick"),memberBoard.includes("wip-settings")];
+  // Review 12e L1: bulkScope() itself refuses a member on the List route (no pick column), while
+  // 3FQEKB lets the Chairman (can_assign) and a manager select.
+  location.hash="#/project/"+U1+"/list";a.state.projects[0].can_assign=false;
+  const tableEl={innerHTML:""},groups={top:tasks.slice(0,2),childrenOf:new Map(),stepIndex:new Map()};
+  out.scopeMember=bulkScope();renderScheduleTable(groups,tableEl);out.memberTable=tableEl.innerHTML.includes("bulk-pick");
+  a.state.projects[0].can_assign=true;out.scopeChairman=bulkScope();renderScheduleTable(groups,tableEl);out.chairmanTable=tableEl.innerHTML.includes("bulk-pick");
+  a.state.projects[0].can_manage=true;out.scopeManager=bulkScope();a.state.projects[0].can_assign=false;
+  location.hash="#/project/"+U1+"/board";
   a.state.projects[0].can_manage=true;
   // Shift-click takes the range from the last box; Shift+Arrow adds the next box.
   location.hash="#/project/"+U1+"/list";
@@ -2562,6 +2617,27 @@ if(mode==="bulk"){
   await decideOwnerRequest("r1","approved");out.decisionPosts=posts.splice(0).filter(p=>p[0].includes("/decision")).map(p=>p[1]);out.decisionAsks=asks.splice(0);
   globalThis.askMove=async()=>null;n=0;await decideOwnerRequest("r1","approved");
   out.cancelledPosts=posts.splice(0).map(p=>p[0]);
+  // 3FQEKB: pickers ask for the purpose, label viewers and keep a current owner the rules now forbid.
+  const opts=[];const sel={innerHTML:"",add:o=>opts.push([o.text,o.value,!!o.selected])};
+  reply=u=>u.startsWith("/api/assignable-users")?{body:{users:[{id:"u-m",display_name:"Mo Member",project_role:"member"},{id:"u-v",display_name:"Vi <b>Viewer</b>",project_role:"viewer"}]}}:null;
+  posts.splice(0);await fillAssignees(U1,sel,"u-chair","subtask","Chair Person");
+  out.pickerUrl=posts.splice(0).map(p=>p[0]);out.pickerOptions=opts.splice(0);
+  await fillAssignees(U1,sel,"u-m");out.pickerKept=opts.splice(0);
+  // The chip on a card and a List row, and the Home tile for owners and managers only.
+  const flagged=T({id:"f",title:"Flagged",needs_new_assignee:true,owner_name:"Chair Person"});
+  out.flaggedCard=boardCard(flagged,[],true);out.plainCard=boardCard(T({id:"p",title:"Plain"}),[],true);
+  const rowEl={innerHTML:""};location.hash="#/project/"+U1+"/list";
+  renderScheduleTable({top:[flagged],childrenOf:new Map(),stepIndex:new Map()},rowEl);out.flaggedRow=rowEl.innerHTML;
+  a.state.tasks=[flagged,T({id:"q",title:"Other"})];
+  const tiles=()=>homeTiles().map(t=>t[0]+":"+t[3]);
+  a.state.user={id:"u9",display_name:"Aly",global_role:"owner"};out.tilesOwner=tiles();
+  a.state.user={id:"u2",display_name:"PM",global_role:"member"};out.tilesManager=tiles();
+  a.state.projects[0].can_manage=false;a.state.projects[0].can_assign=true;out.tilesChairman=tiles();
+  // The Chairman's bulk bar offers Assign only.
+  const bar2=document.querySelector("#bulk-bar");bar2.hidden=true;bar2.innerHTML="";
+  bar2.querySelector=sel=>sel==="#bulk-count"?{textContent:""}:{addEventListener(){},value:"assignee",set innerHTML(v){}};
+  a.bulk.ids=new Set(["f"]);a.bulk.pid=U1;a.bulk.action="status";renderBulkBar();out.chairmanBar=bar2.innerHTML;out.chairmanAction=a.bulk.action;
+  a.state.projects[0].can_manage=true;a.state.projects[0].can_assign=false;
   process.stdout.write(JSON.stringify(out));return;
 }
 if(mode==="work"){
@@ -3236,6 +3312,34 @@ class AstraBulkDriverTests(unittest.TestCase):
         self.assertIn('body:JSON.stringify({limits:Object.fromEntries(changed.map(k=>[k,data[k]||null])),reason:data.reason})', js)
         self.assertNotIn("for(const k of changed)await api", js)
 
+    def test_review_12e_bulk_scope_refuses_a_member_and_takes_the_chairman(self):
+        self.assertIsNone(self.out["scopeMember"])
+        self.assertFalse(self.out["memberTable"])
+        self.assertEqual(self.out["scopeChairman"], "11111111-1111-4111-8111-111111111111")
+        self.assertTrue(self.out["chairmanTable"])
+        self.assertEqual(self.out["scopeManager"], "11111111-1111-4111-8111-111111111111")
+
+    def test_3fqekb_pickers_label_viewers_and_keep_a_forbidden_current_owner(self):
+        self.assertEqual(self.out["pickerUrl"],
+                         ["/api/assignable-users?project_id=11111111-1111-4111-8111-111111111111&for=subtask"])
+        self.assertEqual(self.out["pickerOptions"], [["Mo Member", "u-m", False], ["Vi <b>Viewer</b> (viewer)", "u-v", False],
+                                                     ["Chair Person (needs a new assignee)", "u-chair", True]])
+        self.assertEqual(self.out["pickerKept"], [["Mo Member", "u-m", True], ["Vi <b>Viewer</b> (viewer)", "u-v", False]])
+
+    def test_3fqekb_the_needs_a_new_assignee_chip_and_home_count(self):
+        chip = '<span class="tag reassign-chip" data-tone="amber">⚠ Needs a new assignee</span>'
+        self.assertIn(chip, self.out["flaggedCard"])
+        self.assertNotIn("reassign-chip", self.out["plainCard"])
+        self.assertIn(f"Chair Person {chip}</td>", self.out["flaggedRow"])
+        self.assertIn("reassign:1", self.out["tilesOwner"])
+        self.assertIn("reassign:1", self.out["tilesManager"])
+        self.assertNotIn("reassign:1", self.out["tilesChairman"])  # the Chairman manages no project
+
+    def test_3fqekb_the_chairmans_bulk_bar_offers_assign_only(self):
+        self.assertIn('<select id="bulk-action"><option value="assignee">Assignee</option></select>', self.out["chairmanBar"])
+        self.assertNotIn('value="status"', self.out["chairmanBar"])
+        self.assertEqual(self.out["chairmanAction"], "assignee")
+
     def test_review_12d_the_preview_and_pick_boxes_escape_what_they_show(self):
         for html in (self.out["dialogXss"], self.out["pickXss"]):
             self.assertNotIn("<img", html)
@@ -3756,6 +3860,9 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
         cases["viewer-unchecked"]["attachments"][0]["exists"] = None
         cases["owner-missing"] = _detail_task("in_progress", OWNER_PERMS)
         cases["owner-missing"]["attachments"][0]["exists"] = False
+        # 3FQEKB: the Chairman's dialog carries the assignee control; a flagged task shows its chip.
+        cases["chairman-in_progress"] = _detail_task("in_progress", {**VIEWER_PERMS, "can_assign": True, "assign_only": True})
+        cases["chairman-in_progress"]["needs_new_assignee"] = True
         with tempfile.TemporaryDirectory() as tmp:
             driver = Path(tmp) / "driver.js"
             driver.write_text(DETAIL_DRIVER, encoding="utf-8")
@@ -3766,6 +3873,18 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
         if result.returncode != 0:
             raise AssertionError(result.stderr)
         cls.html = json.loads(result.stdout)
+
+    def test_3fqekb_the_chairman_sees_the_assignee_control_and_the_chip(self):
+        html = self.html["chairman-in_progress"]
+        self.assertIn('<form id="detail-assign">', html)
+        self.assertIn("<button value=\"save\">Save assignee</button>", html)
+        self.assertNotIn('<form id="detail-edit">', html)
+        self.assertIn("You can assign this task to someone. Other changes are made by the project&#39;s managers.", html)
+        self.assertIn("⚠ Needs a new assignee", html)
+        for who in ("owner", "manager"):
+            with self.subTest(who=who):
+                self.assertIn('<form id="detail-edit">', self.html[f"{who}-in_progress"])
+                self.assertNotIn('id="detail-assign"', self.html[f"{who}-in_progress"])
 
     def test_a_manager_puts_work_on_hold_rather_than_requesting_it(self):
         # Aly 2026-09-25 (Slack ts 1790342529.695749): managers hold directly, with a reason.

@@ -8,8 +8,34 @@ are allowed to access.
 This first vertical slice provides:
 
 - owner bootstrap and authenticated sessions;
-- App Owner, Chairman (organization-wide read-only unless separately granted a project role),
-  manager, and member roles;
+- App Owner, Chairman (organization-wide read-only unless separately granted a project role,
+  except that the Chairman may assign work; see below), manager, and member roles;
+- assignment rules (3FQEKB, Aly 2026-09-26, Slack ts 1790386228.535829 and
+  1790386492.402489). Who may set or change a task's assignee, and who may be one:
+
+  | Role | May assign tasks and subtasks | May be assigned a top-level task | May be assigned a subtask |
+  |---|---|---|---|
+  | App Owner | Yes | Yes | Yes |
+  | Project manager | Yes, on their project | Yes | Yes |
+  | Chairman | Yes, in any project: the assignee only (panel and bulk Assign) | No, never | No, never |
+  | Project member | No | Yes | Yes |
+  | Project viewer | No | No | Yes |
+
+  The Chairman's right adds the assignee and nothing else: creating tasks, status, dates,
+  holds, criticality and other bulk changes stay refused (403), and someone else's lock
+  refuses the Chairman as it does anyone. Every path follows the table: create, the task
+  panel, bulk Assign, the Excel importer (`E_OWNER_CHAIRMAN`, `E_OWNER_VIEWER` row errors),
+  the on-hold responsible person and templates. Promoting a viewer's subtask to top level is
+  refused until it is reassigned. A viewer assigned a subtask may do on it what a member
+  assignee may do on their own task (submit it) and nothing else. Templates never offer the
+  Chairman role: a task last owned by the Chairman is saved with no suggested owner, an older
+  template's Chairman role creates the task unassigned, and a viewer role fills subtasks
+  only. Assignee pickers never list the Chairman and list viewers only for a subtask,
+  marked "(viewer)"; the reviewer picker is unchanged. Tasks assigned before these rules to
+  the Chairman, or top-level tasks assigned to a viewer, keep their owner and show a "Needs a
+  new assignee" chip (card, List row, task panel) with a count on Home for owners and
+  managers (`needs_new_assignee`; `?risk=reassign` on the portfolio); the flag clears when
+  someone reassigns the task. `GET /api/assignable-users?project_id=…&for=task|subtask|reviewer`;
 - an owner-only People screen: create users, deactivate/reactivate them, grant or revoke
   project access, and reset a forgotten password (`POST /api/users/{id}/password`): any
   owner resets any active user's password, except that only the primary owner resets the
@@ -311,7 +337,8 @@ task to change it", with a link to the reopen form (offered on completed, cancel
 abandoned tasks); a Manager there can only request a move back into draft, assigned, in
 progress or delayed; on a submitted task the Status field is locked and points to Accept or
 Request changes. This is guidance only; the server stays the authority. Task titles cannot be blanked; task
-assignees must be active and authorized on the task's project; and operations against a
+assignees must be active and authorized on the task's project (and follow the assignment
+rules above); and operations against a
 non-existent project return a controlled 404 rather than a 500. Submission acceptance is
 transactionally single-winner, and retrying an identical protected request or final-result
 mark does not create duplicate queue rows or audit events. Submitting work is also

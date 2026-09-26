@@ -1560,9 +1560,12 @@ class ImportServiceTests(unittest.TestCase):
                 templates.add(message.replace(probe, "<text>"))
         self.assertEqual(templates, {importer.NEUTRAL_PERSON_MESSAGE.format(text="<text>")})
         # people the Manager can already see (the assignable-users set) still resolve, by email or name
-        self.assertEqual((self.codes(by_key["V-1"]), by_key["V-1"]["values"]["owner"]), ([], "Viewer"))
+        # 3FQEKB (Aly 2026-09-26): they resolve, and then meet the assignment rules by name: a viewer
+        # owns steps only and the Chairman is never an assignee (a specific finding, not the neutral one).
+        self.assertEqual((self.codes(by_key["V-1"]), by_key["V-1"]["values"]["owner"]), (["E_OWNER_VIEWER"], ""))
         self.assertEqual((self.codes(by_key["V-2"]), by_key["V-2"]["values"]["owner"]), (["W_PERSON_BY_NAME"], "Waseem"))
-        self.assertEqual((self.codes(by_key["V-3"]), by_key["V-3"]["values"]["owner"]), (["W_PERSON_BY_NAME"], "Chair"))
+        self.assertEqual((self.codes(by_key["V-3"]), by_key["V-3"]["values"]["owner"]),
+                         (["W_PERSON_BY_NAME", "E_OWNER_CHAIRMAN"], ""))
         # the App Owner, who may read the directory, keeps the detailed findings
         _, owner_preview = self.preview(self.owner, rows)
         owner_rows = {r["import_key"]: r for r in owner_preview["rows"]}
