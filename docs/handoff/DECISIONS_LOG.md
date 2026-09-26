@@ -117,6 +117,7 @@ Sources:
 | Lock #13 granted | Slack ts 1790386688.768309 | Released at `0b90ceb`. |
 | Prepare a detailed handoff for Codex covering development to deployment to distribution; commit everything and push the files | Slack ts 1790401671.573199 | This pack. |
 | Lock #14 granted, and the exclusive write lock protocol retired ("remove this exclusive code granted guard rail as well a we are moving on") | Slack ts 1790403410.978849 | The exclusive write lock protocol was retired by Aly on 2026-09-26 (Slack ts 1790403410.978849). Lock #14 was the last. Pulling first, checking origin before a push (if it moved: pull, merge, re-run the tests, push normally), normal pushes only and reporting the final SHA and tests stay in force (`HANDOFF_2026-09-26.md` section 4.2). |
+| Fix the two serious fact-check findings (SSH open to everyone; a viewer holding a top-level task could still submit), and make the handoff work for any AI agent or developer, not only Codex ("give a complete laid out plan") | Slack ts 1790405773.430749 | SSH limited to Aly's address in `146a5b3`; the submit gap fixed as G1PPV7 (`ddc3369`); the pack made tool-neutral, with `AGENTS.md` as the single source of the rules and `AGENT_START_PROMPT.md` as the start prompt. |
 
 ### Standing preferences (memory note `astra-aly-preferences`)
 

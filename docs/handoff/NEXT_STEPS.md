@@ -14,7 +14,8 @@ How to read each phase:
   ticket and goes through the usual lanes, an independent review and signoff.
 - **Done when** is the definition of done for the phase.
 - **Depends on** lists what must be finished first.
-- **Who** says whether Aly or Codex does it.
+- **Who** says whether Aly or the agent does it. "The agent" is whoever works
+  on the repository next: an AI coding agent in any tool, or a human developer.
 - **Risks** lists what could go wrong.
 
 The phases map onto the Delivery Plan artifact
@@ -65,7 +66,7 @@ after the pilot unless Aly pulls one in.
    (workload) was dropped; X8FNA5 (shell) was built by Gate 2 slices 1-7;
    A48JEX (board by sections) was built as a status board instead.
 6. Commit and push the ticket moves (git user and email are already set on
-   Aly's machine). Tell Codex the new head SHA.
+   Aly's machine). Tell the agent the new head SHA.
 
 Done when: signoff and human are empty or hold only tickets Aly sent back with a
 reason, and the moves are pushed.
@@ -77,7 +78,7 @@ your defaults" is a valid answer. The ones that change code in phase A are Q1
 (reviewers and approvers), Q2 (PR #4 extra work), Q3 to Q5 (Z72D79), Q6
 (JPEBCM fix) and Q8 (password change).
 
-### A3. Small fixes from the reviews (Codex)
+### A3. Small fixes from the reviews (agent)
 
 One ticket each, or one grouped ticket if Aly prefers fewer:
 
@@ -95,7 +96,7 @@ One ticket each, or one grouped ticket if Aly prefers fewer:
 7. Doc drift: update `docs/design/authorization-matrix.md` and `CONTEXT.md` to
    the current Chairman, viewer and collaborator rules, and correct the
    older handoff bullets that still read as current.
-8. **Done (G1PPV7).** Block submit for a viewer who is the legacy assignee of
+8. **Done (G1PPV7, `ddc3369`).** Block submit for a viewer who is the legacy assignee of
    a top-level task. `_may_submit` in `src/astra/service.py` used to return
    True for the task's assignee before any 3FQEKB refusal (found by the
    fact-check, 2026-09-26). It now applies the same rule as for
@@ -106,7 +107,7 @@ One ticket each, or one grouped ticket if Aly prefers fewer:
 Done when: each fix has a test that fails without it, the suite is green, and
 the tickets are in signoff.
 
-### A4. Z72D79: settings history and reopening a closed project (Codex, after Aly answers)
+### A4. Z72D79: settings history and reopening a closed project (agent, after Aly answers)
 
 Today these changes write no audit row: working days, holidays, budget, project
 entities and primary entity, entity active flag, import template settings. A
@@ -121,7 +122,7 @@ new step (v21) if a new table is chosen for app-wide history.
 
 Done when: the ticket's definition of done is met and reviewed.
 
-### A5. Password change at first sign-in, and changing your own password (Codex)
+### A5. Password change at first sign-in, and changing your own password (agent)
 
 The 2026-09-20 sharing plan lists "forced first-login password change" as a
 gate before invitations (`CODEX_HANDOFF_2026-09-20.md` section 15.3). Today
@@ -138,7 +139,7 @@ rule that sign-in never locks anyone out.
 Done when: an account created by an owner cannot reach any screen before the
 password is changed, and a member can change their own password.
 
-### A6. Gate 2 leftovers (Codex, Aly picks which ones before launch)
+### A6. Gate 2 leftovers (agent, Aly picks which ones before launch)
 
 1. "Divide by" entity swimlanes on the Board (owner and criticality exist).
 2. A filter on the project Activity tab (by kind and by person).
@@ -150,9 +151,9 @@ password is changed, and a member can change their own password.
 5. A Manage entry in the left rail so Import and Templates are reachable
    outside the portfolio "More" menu.
 
-### A7. Real device and screen-reader checks (Aly, with a Codex checklist)
+### A7. Real device and screen-reader checks (Aly, with the agent's checklist)
 
-Codex writes a 20-minute checklist; Aly runs it:
+The agent writes a 20-minute checklist; Aly runs it:
 
 - one Android phone in Chrome and one iPhone in Safari if available: sign in,
   open Home, open a task, use "Move to" on the Board, add a task with Capture;
@@ -161,9 +162,9 @@ Codex writes a 20-minute checklist; Aly runs it:
   page title announced on each screen;
 - desktop browser zoom at 200%.
 
-Codex fixes what the run finds, one ticket per problem.
+The agent fixes what the run finds, one ticket per problem.
 
-### A8. Option 8: the `tmp*` folders in Aly's checkout (Aly, Codex advises)
+### A8. Option 8: the `tmp*` folders in Aly's checkout (Aly, the agent advises)
 
 `git status` in Aly's checkout prints about 35 warnings "could not open
 directory 'tmpXXXX/': Permission denied". Where they came from is unverified.
@@ -188,10 +189,10 @@ icacls .\tmpXXXX /grant "${env:USERNAME}:(OI)(CI)F" /t
 
 Then look inside. If they hold only temporary test data, zip them to a folder
 outside the repository, delete them, and run `git status` again to confirm the
-warnings are gone. Do not delete anything before looking. Codex should not
+warnings are gone. Do not delete anything before looking. The agent should not
 touch Aly's disk without Aly's go-ahead.
 
-### A9. Option 6: PR #4, then this branch into `main` (Aly decides, Codex prepares)
+### A9. Option 6: PR #4, then this branch into `main` (Aly decides, the agent prepares)
 
 Facts:
 
@@ -208,22 +209,22 @@ Facts:
 Recommended path (Q2 in `OPEN_QUESTIONS.md`):
 
 1. Aly names the extra import work, or accepts 3NT40T (Excel import hardening
-   follow-ups, already in todo) as that work. Codex does it on this branch, not
+   follow-ups, already in todo) as that work. The agent does it on this branch, not
    on `claude/excel-import`, so nothing has to be merged back. Check each of
    3NT40T's seven items first: item 3 (XML-illegal characters) looks fixed by
    `c295bb7`, and item 6 (formula-prefixed CSV cells) by `d295d78` for the
    template and report CSVs and `ad068b6` for the task export (unverified
    item by item).
-2. Codex runs a trial merge of this branch into `main` in a scratch clone
+2. The agent runs a trial merge of this branch into `main` in a scratch clone
    (a full, non-shallow clone), reports any conflicts, and runs the full
    suite on the merge result.
 3. Aly merges PR #4 as it is (it is a strict ancestor of this branch), or
    closes it as superseded. Either way, the order Aly set (PR #4 first) holds.
-4. Codex opens a pull request from `codex/migration-safety-remediation` into
+4. The agent opens a pull request from `codex/migration-safety-remediation` into
    `main` with a description listing the tickets, schema v20, the test count
-   and the review history. Codex runs an adversarial review of the merge
+   and the review history. The agent runs an adversarial review of the merge
    result before marking it ready.
-5. Aly merges it. Codex does not merge unless Aly says so for that pull
+5. Aly merges it. The agent does not merge unless Aly says so for that pull
    request.
 6. After the merge, Aly decides the branch for the next work (Q18).
 
@@ -244,7 +245,7 @@ small fixes and chosen leftovers are in, first-login password change works, the
 real-device check has run, and `main` holds everything.
 
 **Depends on:** Aly's time for signoffs and answers. Phase A is mostly waiting
-on Aly, so Codex should prepare the trial merge and the checklists early.
+on Aly, so the agent should prepare the trial merge and the checklists early.
 
 **Risks:** signoff finds problems that send tickets back; the merge into `main`
 conflicts; scope creep from new feature ideas. Hold new features for after the
@@ -264,7 +265,7 @@ handling and logging.
 hardening review decides the standard library server cannot be made safe
 enough behind Caddy (Q22).
 
-### B1. Security review (Codex, independent reviewer)
+### B1. Security review (agent, independent reviewer)
 
 Run the same adversarial review shape used for locks #9 to #13 against the whole
 app, not just a diff:
@@ -295,7 +296,7 @@ app, not just a diff:
 Done when: findings are fixed or accepted by Aly, and a short security note is
 added to the repository.
 
-### B2. Dependency audit (Codex)
+### B2. Dependency audit (agent)
 
 Astra has no runtime dependencies on Linux and `tzdata` on Windows. The build
 needs `setuptools>=75`. Tasks: confirm with `pip list` in a fresh venv; record
@@ -303,7 +304,7 @@ the Python version used (3.11 or newer); confirm the self-hosted Inter font
 licence file ships (`static/fonts/Inter-OFL.txt`); note that Node is used only
 by the tests. Re-run whenever a dependency is added.
 
-### B3. Backup and restore of SQLite (Codex, ticket TRPV3J; Aly's policy is settled)
+### B3. Backup and restore of SQLite (agent, ticket TRPV3J; Aly's policy is settled)
 
 Aly's policy (2026-09-20): nightly encrypted, SQLite-consistent backup to OCI
 Object Storage within the free allowance, plus an encrypted copy on Aly's
@@ -334,7 +335,7 @@ Tasks:
 
 Done when: a restore from an encrypted off-host backup has been done and timed.
 
-### B4. Migration safety (Codex)
+### B4. Migration safety (agent)
 
 The migration registry is already atomic per step, and every step has fault and
 retry tests. Remaining tasks: a rehearsal script that copies a production
@@ -344,7 +345,7 @@ because a newer schema refuses older code (`db.py`: "Database was created by a
 newer Astra version."); keep the README's refusal instructions for v14, v15
 and v16 current.
 
-### B5. Performance at realistic sizes (Codex)
+### B5. Performance at realistic sizes (agent)
 
 Known numbers: a 200-task bulk change in a 1000-task project took 33 s under
 the write lock before `89e9229` and about 0.2 s after it. Tasks: seed a
@@ -356,14 +357,15 @@ within the 30 s busy timeout; add indexes where a query scans (the
 `login_attempts.attempted_at` index is already a known follow-up); record the
 results in the repository.
 
-### B6. Accessibility (Codex, with Aly's device run from A7)
+### B6. Accessibility (agent, with Aly's device run from A7)
 
 Target WCAG 2.2 AA (decided 2026-09-20). Tasks: fix what the A7 run found;
-re-run the scratch Playwright audit used in lock #11 at 360, 390, 768, 1024 and
-1440 px; check keyboard-only use of every screen; check the colour contrast of
+repeat the browser audit done in lock #11 at 360, 390, 768, 1024 and 1440 px
+with any browser automation or by hand (that script was a throwaway and is not
+in the repository); check keyboard-only use of every screen; check the colour contrast of
 any new UI.
 
-### B7. Error handling and logging (Codex)
+### B7. Error handling and logging (agent)
 
 Today unhandled errors return 500 "Internal server error." and write one
 `log_error` line to stderr; the access log is the standard library's line per
@@ -395,7 +397,7 @@ on the VM, which Aly must set up.
 **Out.** Automatic deployment to the server. Deployment stays a manual,
 runbook-driven step that Aly starts.
 
-### C1. Continuous integration (Codex)
+### C1. Continuous integration (agent)
 
 Add `.github/workflows/tests.yml` that runs on pushes and pull requests:
 
@@ -413,7 +415,7 @@ GitHub Actions minutes for a public repository are free as far as we know
 (unverified; check the repository's Actions settings). Aly may need to enable
 Actions for the repository.
 
-### C2. Versioning and a changelog (Codex)
+### C2. Versioning and a changelog (agent)
 
 - The package is `0.1.0` in `pyproject.toml`, and the server says
   `Astra/0.1`. Recommended: `0.2.0` for the first pilot release (Q12 in
@@ -424,7 +426,7 @@ Actions for the repository.
 - Add `astra --version` (argparse `version` action) reading the package
   version, so the server can report what it runs.
 
-### C3. Release flow (Codex prepares, Aly approves)
+### C3. Release flow (the agent prepares, Aly approves)
 
 1. Work lands on `main` through pull requests Aly merges.
 2. When `main` is ready for a release: CI green, changelog updated, version
@@ -484,7 +486,7 @@ guardrails.
 
 ### Tasks
 
-D1. Provisioning (Aly does the account steps; Codex guides): OCI account and
+D1. Provisioning (Aly does the account steps; the agent guides): OCI account and
 home region; an Always Free shape that is actually available; Ubuntu LTS (24.04
 recommended because Astra needs Python 3.11 or newer; verify the image's Python
 version); a public IP; SSH key only.
@@ -549,7 +551,8 @@ into a fresh instance, the uptime check alerts, and the monthly cost is zero.
 the answers to Q7, Q10, Q11 and Q19 to Q21.
 
 **Who:** Aly for every account, credential, DNS and payment screen, and for
-typing passwords. Codex for scripts, config files, the runbook and verification.
+typing passwords. The agent does the scripts, config files, the runbook and
+verification.
 Nothing is provisioned until Aly says so.
 
 **Risks:** Always Free capacity may not be available in the home region; an idle
@@ -581,13 +584,13 @@ role and project memberships; send the temporary password through a separate
 channel from the URL; the user signs in and is made to change the password
 (A5); the user checks their name, projects and role.
 
-E3. Owner and admin guide (Codex writes, Aly reviews): creating users and
+E3. Owner and admin guide (the agent writes, Aly reviews): creating users and
 project access; secondary owners; resetting passwords (in the app, and
 `astra reset-password` on the server); approving requests in the Inbox; WIP
 limits; templates; Excel import; closing a project; what the audit history
 shows; `astra transfer-primary`; backups and restore in plain words.
 
-E4. User quick-start (Codex writes, Aly reviews): one page with screenshots:
+E4. User quick-start (the agent writes, Aly reviews): one page with screenshots:
 signing in, Home, My Work, opening a task, submitting work, the Board and
 "Move to", what "Needs a new assignee" means, who to ask for help.
 Serve it as a static page from Astra so it needs no other site, or keep it
@@ -596,7 +599,7 @@ as a PDF Aly sends. Keep it short.
 E5. Support and feedback channel (Aly decides, Q9): one place for questions and
 bug reports; a "Help" link in the account menu pointing there.
 
-E6. Privacy note (Codex drafts, Aly approves): what Astra stores (name, email,
+E6. Privacy note (the agent drafts, Aly approves): what Astra stores (name, email,
 password hash, the tasks and history users create, sign-in attempts for 90
 days), where (Aly's Oracle tenancy, home region), who can see what, how long,
 backups, how to ask for an account to be removed. No tracking and no
@@ -626,7 +629,7 @@ instead of direct changes); support load on Aly. Keep the group small at first.
 
 **In.** An incident checklist, routine maintenance, data export.
 
-### F1. Incident checklist (Codex writes into the repository; Aly keeps a copy offline)
+### F1. Incident checklist (the agent writes into the repository; Aly keeps a copy offline)
 
 1. Is it down for everyone? Check the uptime monitor and open the URL.
 2. SSH in. `systemctl status astra caddy`; `journalctl -u astra -n 200`;

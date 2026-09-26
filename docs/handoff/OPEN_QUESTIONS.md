@@ -102,7 +102,7 @@ five matter most, because they block phase A work or the server move.
 
 ### Q15. Who runs the real-device and screen-reader check, and on what?
 
-- **Recommended default:** you, with a 20-minute checklist from Codex, on your
+- **Recommended default:** you, with a 20-minute checklist from the agent, on your
   own phone, one tablet if available, and NVDA (free) on Windows.
 
 ### Q16. Should Unrated tasks keep sorting below Low?

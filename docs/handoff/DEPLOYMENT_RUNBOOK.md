@@ -10,8 +10,9 @@ Read this first:
 
 - **Nothing here may be run until Aly says to start the deployment.** Aly does
   every account, credential, DNS and payment step, and types every password.
-- Steps marked **[ALY]** need Aly personally. Steps marked **[CODEX]** can be
-  prepared or run by Codex once Aly has given SSH access for that session.
+- Steps marked **[ALY]** need Aly personally. Steps marked **[AGENT]** can be
+  prepared or run by the agent (an AI coding agent or a human developer) once
+  Aly has given it SSH access.
 - Every `astra` command below matches `src/astra/__main__.py` at `0b90ceb`:
   `init-owner`, `serve`, `transfer-primary`, `reset-password`. There is no
   `astra backup` or `astra --version` yet; the runbook says where a stop-gap
@@ -28,7 +29,7 @@ Placeholders used below:
 | --- | --- | --- |
 | `<name>` | The DuckDNS subdomain, so the site is `https://<name>.duckdns.org` | Aly |
 | `<ip>` | The VM's public IP address | OCI, after stage 1 |
-| `<tag>` | The release tag, for example `v0.2.0` (phase C) | Codex prepares, Aly approves |
+| `<tag>` | The release tag, for example `v0.2.0` (phase C) | The agent prepares, Aly approves |
 | `<owner-email>` | Aly's sign-in email for Astra | Aly |
 
 ---
@@ -104,7 +105,7 @@ Rollback: terminate the instance in the console. Nothing else exists yet.
 
 ---
 
-## Stage 2 — Open the network **[ALY for the console, CODEX for the host]**
+## Stage 2 — Open the network **[ALY for the console, AGENT for the host]**
 
 **[ALY]** In the OCI console, on the instance's subnet security list or network
 security group, allow inbound TCP:
@@ -117,9 +118,17 @@ security group, allow inbound TCP:
 - 80 from anywhere (Caddy needs it for certificates and redirects);
 - 443 from anywhere.
 
+A new network's default security list usually already has an ingress rule for
+22 from `0.0.0.0/0` (verify in the console). Change that rule's source to
+`<aly-ip>/32`, or delete it; adding a second, narrower rule next to it leaves
+22 open to everyone.
+
 Do not open 8765. Astra listens only on `127.0.0.1`.
 
-**[CODEX]** On the VM, check the host firewall. Oracle's Ubuntu images are
+Verification: the security list (and any network security group on the
+instance) has no ingress rule for 22 whose source is `0.0.0.0/0`.
+
+**[AGENT]** On the VM, check the host firewall. Oracle's Ubuntu images are
 known to ship their own `iptables` rules (verify on the actual image):
 
 ```bash
@@ -143,7 +152,7 @@ Rollback: delete the two rules (`sudo iptables -D INPUT <line>`) and save.
 
 ---
 
-## Stage 3 — Harden the operating system **[CODEX]**
+## Stage 3 — Harden the operating system **[AGENT]**
 
 ```bash
 sudo apt update
@@ -191,7 +200,7 @@ from a session that is still open).
 
 ---
 
-## Stage 4 — Service user, folders and Python **[CODEX]**
+## Stage 4 — Service user, folders and Python **[AGENT]**
 
 Create a system user with no login shell, and the folders:
 
@@ -222,7 +231,7 @@ Verification: `ls -ld /srv/astra/data` shows `drwx------ astra astra`.
 
 ---
 
-## Stage 5 — Install Astra **[CODEX]**
+## Stage 5 — Install Astra **[AGENT]**
 
 The repository is public, so no credentials are needed to clone it.
 
@@ -288,7 +297,7 @@ Rollback: stop here and delete `/srv/astra/data/astra.sqlite3*` to start again.
 
 ---
 
-## Stage 7 — Run Astra under systemd **[CODEX]**
+## Stage 7 — Run Astra under systemd **[AGENT]**
 
 Create `/etc/systemd/system/astra.service`:
 
@@ -358,12 +367,12 @@ Rollback: `sudo systemctl disable --now astra`.
 
 ---
 
-## Stage 8 — DuckDNS name **[ALY for the account, CODEX for the updater]**
+## Stage 8 — DuckDNS name **[ALY for the account, AGENT for the updater]**
 
 **[ALY]** Sign in at duckdns.org, create `<name>`, point it at `<ip>`, and copy
 the account token. Treat the token like a password.
 
-**[CODEX]** Keep the IP current with a small root-only script. The update URL
+**[AGENT]** Keep the IP current with a small root-only script. The update URL
 format below is the one DuckDNS documents on its install page (verify there):
 
 ```bash
@@ -403,7 +412,7 @@ Rollback: remove the cron line with `sudo crontab -e` and delete
 
 ---
 
-## Stage 9 — Caddy for HTTPS **[CODEX]**
+## Stage 9 — Caddy for HTTPS **[AGENT]**
 
 Install Caddy from its official Debian/Ubuntu packages, following
 https://caddyserver.com/docs/install (the 2026-09-20 handoff cites the Caddy
@@ -460,7 +469,7 @@ Rollback: restore the previous Caddyfile and reload, or
 
 ---
 
-## Stage 10 — Sign-in rate limiting (only if Aly agrees, Q11) **[CODEX]**
+## Stage 10 — Sign-in rate limiting (only if Aly agrees, Q11) **[AGENT]**
 
 Astra never locks anyone out and does not limit guessing (Aly, 2026-09-24).
 The README says a hosted deployment should rate-limit in front of Astra, and
@@ -505,7 +514,7 @@ Rollback: set `enabled = false` and restart fail2ban.
 
 ---
 
-## Stage 11 — Backups **[CODEX builds, ALY holds the keys]**
+## Stage 11 — Backups **[AGENT builds, ALY holds the keys]**
 
 Policy (Aly, 2026-09-20): nightly, encrypted, SQLite-consistent, off the VM to
 OCI Object Storage within the free allowance, plus a copy on Aly's desktop;
@@ -527,7 +536,7 @@ echo 'age1...' | sudo tee /srv/astra/backup-recipient.txt
 sudo chown astra:astra /srv/astra/backup-recipient.txt
 ```
 
-**[CODEX]** Create `/usr/local/bin/astra-backup` (owner root, mode 755):
+**[AGENT]** Create `/usr/local/bin/astra-backup` (owner root, mode 755):
 
 ```sh
 #!/bin/sh
@@ -633,7 +642,7 @@ scp -i "$env:USERPROFILE\.ssh\astra_oci" "ubuntu@<ip>:/srv/astra/backups/astra-*
 The files are encrypted, so a copy on the desktop reveals nothing without the
 key.
 
-### 11.4 Restore **[ALY decrypts, CODEX or ALY runs the steps]**
+### 11.4 Restore **[ALY decrypts, AGENT or ALY runs the steps]**
 
 Decrypt on Aly's PC, never on the server, so the private key stays offline:
 
@@ -682,7 +691,7 @@ date, the backup used and the time taken.
 
 ---
 
-## Stage 12 — Monitoring and uptime **[ALY picks the services, CODEX configures]**
+## Stage 12 — Monitoring and uptime **[ALY picks the services, AGENT configures]**
 
 1. **External uptime check [ALY].** Use a free uptime-monitoring service of
    Aly's choice to request `https://<name>.duckdns.org/` every 5 minutes and
@@ -704,7 +713,7 @@ confirm the alert arrives; start it again.
 
 ---
 
-## Stage 13 — Reboot test **[CODEX]**
+## Stage 13 — Reboot test **[AGENT]**
 
 Required by ticket 6BXYJZ ("post-reboot verification").
 
@@ -725,7 +734,7 @@ answers `200`.
 
 ---
 
-## Stage 14 — Update procedure **[CODEX, with Aly's go-ahead per release]**
+## Stage 14 — Update procedure **[AGENT, with Aly's go-ahead per release]**
 
 1. Tell users about a short maintenance window.
 2. Take a backup now and check it:
