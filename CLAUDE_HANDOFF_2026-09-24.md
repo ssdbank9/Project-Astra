@@ -102,7 +102,7 @@ Locks so far:
     Evidence (screenshots and a short video) lives in the session scratchpad,
     `lock12-shots/`.
 - Lock #13 (granted 01:38 UTC 2026-09-26, Slack ts 1790386688.768309): from `d082faf`
-  (baseline `Ran 639 tests`, `OK`), **not pushed** at the time of writing. Ticket 3FQEKB,
+  (baseline `Ran 639 tests`, `OK`), pushed after review 13b. Ticket 3FQEKB,
   assignment rules from Aly's answers to review 12c I3 (ts 1790386228.535829 and
   1790386492.402489): the Chairman may assign tasks and subtasks in any project (the
   assignee only: panel and bulk Assign; `can_assign`, `can_manage_project` unchanged) and is
@@ -110,9 +110,11 @@ Locks so far:
   break the rules are kept and flagged "Needs a new assignee" (card, List row, panel, Home
   count). Every path follows it: create, panel, bulk, importer (`E_OWNER_CHAIRMAN`,
   `E_OWNER_VIEWER`), hold owner, promotion of a viewer's subtask, templates (the Chairman
-  role is no longer offered or filled). No schema change. Three commits: a test-only commit
+  role is no longer offered or filled). No schema change. Six commits: a test-only commit
   closing the three review 12e test gaps (`5e6e593`), the 3FQEKB feature commit (`da414e1`),
-  and the review 13a fix commit. Review 13a approved with follow-ups (0 High, 1 Medium, 2
+  the review 13a fix commit (`d7b2e66`), the Chairman-never-submits follow-up (`f9961e0`),
+  the review 13b fix commit (`44f7c59`), and a chore commit recording reviews 13a-13b and
+  moving 3FQEKB to signoff. Review 13a approved with follow-ups (0 High, 1 Medium, 2
   Low), all fixed: collaborators follow the assignee rules (the Chairman is never one, a
   viewer only on a subtask; older rows are flagged and lose the submit right), the panel
   hides the forms the server refuses for the Chairman and viewers, the Chairman selects in
@@ -120,9 +122,10 @@ Locks so far:
   commit makes the Chairman never submit, not even on a task assigned to them before the
   rules (it stays flagged). Review 13b approved with follow-ups (0 High, 1 Medium, 2 Low),
   all fixed: a designated approver keeps "Request Owner approval" on pending schedule
-  proposals, and the Home tile and `risk=reassign` pin the collaborator flag. The ticket
-  stays in review. Tests: `Ran 676 tests`, `OK`. Screenshots in the session scratchpad,
-  `lock13-shots/`.
+  proposals, and the Home tile and `risk=reassign` pin the collaborator flag. 3FQEKB is in
+  signoff, waiting for Aly. Open question for Aly: the reviewer and approver lists still
+  include the Chairman and project viewers (reviewing is treated as not receiving work).
+  Tests: `Ran 676 tests`, `OK`. Screenshots in the session scratchpad, `lock13-shots/`.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
 
