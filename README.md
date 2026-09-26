@@ -45,7 +45,9 @@ This first vertical slice provides:
   the Chairman, or top-level tasks assigned to a viewer, keep their owner and show a "Needs a
   new assignee" chip (card, List row, task panel) with a count on Home for owners and
   managers (`needs_new_assignee`; `?risk=reassign` on the portfolio); the flag clears when
-  someone reassigns the task. `GET /api/assignable-users?project_id=…&for=task|subtask|reviewer`.
+  someone reassigns the task. A project viewer never submits such a top-level task
+  (G1PPV7): the role is read at submit time, so this also covers a member demoted to viewer,
+  and restoring them to member gives Submit back. `GET /api/assignable-users?project_id=…&for=task|subtask|reviewer`.
   The task panel offers only what the server would accept: someone who cannot edit (the
   Chairman, a member, a viewer) sees the lists without the parent, criticality, schedule
   proposal, dependency, reviewer and Edit forms, and sees Submit only when allowed

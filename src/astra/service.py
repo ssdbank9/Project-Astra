@@ -2408,18 +2408,22 @@ class AstraService:
         # from before the rules (that task stays flagged "Needs a new assignee").
         if actor.get("global_role") == "chairman":
             return False
-        if self.can_manage_project(actor, task["project_id"]) or actor["id"] == task["owner_user_id"]:
+        if self.can_manage_project(actor, task["project_id"]):
             return True
-        if not self.db.execute(
+        is_assignee = actor["id"] == task["owner_user_id"]
+        if not is_assignee and not self.db.execute(
             "SELECT 1 FROM task_reviewers WHERE task_id=? AND user_id=? AND role='collaborator'",
             (task["id"], actor["id"]),
         ).fetchone():
             return False
-        # Review 13a M1: a collaborator the assignment rules forbid (the Chairman, or a viewer on a
-        # top-level task) keeps the row, flagged, but not the right to submit.
+        # Review 13a M1 and G1PPV7: an assignee or collaborator the assignment rules now forbid (a
+        # project viewer on a top-level task, assigned before the rules or demoted since) keeps the
+        # task, flagged, but not the right to submit it. The role is read now, so restoring the
+        # person to member gives the right back. The parent is read here because the row that
+        # submit_task re-reads under the write lock does not carry it.
         parent = self.db.execute("SELECT parent_task_id FROM tasks WHERE id=?", (task["id"],)).fetchone()
         return self._assignee_refusal(task["project_id"], actor["id"], subtask=bool(parent and parent["parent_task_id"]),
-                                      as_collaborator=True) is None
+                                      as_collaborator=not is_assignee) is None
 
     def submit_task(self, actor: dict, task_id: str, note: str = "", *, expected_revision: int | None = None,
                     override_dependencies: bool = False, override_wip: bool = False,

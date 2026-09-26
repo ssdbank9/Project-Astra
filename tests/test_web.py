@@ -1858,6 +1858,38 @@ class AstraAssignmentWebTests(unittest.TestCase):
         _, detail = self.request("GET", f"/api/tasks/{task['id']}", cookie=ccookie)
         self.assertEqual((detail["task"]["permissions"]["assign_only"], detail["task"]["needs_new_assignee"]), (True, False))
 
+    def test_a_viewer_holding_a_top_level_task_gets_no_submit_over_http(self):
+        """G1PPV7: a member demoted to viewer keeps their top-level task, flagged, but the panel
+        offers no Submit (can_submit false) and the submit route refuses it (403)."""
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "Viewer submit HTTP"}, cookie=cookie, csrf=csrf)
+        pid = project["project"]["id"]
+        _, user = self.request("POST", "/api/users", {"email": "vi@example.org", "display_name": "Vi",
+                                                      "password": "a password safe"}, cookie=cookie, csrf=csrf)
+        uid = user["user"]["id"]
+        self.request("POST", "/api/project-access", {"project_id": pid, "user_id": uid, "role": "member"},
+                     cookie=cookie, csrf=csrf)
+        _, task = self.request("POST", "/api/tasks", {"project_id": pid, "title": "Top", "owner_user_id": uid},
+                               cookie=cookie, csrf=csrf)
+        tid = task["task"]["id"]
+        response, _ = self.request("POST", "/api/project-access", {"project_id": pid, "user_id": uid, "role": "viewer"},
+                                   cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 200)
+        vcookie, vcsrf = self._login_as("vi@example.org", "a password safe")
+        _, detail = self.request("GET", f"/api/tasks/{tid}", cookie=vcookie)
+        self.assertEqual((detail["task"]["permissions"]["can_submit"], detail["task"]["needs_new_assignee"]),
+                         (False, True))
+        response, body = self.request("POST", f"/api/tasks/{tid}/submit", {"note": "done"}, cookie=vcookie, csrf=vcsrf)
+        self.assertEqual(response.status, 403)
+        self.assertIn("not authorized to submit", body["error"])
+        _, detail = self.request("GET", f"/api/tasks/{tid}", cookie=cookie)
+        self.assertEqual(detail["task"]["status"], "draft")
+        # Restored to member, they submit it again.
+        self.request("POST", "/api/project-access", {"project_id": pid, "user_id": uid, "role": "member"},
+                     cookie=cookie, csrf=csrf)
+        response, body = self.request("POST", f"/api/tasks/{tid}/submit", {"note": "done"}, cookie=vcookie, csrf=vcsrf)
+        self.assertEqual((response.status, body["submission"]["status"]), (201, "submitted"))
+
 
 class AstraGovernedDragWebTests(unittest.TestCase):
     """Lock #12 over HTTP: board moves, locks, date drags, bulk changes and WIP limits."""

@@ -241,6 +241,64 @@ class ExistingAssignmentsTests(AssignmentFixture):
         self.assertTrue(self.listed(self.parent["id"])["needs_new_assignee"])  # still flagged for someone to reassign
         self.assertEqual(s.submit_task(self.manager, self.parent["id"], "done")["status"], "submitted")
 
+    def test_a_viewer_never_submits_a_top_level_task_even_as_a_legacy_assignee(self):
+        """G1PPV7: the assignee check used to return True before the 3FQEKB rules, so a viewer
+        who held a top-level task from before them could still submit it."""
+        s = self.service
+        top = s.create_task(self.owner, {"project_id": self.pid, "title": "Viewer top"})
+        self.legacy_owner(top["id"], self.viewer["id"])
+        self.assertFalse(s.task_detail(self.viewer, top["id"])["permissions"]["can_submit"])
+        with self.assertRaises(Forbidden):
+            s.submit_task(self.viewer, top["id"], "done")
+        self.assertEqual(self.fresh(top["id"])["status"], "draft")
+        self.assertEqual(s.list_task_submissions(self.owner, top["id"]), [])
+        self.assertTrue(self.listed(top["id"])["needs_new_assignee"])  # still flagged for someone to reassign
+        # Their own subtask still submits, and a manager still submits the flagged task.
+        self.legacy_owner(self.step["id"], self.viewer["id"])
+        self.assertTrue(s.task_detail(self.viewer, self.step["id"])["permissions"]["can_submit"])
+        self.assertEqual(s.submit_task(self.viewer, self.step["id"], "done")["status"], "submitted")
+        self.assertEqual(s.submit_task(self.manager, top["id"], "done")["status"], "submitted")
+
+    def test_a_member_demoted_to_viewer_loses_submit_on_a_top_level_task_until_restored(self):
+        s = self.service
+        top = s.create_task(self.owner, {"project_id": self.pid, "title": "Member top",
+                                         "owner_user_id": self.member["id"]})
+        self.assertTrue(s.task_detail(self.member, top["id"])["permissions"]["can_submit"])
+        s.grant_project_access(self.owner, self.pid, self.member["id"], "viewer")
+        self.assertFalse(s.task_detail(self.member, top["id"])["permissions"]["can_submit"])
+        self.assertTrue(self.listed(top["id"])["needs_new_assignee"])
+        with self.assertRaises(Forbidden):
+            s.submit_task(self.member, top["id"], "done")
+        # A board move into Submitted is a manager's, and goes through the same submit.
+        with self.assertRaises(Forbidden):
+            s.move_task(self.member, top["id"], {"to_column": "submitted", "confirmed": True,
+                                                 "expected_revision": self.fresh(top["id"])["revision"]})
+        self.assertEqual(self.fresh(top["id"])["status"], "draft")
+        s.grant_project_access(self.owner, self.pid, self.member["id"], "member")
+        self.assertFalse(self.listed(top["id"])["needs_new_assignee"])
+        self.assertEqual(s.submit_task(self.member, top["id"], "done")["status"], "submitted")
+
+    def test_a_viewer_demoted_inside_the_submit_is_refused_by_the_recheck(self):
+        """The permission is evaluated again on the row re-read under the write lock; that row
+        carries no parent_task_id, so the rule reads the parent itself."""
+        s = self.service
+        top = s.create_task(self.owner, {"project_id": self.pid, "title": "Race",
+                                         "owner_user_id": self.member["id"]})
+        real = s._dependency_gate
+
+        def demote_then_gate(*args, **kwargs):
+            s._dependency_gate = real
+            s.grant_project_access(self.owner, self.pid, self.member["id"], "viewer")  # lands before BEGIN IMMEDIATE
+            return real(*args, **kwargs)
+        s._dependency_gate = demote_then_gate
+        try:
+            with self.assertRaises(Exception) as caught:
+                s.submit_task(self.member, top["id"], "done")
+        finally:
+            s._dependency_gate = real
+        self.assertIn("access to this task changed", str(caught.exception))
+        self.assertEqual(self.fresh(top["id"])["status"], "draft")
+
     def test_a_closed_task_is_not_flagged(self):
         s = self.service
         task = s.create_task(self.owner, {"project_id": self.pid, "title": "Done"})

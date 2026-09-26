@@ -95,12 +95,13 @@ One ticket each, or one grouped ticket if Aly prefers fewer:
 7. Doc drift: update `docs/design/authorization-matrix.md` and `CONTEXT.md` to
    the current Chairman, viewer and collaborator rules, and correct the
    older handoff bullets that still read as current.
-8. **High.** Block submit for a viewer who is the legacy assignee of a
-   top-level task; add a test. Today `_may_submit` in `src/astra/service.py`
-   returns True for the task's assignee before any 3FQEKB refusal, so a viewer
-   assigned a top-level task before the rules can still submit it (fact-check,
-   2026-09-26). Aly's rule gives viewers subtasks only (Slack ts
-   1790386492.402489).
+8. **Done (G1PPV7).** Block submit for a viewer who is the legacy assignee of
+   a top-level task. `_may_submit` in `src/astra/service.py` used to return
+   True for the task's assignee before any 3FQEKB refusal (found by the
+   fact-check, 2026-09-26). It now applies the same rule as for
+   collaborators, so a viewer submits only their own subtask (Aly, Slack ts
+   1790386492.402489). Tests are in `tests/test_assignment.py` and
+   `tests/test_web.py`. Left for Aly: accept G1PPV7 in signoff.
 
 Done when: each fix has a test that fails without it, the suite is green, and
 the tickets are in signoff.
