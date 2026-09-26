@@ -2152,6 +2152,25 @@ class ImportEngine:
             return None
         return owner
 
+    def _check_collaborator_rules(self, user, result: RowResult, text: dict, existing, label: str):
+        """Review 13a M1: a collaborator may submit the task, so the assignment rules apply: never
+        the Chairman, and a viewer on steps only. A collaborator the task already has is left alone
+        (import adds, never removes)."""
+        if existing and (existing["id"], user["id"], "collaborator") in self.existing_reviewers:
+            return user
+        if user.get("global_role") == "chairman":
+            result.add("error", "E_COLLABORATOR_CHAIRMAN",
+                       f"{user['email']} is the Chairman. The Chairman assigns work but never receives it, so cannot "
+                       "be a collaborator; list them as a reviewer or approver instead.", label)
+            return None
+        step = bool(text.get("parent_key")) or bool(existing and existing.get("parent_task_id"))
+        if user.get("global_role") == "member" and self.member_roles.get(user["id"]) == "viewer" and not step:
+            result.add("error", "E_COLLABORATOR_VIEWER",
+                       f"{user['email']} is a viewer on this project. A viewer can collaborate on a step (give the row "
+                       "a Parent Key) but not on a top-level task.", label)
+            return None
+        return user
+
     def _person_miss(self, text: str, result: RowResult, column: str, code: str, detail: str):
         """Record that ``text`` names nobody the row may be assigned to: the detailed finding
         for the App Owner, the one neutral text for everyone else."""
@@ -2282,7 +2301,10 @@ class ImportEngine:
         for list_key, role in (("collaborators", "collaborator"), ("reviewers", "reviewer"), ("approvers", "approver")):
             ids = []
             for item in split_list(cells.get(list_key)):
-                user = self._resolve_person(item, result, self.config.by_key[list_key].label if list_key in self.config.by_key else list_key)
+                label = self.config.by_key[list_key].label if list_key in self.config.by_key else list_key
+                user = self._resolve_person(item, result, label)
+                if user and role == "collaborator":
+                    user = self._check_collaborator_rules(user, result, text, existing, label)
                 if user and user["id"] not in ids:
                     ids.append(user["id"])
             people_lists[role] = ids

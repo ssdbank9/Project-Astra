@@ -240,6 +240,94 @@ class ExistingAssignmentsTests(AssignmentFixture):
         self.assertFalse(self.listed(task["id"])["needs_new_assignee"])
 
 
+class CollaboratorTests(AssignmentFixture):
+    """Review 13a M1: a collaborator may submit the task, so the Chairman is never one, and a viewer
+    collaborates on subtasks only. Reviewers and approvers stay open to everyone."""
+
+    def add(self, task_id, user_id, role="collaborator"):
+        return self.service.add_task_reviewer(self.owner, task_id, user_id, role)
+
+    def legacy_collaborator(self, task_id, user_id):
+        self.db.execute("INSERT INTO task_reviewers VALUES(?,?,?,?,?)",
+                        (task_id, user_id, "collaborator", "2026-09-01T00:00:00Z", self.owner["id"]))
+
+    def test_the_chairman_is_never_a_collaborator(self):
+        with self.assertRaisesRegex(ValueError, "cannot be a collaborator"):
+            self.add(self.parent["id"], self.chair["id"])
+        with self.assertRaisesRegex(ValueError, "cannot be a collaborator"):
+            self.add(self.step["id"], self.chair["id"])
+        self.add(self.parent["id"], self.chair["id"], "reviewer")  # reviewing is not receiving work
+        self.add(self.parent["id"], self.chair["id"], "approver")
+        roles = {(r["user_id"], r["role"]) for r in self.service.list_task_reviewers(self.owner, self.parent["id"])}
+        self.assertEqual(roles, {(self.chair["id"], "reviewer"), (self.chair["id"], "approver")})
+
+    def test_an_existing_chairman_collaborator_cannot_submit_and_is_flagged(self):
+        s = self.service
+        self.legacy_collaborator(self.parent["id"], self.chair["id"])
+        with self.assertRaises(Forbidden):
+            s.submit_task(self.chair, self.parent["id"], "done")
+        self.assertEqual(self.fresh(self.parent["id"])["status"], "draft")
+        self.assertTrue(self.listed(self.parent["id"])["needs_new_collaborator"])
+        self.assertFalse(self.listed(self.parent["id"])["needs_new_assignee"])
+        self.assertTrue(s.task_detail(self.owner, self.parent["id"])["needs_new_collaborator"])
+        self.assertFalse(s.task_detail(self.chair, self.parent["id"])["permissions"]["can_submit"])
+        row = s.list_task_reviewers(self.owner, self.parent["id"])[0]
+        self.assertEqual((row["role"], row["not_allowed"]), ("collaborator", True))
+        exported = s.export_tasks(self.owner, {"project_id": self.pid, "risk": "reassign"})
+        self.assertEqual([t["title"] for t in exported["tasks"]], ["Parent"])
+        s.remove_task_reviewer(self.owner, self.parent["id"], self.chair["id"], "collaborator")
+        self.assertFalse(self.listed(self.parent["id"])["needs_new_collaborator"])
+
+    def test_a_viewer_collaborates_on_subtasks_only(self):
+        s = self.service
+        with self.assertRaisesRegex(ValueError, "viewer can collaborate on subtasks only"):
+            self.add(self.parent["id"], self.viewer["id"])
+        self.add(self.parent["id"], self.viewer["id"], "reviewer")  # still fine as a reviewer
+        self.add(self.step["id"], self.viewer["id"])
+        self.assertTrue(s.task_detail(self.viewer, self.step["id"])["permissions"]["can_submit"])
+        self.assertEqual(s.submit_task(self.viewer, self.step["id"], "done")["status"], "submitted")
+        self.assertFalse(self.listed(self.step["id"])["needs_new_collaborator"])
+        # Promoting the subtask would put the viewer on a top-level task.
+        other = s.create_task(self.owner, {"project_id": self.pid, "title": "Other"})
+        v_step = s.create_task(self.owner, {"project_id": self.pid, "title": "V step", "parent_task_id": other["id"]})
+        self.add(v_step["id"], self.viewer["id"])
+        with self.assertRaisesRegex(ValueError, "Remove them first"):
+            s.set_parent(self.manager, v_step["id"], None)
+
+    def test_an_existing_viewer_collaborator_on_a_top_level_task_cannot_submit(self):
+        s = self.service
+        self.legacy_collaborator(self.parent["id"], self.viewer["id"])
+        with self.assertRaises(Forbidden):
+            s.submit_task(self.viewer, self.parent["id"], "done")
+        self.assertTrue(self.listed(self.parent["id"])["needs_new_collaborator"])
+        self.assertFalse(s.task_detail(self.viewer, self.parent["id"])["permissions"]["can_submit"])
+        # A member collaborator still submits.
+        self.add(self.parent["id"], self.member["id"])
+        self.assertEqual(s.submit_task(self.member, self.parent["id"], "done")["status"], "submitted")
+
+
+class PanelSaveTests(AssignmentFixture):
+    def test_a_title_only_save_on_an_undated_task_needs_no_reason(self):
+        # Review 13a L1 (older than lock #13): the panel sends "" for an empty date field.
+        task = self.service.update_task(self.manager, self.parent["id"], {
+            "title": "Parent renamed", "start_date": "", "due_date": "", "owner_user_id": "", "progress": "",
+            "description": "", "reason": "", "expected_revision": self.fresh(self.parent["id"])["revision"]})
+        self.assertEqual((task["title"], task["start_date"], task["due_date"]), ("Parent renamed", None, None))
+        # A real date change still asks for a reason.
+        with self.assertRaisesRegex(ValueError, "reason is required"):
+            self.service.update_task(self.manager, self.parent["id"], {
+                "due_date": "2026-12-01", "expected_revision": self.fresh(self.parent["id"])["revision"]})
+
+    def test_an_explicit_unassign_clears_a_flagged_owner(self):
+        # Review 13a L2: sending no one ("") clears the owner, and with it the flag.
+        self.legacy_owner(self.parent["id"], self.chair["id"])
+        self.assertTrue(self.listed(self.parent["id"])["needs_new_assignee"])
+        task = self.service.update_task(self.manager, self.parent["id"], {
+            "owner_user_id": "", "expected_revision": self.fresh(self.parent["id"])["revision"]})
+        self.assertIsNone(task["owner_user_id"])
+        self.assertFalse(self.listed(self.parent["id"])["needs_new_assignee"])
+
+
 class PickerTests(AssignmentFixture):
     def ids(self, actor, purpose="task"):
         return {u["id"]: u["project_role"] for u in self.service.list_assignable_users(actor, self.pid, purpose)}
@@ -282,6 +370,13 @@ class ImporterAndTemplateTests(AssignmentFixture):
             {"import_key": "A-2", "title": "Viewer top", "owner_email": "viewer@example.org"},
             {"import_key": "A-3", "title": "Viewer step", "owner_email": "viewer@example.org", "parent_key": "A-4"},
             {"import_key": "A-4", "title": "Member task", "owner_email": "member@example.org"},
+            # Review 13a M1: the Collaborators column meets the same rules.
+            {"import_key": "A-5", "title": "Chair helps", "owner_email": "member@example.org",
+             "collaborators": "chair@example.org"},
+            {"import_key": "A-6", "title": "Viewer helps top", "owner_email": "member@example.org",
+             "collaborators": "viewer@example.org"},
+            {"import_key": "A-7", "title": "Viewer helps step", "owner_email": "member@example.org",
+             "collaborators": "viewer@example.org", "parent_key": "A-4"},
         ]
         by_key = {r["import_key"]: r for r in self.preview(rows)["rows"]}
         codes = lambda key: [f["code"] for f in by_key[key]["findings"] if f["level"] == "error"]
@@ -292,6 +387,9 @@ class ImporterAndTemplateTests(AssignmentFixture):
         self.assertEqual(codes("A-3"), [])
         self.assertEqual(by_key["A-3"]["values"]["owner"], "Viewer")
         self.assertEqual(codes("A-4"), [])
+        self.assertEqual(codes("A-5"), ["E_COLLABORATOR_CHAIRMAN"])
+        self.assertEqual(codes("A-6"), ["E_COLLABORATOR_VIEWER"])
+        self.assertEqual(codes("A-7"), [])
 
     def test_templates_never_assign_the_chairman_or_a_viewer_at_top_level(self):
         s = self.service

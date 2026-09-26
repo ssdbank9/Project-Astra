@@ -110,9 +110,14 @@ Locks so far:
   break the rules are kept and flagged "Needs a new assignee" (card, List row, panel, Home
   count). Every path follows it: create, panel, bulk, importer (`E_OWNER_CHAIRMAN`,
   `E_OWNER_VIEWER`), hold owner, promotion of a viewer's subtask, templates (the Chairman
-  role is no longer offered or filled). No schema change. Two commits: a test-only commit
-  closing the three review 12e test gaps, then the 3FQEKB feature commit with the ticket in
-  review. Tests: `Ran 663 tests`, `OK`. Screenshots in the session scratchpad,
+  role is no longer offered or filled). No schema change. Three commits: a test-only commit
+  closing the three review 12e test gaps (`5e6e593`), the 3FQEKB feature commit (`da414e1`),
+  and the review 13a fix commit. Review 13a approved with follow-ups (0 High, 1 Medium, 2
+  Low), all fixed: collaborators follow the assignee rules (the Chairman is never one, a
+  viewer only on a subtask; older rows are flagged and lose the submit right), the panel
+  hides the forms the server refuses for the Chairman and viewers, the Chairman selects in
+  the List only, and an empty date no longer demands a reason (an older bug). The ticket
+  stays in review. Tests: `Ran 674 tests`, `OK`. Screenshots in the session scratchpad,
   `lock13-shots/`.
 
 ## 3. What landed on 2026-09-24 (`1c45904..6e52df8`, 16 commits)
@@ -157,7 +162,8 @@ fifteen remediation tickets into `done` after Aly's Slack signoff of 2026-09-23.
   `Ran 510 tests`, `OK`. With lock #12 (schema v18 to v20): `Ran 540`, `564` and `586`
   tests after each feature commit, `Ran 619 tests`, `OK` with the review 12a-12c fixes, and
   `Ran 639 tests`, `OK` with the re-review 12d fixes. With lock #13 (3FQEKB and the review
-  12e test gaps, no schema change): `Ran 663 tests`, `OK`.
+  12e test gaps, no schema change): `Ran 663 tests`, `OK`; with the review 13a fixes:
+  `Ran 674 tests`, `OK`.
 - The branch sits 79 commits after PR #4's head `5adec82` (`git rev-list --count
   5adec82..6e52df8`). This branch has no PR yet.
 

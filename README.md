@@ -13,13 +13,22 @@ This first vertical slice provides:
 - assignment rules (3FQEKB, Aly 2026-09-26, Slack ts 1790386228.535829 and
   1790386492.402489). Who may set or change a task's assignee, and who may be one:
 
-  | Role | May assign tasks and subtasks | May be assigned a top-level task | May be assigned a subtask |
-  |---|---|---|---|
-  | App Owner | Yes | Yes | Yes |
-  | Project manager | Yes, on their project | Yes | Yes |
-  | Chairman | Yes, in any project: the assignee only (panel and bulk Assign) | No, never | No, never |
-  | Project member | No | Yes | Yes |
-  | Project viewer | No | No | Yes |
+  | Role | May assign tasks and subtasks | May be assigned (or collaborate on) a top-level task | May be assigned (or collaborate on) a subtask | Reviewer or approver |
+  |---|---|---|---|---|
+  | App Owner | Yes | Yes | Yes | Yes |
+  | Project manager | Yes, on their project | Yes | Yes | Yes |
+  | Chairman | Yes, in any project: the assignee only (panel and bulk Assign) | No, never | No, never | Yes |
+  | Project member | No | Yes | Yes | Yes |
+  | Project viewer | No | No | Yes | Yes |
+
+  A collaborator may submit the task, so collaborators follow the assignee columns (review
+  13a): `add_task_reviewer` refuses the Chairman as a collaborator anywhere and a viewer as a
+  collaborator on a top-level task, and so does the importer's Collaborators column
+  (`E_COLLABORATOR_CHAIRMAN`, `E_COLLABORATOR_VIEWER`). An older collaborator row that breaks
+  this stays, is marked in the panel's reviewer list, flags the task "Collaborator not
+  allowed" (`needs_new_collaborator`, counted in the same Home tile, "Needs reassigning"),
+  and no longer lets that person submit. A viewer collaborator also blocks promoting a
+  subtask to top level until removed.
 
   The Chairman's right adds the assignee and nothing else: creating tasks, status, dates,
   holds, criticality and other bulk changes stay refused (403), and someone else's lock
@@ -35,7 +44,12 @@ This first vertical slice provides:
   the Chairman, or top-level tasks assigned to a viewer, keep their owner and show a "Needs a
   new assignee" chip (card, List row, task panel) with a count on Home for owners and
   managers (`needs_new_assignee`; `?risk=reassign` on the portfolio); the flag clears when
-  someone reassigns the task. `GET /api/assignable-users?project_id=…&for=task|subtask|reviewer`;
+  someone reassigns the task. `GET /api/assignable-users?project_id=…&for=task|subtask|reviewer`.
+  The task panel offers only what the server would accept: someone who cannot edit (the
+  Chairman, a member, a viewer) sees the lists without the parent, criticality, schedule
+  proposal, dependency, reviewer and Edit forms, and sees Submit only when allowed
+  (`permissions.can_submit`). The Chairman selects tasks for bulk Assign in the List only.
+  An empty date field counts as no date, so a title-only save on an undated task needs no reason;
 - an owner-only People screen: create users, deactivate/reactivate them, grant or revoke
   project access, and reset a forgotten password (`POST /api/users/{id}/password`): any
   owner resets any active user's password, except that only the primary owner resets the

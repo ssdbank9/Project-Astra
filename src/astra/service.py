@@ -1124,8 +1124,10 @@ class AstraService:
             raise ValueError(refusal)
         return owner_user_id
 
-    def _assignee_refusal(self, project_id: str, user_id: str | None, *, subtask: bool) -> str | None:
-        """Why ``user_id`` may not be this task's assignee, or None."""
+    def _assignee_refusal(self, project_id: str, user_id: str | None, *, subtask: bool,
+                          as_collaborator: bool = False) -> str | None:
+        """Why ``user_id`` may not be this task's assignee (or, review 13a M1, its collaborator,
+        who may submit it), or None."""
         if not user_id:
             return None
         row = self.db.execute(
@@ -1135,12 +1137,44 @@ class AstraService:
         if not row:
             return None
         if row["global_role"] == "chairman":
+            if as_collaborator:
+                return (f"“{row['display_name']}” is the Chairman. The Chairman assigns work but never receives it, "
+                        "so cannot be a collaborator; choose someone else (a reviewer or approver is fine).")
             return (f"“{row['display_name']}” is the Chairman. The Chairman assigns work but is never assigned "
                     "a task or subtask; choose someone else.")
         if row["global_role"] == "member" and row["project_role"] == "viewer" and not subtask:
+            if as_collaborator:
+                return (f"“{row['display_name']}” is a viewer on this project. A viewer can collaborate on subtasks "
+                        "only, not a top-level task; choose someone else.")
             return (f"“{row['display_name']}” is a viewer on this project. A viewer can be given subtasks only, "
                     "not a top-level task; choose someone else, or make this a subtask first.")
         return None
+
+    def _viewer_collaborators(self, task: dict) -> list[str]:
+        return [r["user_id"] for r in self.db.execute(
+            """SELECT r.user_id FROM task_reviewers r JOIN users u ON u.id=r.user_id
+               JOIN memberships m ON m.user_id=r.user_id AND m.project_id=?
+               WHERE r.task_id=? AND r.role='collaborator' AND m.role='viewer' AND u.global_role='member'""",
+            (task["project_id"], task["id"])).fetchall()]
+
+    def _collaborator_flags(self, task_ids: list[str]) -> set[str]:
+        """Review 13a M1: tasks with a collaborator the assignment rules now forbid (the Chairman,
+        or a viewer on a top-level task). The rows stay; the task is flagged."""
+        if not task_ids:
+            return set()
+        flagged: set[str] = set()
+        for start in range(0, len(task_ids), 500):
+            chunk = task_ids[start:start + 500]
+            marks = ",".join("?" for _ in chunk)
+            flagged |= {r[0] for r in self.db.execute(
+                f"""SELECT DISTINCT r.task_id FROM task_reviewers r JOIN users u ON u.id=r.user_id
+                    JOIN tasks t ON t.id=r.task_id
+                    LEFT JOIN memberships m ON m.project_id=t.project_id AND m.user_id=r.user_id
+                    WHERE r.role='collaborator' AND r.task_id IN ({marks})
+                      AND (u.global_role='chairman'
+                           OR (u.global_role='member' AND m.role='viewer' AND t.parent_task_id IS NULL))""",
+                chunk).fetchall()}
+        return flagged
 
     def _is_project_viewer(self, project_id: str, user_id: str | None) -> bool:
         if not user_id:
@@ -1343,6 +1377,9 @@ class AstraService:
     def _validate_task_update(self, before: dict, payload: dict) -> dict:
         """Merge the payload over the task, apply the lifecycle policy and field rules, and
         return the normalised values the write and the request routing need."""
+        # Review 13a L1: an empty date field ("") is no date, the same as the stored NULL, so a
+        # save that leaves an undated task undated is not a schedule change needing a reason.
+        payload = {**payload, **{k: None for k in ("start_date", "due_date") if payload.get(k) == ""}}
         merged = {**before, **payload}
         status = merged["status"]
         criticality = merged.get("criticality") or None
@@ -1587,10 +1624,13 @@ class AstraService:
         self._add_dependency_state(result)
         self._add_critical_path(result)
         self._add_lock_state(result)
+        collaborator_flags = self._collaborator_flags([item["id"] for item in result])
         for item in result:
             item["next_action"] = self._next_action(item)
             item["needs_new_assignee"] = self._needs_new_assignee(
                 item, item.pop("owner_global_role", None), item.pop("owner_project_role", None))
+            item["needs_new_collaborator"] = (item["id"] in collaborator_flags
+                                              and item["status"] not in REOPEN_ONLY_STATUSES)
         return result
 
     @staticmethod
@@ -1787,7 +1827,7 @@ class AstraService:
                 return False
             if risk == "critical" and not t.get("is_critical_path"):
                 return False
-            if risk == "reassign" and not t.get("needs_new_assignee"):  # 3FQEKB, the Home tile's filter
+            if risk == "reassign" and not (t.get("needs_new_assignee") or t.get("needs_new_collaborator")):  # 3FQEKB
                 return False
             if risk == "atrisk" and not (t.get("due_state") == "overdue" or t.get("is_blocked")
                                          or t.get("is_critical_path") or t["status"] == "delayed"):
@@ -1815,12 +1855,16 @@ class AstraService:
             "can_manage_files": is_owner,
             "can_read_files": True,
             "can_force_unlock": is_owner,
+            # Review 13a L1: the panel offers Submit only to someone the server lets submit.
+            "can_submit": task["status"] not in UNSUBMITTABLE_STATUSES and self._may_submit(actor, task),
         }
         owner_row = self.db.execute(
             """SELECT u.global_role, (SELECT m.role FROM memberships m WHERE m.project_id=? AND m.user_id=u.id) project_role
                FROM users u WHERE u.id=?""", (task["project_id"], task.get("owner_user_id"))).fetchone()
         task["needs_new_assignee"] = self._needs_new_assignee(
             task, owner_row["global_role"] if owner_row else None, owner_row["project_role"] if owner_row else None)
+        task["needs_new_collaborator"] = (task_id in self._collaborator_flags([task_id])
+                                          and task["status"] not in REOPEN_ONLY_STATUSES)
         task["lock"] = self._active_lock(task_id)
         task["due_state"] = self._due_state(
             task.get("due_date"), task["status"], self._today_in_timezone(task.get("project_timezone"))
@@ -2360,14 +2404,18 @@ class AstraService:
     def _may_submit(self, actor: dict, task) -> bool:
         """Project Manager (or Owner), the Task Owner, or a task collaborator. The caller
         has already established that the actor can view the task's project."""
-        return bool(
-            self.can_manage_project(actor, task["project_id"])
-            or actor["id"] == task["owner_user_id"]
-            or self.db.execute(
-                "SELECT 1 FROM task_reviewers WHERE task_id=? AND user_id=? AND role='collaborator'",
-                (task["id"], actor["id"]),
-            ).fetchone()
-        )
+        if self.can_manage_project(actor, task["project_id"]) or actor["id"] == task["owner_user_id"]:
+            return True
+        if not self.db.execute(
+            "SELECT 1 FROM task_reviewers WHERE task_id=? AND user_id=? AND role='collaborator'",
+            (task["id"], actor["id"]),
+        ).fetchone():
+            return False
+        # Review 13a M1: a collaborator the assignment rules forbid (the Chairman, or a viewer on a
+        # top-level task) keeps the row, flagged, but not the right to submit.
+        parent = self.db.execute("SELECT parent_task_id FROM tasks WHERE id=?", (task["id"],)).fetchone()
+        return self._assignee_refusal(task["project_id"], actor["id"], subtask=bool(parent and parent["parent_task_id"]),
+                                      as_collaborator=True) is None
 
     def submit_task(self, actor: dict, task_id: str, note: str = "", *, expected_revision: int | None = None,
                     override_dependencies: bool = False, override_wip: bool = False,
@@ -3558,6 +3606,9 @@ class AstraService:
             # 3FQEKB: a viewer may hold a subtask only, so promoting it would break the rule.
             raise ValueError(f"“{task['title']}” is assigned to a project viewer, who can be given subtasks only. "
                              "Reassign it first, then make it a top-level task.")
+        elif task.get("parent_task_id") and self._viewer_collaborators(task):
+            raise ValueError(f"“{task['title']}” has a project viewer as a collaborator, who can collaborate on "
+                             "subtasks only. Remove them first, then make it a top-level task.")
         timestamp = now_text()
         before = {"parent_task_id": task.get("parent_task_id")}
         with transaction(self.db):
@@ -3624,6 +3675,12 @@ class AstraService:
         if not user_id:
             raise ValueError("A user is required.")
         self._validate_project_user(task["project_id"], user_id)  # reviewing is not assignment (3FQEKB)
+        if role == "collaborator":
+            # Review 13a M1: a collaborator may submit the task, so the assignment rules apply to them.
+            refusal = self._assignee_refusal(task["project_id"], user_id, subtask=bool(task.get("parent_task_id")),
+                                             as_collaborator=True)
+            if refusal:
+                raise ValueError(refusal)
         with transaction(self.db):
             self._refuse_closed_in_transaction(task_id)
             cursor = self.db.execute(
@@ -3649,13 +3706,21 @@ class AstraService:
                 self._event(task_id, actor["id"], "reviewer_removed", {"user_id": user_id, "role": role}, None, None)
 
     def list_task_reviewers(self, actor: dict, task_id: str) -> list[dict]:
-        self.get_task(actor, task_id)
+        task = self.get_task(actor, task_id)
         rows = self.db.execute(
             """SELECT r.user_id, r.role, u.display_name FROM task_reviewers r JOIN users u ON u.id=r.user_id
                WHERE r.task_id=? ORDER BY r.role, u.display_name COLLATE NOCASE""",
             (task_id,),
         ).fetchall()
-        return [dict(row) for row in rows]
+        result = []
+        for row in rows:
+            item = dict(row)
+            # Review 13a M1: an older collaborator row the rules now forbid stays, flagged.
+            item["not_allowed"] = item["role"] == "collaborator" and self._assignee_refusal(
+                task["project_id"], item["user_id"], subtask=bool(task.get("parent_task_id")),
+                as_collaborator=True) is not None
+            result.append(item)
+        return result
 
     # --- Attachments: links to files that live in a folder outside Astra ---
     #

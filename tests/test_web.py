@@ -2591,6 +2591,10 @@ if(mode==="bulk"){
   const tableEl={innerHTML:""},groups={top:tasks.slice(0,2),childrenOf:new Map(),stepIndex:new Map()};
   out.scopeMember=bulkScope();renderScheduleTable(groups,tableEl);out.memberTable=tableEl.innerHTML.includes("bulk-pick");
   a.state.projects[0].can_assign=true;out.scopeChairman=bulkScope();renderScheduleTable(groups,tableEl);out.chairmanTable=tableEl.innerHTML.includes("bulk-pick");
+  // Review 13a L1: on the board the Chairman gets no pick boxes and no list pick column.
+  location.hash="#/project/"+U1+"/board";out.scopeChairmanBoard=bulkScope();renderScheduleTable(groups,tableEl);
+  out.chairmanBoardTable=tableEl.innerHTML.includes("bulk-pick");out.chairmanBoard=a.renderBoard(tasks,"").includes("bulk-pick");
+  location.hash="#/project/"+U1+"/list";
   a.state.projects[0].can_manage=true;out.scopeManager=bulkScope();a.state.projects[0].can_assign=false;
   location.hash="#/project/"+U1+"/board";
   a.state.projects[0].can_manage=true;
@@ -2626,6 +2630,7 @@ if(mode==="bulk"){
   // The chip on a card and a List row, and the Home tile for owners and managers only.
   const flagged=T({id:"f",title:"Flagged",needs_new_assignee:true,owner_name:"Chair Person"});
   out.flaggedCard=boardCard(flagged,[],true);out.plainCard=boardCard(T({id:"p",title:"Plain"}),[],true);
+  out.collabCard=boardCard(T({id:"k",title:"Collab",needs_new_collaborator:true}),[],true);
   const rowEl={innerHTML:""};location.hash="#/project/"+U1+"/list";
   renderScheduleTable({top:[flagged],childrenOf:new Map(),stepIndex:new Map()},rowEl);out.flaggedRow=rowEl.innerHTML;
   a.state.tasks=[flagged,T({id:"q",title:"Other"})];
@@ -3326,6 +3331,15 @@ class AstraBulkDriverTests(unittest.TestCase):
                                                      ["Chair Person (needs a new assignee)", "u-chair", True]])
         self.assertEqual(self.out["pickerKept"], [["Mo Member", "u-m", True], ["Vi <b>Viewer</b> (viewer)", "u-v", False]])
 
+    def test_review_13a_the_chairman_selects_in_the_list_only(self):
+        self.assertIsNone(self.out["scopeChairmanBoard"])
+        self.assertFalse(self.out["chairmanBoardTable"])
+        self.assertFalse(self.out["chairmanBoard"])
+
+    def test_review_13a_a_forbidden_collaborator_flags_the_card(self):
+        self.assertIn("⚠ Collaborator not allowed", self.out["collabCard"])
+        self.assertNotIn("Needs a new assignee", self.out["collabCard"])
+
     def test_3fqekb_the_needs_a_new_assignee_chip_and_home_count(self):
         chip = '<span class="tag reassign-chip" data-tone="amber">⚠ Needs a new assignee</span>'
         self.assertIn(chip, self.out["flaggedCard"])
@@ -3861,8 +3875,14 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
         cases["owner-missing"] = _detail_task("in_progress", OWNER_PERMS)
         cases["owner-missing"]["attachments"][0]["exists"] = False
         # 3FQEKB: the Chairman's dialog carries the assignee control; a flagged task shows its chip.
-        cases["chairman-in_progress"] = _detail_task("in_progress", {**VIEWER_PERMS, "can_assign": True, "assign_only": True})
+        cases["chairman-in_progress"] = _detail_task("in_progress", {**VIEWER_PERMS, "can_assign": True, "assign_only": True,
+                                                                     "can_submit": False})
         cases["chairman-in_progress"]["needs_new_assignee"] = True
+        # Review 13a: a viewer who is a valid collaborator may submit; a flagged collaborator row is marked.
+        cases["viewer-collaborator"] = _detail_task("in_progress", {**VIEWER_PERMS, "can_submit": True})
+        cases["viewer-collaborator"]["needs_new_collaborator"] = True
+        cases["viewer-collaborator"]["reviewers"] = [{"display_name": "Chair <b>", "role": "collaborator", "user_id": "u3",
+                                                      "not_allowed": True}]
         with tempfile.TemporaryDirectory() as tmp:
             driver = Path(tmp) / "driver.js"
             driver.write_text(DETAIL_DRIVER, encoding="utf-8")
@@ -3873,6 +3893,31 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
         if result.returncode != 0:
             raise AssertionError(result.stderr)
         cls.html = json.loads(result.stdout)
+
+    def test_review_13a_the_chairman_and_viewers_see_no_forms_the_server_refuses(self):
+        for case in ("chairman-in_progress", "viewer-collaborator", "viewer-unchecked"):
+            html = self.html[case]
+            with self.subTest(case=case):
+                for refused in ('id="parent-form"', 'id="crit-form"', 'id="sched-form"', 'id="add-dep-select"',
+                                "data-remove-pred=", 'id="add-reviewer-button"', "data-remove-reviewer-user",
+                                "data-approve-sched", 'id="detail-edit"'):
+                    self.assertNotIn(refused, html, refused)
+                self.assertIn("Depends on: <strong>Before</strong>", html)  # the lists stay
+                self.assertIn("Reviewers &amp; approvers", html)
+        self.assertNotIn('data-life="submit"', self.html["chairman-in_progress"])
+        self.assertIn('data-life="submit"', self.html["viewer-collaborator"])
+        self.assertIn('data-life="submit"', self.html["owner-in_progress"])  # no can_submit key: unchanged
+
+    def test_review_13a_the_panel_sends_empty_dates_as_null(self):
+        js = (REPO / "src" / "astra" / "static" / "app.js").read_text(encoding="utf-8")
+        body = js[js.index("async function submitDetailEdit("):js.index("async function addDependency(")]
+        self.assertIn('for(const k of ["start_date","due_date"])if(k in body&&!body[k])body[k]=null;', body)
+
+    def test_review_13a_a_forbidden_collaborator_is_marked(self):
+        html = self.html["viewer-collaborator"]
+        self.assertIn("Chair &lt;b&gt; · collaborator <span class=\"tag reassign-chip\" data-tone=\"amber\">⚠ Not allowed as a "
+                      "collaborator here: remove</span>", html)
+        self.assertIn("⚠ Collaborator not allowed", html)
 
     def test_3fqekb_the_chairman_sees_the_assignee_control_and_the_chip(self):
         html = self.html["chairman-in_progress"]

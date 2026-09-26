@@ -30,7 +30,7 @@ function projectActions(){
 }
 // VPYGY5: the Risk filter behind the Home tiles (service.py export_tasks applies the same rules).
 function isAtRisk(t){return t.due_state==="overdue"||!!t.is_blocked||!!t.is_critical_path||t.status==="delayed"}
-function matchesRisk(t,risk){return risk==="blocked"?!!t.is_blocked:risk==="critical"?!!t.is_critical_path:risk==="atrisk"?isAtRisk(t):risk==="reassign"?!!t.needs_new_assignee:true}
+function matchesRisk(t,risk){return risk==="blocked"?!!t.is_blocked:risk==="critical"?!!t.is_critical_path:risk==="atrisk"?isAtRisk(t):risk==="reassign"?!!(t.needs_new_assignee||t.needs_new_collaborator):true}
 // The portfolio filters, applied to the loaded tasks (the same rules the export reuses on the server).
 function visibleTasks(){
   const project=document.querySelector("#project-filter").value,status=document.querySelector("#status-filter").value,
@@ -290,7 +290,7 @@ function renderScheduleTable(groups,tableEl){
     const link=`<button type="button" class="link" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>`;
     const stepNo=isStep?`<i class="sw step-c${stepHue(m.idx)}${m.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${m.idx}</i><span class="sr-only">Step ${m.idx}</span> of ${m.total}`:"—";
     const pick=scope?`<td class="pick">${isStep?"":pickBox(t)}</td>`:"";
-    rows.push(`<tr class="${isStep?"step-tr":"task-tr"}${bulk.ids.has(t.id)?" is-picked":""}">${pick}${cell(t.project_name)}<td>${isStep?escapeHtml(parent.title):link}</td><td>${stepNo}</td><td>${isStep?link:"—"}</td><td>${escapeHtml(t.owner_name||"Unassigned")}${t.needs_new_assignee?" "+reassignChip(t):""}</td>${cell(t.start_date||"—")}${cell(t.due_date||"—")}${cell(statusLabel(t.status))}<td>${critLabel(t.criticality)}</td>${cell(dueText(t)||t.due_state)}<td>${t.is_critical_path?"Yes":"No"}</td></tr>`);
+    rows.push(`<tr class="${isStep?"step-tr":"task-tr"}${bulk.ids.has(t.id)?" is-picked":""}">${pick}${cell(t.project_name)}<td>${isStep?escapeHtml(parent.title):link}</td><td>${stepNo}</td><td>${isStep?link:"—"}</td><td>${escapeHtml(t.owner_name||"Unassigned")}${t.needs_new_assignee||t.needs_new_collaborator?" "+reassignChip(t):""}</td>${cell(t.start_date||"—")}${cell(t.due_date||"—")}${cell(statusLabel(t.status))}<td>${critLabel(t.criticality)}</td>${cell(dueText(t)||t.due_state)}<td>${t.is_critical_path?"Yes":"No"}</td></tr>`);
     if(isStep)steps++;
     kids.forEach(k=>walk(k,t));
   };
@@ -632,7 +632,8 @@ function canMoveOnBoard(pid){const p=(state.projects||[]).find(x=>x.id===pid);re
 function canAssignIn(pid){const p=(state.projects||[]).find(x=>x.id===pid);return !!(p&&(p.can_manage||p.can_assign))}
 function assignOnly(pid){return canAssignIn(pid)&&!canMoveOnBoard(pid)}
 // An open task assigned before the assignment rules to the Chairman, or (top level) to a viewer.
-function reassignChip(t){return t&&t.needs_new_assignee?'<span class="tag reassign-chip" data-tone="amber">⚠ Needs a new assignee</span>':""}
+function reassignChip(t){return (t&&t.needs_new_assignee?'<span class="tag reassign-chip" data-tone="amber">⚠ Needs a new assignee</span>':"")
+  +(t&&t.needs_new_collaborator?'<span class="tag reassign-chip" data-tone="amber">⚠ Collaborator not allowed</span>':"")}
 function boardCard(t,kids,movable){
   const done=kids.filter(k=>k.status==="completed").length,col=boardColumn(t),tags=[];
   if(t.is_blocked&&!CLOSED_STATUSES.includes(t.status))tags.push(`<span class="tag" data-tone="purple">⊘ Waits on ${escapeHtml((t.blocked_by&&t.blocked_by[0]&&t.blocked_by[0].title)||"a predecessor")}</span>`);
@@ -642,7 +643,7 @@ function boardCard(t,kids,movable){
   if(t.is_critical_path&&!CLOSED_STATUSES.includes(t.status))tags.push('<span class="tag" data-tone="red">◆ Critical path</span>');
   if(col==="accepted")tags.push('<span class="tag" data-tone="green">✓ Accepted</span>');
   if(col==="closed")tags.push(`<span class="tag">× ${escapeHtml(statusLabel(t.status))}</span>`);
-  if(t.needs_new_assignee)tags.push(reassignChip(t));
+  if(t.needs_new_assignee||t.needs_new_collaborator)tags.push(reassignChip(t));
   if(lockedByOther(t))tags.push(`<span class="tag lock-chip" data-tone="amber">🔒 ${escapeHtml(t.lock.holder_name)}<span class="sr-only"> is changing this task</span></span>`);
   const due=CLOSED_STATUSES.includes(t.status)?"":`<span class="due-chip" data-due="${workGroup(t)}">${escapeHtml(dueText(t)||"No due date")}</span>`;
   const id=escapeHtml(t.id),move=movable?`<button type="button" class="link card-move" data-move-menu="${id}" aria-haspopup="menu" aria-expanded="false" aria-controls="move-menu" aria-label="Move “${escapeHtml(t.title)}” to…">Move to…</button>`:"";
@@ -1134,7 +1135,8 @@ ganttEl.addEventListener("click",e=>{if(gdrag.suppressClick){e.preventDefault();
 // (Shift-click for a range, Space to toggle, Shift+Arrow to extend in the list), then change status,
 // assignee or due dates for all of them in one previewed, all-or-nothing, undoable change.
 const bulk={ids:new Set(),pid:null,last:null,action:"status"};
-function bulkScope(){const r=currentRoute();return r.name==="project"&&r.id&&canAssignIn(r.id)?r.id:null}
+// Review 13a L1: someone who may only assign (the Chairman) selects in the List, never on the board.
+function bulkScope(){const r=currentRoute();return r.name==="project"&&r.id&&(canMoveOnBoard(r.id)||(canAssignIn(r.id)&&r.tab==="list"))?r.id:null}
 function pickBox(t){return `<input type="checkbox" class="bulk-pick" data-pick="${escapeHtml(t.id)}"${bulk.ids.has(t.id)?" checked":""} aria-label="Select “${escapeHtml(t.title)}”">`}
 function syncPicks(){
   document.querySelectorAll("[data-pick]").forEach(b=>{const on=bulk.ids.has(b.dataset.pick);b.checked=on;b.closest(".board-card,tr")?.classList.toggle("is-picked",on)});
@@ -1285,8 +1287,8 @@ function homeTiles(){
   ].filter(Boolean);
 }
 function reassignTile(open){
-  const mine=open.filter(t=>t.needs_new_assignee&&canMoveOnBoard(t.project_id));
-  return mine.length?[["reassign","Needs a new assignee","amber",mine.length,"#/portfolio?risk=reassign&open=1","Open tasks assigned to the Chairman, or top-level tasks assigned to a viewer"]]:[];
+  const mine=open.filter(t=>(t.needs_new_assignee||t.needs_new_collaborator)&&canMoveOnBoard(t.project_id));
+  return mine.length?[["reassign","Needs reassigning","amber",mine.length,"#/portfolio?risk=reassign&open=1","Open tasks whose assignee or a collaborator is the Chairman, or a viewer on a top-level task"]]:[];
 }
 function homeRow(t,chip){
   return `<li class="home-row"><button type="button" class="link row-title" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>
@@ -1901,7 +1903,7 @@ function stateTags(task){
   else if(task.due_state!=="closed")out.push(tag("gray",due||(task.due_date?`Due ${fmtDay(task.due_date)}`:"No due date")));
   if(task.is_blocked)out.push(tag("purple","⊘ Blocked"));
   if(task.is_critical_path)out.push(tag("red","◆ Critical path"));
-  if(task.needs_new_assignee)out.push(reassignChip(task));
+  if(task.needs_new_assignee||task.needs_new_collaborator)out.push(reassignChip(task));
   return out.join("");
 }
 function roleLine(perms){
@@ -1931,11 +1933,14 @@ function renderDetail(task,events){
     fact("Progress",task.progress==null?"—":`${task.progress}%`),
     fact("Steps",roll&&roll.total?`${roll.completed} of ${roll.total} done`:"None"),
   ].join("");
+  // Review 13a L1: someone who cannot edit (the Chairman, a viewer, a member) sees the lists, not the
+  // forms the server would refuse (parent, criticality, proposal, dependencies, reviewers).
+  const ro=perms.can_edit_ordinary===false,fixed=closed||ro;
   const deps=(task.dependencies||[]).map(dep=>{
     const other=dep.direction==="incoming"?dep.predecessor_title:dep.successor_title;
     const flag=dep.blocking?' <span class="blocked-text">(blocking)</span>':"";
     // A closed task cannot lose a predecessor (it is the successor); it may still stop blocking another task.
-    if(closed&&dep.direction==="incoming")return `<li>Depends on: <strong>${escapeHtml(other)}</strong>${flag}</li>`;
+    if((closed&&dep.direction==="incoming")||ro)return `<li>${dep.direction==="incoming"?"Depends on":"Blocks"}: <strong>${escapeHtml(other)}</strong>${flag}</li>`;
     return `<li>${dep.direction==="incoming"?"Depends on":"Blocks"}: <strong>${escapeHtml(other)}</strong>${flag}
       <span class="dep-remove"><input class="dep-reason" placeholder="Reason to remove" aria-label="Reason to remove dependency">
       <button type="button" class="link" data-remove-pred="${escapeHtml(dep.predecessor_task_id)}" data-remove-succ="${escapeHtml(dep.successor_task_id)}">Remove</button></span></li>`;
@@ -1943,11 +1948,11 @@ function renderDetail(task,events){
   const candidates=state.tasks.filter(t=>t.project_id===task.project_id&&t.id!==task.id);
   const addOptions=candidates.map(t=>`<option value="${escapeHtml(t.id)}">${escapeHtml(t.title)}</option>`).join("");
   const timeline=events.slice().reverse().map(renderEvent).join("")||"<li>No history.</li>";
-  const reviewers=buildReviewers(task,closed);
+  const reviewers=buildReviewers(task,fixed);
   const attachments=buildAttachments(task);
-  const subtasks=buildSubtasks(task,closed);
-  const schedule=buildSchedule(task,closed);
-  const critForm=closed?`<div class="crit-confirm"><h3>Criticality</h3><p>Current: ${critLabel(task.criticality,true)}</p></div>`:`<div class="crit-confirm"><h3>Criticality</h3>
+  const subtasks=buildSubtasks(task,fixed);
+  const schedule=buildSchedule(task,fixed);
+  const critForm=fixed?`<div class="crit-confirm"><h3>Criticality</h3><p>Current: ${critLabel(task.criticality,true)}</p></div>`:`<div class="crit-confirm"><h3>Criticality</h3>
     <p>Current: ${critLabel(task.criticality,true)} — changes are confirmed with a reason and recorded.</p>
     <form id="crit-form" data-revision="${escapeHtml(String(task.revision))}"><label>Set level<select name="criticality">${crit}</select></label>
       <label>Reason (evidence for this level)<input name="reason" required></label>
@@ -1981,7 +1986,7 @@ function renderDetail(task,events){
       <div class="actions"><button value="save">Save assignee</button></div>
       <div class="error" id="detail-assign-error" role="alert"></div>
     </form>`;
-  const editForm=perms.assign_only?assignForm:closed?"":`<form id="detail-edit">
+  const editForm=perms.assign_only?assignForm:fixed?"":`<form id="detail-edit">
       <h3>Edit</h3>
       <input name="expected_revision" type="hidden" value="${task.revision}">
       <label>Title<input name="title" value="${escapeHtml(task.title)}" required></label>
@@ -1998,7 +2003,7 @@ function renderDetail(task,events){
       <div class="error" id="detail-edit-error"></div>
     </form>`;
   const lifecycle=buildLifecycle(task,statusRequest);
-  const addDep=closed?"":`<div class="add-dep">
+  const addDep=fixed?"":`<div class="add-dep">
         <select id="add-dep-select" aria-label="Predecessor task"><option value="">Add a predecessor…</option>${addOptions}</select>
         <button type="button" id="add-dep-button">Add predecessor</button>
       </div>`;
@@ -2029,7 +2034,7 @@ function renderDetail(task,events){
     ${critForm}
     ${schedule}
     ${editForm}
-    <p><button type="button" class="link" id="save-task-template">Save this task (and its subtasks) as a template</button></p>
+    ${ro?"":'<p><button type="button" class="link" id="save-task-template">Save this task (and its subtasks) as a template</button></p>'}
     <div class="history"><h3>History</h3><ul>${timeline}</ul></div>`;
   document.querySelector("#detail-edit")?.addEventListener("submit",e=>submitDetailEdit(e,{statusLocked:submitted}));
   document.querySelector("#detail-assign")?.addEventListener("submit",submitAssign);
@@ -2043,7 +2048,7 @@ function renderDetail(task,events){
   wireEditLease(task);
   wireReviewers(task);
   wireAttachments(task);
-  document.querySelector("#save-task-template").addEventListener("click",()=>saveTaskAsTemplate(task.id));
+  document.querySelector("#save-task-template")?.addEventListener("click",()=>saveTaskAsTemplate(task.id));
   document.querySelectorAll("#detail-body [data-mark-fr-sub]").forEach(b=>b.addEventListener("click",()=>markFinalResult(task.id,"submission",b.dataset.markFrSub)));
   document.querySelectorAll("#detail-body [data-mark-fr-att]").forEach(b=>b.addEventListener("click",()=>markFinalResult(task.id,"attachment",b.dataset.markFrAtt)));
   document.querySelectorAll("#detail-body [data-unmark-fr]").forEach(b=>b.addEventListener("click",()=>unmarkFinalResult(task.id,b.dataset.unmarkFr)));
@@ -2157,7 +2162,7 @@ function buildLifecycle(task,extra=""){
   const pending=(task.submissions||[]).find(s=>s.status==="submitted");
   const closed=CLOSED_STATUSES.includes(task.status);
   let actions="";
-  if(!closed&&task.status!=="submitted"){
+  if(!closed&&task.status!=="submitted"&&task.permissions?.can_submit!==false){
     actions+=`<form data-life="submit"><label>Submit work (note)<input name="note"></label><div class="actions"><button>Submit for acceptance</button></div></form>`;
   }
   if(task.status==="submitted"&&pending){
@@ -2178,7 +2183,7 @@ function buildLifecycle(task,extra=""){
 }
 
 function buildReviewers(task,closed){
-  const rows=(task.reviewers||[]).map(r=>`<li>${escapeHtml(r.display_name)} · ${escapeHtml(r.role)}
+  const rows=(task.reviewers||[]).map(r=>`<li>${escapeHtml(r.display_name)} · ${escapeHtml(r.role)}${r.not_allowed?' <span class="tag reassign-chip" data-tone="amber">⚠ Not allowed as a collaborator here: remove</span>':""}
     ${closed?"":`<button type="button" class="link" data-remove-reviewer-user="${escapeHtml(r.user_id)}" data-remove-reviewer-role="${escapeHtml(r.role)}">Remove</button>`}</li>`).join("")||"<li>No reviewers or approvers.</li>";
   if(closed)return `<div class="reviewers"><h3>Reviewers &amp; approvers</h3><ul>${rows}</ul></div>`;
   return `<div class="reviewers"><h3>Reviewers &amp; approvers</h3><ul>${rows}</ul>
@@ -2322,6 +2327,8 @@ async function submitDetailEdit(e,{statusLocked=false}={}){
   const body=Object.fromEntries(new FormData(form));
   if(statusLocked)delete body.status; // shown for context only; Accept or Request changes moves it
   body.expected_revision=Number(body.expected_revision);
+  // Review 13a L1: an empty date field is no date (null), so a title-only save needs no reason.
+  for(const k of ["start_date","due_date"])if(k in body&&!body[k])body[k]=null;
   try{
     const outcome=await withDependencyConfirm(panelState.task,body.status,more=>api(taskApi(detailTaskId),{method:"POST",body:JSON.stringify({...body,...more})}),
       {dates:{start_date:body.start_date||null,due_date:body.due_date||null}});
