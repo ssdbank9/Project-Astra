@@ -1,5 +1,11 @@
 # Astra repository working instructions
 
+> **Current handoff:** Read [`docs/handoff/README.md`](docs/handoff/README.md)
+> before reviewing or changing `codex/migration-safety-remediation`.
+> `CLAUDE_HANDOFF_2026-09-24.md` is kept as history.
+> The exclusive write lock protocol was retired by Aly on 2026-09-26
+> (Slack ts 1790403410.978849). Lock #14 was the last.
+
 - Treat this standalone repository as the Git source of truth. Work on a named
   branch, keep commits scoped, and preserve unrelated work.
 - Read `pending-global-mistakes.md` before implementation and handoff. When the
@@ -13,9 +19,15 @@
   virtual environments, caches, or local browser artifacts.
 - `main` is the clean imported baseline. Current work is on
   `codex/migration-safety-remediation`; read
-  `CLAUDE_HANDOFF_2026-09-24.md` before continuing. The older
+  `docs/handoff/README.md` before continuing. The older
   `hs3jry-handoff` branch is already contained in it. Use another branch only if
   Aly directs it.
+- Pull before starting. Right before a push, check with
+  `git ls-remote origin refs/heads/codex/migration-safety-remediation` that
+  origin has not moved since you pulled; if it has, pull (merge), re-run the
+  tests, then push normally. Never force-push, rebase or amend published
+  history. After each push, report the final SHA and the tests run with their
+  result.
 
 <!-- jaira:start -->
 ## Task tracking: jaira
