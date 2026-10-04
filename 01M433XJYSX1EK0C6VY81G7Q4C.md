@@ -1,7 +1,7 @@
 ---
 id: 01M433XJYSX1EK0C6VY81G7Q4C
 title: Prevent mixed Manager saves from silently dropping edits
-status: in-progress
+status: signoff
 ready: true
 creator: Codex
 assignee: Codex
@@ -13,13 +13,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T09:29:01Z
-updated-at: 2026-10-04T18:18:21Z
+updated-at: 2026-10-04T18:18:31Z
 updated-by: Codex
 claimed-by: X1CarbonPC-53068
 claimed-at: 2026-10-04T15:07:35Z
-outcome-what: "Planned failing service and HTTP regressions, persisted-field comparison and browser retention verification."
-outcome-why: Aly selected R1 atomic refusal and authorized fixes followed by development.
-outcome-resolves: A bounded method for preventing silent discarded edits without changing lifecycle policy.
+outcome-what: "Added atomic refusal of mixed Manager status requests and ordinary edits, with normalized unchanged-form support and safe progress validation."
+outcome-why: Protected request routing previously returned success while silently discarding edits; Aly selected R1 atomic refusal.
+outcome-resolves: "Service and HTTP no-write regressions, actual browser retained fields, removal checks, independent review and full Windows tests verify the selected behavior; Aly acceptance remains required."
 review-summary: "Before either Manager protected-status request is created, the service compares normalized title, description, assignment, dates and progress with the task. Actual edits refuse the entire save with HTTP 400; unchanged full-form values still permit a status request. Unsupported progress containers and infinity return a progress error. The existing form keeps all values after refusal."
 review-gaps: "none within this repair scope; Aly acceptance and hosted readiness remain outstanding, and the existing Windows symlink check is unverified."
 review-verdict: PASS
