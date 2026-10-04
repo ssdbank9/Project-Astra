@@ -2,6 +2,26 @@
 
 Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 
+## ASTRA-20260924-04 remediation — A0 Windows baseline
+
+- Date / project: 2026-10-04; Project-Astra, ticket SFAZD7, starting SHA `10d0ff32f64b9ffd73299e9559976b60d6884db5`.
+- Category / status: Confirmed baseline defects repaired and verified on the Windows runtime; owner acceptance pending.
+- Evidence / impact: A focused default-locale run reproduced SQLite file cleanup errors, Node output decoding failure and two missing-database path assertions. The prior default full run was 583 tests with 12 failures and 26 errors; the UTF-8 diagnostic was 680 tests with 2 failures and 19 errors, with one platform skip in each.
+- Cause: Implicit locale decoding of UTF-8 Node output; connection setup failed without closing its SQLite handle; unittest cleanup callbacks ran after fixture directory removal; CLI assertions compared short and resolved long Windows paths.
+- Correction / prevention: Decode all five Node capture sites explicitly. Close unsuccessful database setup, including interruption. Register fixture directory and primary connection cleanup first, so later secondary connections close before them. Resolve the expected missing-database path while retaining exact refusal and noncreation checks.
+- Verification: Four new regressions failed before the repair; 20 focused tests then passed. Removing connection cleanup makes all three closure regressions fail; removing UTF-8 decoding makes the locale regression fail. Independent static review passed. The documented default suite ran 684 tests in 429.070 seconds, OK (skipped=1), with no UTF-8 environment override, no resource warnings and no new temporary directories. The existing symlink test is skipped because symlinks are unavailable in this Windows environment; that check and hosted readiness remain unverified. Source files were unchanged during the run.
+- Scope: No importer, mixed-save, role-policy, feature, schema, deployment or real-user change. Aly alone accepts A0. Canonical global-log merge remains pending outside writable roots.
+
+## ASTRA-20261004-05 — A0 workflow and regression-authoring errors
+
+- Date / project: 2026-10-04; Project-Astra A0.
+- Category / status: Tooling and test-authoring errors; corrections recorded below. No private data loss.
+- Evidence / impact: The required pull was blocked at FETCH_HEAD and succeeded with scoped escalation. A combined handoff refresh and an unfiltered jaira JSON list exceeded output budgets; relevant phase and ticket fields were reread narrowly. Plain module-qualified unittest imports missed the tests-only link_roots helper; the corrected invocation reproduces the real failures. The first Node regression missed its mock import; after correction it failed on the intended cp1252 decoding error. Entering pre-process was refused until the ticket's planning option was enabled.
+- Cause / prevention: Account for tests/run.py discovery imports; use existing unittest.mock bindings; filter structured CLI output before display; inspect lane options; wait for every exec session to complete before starting another mutation.
+- Mutation recurrence: Three sequential tool calls returned still-running shell sessions. Later calls then overlapped jaira writers, producing ref-conflict warnings. The sessions were drained; jaira fetch reconciled the refs and jaira resolve SFAZD7 reported no outstanding conflicts. The local checklist retained all completed/current steps. Await a shell session's exit before the next mutation; no force operation was used.
+- Identity recurrence: A dry-run move omitted JAIRA_USER=Codex and was refused by the assignee gate; nothing was written. Supply the agent identity for gate checks as well as actual moves, without impersonating Aly.
+- Verification: Required pull says already up to date; focused, regression-removal and default full-suite checks pass. Board validation has errors=false. Application source is restricted to db.connect cleanup; five test files carry baseline repairs. LF normalization and diff hygiene passed; independent final review verified zero CR characters. Owner acceptance and canonical global-log merge remain pending.
+
 ## ASTRA-20260920-10 - current authorization predates the latest Owner-only decisions
 
 - Date / project: 2026-09-20; Astra cumulative handoff authorization cross-check.

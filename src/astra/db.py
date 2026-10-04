@@ -32,11 +32,15 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     target = path or database_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(target, timeout=30, isolation_level=None)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    connection.execute("PRAGMA journal_mode = WAL")
-    connection.execute("PRAGMA busy_timeout = 30000")
-    migrate(connection)
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA busy_timeout = 30000")
+        migrate(connection)
+    except BaseException:
+        connection.close()
+        raise
     return connection
 
 

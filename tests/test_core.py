@@ -22,15 +22,13 @@ from link_roots import allow_attachment_roots, link
 class AstraCoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
         self.db_path = Path(self.temp.name) / "test.sqlite3"
         self.db = connect(self.db_path)
+        self.addCleanup(self.db.close)
         self.service = AstraService(self.db)
         self.owner = self.service.create_initial_owner("owner@example.org", "Owner", "correct horse battery")
         allow_attachment_roots(self)
-
-    def tearDown(self):
-        self.db.close()
-        self.temp.cleanup()
 
     def update_task(self, actor, task_id, payload):
         payload = dict(payload)
@@ -2873,14 +2871,12 @@ class ServerCommandTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
         self.db_path = Path(self.temp.name) / "astra.sqlite3"
         self.db = connect(self.db_path)
+        self.addCleanup(self.db.close)
         self.service = AstraService(self.db)
         self.primary = self.service.create_initial_owner("owner@example.org", "Primary", "correct horse battery")
-
-    def tearDown(self):
-        self.db.close()
-        self.temp.cleanup()
 
     def user(self, key, role="member"):
         return self.service.create_user(self.primary, f"{key}@example.org", key.title(), f"{key} password safe", role)
@@ -3210,6 +3206,7 @@ class ServerCommandCliTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
         patcher = patch.dict(os.environ, {"ASTRA_HOME": self.temp.name})
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -3224,9 +3221,6 @@ class ServerCommandCliTests(unittest.TestCase):
             service.grant_secondary_owner(primary, deputy["id"], "cover")
         finally:
             db.close()
-
-    def tearDown(self):
-        self.temp.cleanup()
 
     def run_cli(self, argv, typed="", passwords=(), interactive=True):
         answers = iter(passwords)
@@ -3287,13 +3281,14 @@ class ServerCommandCliTests(unittest.TestCase):
 
     def test_recovery_commands_refuse_a_missing_database_without_creating_one(self):
         missing = Path(self.temp.name) / "typo" / "home"
+        expected = missing.resolve() / "astra.sqlite3"
         with patch.dict(os.environ, {"ASTRA_HOME": str(missing)}):
             for argv in (["transfer-primary", "--to", "deputy@example.org", "--yes"],
                          ["reset-password", "--email", "deputy@example.org", "--yes"]):
                 with self.subTest(argv=argv[0]):
                     code, out, _ = self.run_cli(argv, passwords=["a brand new passphrase"] * 2)
-                    self.assertEqual(code, f"No Astra database at {missing / 'astra.sqlite3'}; set ASTRA_HOME.")
-                    self.assertIn(f"Database: {missing / 'astra.sqlite3'}", out)
+                    self.assertEqual(code, f"No Astra database at {expected}; set ASTRA_HOME.")
+                    self.assertIn(f"Database: {expected}", out)
                     self.assertFalse(missing.exists())
 
     def test_reset_password_needs_an_interactive_terminal(self):

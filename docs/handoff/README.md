@@ -6,6 +6,11 @@ agent". It was written at branch `codex/migration-safety-remediation`, head
 `0b90ceb` (schema v20, 676 tests OK, nothing deployed); the commits made since
 are listed in `HANDOFF_2026-09-26.md` section 1.
 
+Latest Windows baseline evidence: [A0 repair, 2026-10-04](A0_2026-10-04.md),
+ticket SFAZD7. The default Windows command ran 684 tests, `OK (skipped=1)`;
+the symlink skip and remaining launch gates are recorded there. A0 awaits
+Aly's acceptance; this result does not establish hosted readiness.
+
 ## What is in the pack
 
 | File | What it is for |

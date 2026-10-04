@@ -168,6 +168,52 @@ def first_statement_then_fail(connection, script):
     raise InjectedFault("injected after the first statement of the step")
 
 
+class ConnectionSetupTests(unittest.TestCase):
+    """A connection that cannot finish setup must release its SQLite file."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "astra.sqlite3"
+        self.connection = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(self.connection.close)
+
+    def assert_closed(self):
+        with self.assertRaises(sqlite3.ProgrammingError):
+            self.connection.execute("SELECT 1")
+
+    def test_newer_schema_refusal_closes_connection_and_preserves_data(self):
+        self.connection.execute(f"PRAGMA user_version = {db.SCHEMA_VERSION + 1}")
+        self.connection.execute("CREATE TABLE sentinel(value TEXT)")
+        self.connection.execute("INSERT INTO sentinel VALUES('keep me')")
+        with patch.object(db.sqlite3, "connect", return_value=self.connection):
+            with self.assertRaisesRegex(RuntimeError, "newer Astra version"):
+                db.connect(self.path)
+        self.assert_closed()
+        check = sqlite3.connect(self.path)
+        try:
+            self.assertEqual(check.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION + 1)
+            self.assertEqual(check.execute("SELECT value FROM sentinel").fetchone()[0], "keep me")
+        finally:
+            check.close()
+
+    def test_pragma_failure_closes_connection(self):
+        self.connection.set_authorizer(
+            lambda action, *_: sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_PRAGMA else sqlite3.SQLITE_OK
+        )
+        with patch.object(db.sqlite3, "connect", return_value=self.connection):
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.connect(self.path)
+        self.assert_closed()
+
+    def test_interrupted_migration_closes_connection(self):
+        with patch.object(db.sqlite3, "connect", return_value=self.connection), \
+                patch.object(db, "migrate", side_effect=KeyboardInterrupt("migration interrupted")):
+            with self.assertRaisesRegex(KeyboardInterrupt, "migration interrupted"):
+                db.connect(self.path)
+        self.assert_closed()
+
+
 class MigrationTests(unittest.TestCase):
     """Regression review MIGRATION-1 (2026-09-22/23).
 

@@ -2166,7 +2166,7 @@ class AstraStaticAssetTests(unittest.TestCase):
                      "console.log(JSON.stringify([[{active:1,is_primary_owner:1},false],[{active:1,is_primary_owner:1},true],"
                      "[{active:1,is_primary_owner:0},false],[{active:0,is_primary_owner:0},true]]"
                      ".map(([u,p])=>canResetPassword(u,p))))")
-            result = subprocess.run(["node", "-e", probe], capture_output=True, text=True, timeout=30)
+            result = subprocess.run(["node", "-e", probe], capture_output=True, text=True, encoding="utf-8", timeout=30)
             self.assertEqual(json.loads(result.stdout), [False, True, True, False])
         # PDDS2D: server-command events are labelled on the People screen.
         for phrase in ('primary_owner_transferred:"Primary owner transferred"', 'password_reset:"Password reset"',
@@ -2841,11 +2841,21 @@ def _run_shell_driver(mode, env=None):
         driver = Path(tmp) / "shell.js"
         driver.write_text(SHELL_DRIVER, encoding="utf-8")
         result = subprocess.run(["node", str(driver), str(STATIC / "app.js"), mode],
-                                capture_output=True, text=True, timeout=60,
+                                capture_output=True, text=True, encoding="utf-8", timeout=60,
                                 env={**os.environ, **(env or {})})
     if result.returncode != 0:
         raise AssertionError(result.stderr)
     return json.loads(result.stdout)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to verify driver encoding")
+class AstraNodeEncodingTests(unittest.TestCase):
+    def test_driver_decodes_unicode_under_a_cp1252_locale(self):
+        expected = {"label": "Scope — “quoted” café ✓"}
+        driver = f"process.stdout.write(JSON.stringify({json.dumps(expected, ensure_ascii=False)}));"
+        with mock.patch.dict(globals(), {"SHELL_DRIVER": driver}), \
+                mock.patch.object(subprocess, "_text_encoding", return_value="cp1252"):
+            self.assertEqual(_run_shell_driver("encoding"), expected)
 
 
 U1, U2, U3 = ("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222",
@@ -3929,7 +3939,7 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
             driver.write_text(DETAIL_DRIVER, encoding="utf-8")
             result = subprocess.run(
                 ["node", str(driver), str(REPO / "src" / "astra" / "static" / "app.js")],
-                input=json.dumps(cases), capture_output=True, text=True, timeout=60,
+                input=json.dumps(cases), capture_output=True, text=True, encoding="utf-8", timeout=60,
             )
         if result.returncode != 0:
             raise AssertionError(result.stderr)
@@ -4190,7 +4200,7 @@ class AstraDetailDialogWiringTests(unittest.TestCase):
             driver.write_text(WIRING_DRIVER, encoding="utf-8")
             static = REPO / "src" / "astra" / "static"
             result = subprocess.run(["node", str(driver), str(static / "app.js"), str(static / "index.html")],
-                                    input=json.dumps(scenarios), capture_output=True, text=True, timeout=60)
+                                    input=json.dumps(scenarios), capture_output=True, text=True, encoding="utf-8", timeout=60)
         if result.returncode != 0:
             raise AssertionError(result.stderr)
         cls.out = json.loads(result.stdout)
@@ -4389,7 +4399,7 @@ class AstraFinalResultsDialogTests(unittest.TestCase):
             driver = Path(tmp) / "final_results.js"
             driver.write_text(FINAL_RESULTS_DRIVER, encoding="utf-8")
             result = subprocess.run(["node", str(driver), str(REPO / "src" / "astra" / "static" / "app.js")],
-                                    input=json.dumps(scenario), capture_output=True, text=True, timeout=60)
+                                    input=json.dumps(scenario), capture_output=True, text=True, encoding="utf-8", timeout=60)
         if result.returncode != 0:
             raise AssertionError(result.stderr)
         return json.loads(result.stdout)

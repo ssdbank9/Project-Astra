@@ -22,8 +22,10 @@ from astra.service import AstraService, Conflict, Forbidden
 class UpdateTaskContractTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
         self.db_path = Path(self.temp.name) / "contract.sqlite3"
         self.db = connect(self.db_path)
+        self.addCleanup(self.db.close)
         self.service = AstraService(self.db)
         self.owner = self.service.create_initial_owner("owner@example.org", "Owner", "correct horse battery")
         self.project = self.service.create_project(self.owner, "Contract")
@@ -31,10 +33,6 @@ class UpdateTaskContractTests(unittest.TestCase):
         self.service.grant_project_access(self.owner, self.project["id"], self.manager["id"], "manager")
         self.viewer = self.service.create_user(self.owner, "viewer@example.org", "Viewer", "viewer password safe")
         self.service.grant_project_access(self.owner, self.project["id"], self.viewer["id"], "viewer")
-
-    def tearDown(self):
-        self.db.close()
-        self.temp.cleanup()
 
     # helpers -----------------------------------------------------------------
 

@@ -18,17 +18,15 @@ from link_roots import allow_attachment_roots, link
 class AstraStateIntegrityTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
         self.db_path = Path(self.temp.name) / "integrity.sqlite3"
         self.db = connect(self.db_path)
+        self.addCleanup(self.db.close)
         self.service = AstraService(self.db)
         self.owner = self.service.create_initial_owner(
             "owner@example.org", "Owner", "correct horse battery"
         )
         allow_attachment_roots(self)
-
-    def tearDown(self):
-        self.db.close()
-        self.temp.cleanup()
 
     def _hold_request(self, task, reason="vendor", checkpoint="2027-04-01", hold_owner_id=None):
         """A set_on_hold Owner request. Since Aly's decision of 2026-09-25 (Slack ts 1790342529.695749)
