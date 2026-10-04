@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T09:29:01Z
-updated-at: 2026-10-04T15:07:35Z
+updated-at: 2026-10-04T15:09:01Z
 updated-by: Codex
 claimed-by: X1CarbonPC-53068
 claimed-at: 2026-10-04T15:07:35Z
@@ -41,3 +41,4 @@ claimed-at: 2026-10-04T15:07:35Z
 - [ ] Obtain independent review, run guard-removal and full checks, document evidence and move to signoff with the scoped commit.
 
 ## Progress
+- **2026-10-04 15:09 · Codex** — Use the existing update_task service seam and compare normalized persisted fields before both protected-request routes. A full form with unchanged fields remains a status-only request. Return ValueError so the existing HTTP 400 form error handling retains inputs. Preserve dedicated lifecycle actions and direct App Owner writes. No schema or UI redesign is required.
