@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T09:29:01Z
-updated-at: 2026-10-04T15:41:43Z
+updated-at: 2026-10-04T15:41:48Z
 updated-by: Codex
 claimed-by: X1CarbonPC-53068
 claimed-at: 2026-10-04T15:07:35Z
@@ -48,3 +48,4 @@ outcome-resolves: A bounded method for preventing silent discarded edits without
 
 ## Progress
 - **2026-10-04 15:09 · Codex** — Use the existing update_task service seam and compare normalized persisted fields before both protected-request routes. A full form with unchanged fields remains a status-only request. Return ValueError so the existing HTTP 400 form error handling retains inputs. Preserve dedicated lifecycle actions and direct App Owner writes. No schema or UI redesign is required.
+- **2026-10-04 15:41 · Codex** — Independent review caught unsupported progress types at the new normalization boundary. Lists, objects and infinity are translated to ValueError locally; ordinary and Owner-save normalization is unchanged. The textarea label includes its contents, so browser verification used observed form name attributes. No UI source change was needed. Default full suite: 700 tests in 368.566s, OK (skipped=1); source hashes unchanged, no new tmp dirs or ResourceWarnings.
