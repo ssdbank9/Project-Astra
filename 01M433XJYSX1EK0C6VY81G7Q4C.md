@@ -1,7 +1,7 @@
 ---
 id: 01M433XJYSX1EK0C6VY81G7Q4C
 title: Prevent mixed Manager saves from silently dropping edits
-status: pre-process
+status: in-progress
 ready: true
 creator: Codex
 assignee: Codex
@@ -13,10 +13,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T09:29:01Z
-updated-at: 2026-10-04T15:09:01Z
+updated-at: 2026-10-04T15:09:08Z
 updated-by: Codex
 claimed-by: X1CarbonPC-53068
 claimed-at: 2026-10-04T15:07:35Z
+outcome-what: "Planned failing service and HTTP regressions, persisted-field comparison and browser retention verification."
+outcome-why: Aly selected R1 atomic refusal and authorized fixes followed by development.
+outcome-resolves: A bounded method for preventing silent discarded edits without changing lifecycle policy.
 ---
 
 # Prevent mixed Manager saves from silently dropping edits
