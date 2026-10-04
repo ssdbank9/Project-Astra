@@ -23,7 +23,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T02:24:50Z
-updated-at: 2026-10-04T04:03:10Z
+updated-at: 2026-10-04T04:03:26Z
 updated-by: Codex
 claimed-by: X1CarbonPC-26304
 claimed-at: 2026-10-04T02:26:57Z
@@ -33,7 +33,7 @@ claimed-at: 2026-10-04T02:26:57Z
 
 ## Definition of Done
 
-- [ ] - [ ] Node driver output is decoded explicitly as UTF-8 and the normal Windows run loads every intended UI class.
+- [ ] Node driver output is decoded explicitly as UTF-8 and the normal Windows run loads every intended UI class.
 - [ ] Failed database connection setup closes the connection without modifying refused migration data; a regression fails when cleanup is removed.
 - [ ] Secondary test connections close before temporary directory removal; the affected interleaving and refusal tests pass without WinError 32.
 - [ ] Recovery commands still refuse missing databases without creating files; path assertions use resolved identity.
@@ -50,7 +50,7 @@ claimed-at: 2026-10-04T02:26:57Z
 
 - [x] Reproduce the default-locale driver failure, migration-refusal leak, interleaving cleanup and missing-database path assertions.
 - [x] Add real SQLite setup/refusal closure and locale-independent Node output regressions; observe failures before changing code.
-- [ ] Close unsuccessful database setup, decode Node output explicitly, order fixture cleanups and normalize the expected CLI path.
+- [x] Close unsuccessful database setup, decode Node output explicitly, order fixture cleanups and normalize the expected CLI path.
 - [ ] Run focused checks, cleanup-removal mutations and the documented full Windows suite; record skips and residue.
 - [ ] Obtain read-only independent review; stage scoped LF-only code, tests and ticket; commit and push on the named branch; stop for Aly acceptance.
 
