@@ -13,8 +13,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T09:29:01Z
-updated-at: 2026-10-04T15:07:31Z
+updated-at: 2026-10-04T15:07:35Z
 updated-by: Codex
+claimed-by: X1CarbonPC-53068
+claimed-at: 2026-10-04T15:07:35Z
 ---
 
 # Prevent mixed Manager saves from silently dropping edits
