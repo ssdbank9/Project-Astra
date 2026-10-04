@@ -1,7 +1,7 @@
 ---
 id: 01M42BMWMFBR1WSTTCRJSFAZD7
 title: "A0: restore the Windows test baseline"
-status: backlog
+status: todo
 ready: true
 creator: Codex
 assignee: Codex
@@ -23,7 +23,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T02:24:50Z
-updated-at: 2026-10-04T02:26:57Z
+updated-at: 2026-10-04T02:27:09Z
 updated-by: Codex
 claimed-by: X1CarbonPC-26304
 claimed-at: 2026-10-04T02:26:57Z
