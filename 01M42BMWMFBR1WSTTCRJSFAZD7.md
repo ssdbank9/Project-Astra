@@ -1,7 +1,7 @@
 ---
 id: 01M42BMWMFBR1WSTTCRJSFAZD7
 title: "A0: restore the Windows test baseline"
-status: in-progress
+status: review
 ready: true
 creator: Codex
 assignee: Codex
@@ -23,10 +23,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T02:24:50Z
-updated-at: 2026-10-04T08:12:05Z
+updated-at: 2026-10-04T08:14:01Z
 updated-by: Codex
 claimed-by: X1CarbonPC-26304
 claimed-at: 2026-10-04T02:26:57Z
+outcome-what: Closed unsuccessful SQLite setup; ordered fixture cleanup; decoded all Node capture sites as UTF-8; resolved expected missing-database paths; added four regressions and A0 evidence.
+outcome-why: "Default Windows tests failed on locale decoding, leaked handles and equivalent short/long paths."
+outcome-resolves: "Default full suite Ran 684 tests in 429.070s, OK (skipped=1); focused20 tests OK; closure/encoding removal regressions caught; no resource warnings or new temp residue; independent review passed. Owner acceptance remains pending."
 ---
 
 # A0: restore the Windows test baseline
