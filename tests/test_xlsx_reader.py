@@ -1,9 +1,10 @@
 import unittest
+from unittest import mock
 from datetime import date
 
 from astra.xlsx_reader import CellError, XlsxError, column_letter, read_workbook, serial_to_date
 
-from import_fixtures import DECL, NS, sheet_xml, workbook_bytes
+from import_fixtures import DECL, NS, corrupt_zip_member, sheet_xml, workbook_bytes
 
 
 class XlsxReaderTests(unittest.TestCase):
@@ -95,6 +96,23 @@ class XlsxReaderTests(unittest.TestCase):
             read_workbook(bytes(data))
         from astra.xlsx_reader import XlsxTooLarge
         self.assertIsInstance(caught.exception, XlsxTooLarge)
+
+    def test_corrupt_zip_members_are_refused(self):
+        data = workbook_bytes([("Tasks", sheet_xml([["Title"]]))])
+        for part in ("xl/workbook.xml", "xl/worksheets/sheet1.xml"):
+            for kind in ("crc", "deflate"):
+                with self.subTest(part=part, kind=kind):
+                    with self.assertRaisesRegex(XlsxError, "corrupt or incomplete"):
+                        read_workbook(corrupt_zip_member(data, part, kind))
+
+    def test_truncated_or_unreadable_zip_members_are_refused(self):
+        import zipfile
+        data = workbook_bytes([("Tasks", sheet_xml([["Title"]]))])
+        for error in (EOFError("truncated"), OSError("unreadable")):
+            with self.subTest(error=type(error).__name__):
+                with mock.patch.object(zipfile.ZipFile, "read", side_effect=error):
+                    with self.assertRaisesRegex(XlsxError, "corrupt or incomplete"):
+                        read_workbook(data)
 
     def test_total_declared_size_is_capped(self):
         import io

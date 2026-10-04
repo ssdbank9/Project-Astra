@@ -134,6 +134,31 @@ def workbook_bytes(sheets, *, date1904=False, shared_strings=None, absolute_targ
     return buffer.getvalue()
 
 
+def corrupt_zip_member(data: bytes, name: str, kind: str) -> bytes:
+    """Damage one member without breaking the zip directory or workbook structure."""
+    out = bytearray(data)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        member = archive.getinfo(name)
+        if kind == "deflate":
+            assert member.compress_type == zipfile.ZIP_DEFLATED
+            offset = member.header_offset
+            name_length = int.from_bytes(out[offset + 26:offset + 28], "little")
+            extra_length = int.from_bytes(out[offset + 28:offset + 30], "little")
+            start = offset + 30 + name_length + extra_length
+            out[start] = (out[start] & 0xF8) | 0x07  # invalid deflate block type
+            return bytes(out)
+    assert kind == "crc"
+    start = 0
+    while True:
+        index = out.find(b"PK\x01\x02", start)
+        assert index >= 0, name
+        length = int.from_bytes(out[index + 28:index + 30], "little")
+        if out[index + 46:index + 46 + length] == name.encode("utf-8"):
+            out[index + 16] ^= 1  # CRC differs; compressed bytes remain intact
+            return bytes(out)
+        start = index + 4
+
+
 def forge_declared_size(data: bytes, name: str, size: int) -> bytes:
     """Return the zip with member ``name``'s uncompressed size in the central directory set to ``size``.
 

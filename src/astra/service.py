@@ -5013,6 +5013,8 @@ class AstraService:
             raise KeyError("Project not found.")
         if actor["global_role"] != "owner" and not self._is_project_manager(actor, project_id):
             raise Forbidden("Only the App Owner or a Manager of the project may download its filled template.")
+        if project["status"] == "closed":
+            raise ValueError("This project is closed; reopen it before importing.")
         return project
 
     def _template_prefill(self, actor: dict, project: dict, config: importer.TemplateConfig):
@@ -5026,6 +5028,8 @@ class AstraService:
         """
         project_id = project["id"]
         with transaction(self.db):
+            # Recheck under the write lock: the project may have closed after lookup.
+            project = self._template_project(actor, project_id)
             tasks = [dict(row) for row in self.db.execute(
                 "SELECT * FROM tasks WHERE project_id=? ORDER BY created_at, rowid", (project_id,))]
             missing = [task for task in tasks if not task.get("import_key")]

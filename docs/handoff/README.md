@@ -11,6 +11,11 @@ ticket SFAZD7. The default Windows command ran 684 tests, `OK (skipped=1)`;
 the symlink skip and remaining launch gates are recorded there. A0 awaits
 Aly's acceptance; this result does not establish hosted readiness.
 
+Latest importer repair evidence: [2026-10-04 repairs](IMPORTER_REPAIRS_2026-10-04.md),
+ticket WYM776. The default Windows suite ran 692 tests, `OK (skipped=1)`.
+Parent 3NT40T remains in human for the sample-dependent CSV decision. The
+mixed-save repair is next; owner acceptance and hosted readiness remain separate.
+
 ## What is in the pack
 
 | File | What it is for |

@@ -2552,8 +2552,19 @@ class ImportEngine:
                 node, seen = self._node(parent_key), set()
                 while node and node not in seen:
                     if node == own:
-                        result.add("error", "E_PARENT_CYCLE", f"Parent '{parent_key}' would create a subtask cycle.",
-                                   "Parent Key")
+                        # Use the final proposed graph, so valid simultaneous reparenting
+                        # stays valid. Blame the last changed edge in the file, rather
+                        # than whichever cycle member this traversal encounters first.
+                        candidates = []
+                        for member in seen | {own}:
+                            row = row_of_node.get(member)
+                            key = row.plan.get("parent_key") if row else None
+                            if key and (not row.existing or row.existing.get("parent_task_id") != self._node(key)):
+                                candidates.append(row)
+                        closing = max(candidates, key=lambda row: row.number) if candidates else result
+                        if not any(finding.code == "E_PARENT_CYCLE" for finding in closing.findings):
+                            closing.add("error", "E_PARENT_CYCLE",
+                                        f"Parent '{closing.plan['parent_key']}' would create a subtask cycle.", "Parent Key")
                         break
                     seen.add(node)
                     node = parent_node(node)

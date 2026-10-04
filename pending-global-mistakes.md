@@ -2,6 +2,24 @@
 
 Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 
+## ASTRA-20261004-06 — bounded reads and CSV contract ambiguity
+
+- Date / project: 2026-10-04; Project-Astra importer repair continuation.
+- Category / status: Output-budget mistake corrected; confirmed CSV round-trip defect remains open pending Aly's R2 decision.
+- Evidence / impact: A broad regex over the importer tests produced 349 matching lines and truncated the output. Relevant tests were reread in small ranges. The existing export maps a formula-prefixed title and a literal apostrophe-prefixed title to the same CSV text, so blind unescaping or matching the stored task cannot distinguish a deliberate edit.
+- Cause / prevention: Limit regex scope and select bounded source ranges before display. Do not treat older claims that no design decision is needed as authority to change the CSV contract.
+- Correction / verification: A concrete reversible-format proposal and a format-preserving alternative are recorded in docs/handoff/CSV_ROUNDTRIP_DECISION_2026-10-04.md. Neither is implemented or owner-approved. Keep independently authorized repairs separate from this decision. Canonical log merge remains pending outside writable roots.
+
+## ASTRA-20261004-07 — importer regression and cycle-review corrections
+
+- Date / project: 2026-10-04; Project-Astra WYM776.
+- Category / status: Test-authoring, workflow and implementation errors corrected and independently reviewed; normal publication and owner acceptance pending.
+- Evidence / impact: A failing HTTP assertion included binary workbook bytes, producing oversized output. One new HTTP test called the SQLite connection as a context factory; corrected to query the existing service connection. A move to human was refused because the question and plan were absent; these were recorded through the CLI and the move then succeeded. No forced move was used.
+- Cause / prevention: Keep binary response assertions to status, content type and length; inspect actual fixture connection ownership; inspect lane gates before moving a ticket. Capture red-run logs in Temp and display bounded summaries. Unfiltered jaira validation output recurred before publication; the filtered retry checked 72 tickets with errors=false. Filter validation fields before display.
+- Publication-check correction: Overriding core.autocrlf before normalizing documentation exposed checkout CRLF as trailing-whitespace failures and oversized output. The first check's exit was not gated. Use the actual staged blobs for LF proof, preserve CLI-only ticket writes, normalize ordinary documentation, and stop on failed checks before publication. The test-preview process also ended after new input; a stale login link was corrected after a live HTTP check and the loopback helper was restarted hidden. Confirm the server before offering a usable login; rebind CUA after its runtime resets.
+- Independent review: The first cycle-attribution implementation duplicated E_PARENT_CYCLE on a four-row cycle. A new exact-one-finding regression failed with 2 != 1; a duplicate guard corrected it, and independent rereview passed. Preserve the final graph to allow valid simultaneous reparenting; report the last changed edge, excluding unchanged parent rows.
+- Verification: Eight initial regressions reproduced the remaining source defects; the focused reader/importer suite then ran 88 tests, OK. The extended two-cycle tests pass. Five removal mutations fail as required. The actual local task History displays Import key assigned. The default full suite ran 692 tests in 406.850 seconds, OK (skipped=1), with source hashes unchanged, no resource warnings and no new tmp directories. CSV serialization is unchanged; R2 and the sample workplan remain with Aly. A Windows rg wildcard path failed with error 123; the corrected directory plus -g search succeeded. The completed suite session expired after new input; its saved result was read instead of rerunning it. Canonical log merge remains pending outside writable roots.
+
 ## ASTRA-20260924-04 remediation — A0 Windows baseline
 
 - Date / project: 2026-10-04; Project-Astra, ticket SFAZD7, starting SHA `10d0ff32f64b9ffd73299e9559976b60d6884db5`.

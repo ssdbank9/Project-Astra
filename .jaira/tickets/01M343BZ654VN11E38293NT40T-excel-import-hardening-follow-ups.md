@@ -1,10 +1,10 @@
 ---
 id: 01M343BZ654VN11E38293NT40T
 title: Excel import hardening follow-ups
-status: todo
+status: human
 ready: true
 creator: Claude
-assignee: Claude
+assignee: Codex
 goal: "Close the low-severity gaps the round-2 independent review left open on the Excel/CSV importer (src/astra/xlsx_reader.py, importer.py, service.py, static/app.js, docs/design/excel-import.md) without changing any behaviour reviewed and accepted in C9KPH6."
 context: |-
   Seven LOW findings from independent review round 2 of C9KPH6 (2026-09-22, report scratchpad/excel-import/review/review-probes-round2.md, probes R6d/R6e/R7b/R13a/R5b/R8b/R15/R13c/R2b) are open. None violates the C9KPH6 definition of done; the review verdict was go and C9KPH6 sits in signoff.
@@ -25,8 +25,14 @@ related:
 follows: 01M33VD86SS216CCQEDVC9KPH6
 commits: []
 created-at: 2026-09-22T08:22:56Z
-updated-at: 2026-09-22T08:23:33Z
-updated-by: Claude
+updated-at: 2026-10-04T08:58:44Z
+updated-by: Codex
+claimed-by: codex-astra-fixes-20261004
+claimed-at: 2026-10-04T08:37:49Z
+outcome-what: Exact CSV round-trip criterion needs Aly decision after sample review
+outcome-why: Current formula protection introduces an ambiguous apostrophe
+outcome-resolves: Documented both concrete options; independent repairs scoped to WYM776
+question: Which CSV contract should be accepted after reviewing Aly sample workplan? See docs/handoff/CSV_ROUNDTRIP_DECISION_2026-10-04.md. XLSX is recommended as the primary basic-Excel workflow.
 ---
 
 # Excel import hardening follow-ups
@@ -45,11 +51,14 @@ updated-by: Claude
 ## Options
 
 - [ ] brainstorm
-- [ ] planning
+- [x] planning
 
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
 
+- [ ] Repair independent items in WYM776; resolve exact CSV contract R2 using Aly sample workplan before parent completion
+
 ## Progress
 
+- **2026-10-04 08:50 · Codex** — 2026-10-04: Aly authorized fixes then development. Codex claimed the unclaimed Claude todo ticket. XML stripping and formula neutralisation already exist; Windows A0 is pushed at 10fcccdf. Exact formula/apostrophe CSV round trips require an explicit format policy. Aly asked for an easy basic-Excel workflow and a sample workplan before that choice; XLSX is recommended as the primary user workflow. Keep R2 open and repair the independent items in a scoped related ticket.

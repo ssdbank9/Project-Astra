@@ -18,7 +18,7 @@ from astra.web import AstraHandler, AstraServer
 from astra.xlsx_reader import Percent, read_workbook
 
 from link_roots import allow_attachment_roots, link
-from import_fixtures import ErrorValue, PERCENT_STYLE, Styled, filled_template, forge_declared_size, sheet_xml, workbook_bytes
+from import_fixtures import ErrorValue, PERCENT_STYLE, Styled, corrupt_zip_member, filled_template, forge_declared_size, sheet_xml, workbook_bytes
 
 
 class ImportServiceTests(unittest.TestCase):
@@ -827,6 +827,36 @@ class ImportServiceTests(unittest.TestCase):
             self.commit(self.owner, [{"import_key": "B-1", "title": "", "due_date": "12-09-2026"}])
         self.assertEqual((self.task_by_key("B-1")["title"], self.task_by_key("B-1")["due_date"]), ("Keep me", "2026-09-10"))
 
+    def test_closed_project_template_downloads_write_nothing(self):
+        task = self.service.create_task(self.owner, {"project_id": self.project["id"], "title": "No key"})
+        self.service.close_project(self.owner, self.project["id"], "Close for this test", exceptional=True)
+        before = list(self.db.iterdump())
+        for actor in (self.owner, self.jamal):
+            for fmt in ("csv", "xlsx"):
+                with self.subTest(actor=actor["email"], fmt=fmt):
+                    with self.assertRaisesRegex(ValueError, "project is closed"):
+                        self.service.import_template(actor, fmt, self.project["id"])
+                    self.assertEqual(list(self.db.iterdump()), before)
+        self.assertIsNone(self.service.get_task(self.owner, task["id"])["import_key"])
+        for actor in (self.viewer, self.chair):
+            with self.subTest(actor=actor["email"]), self.assertRaises(Forbidden):
+                self.service.import_template(actor, "xlsx", self.project["id"])
+
+    def test_template_download_rechecks_project_before_key_assignment(self):
+        self.service.create_task(self.owner, {"project_id": self.project["id"], "title": "No key"})
+        prefill = self.service._template_prefill
+        closed_snapshot = []
+
+        def close_before_prefill(actor, project, config):
+            self.service.close_project(self.owner, project["id"], "Closed after lookup", exceptional=True)
+            closed_snapshot.extend(self.db.iterdump())
+            return prefill(actor, project, config)
+
+        with mock.patch.object(self.service, "_template_prefill", side_effect=close_before_prefill):
+            with self.assertRaisesRegex(ValueError, "project is closed"):
+                self.service.import_template(self.jamal, "xlsx", self.project["id"])
+        self.assertEqual(list(self.db.iterdump()), closed_snapshot)
+
     def test_commit_is_atomic(self):
         rows = self.rows()
         data = filled_template(rows)
@@ -1192,6 +1222,32 @@ class ImportServiceTests(unittest.TestCase):
         self.assertIn("parent_changed", [ev["event_type"] for ev in self.service.task_events(self.owner, e["id"])])
         _, preview = self.preview(self.owner, rows)
         self.assertEqual({r["action"] for r in preview["rows"]}, {"unchanged"})
+
+    def test_parent_cycle_error_identifies_the_closing_changed_row(self):
+        self.commit(self.owner, [{"import_key": "E", "title": "E"}, {"import_key": "F", "title": "F"}])
+        for keys in (("N", "E"), ("E", "N"), ("E", "F"), ("A", "B"), ("A", "B", "C", "D")):
+            last = keys[-1]
+            rows = [{"import_key": key, "title": key, "parent_key": keys[(index + 1) % len(keys)]}
+                    for index, key in enumerate(keys)]
+            with self.subTest(keys=keys):
+                _, preview = self.preview(self.owner, rows)
+                by_key = {row["import_key"]: row for row in preview["rows"]}
+                self.assertIn("E_PARENT_CYCLE", self.codes(by_key[last]))
+                self.assertEqual(self.codes(by_key[last]).count("E_PARENT_CYCLE"), 1)
+                for earlier in keys[:-1]:
+                    self.assertIn("E_PARENT_INVALID", self.codes(by_key[earlier]))
+                    self.assertNotIn("E_PARENT_CYCLE", self.codes(by_key[earlier]))
+                self.assertFalse(preview["can_commit"])
+                with self.assertRaisesRegex(ValueError, "Nothing to import"):
+                    self.commit(self.owner, rows, valid_rows_only=True)
+
+    def test_parent_cycle_does_not_blame_a_later_unchanged_parent(self):
+        self.commit(self.owner, [{"import_key": "E", "title": "E"},
+                                 {"import_key": "F", "title": "F", "parent_key": "E"}])
+        _, preview = self.preview(self.owner, [{"import_key": "E", "title": "E", "parent_key": "F"},
+                                              {"import_key": "F", "title": "F", "parent_key": "E"}])
+        self.assertIn("E_PARENT_CYCLE", self.codes(preview["rows"][0]))
+        self.assertNotIn("E_PARENT_CYCLE", self.codes(preview["rows"][1]))
 
     def test_child_of_a_parent_that_fails_in_dependency_wiring_is_an_error_too(self):
         # P5b: Q-2 fails only when the dependency cycle is found; its step and successor must fail with it.
@@ -1973,6 +2029,38 @@ class ImportHttpTests(unittest.TestCase):
         self.connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
         _, tasks = self.request("GET", "/api/tasks", cookie=cookie)
         self.assertEqual(tasks["tasks"], [])
+
+    def test_corrupt_workbook_members_return_400_without_writes(self):
+        for email, password in (("owner@example.org", "correct horse battery"),
+                                ("waseem@example.org", "waseem password safe")):
+            cookie, csrf = self.login(email, password)
+            for kind in ("crc", "deflate"):
+                data = corrupt_zip_member(filled_template(self.rows()), "xl/worksheets/sheet2.xml", kind)
+                for route in ("preview", "commit"):
+                    with self.subTest(actor=email, kind=kind, route=route):
+                        response, payload = self.request("POST", "/api/import/" + route, cookie=cookie, csrf=csrf,
+                                                         raw=data, headers=self.upload_headers(self.project["id"]))
+                        self.assertEqual(response.status, 400, payload)
+                        self.assertIn("corrupt or incomplete", payload["error"])
+            _, tasks = self.request("GET", "/api/tasks", cookie=cookie)
+            self.assertEqual(tasks["tasks"], [])
+
+    def test_closed_project_templates_return_400_without_keys(self):
+        service = self.server.service
+        task = service.create_task(self.owner, {"project_id": self.project["id"], "title": "No key"})
+        service.close_project(self.owner, self.project["id"], "Closed test project", exceptional=True)
+        for email, password in (("owner@example.org", "correct horse battery"),
+                                ("waseem@example.org", "waseem password safe"),
+                                ("viewer@example.org", "viewer password safe"),
+                                ("chair@example.org", "chair password safe")):
+            cookie, _ = self.login(email, password)
+            expected = 400 if email in ("owner@example.org", "waseem@example.org") else 403
+            for fmt in ("csv", "xlsx"):
+                with self.subTest(actor=email, fmt=fmt):
+                    response, payload = self.request("GET", f"/api/import/template.{fmt}?project_id={self.project['id']}",
+                                                     cookie=cookie)
+                    self.assertEqual(response.status, expected, f"{email} {fmt}: {response.getheader('Content-Type')}")
+        self.assertIsNone(service.db.execute("SELECT import_key FROM tasks WHERE id=?", (task["id"],)).fetchone()[0])
 
     def test_put_routes_delegate_to_the_service_layer(self):
         source = inspect.getsource(AstraHandler.do_PUT)

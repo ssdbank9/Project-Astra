@@ -112,6 +112,9 @@ is selected.
   (`project_id` absent or empty) is served to the App Owner and to anyone who manages
   at least one project - the same people who may read the template configuration
   (authorization matrix) - and is 403 for everyone else.
+  A filled-template download for a closed project is refused with HTTP 400 before
+  any Import Key or audit event is written, for both App Owners and Managers.
+  Authorization and project status are rechecked inside the key-assignment transaction.
 - Keys: a task that has no Import Key yet gets one at download time - `T-001`,
   `T-002` ... continuing above the highest `T-nnn` already in the project and skipping
   any key in use - stored in `tasks.import_key` with a `task_event`
@@ -130,8 +133,13 @@ is selected.
   section) and custom columns from `tasks.import_extras`. Original Due Date stays blank
   (a baseline is never overwritten) and Type repeats only a value the task already
   carries in `import_extras`, so re-uploading the file unedited previews every row as
-  **unchanged** with no warnings; a single edited Title previews as one update (with
+  **unchanged** when its values remain eligible; a single edited Title previews as one update (with
   `W_TITLE_CHANGED`).
+  Eligibility is validated again: an unchanged upload can show
+  `W_PERSON_NOT_ELIGIBLE` when a named owner or participant has lost project access.
+  CSV downloads protect formula-prefixed text with an apostrophe; re-uploading that
+  text currently proposes a text change. XLSX is the recommended editing workflow
+  while Aly reviews the CSV round-trip decision R2 with a sample workplan.
 - Project sheet: name, the first Manager's email (falling back to
   `projects.manager_user_id`), timezone and, in the Full shape, description, working
   days and planned dates. The People sheet (Full shape only) lists the project's active
@@ -222,7 +230,7 @@ and People sheets.
 | Duration (days) | derived | fills the missing one of Start/Due |
 | Original Due Date | `tasks.baseline_due_date` | Owner only; never overwrites an existing baseline |
 | Status (core) | `tasks.status` | labels or synonyms (Not Started, Done, Delayed/At Risk, Blocked ...); on update, Submitted, Completed, On hold, Reopened and Changes requested are never set by import (`W_GOVERNED_STATUS`), and a task is never moved *out of* Submitted, Completed, On hold, Reopened, Changes requested, Cancelled or Abandoned either (`W_GOVERNED_STATUS` for the Owner, `W_PROTECTED_STATUS` for a Manager; the stored status stays and the change is made in Astra through its lifecycle action). A row for an existing **Completed, Cancelled or Abandoned** task changes nothing at all, see "Closed tasks" below |
-| % Complete | `tasks.progress` | 0..100, `45%` and `0.45` accepted; a %-formatted Excel cell is read as displayed (stored 1.0 shown as 100% -> 100) |
+| % Complete | `tasks.progress` | Whole numbers 0..100 and text `45%` accepted. A numeric Excel cell `0.45` scales to 45; text `0.45` is refused with `E_PROGRESS_INVALID`. A %-formatted Excel cell is read as displayed (stored 1.0 shown as 100% -> 100). |
 | Criticality | `tasks.criticality` | Critical, High, Normal, Low or blank |
 | Predecessors | `task_dependencies` (finish-to-start) | `;`-separated Import Keys; `FS+2d` suffixes are recorded in Notes with `W_LAG_IGNORED` |
 | Milestone (off by default) | `tasks.is_milestone` | Yes/No; superseded by the `Type` list column; with one date, start = due |

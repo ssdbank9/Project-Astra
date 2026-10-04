@@ -27,6 +27,7 @@ import math
 import posixpath
 import re
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from xml.etree import ElementTree as ET
@@ -252,7 +253,11 @@ def read_workbook(data: bytes) -> Workbook:
 def _read(archive: zipfile.ZipFile, names: set[str]) -> Workbook:
     def parse(name: str):
         try:
-            return ET.fromstring(archive.read(name))
+            data = archive.read(name)
+        except (zipfile.BadZipFile, zlib.error, EOFError, OSError) as exc:
+            raise XlsxError(f"Workbook part {name} is corrupt or incomplete. Save the workbook again and retry.") from exc
+        try:
+            return ET.fromstring(data)
         except ET.ParseError as exc:
             raise XlsxError(f"Workbook part {name} is not well-formed XML.") from exc
 
