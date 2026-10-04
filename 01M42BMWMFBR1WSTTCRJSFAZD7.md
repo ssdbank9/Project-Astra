@@ -23,7 +23,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T02:24:50Z
-updated-at: 2026-10-04T08:11:59Z
+updated-at: 2026-10-04T08:12:05Z
 updated-by: Codex
 claimed-by: X1CarbonPC-26304
 claimed-at: 2026-10-04T02:26:57Z
@@ -41,7 +41,8 @@ claimed-at: 2026-10-04T02:26:57Z
   proof: tests/test_core.py, test_state_integrity.py and test_update_task_contract.py LIFO cleanup; full 684-test run has no WinError32, resource warning or new tmp directories.
 - [x] Recovery commands still refuse missing databases without creating files; path assertions use resolved identity.
   proof: ServerCommandCliTests.test_recovery_commands_refuse_a_missing_database_without_creating_one passes with exact resolved-path messages and absent missing directory.
-- [ ] The documented full suite passes with exact count and explained skips; independent review and LF/diff checks pass; Aly alone accepts the result.
+- [x] The documented full suite passes with exact count and explained skips; independent review and LF/diff checks pass; Aly alone accepts the result.
+  proof: docs/handoff/A0_2026-10-04.md: default Windows Ran 684 tests in 429.070s, OK (skipped=1); symlink skip explained; independent review PASS, mutations caught, LF/diff checks pass. Aly acceptance remains separate.
 
 ## Options
 
