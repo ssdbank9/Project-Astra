@@ -23,7 +23,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T02:24:50Z
-updated-at: 2026-10-04T02:24:50Z
+updated-at: 2026-10-04T02:26:49Z
+updated-by: Codex
 ---
 
 # A0: restore the Windows test baseline
