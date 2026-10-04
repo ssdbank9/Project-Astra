@@ -333,6 +333,90 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         return response.getheader("Set-Cookie").split(";", 1)[0], login["csrf"]
 
+    def test_manager_mixed_status_save_is_400_without_any_database_write(self):
+        service = self.server.service
+        owner = dict(service.db.execute("SELECT * FROM users WHERE global_role='owner'").fetchone())
+        project = service.create_project(owner, "Mixed save HTTP")
+        manager = service.create_user(owner, "mixed-manager@example.org", "Manager", "manager password safe")
+        service.grant_project_access(owner, project["id"], manager["id"], "manager")
+        cookie, csrf = self._login_as(manager["email"], "manager password safe")
+        for source, target in (("draft", "cancelled"), ("cancelled", "in_progress")):
+            with self.subTest(source=source, target=target):
+                task = service.create_task(owner, {"project_id": project["id"], "title": "Original title"})
+                service.db.execute("UPDATE tasks SET status=? WHERE id=?", (source, task["id"]))
+                before = tuple(service.db.iterdump())
+                response, error = self.request("POST", f"/api/tasks/{task['id']}", {
+                    "title": "Entered title", "description": "Entered description", "progress": "25",
+                    "status": target, "reason": "Review this change", "expected_revision": task["revision"],
+                }, cookie=cookie, csrf=csrf)
+                self.assertEqual(response.status, 400)
+                self.assertEqual(error["error"],
+                                 "Save task edits separately from a status request. Nothing was saved or requested.")
+                self.assertEqual(tuple(service.db.iterdump()), before)
+
+    def test_mixed_save_guard_preserves_http_role_and_status_only_behavior(self):
+        service = self.server.service
+        owner = dict(service.db.execute("SELECT * FROM users WHERE global_role='owner'").fetchone())
+        project = service.create_project(owner, "Mixed save role controls")
+        manager = service.create_user(owner, "status-manager@example.org", "Manager", "manager password safe")
+        service.grant_project_access(owner, project["id"], manager["id"], "manager")
+        cookie, csrf = self._login_as(manager["email"], "manager password safe")
+        task = service.create_task(owner, {
+            "project_id": project["id"], "title": "Original title", "description": "Original description",
+            "progress": 0,
+        })
+        response, result = self.request("POST", f"/api/tasks/{task['id']}", {
+            "title": "  Original title  ", "description": "  Original description  ",
+            "progress": "0", "start_date": "", "due_date": "", "owner_user_id": "",
+            "status": "cancelled", "reason": "Status only", "expected_revision": task["revision"],
+        }, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 202)
+        self.assertEqual(result["request"]["action"], "update_task_status")
+
+        owner_cookie, owner_csrf = self._owner_session()
+        response, result = self.request("POST", f"/api/tasks/{task['id']}", {
+            "title": "Owner saved title", "status": "cancelled", "reason": "Owner cancels",
+            "expected_revision": task["revision"],
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        self.assertEqual(response.status, 200)
+        self.assertEqual((result["task"]["title"], result["task"]["status"]), ("Owner saved title", "cancelled"))
+
+        for role in ("viewer", "chairman"):
+            actor = service.create_user(owner, f"mixed-{role}@example.org", role, "read only password safe",
+                                        "chairman" if role == "chairman" else "member")
+            if role == "viewer":
+                service.grant_project_access(owner, project["id"], actor["id"], "viewer")
+            actor_cookie, actor_csrf = self._login_as(actor["email"], "read only password safe")
+            before = tuple(service.db.iterdump())
+            with self.subTest(role=role):
+                response, _ = self.request("POST", f"/api/tasks/{task['id']}", {
+                    "title": "Denied title", "status": "in_progress", "reason": "Attempt",
+                    "expected_revision": result["task"]["revision"],
+                }, cookie=actor_cookie, csrf=actor_csrf)
+                self.assertEqual(response.status, 403)
+                self.assertEqual(tuple(service.db.iterdump()), before)
+
+    def test_manager_status_request_invalid_progress_is_400_without_writes(self):
+        service = self.server.service
+        owner = dict(service.db.execute("SELECT * FROM users WHERE global_role='owner'").fetchone())
+        project = service.create_project(owner, "Invalid request progress")
+        manager = service.create_user(owner, "progress-manager@example.org", "Manager", "manager password safe")
+        service.grant_project_access(owner, project["id"], manager["id"], "manager")
+        cookie, csrf = self._login_as(manager["email"], "manager password safe")
+        for source, target in (("draft", "cancelled"), ("cancelled", "in_progress")):
+            task = service.create_task(owner, {"project_id": project["id"], "title": "Original title"})
+            service.db.execute("UPDATE tasks SET status=? WHERE id=?", (source, task["id"]))
+            for progress in ([], {}):
+                with self.subTest(source=source, progress=progress):
+                    before = tuple(service.db.iterdump())
+                    response, error = self.request("POST", f"/api/tasks/{task['id']}", {
+                        "status": target, "progress": progress, "reason": "Review this change",
+                        "expected_revision": task["revision"],
+                    }, cookie=cookie, csrf=csrf)
+                    self.assertEqual(response.status, 400)
+                    self.assertEqual(error["error"], "Progress must be between 0 and 100.")
+                    self.assertEqual(tuple(service.db.iterdump()), before)
+
     def test_read_only_roles_protected_attempts_return_403_and_notify_owner_over_http(self):
         owner_cookie, owner_csrf = self._owner_session()
         _, project = self.request(

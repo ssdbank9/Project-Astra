@@ -219,6 +219,94 @@ class UpdateTaskContractTests(unittest.TestCase):
         )
         self.assertEqual(self._pending_requests(task["id"]), [])
 
+    def test_manager_mixed_status_request_refuses_without_any_database_write(self):
+        transitions = (
+            ("draft", "cancelled"), ("draft", "abandoned"), ("draft", "changes_requested"),
+            *((source, "in_progress") for source in (
+                "cancelled", "abandoned", "completed", "on_hold", "changes_requested", "reopened",
+            )),
+        )
+        changes = {
+            "title": "Changed title", "description": "Changed description",
+            "owner_user_id": self.manager["id"], "start_date": "2027-01-02",
+            "due_date": "2027-02-02", "progress": 25,
+        }
+        for source, target in transitions:
+            for field, value in changes.items():
+                with self.subTest(source=source, target=target, field=field):
+                    task = self._set_status(self._task(
+                        description="Original description", owner_user_id=self.owner["id"],
+                        start_date="2027-01-01", due_date="2027-02-01", progress=15,
+                    ), source)
+                    before = tuple(self.db.iterdump())
+                    with self.assertRaisesRegex(ValueError, "Save task edits separately from a status request"):
+                        self.service.update_task(self.manager, task["id"], {
+                            field: value, "status": target, "reason": "Review this change",
+                            "expected_revision": task["revision"],
+                        })
+                    self.assertEqual(tuple(self.db.iterdump()), before)
+
+    def test_manager_status_request_accepts_normalized_unchanged_form_values(self):
+        for source, target in (("draft", "cancelled"), ("cancelled", "in_progress")):
+            for progress in (None, 0, 45):
+                with self.subTest(source=source, target=target, progress=progress):
+                    task = self._set_status(self._task(
+                        description="Original description", owner_user_id=self.manager["id"], progress=progress,
+                        start_date="2027-01-01" if progress == 45 else None,
+                        due_date="2027-02-01" if progress == 45 else None,
+                    ), source)
+                    before = self.service.get_task(self.owner, task["id"])
+                    result = self.service.update_task(self.manager, task["id"], {
+                        "title": "  Task  ", "description": "  Original description  ",
+                        "owner_user_id": self.manager["id"], "criticality": "",
+                        "start_date": task["start_date"] or "", "due_date": task["due_date"] or "",
+                        "progress": "" if progress is None else str(progress),
+                        "status": target, "reason": "Review this change", "expected_revision": task["revision"],
+                    })
+                    self.assertEqual(result["request"]["action"], "update_task_status")
+                    self.assertEqual(self.service.get_task(self.owner, task["id"]), before)
+                    self.assertEqual(len(self._pending_requests(task["id"])), 1)
+
+    def test_manager_status_request_refuses_invalid_progress_without_writes(self):
+        for source, target in (("draft", "cancelled"), ("cancelled", "in_progress")):
+            for progress in ([], {}, float("inf")):
+                with self.subTest(source=source, progress=progress):
+                    task = self._set_status(self._task(), source)
+                    before = tuple(self.db.iterdump())
+                    with self.assertRaisesRegex(ValueError, "Progress must be between 0 and 100"):
+                        self.service.update_task(self.manager, task["id"], {
+                            "status": target, "progress": progress, "reason": "Review this change",
+                            "expected_revision": task["revision"],
+                        })
+                    self.assertEqual(tuple(self.db.iterdump()), before)
+
+    def test_ordinary_manager_save_and_direct_owner_mixed_save_still_apply_edits(self):
+        for actor, status in ((self.manager, "in_progress"), (self.owner, "cancelled")):
+            with self.subTest(actor=actor["global_role"], status=status):
+                task = self._task()
+                result = self.service.update_task(actor, task["id"], {
+                    "title": "Saved title", "description": "Saved description", "status": status,
+                    "reason": "Apply edits", "expected_revision": task["revision"],
+                })
+                self.assertEqual((result["title"], result["description"], result["status"]),
+                                 ("Saved title", "Saved description", status))
+                self.assertEqual(result["revision"], task["revision"] + 1)
+                self.assertEqual(self._pending_requests(task["id"]), [])
+
+    def test_read_only_roles_cannot_make_a_mixed_status_request(self):
+        chairman = self.service.create_user(self.owner, "chairman@example.org", "Chairman",
+                                            "chairman password safe", "chairman")
+        for actor in (self.viewer, chairman):
+            with self.subTest(actor=actor["global_role"]):
+                task = self._task()
+                before = tuple(self.db.iterdump())
+                with self.assertRaises(Forbidden):
+                    self.service.update_task(actor, task["id"], {
+                        "title": "Changed title", "status": "cancelled", "reason": "Attempt",
+                        "expected_revision": task["revision"],
+                    })
+                self.assertEqual(tuple(self.db.iterdump()), before)
+
     def test_owner_writes_a_protected_status_directly(self):
         task = self._task()
         after = self.service.update_task(self.owner, task["id"], {

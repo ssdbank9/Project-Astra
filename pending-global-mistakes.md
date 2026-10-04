@@ -2,6 +2,15 @@
 
 Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 
+## ASTRA-20261004-08 — mixed-save boundary and inspection corrections
+
+- Date / project: 2026-10-04; Project-Astra 1G7Q4C.
+- Category / status: Confirmed lost-edit defect repaired locally; independent review correction and full suite verified. Publication and Aly's acceptance pending.
+- Evidence / impact: Fifty-four service field/transition cases and two HTTP cases reproduced silent discarded edits. The new guard initially exposed TypeError/OverflowError for unsupported progress values; two review regressions reproduced six service errors and four HTTP 500-versus-400 failures.
+- Cause / correction: Protected status routing returned a request before the ordinary write. Compare actual normalized persisted values before both request routes, translate unsupported progress types to ValueError, and preserve unchanged full-form requests and earlier lifecycle refusals.
+- Workflow lessons: A jaira lane JSON was incorrectly assumed to have a ticket property; inspecting its keys showed input and prompt instead. A root file inventory encountered pre-existing inaccessible tmp directories; target known paths or exclude tmp directories. An exact browser label lookup failed because the textarea's label included its current contents; inspecting form.elements exposed stable name attributes, which completed the retained-value check. A redundant claim renewal was refused because a new CLI process identity differed from this session's live original claim; no claim was stolen and the existing claimed work continued. Independent documentation review clarified that both request branches share one HTTP endpoint.
+- Verification: Focused 25 tests and two progress-boundary tests pass; each route's guard removal fails (36 and 18 cases), independent rereview passes and the actual browser retains all entered fields. The default full Windows suite ran 700 tests in 368.566s, OK (skipped=1), with unchanged source/test hashes, no ResourceWarnings and no new tmp directories. No unrelated directory or original account was changed. Canonical log merge remains pending outside writable roots.
+
 ## ASTRA-20261004-06 — bounded reads and CSV contract ambiguity
 
 - Date / project: 2026-10-04; Project-Astra importer repair continuation.
@@ -13,7 +22,7 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 ## ASTRA-20261004-07 — importer regression and cycle-review corrections
 
 - Date / project: 2026-10-04; Project-Astra WYM776.
-- Category / status: Test-authoring, workflow and implementation errors corrected and independently reviewed; normal publication and owner acceptance pending.
+- Category / status: Test-authoring, workflow and implementation errors corrected and independently reviewed; published as dd5284c0004319bb6fea53f325224f6265980cd2, owner acceptance pending.
 - Evidence / impact: A failing HTTP assertion included binary workbook bytes, producing oversized output. One new HTTP test called the SQLite connection as a context factory; corrected to query the existing service connection. A move to human was refused because the question and plan were absent; these were recorded through the CLI and the move then succeeded. No forced move was used.
 - Cause / prevention: Keep binary response assertions to status, content type and length; inspect actual fixture connection ownership; inspect lane gates before moving a ticket. Capture red-run logs in Temp and display bounded summaries. Unfiltered jaira validation output recurred before publication; the filtered retry checked 72 tickets with errors=false. Filter validation fields before display.
 - Publication-check correction: Overriding core.autocrlf before normalizing documentation exposed checkout CRLF as trailing-whitespace failures and oversized output. The first check's exit was not gated. Use the actual staged blobs for LF proof, preserve CLI-only ticket writes, normalize ordinary documentation, and stop on failed checks before publication. The test-preview process also ended after new input; a stale login link was corrected after a live HTTP check and the loopback helper was restarted hidden. Confirm the server before offering a usable login; rebind CUA after its runtime resets.

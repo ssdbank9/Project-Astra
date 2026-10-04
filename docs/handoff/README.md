@@ -14,7 +14,13 @@ Aly's acceptance; this result does not establish hosted readiness.
 Latest importer repair evidence: [2026-10-04 repairs](IMPORTER_REPAIRS_2026-10-04.md),
 ticket WYM776. The default Windows suite ran 692 tests, `OK (skipped=1)`.
 Parent 3NT40T remains in human for the sample-dependent CSV decision. The
-mixed-save repair is next; owner acceptance and hosted readiness remain separate.
+mixed-save evidence is below; owner acceptance and hosted readiness remain separate.
+
+Latest mixed-save evidence: [2026-10-04 repair](MIXED_SAVE_REPAIR_2026-10-04.md),
+ticket 1G7Q4C. The default Windows suite ran 700 tests, `OK (skipped=1)`.
+Manager combined edits and protected status requests are refused without partial
+writes, and the actual browser retains the entered fields. Aly's acceptance and
+the remaining development and hosting gates are still required.
 
 ## What is in the pack
 

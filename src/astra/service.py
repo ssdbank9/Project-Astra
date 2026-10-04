@@ -1464,6 +1464,7 @@ class AstraService:
             if before["status"] in REOPEN_ONLY_STATUSES and status not in REOPEN_EQUIVALENT_STATUSES:
                 raise ValueError(reopen_refusal)
             if actor["global_role"] != "owner":
+                self._refuse_mixed_status_request(before, fields)
                 return self._request_protected_action(
                     actor,
                     before,
@@ -1475,6 +1476,7 @@ class AstraService:
             if before["status"] in REOPEN_ONLY_STATUSES:
                 raise ValueError(reopen_refusal)
         if actor["global_role"] != "owner" and status in PROTECTED_STATUSES:
+            self._refuse_mixed_status_request(before, fields)
             return self._request_protected_action(
                 actor,
                 before,
@@ -1483,6 +1485,19 @@ class AstraService:
                 reason or "",
             )
         return None
+
+    def _refuse_mixed_status_request(self, before: dict, fields: dict) -> None:
+        """A status request cannot also save edits; unchanged form values are safe to echo."""
+        ordinary = {key: fields[key] for key in (
+            "title", "owner_user_id", "start_date", "due_date",
+        )}
+        ordinary["description"] = str(fields["description"]).strip()
+        try:
+            ordinary["progress"] = self._progress(fields["progress"])
+        except (TypeError, OverflowError) as exc:
+            raise ValueError("Progress must be between 0 and 100.") from exc
+        if any(value != before.get(key) for key, value in ordinary.items()):
+            raise ValueError("Save task edits separately from a status request. Nothing was saved or requested.")
 
     def _write_task_update(
         self, actor: dict, task_id: str, before: dict, fields: dict, expected_revision: int,
