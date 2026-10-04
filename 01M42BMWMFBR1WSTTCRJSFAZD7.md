@@ -23,7 +23,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T02:24:50Z
-updated-at: 2026-10-04T04:03:47Z
+updated-at: 2026-10-04T08:08:40Z
 updated-by: Codex
 claimed-by: X1CarbonPC-26304
 claimed-at: 2026-10-04T02:26:57Z
@@ -51,7 +51,7 @@ claimed-at: 2026-10-04T02:26:57Z
 - [x] Reproduce the default-locale driver failure, migration-refusal leak, interleaving cleanup and missing-database path assertions.
 - [x] Add real SQLite setup/refusal closure and locale-independent Node output regressions; observe failures before changing code.
 - [x] Close unsuccessful database setup, decode Node output explicitly, order fixture cleanups and normalize the expected CLI path.
-- [~] Run focused checks, cleanup-removal mutations and the documented full Windows suite; record skips and residue.
+- [x] Run focused checks, cleanup-removal mutations and the documented full Windows suite; record skips and residue.
 - [ ] Obtain read-only independent review and prepare the scoped LF-only code, tests, evidence and ticket for a normal branch commit and push; Aly alone accepts A0.
 
 ## Progress
