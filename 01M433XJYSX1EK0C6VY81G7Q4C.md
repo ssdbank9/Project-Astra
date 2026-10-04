@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T09:29:01Z
-updated-at: 2026-10-04T15:41:28Z
+updated-at: 2026-10-04T15:41:33Z
 updated-by: Codex
 claimed-by: X1CarbonPC-53068
 claimed-at: 2026-10-04T15:07:35Z
@@ -26,7 +26,8 @@ outcome-resolves: A bounded method for preventing silent discarded edits without
 
 ## Definition of Done
 
-- [ ] A Manager save that combines an actual ordinary edit with a protected status request fails atomically with a clear error; task, revision, events, requests and notifications remain unchanged.
+- [x] A Manager save that combines an actual ordinary edit with a protected status request fails atomically with a clear error; task, revision, events, requests and notifications remain unchanged.
+  proof: UpdateTaskContractTests.test_manager_mixed_status_request_refuses_without_any_database_write covers six fields and nine transitions with complete SQLite dump comparison.
 - [ ] Service tests cover all persisted ordinary fields, entering and leaving protected statuses, normalized unchanged form values, ordinary Manager edits and direct App Owner edits; read-only roles remain refused.
 - [ ] HTTP tests prove status 400 and no partial writes or requests; browser verification proves the entered form values remain available after refusal.
 - [ ] Removing the service guard makes the regression fail; focused and full Windows suite, LF and diff hygiene and independent review pass before publication.
