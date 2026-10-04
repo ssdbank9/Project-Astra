@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T09:29:01Z
-updated-at: 2026-10-04T15:09:08Z
+updated-at: 2026-10-04T15:41:09Z
 updated-by: Codex
 claimed-by: X1CarbonPC-53068
 claimed-at: 2026-10-04T15:07:35Z
@@ -38,7 +38,7 @@ outcome-resolves: A bounded method for preventing silent discarded edits without
 
 ## Plan
 
-- [ ] Reproduce discarded edits with failing service and HTTP tests; inspect existing form error handling.
+- [x] Reproduce discarded edits with failing service and HTTP tests; inspect existing form error handling.
 - [ ] Compare normalized persisted fields before either protected-request route; refuse mixed saves without writing.
 - [ ] Verify retained fields in a synthetic local browser and preserve dedicated lifecycle routes.
 - [ ] Obtain independent review, run guard-removal and full checks, document evidence and move to signoff with the scoped commit.
