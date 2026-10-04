@@ -23,7 +23,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T02:24:50Z
-updated-at: 2026-10-04T08:08:45Z
+updated-at: 2026-10-04T08:11:40Z
 updated-by: Codex
 claimed-by: X1CarbonPC-26304
 claimed-at: 2026-10-04T02:26:57Z
@@ -33,7 +33,8 @@ claimed-at: 2026-10-04T02:26:57Z
 
 ## Definition of Done
 
-- [ ] Node driver output is decoded explicitly as UTF-8 and the normal Windows run loads every intended UI class.
+- [x] Node driver output is decoded explicitly as UTF-8 and the normal Windows run loads every intended UI class.
+  proof: tests/test_web.py: all five subprocess capture sites use encoding=utf-8; AstraNodeEncodingTests passes and encoding-removal mutation fails; default full run executes UI classes.
 - [ ] Failed database connection setup closes the connection without modifying refused migration data; a regression fails when cleanup is removed.
 - [ ] Secondary test connections close before temporary directory removal; the affected interleaving and refusal tests pass without WinError 32.
 - [ ] Recovery commands still refuse missing databases without creating files; path assertions use resolved identity.
