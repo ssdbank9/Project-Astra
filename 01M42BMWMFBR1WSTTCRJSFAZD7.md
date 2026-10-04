@@ -23,7 +23,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T02:24:50Z
-updated-at: 2026-10-04T02:28:21Z
+updated-at: 2026-10-04T02:28:31Z
 updated-by: Codex
 claimed-by: X1CarbonPC-26304
 claimed-at: 2026-10-04T02:26:57Z
@@ -47,6 +47,12 @@ claimed-at: 2026-10-04T02:26:57Z
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
+
+- [ ] Reproduce the default-locale driver failure, migration-refusal leak, interleaving cleanup and missing-database path assertions.
+- [ ] Add real SQLite setup/refusal closure and locale-independent Node output regressions; observe failures before changing code.
+- [ ] Close unsuccessful database setup, decode Node output explicitly, order fixture cleanups and normalize the expected CLI path.
+- [ ] Run focused checks, cleanup-removal mutations and the documented full Windows suite; record skips and residue.
+- [ ] Obtain read-only independent review; stage scoped LF-only code, tests and ticket; commit and push on the named branch; stop for Aly acceptance.
 
 ## Progress
 
