@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T09:29:01Z
-updated-at: 2026-10-04T18:18:11Z
+updated-at: 2026-10-04T18:18:16Z
 updated-by: Codex
 claimed-by: X1CarbonPC-53068
 claimed-at: 2026-10-04T15:07:35Z
@@ -45,7 +45,7 @@ outcome-resolves: A bounded method for preventing silent discarded edits without
 - [x] Reproduce discarded edits with failing service and HTTP tests; inspect existing form error handling.
 - [x] Compare normalized persisted fields before either protected-request route; refuse mixed saves without writing.
 - [x] Verify retained fields in a synthetic local browser and preserve dedicated lifecycle routes.
-- [~] Obtain independent review, run guard-removal and full checks, document evidence and move to signoff with the scoped commit.
+- [x] Obtain independent review, run guard-removal and full checks, document evidence and move to signoff with the scoped commit.
 
 ## Progress
 - **2026-10-04 15:09 · Codex** — Use the existing update_task service seam and compare normalized persisted fields before both protected-request routes. A full form with unchanged fields remains a status-only request. Return ValueError so the existing HTTP 400 form error handling retains inputs. Preserve dedicated lifecycle actions and direct App Owner writes. No schema or UI redesign is required.
