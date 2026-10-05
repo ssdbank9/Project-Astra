@@ -16,7 +16,7 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-05T18:24:34Z
+updated-at: 2026-10-05T18:24:40Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
@@ -46,7 +46,8 @@ outcome-resolves: Makes Z72D79 ready for implementation without changing behavio
   proof: _project_setting_event and _app_setting_event define before/after detail JSON; reopen notification policy recorded in ticket note
 - [x] Add transactional audit coverage to project calendar, holidays, budget, entity links/primary entity, entity active state and import template configuration writes.
   proof: set_working_days, add/remove_holiday, set_project_budget, set_project_entities, set_primary_entity, set_entity_active and set_import_template_config now write audit records
-- [ ] Add owner-only project reopen with a required reason, project history event and notifications to the other active owners; expose the service and HTTP route.
+- [x] Add owner-only project reopen with a required reason, project history event and notifications to the other active owners; expose the service and HTTP route.
+  proof: AstraService.reopen_project, POST /api/projects/{id}/reopen, required reason, project_reopened event and owner notification
 - [ ] Show new project setting and reopen events in project Activity, and show app-wide setting history in People and access.
 - [ ] Add service, HTTP and UI tests for every setting path, reopen authorization/reason/notification, history visibility and no-write failures.
 - [ ] Run focused checks, guard-removal checks, the full Windows suite, diff hygiene and independent review; prepare the ticket for signoff.
