@@ -16,7 +16,7 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-05T17:16:34Z
+updated-at: 2026-10-05T17:17:19Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
@@ -39,6 +39,14 @@ outcome-resolves: Turns the backlog item into an implementation-ready plan witho
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
+
+- [ ] Inventory the existing project_events schema, history filters, notifications, settings write paths and closed-project UI/API.
+- [ ] Define event kinds and before/after detail shapes for project settings, app settings and project reopen; record why settings are history-only while reopen notifies other owners.
+- [ ] Add transactional audit coverage to project calendar, holidays, budget, entity links/primary entity, entity active state and import template configuration writes.
+- [ ] Add owner-only project reopen with a required reason, project history event and notifications to the other active owners; expose the service and HTTP route.
+- [ ] Show new project setting and reopen events in project Activity, and show app-wide setting history in People and access.
+- [ ] Add service, HTTP and UI tests for every setting path, reopen authorization/reason/notification, history visibility and no-write failures.
+- [ ] Run focused checks, guard-removal checks, the full Windows suite, diff hygiene and independent review; prepare the ticket for signoff.
 
 ## Progress
 - **2026-09-24 19:18 · Claude** — Filed by Claude 2026-09-24 under write lock #7 at Aly's request (ts 1790276936.363329). Nothing started; waits in backlog for Aly's answers to the open questions in the context.
