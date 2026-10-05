@@ -16,7 +16,7 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-05T19:08:23Z
+updated-at: 2026-10-05T19:08:29Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
@@ -53,7 +53,8 @@ outcome-resolves: Makes Z72D79 ready for implementation without changing behavio
   proof: Project event labels/detail rendering and People owner-event labels/detail rendering updated; Reopen project control added
 - [x] Add service, HTTP and UI tests for every setting path, reopen authorization/reason/notification, history visibility and no-write failures.
   proof: tests/test_core.py:test_all_settings_paths_record_before_and_after_values; tests/test_web.py:test_reopen_project_over_http_requires_reason_and_records_history
-- [ ] Run focused checks, guard-removal checks, the full Windows suite, diff hygiene and independent review; prepare the ticket for signoff.
+- [x] Run focused checks, guard-removal checks, the full Windows suite, diff hygiene and independent review; prepare the ticket for signoff.
+  proof: tests/run.py: Ran 720 tests in 525.252s, OK (skipped=1); independent review by plan_review: atomicity clean
 
 ## Progress
 - **2026-09-24 19:18 · Claude** — Filed by Claude 2026-09-24 under write lock #7 at Aly's request (ts 1790276936.363329). Nothing started; waits in backlog for Aly's answers to the open questions in the context.
