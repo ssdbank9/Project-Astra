@@ -16,7 +16,7 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-05T17:17:37Z
+updated-at: 2026-10-05T17:18:24Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
@@ -51,3 +51,4 @@ outcome-resolves: Makes Z72D79 ready for implementation without changing behavio
 ## Progress
 - **2026-09-24 19:18 · Claude** — Filed by Claude 2026-09-24 under write lock #7 at Aly's request (ts 1790276936.363329). Nothing started; waits in backlog for Aly's answers to the open questions in the context.
 - **2026-10-05 17:15 · Aly Jafferani** — Owner decisions already settled: any active Owner, including primary and secondary owners, may reopen a closed project; reopen requires a reason, is audited and notifies the other owners. Settings changes are recorded in history; app-wide settings history appears in People/access and project settings history appears in project Activity. Reopen notifications follow existing project-change notification behavior.
+- **2026-10-05 17:18 · Aly Jafferani** — Inventory findings: project_events already stores project_id, event_type, actor, occurred_at, reason and detail_json; _project_event can notify other owners. project_events currently expose only project_schedule_changed and project_closed to non-managers. People history currently reads user_events for owner access. set_import_template_config already uses BEGIN IMMEDIATE but stores only current config/version, so app-wide history needs a separate history record or table. close_project has no reverse service/API/UI path.
