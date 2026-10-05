@@ -16,7 +16,7 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-05T17:18:24Z
+updated-at: 2026-10-05T18:24:23Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
@@ -40,7 +40,8 @@ outcome-resolves: Makes Z72D79 ready for implementation without changing behavio
 
 <Steps, in order — filled in by the pre-process step, or by you.>
 
-- [ ] Inventory the existing project_events schema, history filters, notifications, settings write paths and closed-project UI/API.
+- [x] Inventory the existing project_events schema, history filters, notifications, settings write paths and closed-project UI/API.
+  proof: Inventory recorded in ticket note; service.py, web.py, db.py and app.js paths inspected
 - [ ] Define event kinds and before/after detail shapes for project settings, app settings and project reopen; record why settings are history-only while reopen notifies other owners.
 - [ ] Add transactional audit coverage to project calendar, holidays, budget, entity links/primary entity, entity active state and import template configuration writes.
 - [ ] Add owner-only project reopen with a required reason, project history event and notifications to the other active owners; expose the service and HTTP route.
