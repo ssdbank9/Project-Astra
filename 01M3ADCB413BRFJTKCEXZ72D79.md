@@ -1,7 +1,7 @@
 ---
 id: 01M3ADCB413BRFJTKCEXZ72D79
 title: Record settings changes and let owners reopen a closed project
-status: pre-process
+status: in-progress
 ready: true
 creator: Claude
 assignee: Aly Jafferani
@@ -16,13 +16,13 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-05T17:17:19Z
+updated-at: 2026-10-05T17:17:37Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
-outcome-what: "Decisions are settled; map settings write paths, project history visibility, and closed-project lifecycle before implementation."
-outcome-why: "Aly selected owner reopen with reason and notification, settings audit history, and separate project/People history locations."
-outcome-resolves: Turns the backlog item into an implementation-ready plan without changing product behavior yet.
+outcome-what: "Plan completed: inventory, event design, transactional settings audit, owner reopen route, history UI, tests and independent verification."
+outcome-why: "Existing project_events and owner-notice infrastructure can support the selected decisions; the plan closes the ticket's prior ambiguity."
+outcome-resolves: Makes Z72D79 ready for implementation without changing behavior yet.
 ---
 
 # Record settings changes and let owners reopen a closed project
