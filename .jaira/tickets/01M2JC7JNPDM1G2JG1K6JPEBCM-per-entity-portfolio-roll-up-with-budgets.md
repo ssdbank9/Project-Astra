@@ -17,9 +17,9 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T11:11:29Z
-updated-at: 2026-09-20T03:10:12Z
-claimed-by: X1CarbonPC-37316
-claimed-at: 2026-09-15T11:56:49Z
+updated-at: 2026-10-05T14:51:20Z
+claimed-by: X1CarbonPC-59324
+claimed-at: 2026-10-05T14:35:18Z
 updated-by: Aly Jafferani
 outcome-what: Per-entity portfolio roll-up (open/overdue/critical + per-currency budget totals) with project budgets (amount+currency) and a primary-entity flag so cross-entity projects count once; Portfolio dialog + budget controls; 4 new tests (76 total).
 outcome-why: Owner asked (from Asana-forum review) for a per-entity portfolio roll-up with budgets summing into one entity budget.
@@ -58,3 +58,5 @@ review-check: "Read set_project_budget, set_primary_entity, _rollup_entity_id, p
 - **2026-09-15 18:32 · Aly Jafferani** — OWNER ACCEPTED (2026-09-15): no-primary multi-entity project -> Unassigned bucket (shown, not counted); planned-only budget; per-currency subtotals never blended. Proceeding to model review.
 - **2026-09-19 06:14 · Aly Jafferani** — HANDOFF 2026-09-19 (Claude->Codex): see astra_project_tracker/CODEX_HANDOFF_2026-09-19.md. PARKED in signoff - waiting on the App Owner. Verdict: pass-with-notes. Owner question: multi-entity project with no primary -> Unassigned bucket (shown, not counted) - OK, or default to first-listed entity? Budget planned-only - want actual/spent next?
 - **2026-09-20 03:10 · Aly Jafferani** — Owner decision 2026-09-20: keep a multi-entity project with no primary entity in a visible Unassigned bucket; never default to the first-listed entity. Production budgets include planned, committed and actual/spent amounts with explicit variance; never blend currencies.
+- **2026-10-05 14:38 · Aly Jafferani** — Confirmed medium gap and fixed it: set_project_entities now clears primary_entity_id atomically when re-filing removes that linked entity; added regression coverage in tests/test_core.py. Focused tests pass (3, OK). Ticket remains in signoff pending Aly acceptance.
+- **2026-10-05 14:51 · Aly Jafferani** — Closed adjacent race: set_primary_entity now validates linked membership and writes primary_entity_id inside BEGIN IMMEDIATE; added transaction-order guard test. Focused tests pass (4, OK). Full suite after atomic code: 715 tests, OK (skipped=1); guard test was added afterward and passes.

@@ -532,6 +532,39 @@ class AstraCoreTests(unittest.TestCase):
         self.service.set_project_entities(self.owner, project["id"], [entities["RDI Pakistan"]])
         self.assertEqual([e["name"] for e in self.service.list_project_entities(self.owner, project["id"])], ["RDI Pakistan"])
 
+    def test_refiling_clears_primary_entity_when_link_is_removed(self):
+        self.service.seed_default_entities(self.owner)
+        entities = {e["name"]: e["id"] for e in self.service.list_entities(self.owner)}
+        project = self.service.create_project(self.owner, "Refile primary")
+        self.service.set_project_entities(
+            self.owner, project["id"], [entities["RDI - Global"], entities["RDI Pakistan"]]
+        )
+        self.service.set_primary_entity(self.owner, project["id"], entities["RDI - Global"])
+
+        self.service.set_project_entities(self.owner, project["id"], [entities["RDI Pakistan"]])
+
+        self.assertIsNone(self.service.get_project(self.owner, project["id"])["primary_entity_id"])
+        with self.assertRaisesRegex(ValueError, "primary entity"):
+            self.service.set_primary_entity(self.owner, project["id"], entities["RDI - Global"])
+
+    def test_primary_entity_membership_check_runs_inside_write_transaction(self):
+        self.service.seed_default_entities(self.owner)
+        entity_id = next(e["id"] for e in self.service.list_entities(self.owner))
+        project = self.service.create_project(self.owner, "Atomic primary")
+        self.service.set_project_entities(self.owner, project["id"], [entity_id])
+        statements = []
+        self.db.set_trace_callback(statements.append)
+        self.addCleanup(lambda: self.db.set_trace_callback(None))
+
+        self.service.set_primary_entity(self.owner, project["id"], entity_id)
+
+        begin = next(i for i, statement in enumerate(statements) if statement.startswith("BEGIN IMMEDIATE"))
+        membership = next(
+            i for i, statement in enumerate(statements)
+            if "FROM project_entities" in statement and "project_id" in statement
+        )
+        self.assertLess(begin, membership)
+
     def test_owner_notified_of_other_users_changes_idempotently(self):
         project = self.service.create_project(self.owner, "Notify")
         manager = self.service.create_user(self.owner, "n@example.org", "Manager", "manager password ok")

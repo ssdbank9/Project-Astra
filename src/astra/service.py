@@ -827,6 +827,15 @@ class AstraService:
                     raise ValueError("Unknown entity.")
                 self.db.execute("INSERT INTO project_entities VALUES(?,?)", (project_id, entity_id))
                 seen.append(entity_id)
+            # A primary entity must always remain one of the project's linked
+            # entities. Re-filing a project can remove the current primary;
+            # clear it atomically so roll-ups cannot point at an unlinked entity.
+            self.db.execute(
+                "UPDATE projects SET primary_entity_id=NULL "
+                "WHERE id=? AND primary_entity_id IS NOT NULL "
+                "AND primary_entity_id NOT IN (SELECT entity_id FROM project_entities WHERE project_id=?)",
+                (project_id, project_id),
+            )
         return self.list_project_entities(actor, project_id)
 
     def list_project_entities(self, actor: dict, project_id: str) -> list[dict]:
@@ -985,11 +994,13 @@ class AstraService:
         self.require_owner(actor)
         self._require_project(project_id)
         entity_id = entity_id or None
-        if entity_id:
-            linked = {e["id"] for e in self.list_project_entities(actor, project_id)}
-            if entity_id not in linked:
+        with transaction(self.db):
+            if entity_id and not self.db.execute(
+                "SELECT 1 FROM project_entities WHERE project_id=? AND entity_id=?",
+                (project_id, entity_id),
+            ).fetchone():
                 raise ValueError("The primary entity must be one of the project's entities.")
-        self.db.execute("UPDATE projects SET primary_entity_id=? WHERE id=?", (entity_id, project_id))
+            self.db.execute("UPDATE projects SET primary_entity_id=? WHERE id=?", (entity_id, project_id))
         return self.get_project(actor, project_id)
 
     def _rollup_entity_id(self, project: dict):
