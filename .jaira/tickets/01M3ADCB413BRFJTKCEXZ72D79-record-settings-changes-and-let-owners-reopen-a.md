@@ -1,7 +1,7 @@
 ---
 id: 01M3ADCB413BRFJTKCEXZ72D79
 title: Record settings changes and let owners reopen a closed project
-status: in-progress
+status: human
 ready: true
 creator: Claude
 assignee: Aly Jafferani
@@ -16,13 +16,18 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-05T19:08:29Z
+updated-at: 2026-10-05T19:36:15Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
-outcome-what: "Plan completed: inventory, event design, transactional settings audit, owner reopen route, history UI, tests and independent verification."
-outcome-why: "Existing project_events and owner-notice infrastructure can support the selected decisions; the plan closes the ticket's prior ambiguity."
-outcome-resolves: Makes Z72D79 ready for implementation without changing behavior yet.
+outcome-what: "Independent review completed; implementation is ready for Aly's human acceptance with browser checks called out."
+outcome-why: "Full suite passed and the read-only review found no atomicity defect; remaining browser and role-notice verification is explicitly disclosed."
+outcome-resolves: Moves Z72D79 to Aly for acceptance.
+review-summary: "The diff adds transactional before/after audit events for project calendar, holidays, budget, entity links and primary entity, plus app entity-active and import-template settings. It adds owner/Chairman reopen with a required reason, project history and owner notices, an HTTP route, Activity/People history rendering, and tests; the full suite reports 720 tests OK with one skip."
+review-gaps: "The source is atomic and the focused/full tests pass. Browser acceptance of the new reopen control and rendered Settings history is unverified, and the added HTTP test covers owner reopen rather than Chairman HTTP reopen or notification recipients directly."
+review-verdict: "Conditional approval for Aly: implementation is ready for human review; browser acceptance and the remaining role/notice checks should be confirmed before signoff."
+review-check: "1. Run .venv\\\\Scripts\\\\python.exe tests\\\\run.py. 2. Confirm the output ends with Ran 720 tests and OK (skipped=1). 3. Log in as an active owner, close a project, reopen it with a reason, and open Activity. 4. Confirm project_reopened shows the actor, reason and before/after status. 5. Open People & access and confirm Settings history is separate from Owner access history. 6. Repeat reopen as the Chairman and confirm it succeeds with a reason."
+question: "Aly: please perform the browser acceptance steps in review-check, especially owner and Chairman reopen, Activity history, and separate People Settings history; then accept or return the ticket."
 ---
 
 # Record settings changes and let owners reopen a closed project
