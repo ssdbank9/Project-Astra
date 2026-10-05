@@ -1,7 +1,7 @@
 ---
 id: 01M3ADCB413BRFJTKCEXZ72D79
 title: Record settings changes and let owners reopen a closed project
-status: review
+status: human
 ready: true
 creator: Claude
 assignee: Aly Jafferani
@@ -16,7 +16,7 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-05T19:35:51Z
+updated-at: 2026-10-05T19:36:15Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
@@ -27,6 +27,7 @@ review-summary: "The diff adds transactional before/after audit events for proje
 review-gaps: "The source is atomic and the focused/full tests pass. Browser acceptance of the new reopen control and rendered Settings history is unverified, and the added HTTP test covers owner reopen rather than Chairman HTTP reopen or notification recipients directly."
 review-verdict: "Conditional approval for Aly: implementation is ready for human review; browser acceptance and the remaining role/notice checks should be confirmed before signoff."
 review-check: "1. Run .venv\\\\Scripts\\\\python.exe tests\\\\run.py. 2. Confirm the output ends with Ran 720 tests and OK (skipped=1). 3. Log in as an active owner, close a project, reopen it with a reason, and open Activity. 4. Confirm project_reopened shows the actor, reason and before/after status. 5. Open People & access and confirm Settings history is separate from Owner access history. 6. Repeat reopen as the Chairman and confirm it succeeds with a reason."
+question: "Aly: please perform the browser acceptance steps in review-check, especially owner and Chairman reopen, Activity history, and separate People Settings history; then accept or return the ticket."
 ---
 
 # Record settings changes and let owners reopen a closed project
