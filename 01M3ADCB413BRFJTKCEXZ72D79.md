@@ -16,7 +16,7 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-05T19:34:48Z
+updated-at: 2026-10-05T19:35:26Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
@@ -25,6 +25,7 @@ outcome-why: "Full suite passed and the read-only review found no atomicity defe
 outcome-resolves: Moves Z72D79 to Aly for acceptance.
 review-summary: "The diff adds transactional before/after audit events for project calendar, holidays, budget, entity links and primary entity, plus app entity-active and import-template settings. It adds owner/Chairman reopen with a required reason, project history and owner notices, an HTTP route, Activity/People history rendering, and tests; the full suite reports 720 tests OK with one skip."
 review-gaps: "The source is atomic and the focused/full tests pass. Browser acceptance of the new reopen control and rendered Settings history is unverified, and the added HTTP test covers owner reopen rather than Chairman HTTP reopen or notification recipients directly."
+review-verdict: "Conditional approval for Aly: implementation is ready for human review; browser acceptance and the remaining role/notice checks should be confirmed before signoff."
 ---
 
 # Record settings changes and let owners reopen a closed project
