@@ -16,7 +16,7 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-05T18:25:23Z
+updated-at: 2026-10-05T19:08:09Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
@@ -29,7 +29,8 @@ outcome-resolves: Makes Z72D79 ready for implementation without changing behavio
 
 ## Definition of Done
 
-- [ ] Each listed settings change writes an audit row with actor, time and before/after values, shown in the relevant history; an owner (as Aly decides) can reopen a closed project with a required reason, recorded and notified; tests for each change and for reopen; existing tests green.
+- [x] Each listed settings change writes an audit row with actor, time and before/after values, shown in the relevant history; an owner (as Aly decides) can reopen a closed project with a required reason, recorded and notified; tests for each change and for reopen; existing tests green.
+  proof: tests/test_core.py:test_project_settings_are_audited_and_closed_project_can_reopen; tests/run.py (720 tests, OK)
 
 ## Options
 
