@@ -1,7 +1,7 @@
 ---
 id: 01M2JC7JNPDM1G2JG1K6JPEBCM
 title: Per-entity portfolio roll-up with budgets
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Aly Jafferani
@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T11:11:29Z
-updated-at: 2026-10-05T14:51:20Z
+updated-at: 2026-10-05T16:46:54Z
 claimed-by: X1CarbonPC-59324
 claimed-at: 2026-10-05T14:35:18Z
 updated-by: Aly Jafferani
