@@ -1,7 +1,7 @@
 ---
 id: 01M3ADCB413BRFJTKCEXZ72D79
 title: Record settings changes and let owners reopen a closed project
-status: in-progress
+status: review
 ready: true
 creator: Claude
 assignee: Aly Jafferani
@@ -16,13 +16,13 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-05T19:08:29Z
+updated-at: 2026-10-05T19:32:55Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
-outcome-what: "Plan completed: inventory, event design, transactional settings audit, owner reopen route, history UI, tests and independent verification."
-outcome-why: "Existing project_events and owner-notice infrastructure can support the selected decisions; the plan closes the ticket's prior ambiguity."
-outcome-resolves: Makes Z72D79 ready for implementation without changing behavior yet.
+outcome-what: "Implemented transactional audits for all listed settings, separate app/project history views, and owner/Chairman project reopen with required reason, history and notices."
+outcome-why: "The full repository suite passes and an independent read-only review found no atomicity defect; remaining verification is the review lane's final assessment."
+outcome-resolves: Z72D79 implementation and verification are complete and ready for independent review.
 ---
 
 # Record settings changes and let owners reopen a closed project
