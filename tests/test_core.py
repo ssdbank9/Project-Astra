@@ -1307,6 +1307,54 @@ class AstraCoreTests(unittest.TestCase):
         with self.assertRaises(Forbidden):
             self.service.add_holiday(member, p["id"], "2026-12-25", "Xmas")
 
+    def test_project_settings_are_audited_and_closed_project_can_reopen(self):
+        project = self.service.create_project(self.owner, "Settings history")
+        self.service.set_working_days(self.owner, project["id"], "01234")
+        self.service.set_project_budget(self.owner, project["id"], 100, "PKR")
+        self.service.close_project(self.owner, project["id"], "Finished review")
+        with self.assertRaisesRegex(ValueError, "reason"):
+            self.service.reopen_project(self.owner, project["id"], "")
+
+        reopened = self.service.reopen_project(self.owner, project["id"], "Correction required")
+
+        self.assertEqual(reopened["status"], "active")
+        kinds = [event["event_type"] for event in self.service.project_events(self.owner, project["id"])]
+        self.assertIn("project_working_days_changed", kinds)
+        self.assertIn("project_budget_changed", kinds)
+        self.assertIn("project_closed", kinds)
+        self.assertIn("project_reopened", kinds)
+
+    def test_chairman_can_reopen_a_closed_project_with_a_reason(self):
+        chairman = self.service.create_user(
+            self.owner, "reopen-chair@example.org", "Chairman", "chairman password safe", "chairman"
+        )
+        project = self.service.create_project(self.owner, "Chairman reopen")
+        self.service.close_project(self.owner, project["id"], "Finished review")
+        reopened = self.service.reopen_project(chairman, project["id"], "Chairman approved correction")
+        self.assertEqual(reopened["status"], "active")
+        event = self.service.project_events(self.owner, project["id"])[-1]
+        self.assertEqual(event["event_type"], "project_reopened")
+        self.assertEqual(event["actor_user_id"], chairman["id"])
+
+    def test_all_settings_paths_record_before_and_after_values(self):
+        self.service.seed_default_entities(self.owner)
+        entities = self.service.list_entities(self.owner)
+        project = self.service.create_project(self.owner, "All settings history")
+        self.service.set_project_entities(self.owner, project["id"], [entities[0]["id"]])
+        self.service.set_primary_entity(self.owner, project["id"], entities[0]["id"])
+        self.service.add_holiday(self.owner, project["id"], "2026-12-25", "Holiday")
+        self.service.remove_holiday(self.owner, project["id"], "2026-12-25")
+        self.service.set_entity_active(self.owner, entities[0]["id"], False)
+        self.service.set_import_template_config(self.owner, {"preset": "simple"})
+        project_events = self.service.project_events(self.owner, project["id"])
+        self.assertTrue(all(event["actor_user_id"] and event["occurred_at"] for event in project_events))
+        self.assertTrue(any(event["event_type"] == "project_holiday_changed" for event in project_events))
+        self.assertTrue(any(event["event_type"] == "project_entities_changed" for event in project_events))
+        self.assertTrue(any(event["event_type"] == "project_primary_entity_changed" for event in project_events))
+        app_events = self.service.list_user_events(self.owner)
+        self.assertTrue(any(event["event_type"] == "entity_active_changed" for event in app_events))
+        self.assertTrue(any(event["event_type"] == "import_template_config_changed" for event in app_events))
+
     def test_budget_rollup_counts_cross_entity_once_and_sums_per_currency(self):
         self.service.seed_default_entities(self.owner)
         ents = {e["name"]: e["id"] for e in self.service.list_entities(self.owner)}

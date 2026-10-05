@@ -511,6 +511,9 @@ class AstraHandler(BaseHTTPRequestHandler):
                     user, project_id, payload.get("note", ""), bool(payload.get("exceptional"))
                 )
                 return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json({"project": outcome})
+            if path.startswith("/api/projects/") and path.endswith("/reopen"):
+                project_id = path.split("/")[3]
+                return self._json({"project": self.service.reopen_project(user, project_id, payload.get("reason", ""))})
             if path.startswith("/api/tasks/") and path.count("/") == 3:
                 task_id = path.split("/")[3]
                 outcome = self.service.update_task(user, task_id, payload)

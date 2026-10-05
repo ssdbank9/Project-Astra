@@ -797,9 +797,13 @@ class AstraService:
 
     def set_entity_active(self, actor: dict, entity_id: str, active: bool) -> dict:
         self.require_owner(actor)
-        self.get_entity(entity_id)
-        self.db.execute("UPDATE entities SET active=? WHERE id=?", (1 if active else 0, entity_id))
-        return self.get_entity(entity_id)
+        with transaction(self.db):
+            before = self.get_entity(entity_id)
+            self.db.execute("UPDATE entities SET active=? WHERE id=?", (1 if active else 0, entity_id))
+            after = self.get_entity(entity_id)
+            self._app_setting_event(actor, "entity_active_changed", {"entity_id": entity_id, "active": bool(before["active"])},
+                                    {"entity_id": entity_id, "active": bool(after["active"])})
+        return after
 
     def seed_default_entities(self, actor: dict) -> list[str]:
         self.require_owner(actor)
@@ -819,6 +823,8 @@ class AstraService:
         self._require_project(project_id)
         seen = []
         with transaction(self.db):
+            before = [r["id"] for r in self.db.execute("SELECT entity_id AS id FROM project_entities WHERE project_id=?", (project_id,)).fetchall()]
+            current = self.db.execute("SELECT primary_entity_id FROM projects WHERE id=?", (project_id,)).fetchone()
             self.db.execute("DELETE FROM project_entities WHERE project_id=?", (project_id,))
             for entity_id in entity_ids or []:
                 if entity_id in seen:
@@ -836,7 +842,14 @@ class AstraService:
                 "AND primary_entity_id NOT IN (SELECT entity_id FROM project_entities WHERE project_id=?)",
                 (project_id, project_id),
             )
-        return self.list_project_entities(actor, project_id)
+            after_ids = [r["entity_id"] for r in self.db.execute("SELECT entity_id FROM project_entities WHERE project_id=?", (project_id,)).fetchall()]
+            after_primary = self.db.execute("SELECT primary_entity_id FROM projects WHERE id=?", (project_id,)).fetchone()["primary_entity_id"]
+            if before != after_ids or current["primary_entity_id"] != after_primary:
+                self._project_setting_event(actor, project_id, "project_entities_changed",
+                                            {"entity_ids": before, "primary_entity_id": current["primary_entity_id"]},
+                                            {"entity_ids": after_ids, "primary_entity_id": after_primary})
+        after = self.list_project_entities(actor, project_id)
+        return after
 
     def list_project_entities(self, actor: dict, project_id: str) -> list[dict]:
         self.get_project(actor, project_id)
@@ -909,7 +922,11 @@ class AstraService:
         cleaned = "".join(sorted({c for c in str(days) if c in "0123456"}))
         if not cleaned:
             raise ValueError("At least one working day is required.")
-        self.db.execute("UPDATE projects SET working_days=? WHERE id=?", (cleaned, project_id))
+        with transaction(self.db):
+            before = self.db.execute("SELECT working_days FROM projects WHERE id=?", (project_id,)).fetchone()["working_days"]
+            self.db.execute("UPDATE projects SET working_days=? WHERE id=?", (cleaned, project_id))
+            if before != cleaned:
+                self._project_setting_event(actor, project_id, "project_working_days_changed", {"working_days": before}, {"working_days": cleaned})
         return cleaned
 
     def list_holidays(self, actor: dict, project_id: str) -> list[dict]:
@@ -925,18 +942,26 @@ class AstraService:
         day = self._date(holiday_date)
         if not day:
             raise ValueError("A holiday date is required.")
-        self.db.execute(
-            "INSERT OR REPLACE INTO project_holidays(project_id,holiday_date,label,created_by,created_at)"
-            " VALUES(?,?,?,?,?)",
-            (project_id, day, str(label).strip(), actor["id"], now_text()),
-        )
+        with transaction(self.db):
+            before = self.db.execute("SELECT label FROM project_holidays WHERE project_id=? AND holiday_date=?", (project_id, day)).fetchone()
+            self.db.execute(
+                "INSERT OR REPLACE INTO project_holidays(project_id,holiday_date,label,created_by,created_at)"
+                " VALUES(?,?,?,?,?)",
+                (project_id, day, str(label).strip(), actor["id"], now_text()),
+            )
+            after = {"date": day, "label": str(label).strip()}
+            self._project_setting_event(actor, project_id, "project_holiday_changed",
+                                        {"date": day, "label": before["label"] if before else None}, after)
         return self.list_holidays(actor, project_id)
 
     def remove_holiday(self, actor: dict, project_id: str, holiday_date) -> None:
         self.require_owner(actor)
-        self.db.execute(
-            "DELETE FROM project_holidays WHERE project_id=? AND holiday_date=?", (project_id, self._date(holiday_date))
-        )
+        day = self._date(holiday_date)
+        with transaction(self.db):
+            before = self.db.execute("SELECT label FROM project_holidays WHERE project_id=? AND holiday_date=?", (project_id, day)).fetchone()
+            self.db.execute("DELETE FROM project_holidays WHERE project_id=? AND holiday_date=?", (project_id, day))
+            if before:
+                self._project_setting_event(actor, project_id, "project_holiday_changed", {"date": day, "label": before["label"]}, {"date": day, "label": None})
 
     # --- Budgets and per-entity portfolio roll-up ---
 
@@ -950,10 +975,15 @@ class AstraService:
             if amount < 0:
                 raise ValueError("Budget cannot be negative.")
         currency = (str(currency).strip().upper() or "PKR")
-        self.db.execute(
-            "UPDATE projects SET budget_amount=?, budget_currency=? WHERE id=?", (amount, currency, project_id)
-        )
-        return self.get_project(actor, project_id)
+        with transaction(self.db):
+            before = self.db.execute("SELECT budget_amount,budget_currency FROM projects WHERE id=?", (project_id,)).fetchone()
+            self.db.execute("UPDATE projects SET budget_amount=?, budget_currency=? WHERE id=?", (amount, currency, project_id))
+            after = self.get_project(actor, project_id)
+            if before["budget_amount"] != after["budget_amount"] or before["budget_currency"] != after["budget_currency"]:
+                self._project_setting_event(actor, project_id, "project_budget_changed",
+                                            {"amount": before["budget_amount"], "currency": before["budget_currency"]},
+                                            {"amount": after["budget_amount"], "currency": after["budget_currency"]})
+        return after
 
     def set_project_schedule(self, actor: dict, project_id: str, start_date, target_date, reason: str = "") -> dict:
         # Project dates are informational — recorded and change-logged, never a
@@ -995,13 +1025,18 @@ class AstraService:
         self._require_project(project_id)
         entity_id = entity_id or None
         with transaction(self.db):
+            before = self.db.execute("SELECT primary_entity_id FROM projects WHERE id=?", (project_id,)).fetchone()["primary_entity_id"]
             if entity_id and not self.db.execute(
                 "SELECT 1 FROM project_entities WHERE project_id=? AND entity_id=?",
                 (project_id, entity_id),
             ).fetchone():
                 raise ValueError("The primary entity must be one of the project's entities.")
             self.db.execute("UPDATE projects SET primary_entity_id=? WHERE id=?", (entity_id, project_id))
-        return self.get_project(actor, project_id)
+            if before != entity_id:
+                self._project_setting_event(actor, project_id, "project_primary_entity_changed",
+                                            {"primary_entity_id": before}, {"primary_entity_id": entity_id})
+        after = self.get_project(actor, project_id)
+        return after
 
     def _rollup_entity_id(self, project: dict):
         # A project's budget/tasks roll up to its primary entity; if none is set but the
@@ -4408,6 +4443,30 @@ class AstraService:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def reopen_project(self, actor: dict, project_id: str, reason: str = "") -> dict:
+        if not actor.get("active") or actor.get("global_role") not in {"owner", "chairman"}:
+            raise Forbidden("Owner or Chairman access required.")
+        reason = str(reason).strip()
+        if not reason:
+            raise ValueError("A reason is required to reopen a project.")
+        with transaction(self.db):
+            current = row_dict(self.db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
+            if not current:
+                raise KeyError("Project not found.")
+            if current["status"] != "closed":
+                raise ValueError("This project is not closed.")
+            self.db.execute(
+                "UPDATE projects SET status='active', closed_at=NULL, closed_by=NULL, closure_note=NULL, "
+                "closure_is_exceptional=0 WHERE id=? AND status='closed'", (project_id,)
+            )
+            self._project_event(
+                project_id, actor["id"], "project_reopened",
+                {"before": {"status": "closed", "closure_note": current.get("closure_note")},
+                 "after": {"status": "active"}}, reason,
+                notice=f"project reopened: {current['name']} · by {self._actor_name(actor)}",
+            )
+        return self.get_project(actor, project_id)
+
     def close_project(self, actor: dict, project_id: str, note: str = "", exceptional: bool = False,
         *, owner_decision: OwnerDecision | None = None,
     ) -> dict:
@@ -4494,7 +4553,7 @@ class AstraService:
     # ZSZ9T2/K62ZAP (Aly, 2026-09-24): the Owner, the Chairman and project managers read
     # full history. Anyone else who can view the project reads only these kinds plus rows
     # they wrote themselves. Allow-lists, so a new kind stays hidden from them by default.
-    NON_MANAGER_PROJECT_EVENT_KINDS = ("project_schedule_changed", "project_closed")
+    NON_MANAGER_PROJECT_EVENT_KINDS = ("project_schedule_changed", "project_closed", "project_reopened")
     NON_MANAGER_TASK_EVENT_KINDS = (
         "task_created", "task_updated", "criticality_changed", "parent_changed", "dependency_added",
         "dependency_removed", "task_submitted", "submission_accepted", "changes_requested", "task_reopened",
@@ -4534,7 +4593,16 @@ class AstraService:
         if notice:
             # XX9RFM (Aly, 2026-09-24): project closes and date changes reach every other
             # active owner, like task changes. Ordinary notices, so the KBWY86 cap does not apply.
-            self._notify_owners(actor_id, event_id, None, kind, notice)
+                self._notify_owners(actor_id, event_id, None, kind, notice)
+
+    def _project_setting_event(self, actor: dict, project_id: str, kind: str,
+                               before: dict, after: dict, reason: str | None = None) -> None:
+        self._project_event(project_id, actor["id"], kind,
+                            {"before": before, "after": after}, reason)
+
+    def _app_setting_event(self, actor: dict, kind: str, before: dict, after: dict) -> str:
+        return self._insert_user_event(actor["id"], kind, actor["id"], None,
+                                       {"before": before, "after": after, "scope": "app"})
 
     def _actor_name(self, actor: dict) -> str:
         return actor.get("display_name") or actor["id"]
@@ -5010,6 +5078,7 @@ class AstraService:
         else:
             config = importer.TemplateConfig.normalize(payload.get("columns", []))
         with transaction(self.db):
+            before = self._import_config().to_dict()
             row = self.db.execute("SELECT version FROM import_template_config WHERE id=1").fetchone()
             version = (row["version"] if row else 0) + 1
             self.db.execute(
@@ -5018,6 +5087,7 @@ class AstraService:
                 " updated_at=excluded.updated_at, updated_by=excluded.updated_by",
                 (version, config.to_json(), now_text(), actor["id"]),
             )
+            self._app_setting_event(actor, "import_template_config_changed", before, config.to_dict())
         return self.get_import_template_config(actor)
 
     def import_template(self, actor: dict, fmt: str, project_id: str | None = None) -> tuple[bytes, str, str]:

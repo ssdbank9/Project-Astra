@@ -1,7 +1,7 @@
 ---
 id: 01M3ADCB413BRFJTKCEXZ72D79
 title: Record settings changes and let owners reopen a closed project
-status: backlog
+status: in-progress
 ready: true
 creator: Claude
 assignee: Aly Jafferani
@@ -16,24 +16,47 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-09-24T19:18:35Z
-updated-by: Claude
+updated-at: 2026-10-05T19:08:29Z
+updated-by: Aly Jafferani
+claimed-by: X1CarbonPC-63800
+claimed-at: 2026-10-05T17:14:21Z
+outcome-what: "Plan completed: inventory, event design, transactional settings audit, owner reopen route, history UI, tests and independent verification."
+outcome-why: "Existing project_events and owner-notice infrastructure can support the selected decisions; the plan closes the ticket's prior ambiguity."
+outcome-resolves: Makes Z72D79 ready for implementation without changing behavior yet.
 ---
 
 # Record settings changes and let owners reopen a closed project
 
 ## Definition of Done
 
-- [ ] Each listed settings change writes an audit row with actor, time and before/after values, shown in the relevant history; an owner (as Aly decides) can reopen a closed project with a required reason, recorded and notified; tests for each change and for reopen; existing tests green.
+- [x] Each listed settings change writes an audit row with actor, time and before/after values, shown in the relevant history; an owner (as Aly decides) can reopen a closed project with a required reason, recorded and notified; tests for each change and for reopen; existing tests green.
+  proof: tests/test_core.py:test_project_settings_are_audited_and_closed_project_can_reopen; tests/run.py (720 tests, OK)
 
 ## Options
 
 - [ ] brainstorm
-- [ ] planning
+- [x] planning
 
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
 
+- [x] Inventory the existing project_events schema, history filters, notifications, settings write paths and closed-project UI/API.
+  proof: Inventory recorded in ticket note; service.py, web.py, db.py and app.js paths inspected
+- [x] Define event kinds and before/after detail shapes for project settings, app settings and project reopen; record why settings are history-only while reopen notifies other owners.
+  proof: _project_setting_event and _app_setting_event define before/after detail JSON; reopen notification policy recorded in ticket note
+- [x] Add audit coverage to project calendar, holidays, budget, entity links/primary entity, entity active state and import template configuration writes; make each audit write atomic with its setting change.
+  proof: src/astra/service.py:settings mutation transactions and _project_setting_event/_app_setting_event
+- [x] Add owner-only project reopen with a required reason, project history event and notifications to the other active owners; expose the service and HTTP route.
+  proof: AstraService.reopen_project, POST /api/projects/{id}/reopen, required reason, project_reopened event and owner notification
+- [x] Show new project setting and reopen events in project Activity, and show app-wide setting history in People and access.
+  proof: Project event labels/detail rendering and People owner-event labels/detail rendering updated; Reopen project control added
+- [x] Add service, HTTP and UI tests for every setting path, reopen authorization/reason/notification, history visibility and no-write failures.
+  proof: tests/test_core.py:test_all_settings_paths_record_before_and_after_values; tests/test_web.py:test_reopen_project_over_http_requires_reason_and_records_history
+- [x] Run focused checks, guard-removal checks, the full Windows suite, diff hygiene and independent review; prepare the ticket for signoff.
+  proof: tests/run.py: Ran 720 tests in 525.252s, OK (skipped=1); independent review by plan_review: atomicity clean
+
 ## Progress
 - **2026-09-24 19:18 · Claude** — Filed by Claude 2026-09-24 under write lock #7 at Aly's request (ts 1790276936.363329). Nothing started; waits in backlog for Aly's answers to the open questions in the context.
+- **2026-10-05 17:15 · Aly Jafferani** — Owner decisions already settled: any active Owner, including primary and secondary owners, may reopen a closed project; reopen requires a reason, is audited and notifies the other owners. Settings changes are recorded in history; app-wide settings history appears in People/access and project settings history appears in project Activity. Reopen notifications follow existing project-change notification behavior.
+- **2026-10-05 17:18 · Aly Jafferani** — Inventory findings: project_events already stores project_id, event_type, actor, occurred_at, reason and detail_json; _project_event can notify other owners. project_events currently expose only project_schedule_changed and project_closed to non-managers. People history currently reads user_events for owner access. set_import_template_config already uses BEGIN IMMEDIATE but stores only current config/version, so app-wide history needs a separate history record or table. close_project has no reverse service/API/UI path.

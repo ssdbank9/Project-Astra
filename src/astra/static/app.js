@@ -709,6 +709,7 @@ function renderProject(r){
   q("#project-capture").hidden=!p||p.status==="closed";
   q("#project-save-template").hidden=!p||!isOwner();
   q("#project-close").hidden=!p||!isOwner()||p.status==="closed";
+  q("#project-reopen").hidden=!p||!canReopenProject()||p.status!=="closed";
   slot.hidden=!p||!(r.tab==="list"||r.tab==="timeline");body.hidden=!slot.hidden;
   if(!p){
     q("#project-facts").textContent="";
@@ -1271,6 +1272,7 @@ document.querySelector("#project-close").addEventListener("click",()=>closeProje
 // VPYGY5: the Command Center. Everything is drawn from what is already loaded (tasks, projects, the Owner's
 // cached requests) plus /api/portfolio; each count links to the list behind it, and rows open the task panel.
 function isOwner(){return !!state.user&&state.user.global_role==="owner"}
+function canReopenProject(){return !!state.user&&["owner","chairman"].includes(state.user.global_role)}
 function isOpen(t){return !CLOSED_STATUSES.includes(t.status)}
 function hhmm(){return new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}
 function homeTiles(){
@@ -1426,6 +1428,13 @@ function signedOut(){state.user=state.csrf=null;location.replace(location.pathna
 document.querySelector("#logout").onclick=async()=>{await api("/api/logout",{method:"POST",body:"{}"});signedOut()};
 document.querySelector("#logout-all").onclick=async()=>{await api("/api/logout-all",{method:"POST",body:"{}"});signedOut()};
 document.querySelector("#close-project").onclick=()=>closeProject(document.querySelector("#project-filter").value);
+document.querySelector("#project-reopen").onclick=()=>reopenProject(currentRoute().id);
+async function reopenProject(pid){
+  const reason=prompt("Why should this closed project be reopened?","");
+  if(reason===null)return;
+  try{await api(`/api/projects/${pid}/reopen`,{method:"POST",body:JSON.stringify({reason})});await load();showToast("Project reopened.")}
+  catch(err){alert(err.message)}
+}
 async function closeProject(pid){
   if(!pid){alert("Select a single project in the filter to close it.");return}
   const note=prompt("Closure note (describe the outcome or any residual work):","");
@@ -1447,7 +1456,7 @@ document.querySelector("#portfolio-btn").onclick=openPortfolio;
 // 5WZ4A8: project history (schedule changes, closure, imports, owner-action decisions).
 // ZSZ9T2/K62ZAP: the server sends only schedule changes, closure and their own events to anyone
 // other than the Owner, the Chairman or a project manager.
-const PROJECT_EVENT_LABELS={board_reordered:"Board order changed",bulk_change:"Bulk change",bulk_change_undone:"Bulk change undone",wip_limit_changed:"Work-in-progress limit changed",wip_limit_override:"Work-in-progress limit overridden",project_schedule_changed:"Project dates changed",project_closed:"Project closed",import_committed:"Import committed",protected_action_blocked:"Owner action blocked",protected_action_approved:"Owner request approved",protected_action_rejected:"Owner request rejected",protected_action_cancelled:"Owner request cancelled"};
+const PROJECT_EVENT_LABELS={board_reordered:"Board order changed",bulk_change:"Bulk change",bulk_change_undone:"Bulk change undone",wip_limit_changed:"Work-in-progress limit changed",wip_limit_override:"Work-in-progress limit overridden",project_schedule_changed:"Project dates changed",project_closed:"Project closed",project_reopened:"Project reopened",project_working_days_changed:"Working days changed",project_holiday_changed:"Project holiday changed",project_budget_changed:"Project budget changed",project_entities_changed:"Project entities changed",project_primary_entity_changed:"Primary entity changed",import_committed:"Import committed",protected_action_blocked:"Owner action blocked",protected_action_approved:"Owner request approved",protected_action_rejected:"Owner request rejected",protected_action_cancelled:"Owner request cancelled"};
 document.querySelector("#project-history-btn").onclick=()=>{const pid=document.querySelector("#project-filter").value;if(pid)openProjectHistory(pid)};
 async function openProjectHistory(projectId){
   const body=document.querySelector("#project-history-body"),project=state.projects.find(p=>p.id===projectId)||{};
@@ -1474,6 +1483,7 @@ function renderProjectEvent(ev){
     const d=safeParse(ev.detail_json),n=(d.tasks||[]).length;
     detail=`<br>${n} task${n===1?"":"s"}: ${escapeHtml((d.tasks||[]).map(t=>t.title).join(", "))}`;
   }
+  if(!detail&&ev.detail_json){const d=safeParse(ev.detail_json),b=d.before,a=d.after;if(b&&a)detail=`<br>${escapeHtml(JSON.stringify(b))} → ${escapeHtml(JSON.stringify(a))}`;}
   if(ev.event_type==="wip_limit_changed"){const d=safeParse(ev.detail_json);detail=`<br>${escapeHtml(COL_LABEL[d.column]||d.column)}: ${escapeHtml(String(d.before??"none"))} → ${escapeHtml(String(d.after??"none"))}`}
   const reason=ev.reason?`<br><em>Reason: ${escapeHtml(ev.reason)}</em>`:"";
   return `<li><strong>${escapeHtml(label)}</strong> · ${escapeHtml(when)} · ${escapeHtml(who)}${reason}${detail}</li>`;
@@ -2390,7 +2400,7 @@ async function openPeople(){
 }
 
 // GTEYTG: every owner has role "owner"; only the primary owner may give or remove owner access.
-const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset"};
+const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset",entity_active_changed:"Entity active state changed",import_template_config_changed:"Import template settings changed"};
 // PDDS2D/3M2AYA: a password reset is either a server command or done in the app by an owner.
 const viaServerCommand=e=>(e.event_type==="primary_owner_transferred"||e.event_type==="password_reset")&&e.reason==="server command";
 const MIN_PASSWORD=8;
@@ -2409,9 +2419,11 @@ function renderPeople(users,memberships,ownerEvents){
     if(e.event_type==="owner_change_blocked"){try{if(JSON.parse(e.detail_json||"{}").action==="password reset of the primary owner")return "Blocked password reset of the primary owner"}catch{}}
     return OWNER_EVENT_LABELS[e.event_type]||e.event_type;
   };
-  const ownerEventRow=e=>`<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(ownerEventLabel(e))}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`}${viaServerCommand(e)?" via server command":` by ${escapeHtml(e.actor_name)}`}${e.reason&&!viaServerCommand(e)?` · ${escapeHtml(e.reason)}`:""}</li>`;
+  const ownerEventRow=e=>{let change="";if(e.detail_json){const d=safeParse(e.detail_json),b=d.before,a=d.after;if(b&&a)change=` · ${escapeHtml(JSON.stringify(b))} → ${escapeHtml(JSON.stringify(a))}`;}return `<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(ownerEventLabel(e))}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`}${viaServerCommand(e)?" via server command":` by ${escapeHtml(e.actor_name)}`}${e.reason&&!viaServerCommand(e)?` · ${escapeHtml(e.reason)}`:""}${change}</li>`};
   const blocked=e=>e.event_type==="owner_change_blocked"||e.event_type==="import_blocked";
-  const ownerHistory=(ownerEvents||[]).filter(e=>!blocked(e)).slice(0,20).map(ownerEventRow).join("")||"<li>No owner access changes yet.</li>";
+  const settingEvents=new Set(["entity_active_changed","import_template_config_changed"]);
+  const ownerHistory=(ownerEvents||[]).filter(e=>!blocked(e)&&!settingEvents.has(e.event_type)).slice(0,20).map(ownerEventRow).join("")||"<li>No owner access changes yet.</li>";
+  const settingsHistory=(ownerEvents||[]).filter(e=>settingEvents.has(e.event_type)).slice(0,20).map(ownerEventRow).join("")||"<li>No app setting changes yet.</li>";
   const blockedList=type=>(ownerEvents||[]).filter(e=>e.event_type===type).slice(0,10).map(ownerEventRow).join("")||"<li>None.</li>";
   const blockedHistory=blockedList("owner_change_blocked"),blockedImports=blockedList("import_blocked");
   const resetOptions=users.filter(u=>canResetPassword(u,primary)).map(u=>`<option value="${escapeHtml(u.id)}" data-name="${escapeHtml(u.display_name)}">${escapeHtml(u.display_name)} · ${escapeHtml(u.email)}</option>`).join("");
@@ -2426,6 +2438,7 @@ function renderPeople(users,memberships,ownerEvents){
     <h2>People &amp; access</h2>
     <h3>Users</h3><ul class="people-list">${rows}</ul>
     <h3>Owner access history</h3><ul class="people-list">${ownerHistory}</ul>
+    <h3>Settings history</h3><ul class="people-list">${settingsHistory}</ul>
     <h3>Blocked owner-access attempts</h3><ul class="people-list">${blockedHistory}</ul>
     <h3>Blocked imports without a project</h3><ul class="people-list">${blockedImports}</ul>
     <form id="add-user-form"><h3>Add a user</h3>

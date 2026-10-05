@@ -1161,6 +1161,19 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(closed["project"]["status"], "closed")
 
+    def test_reopen_project_over_http_requires_reason_and_records_history(self):
+        cookie, csrf = self._owner_session()
+        _, project = self.request("POST", "/api/projects", {"name": "Reopen HTTP"}, cookie=cookie, csrf=csrf)
+        pid = project["project"]["id"]
+        self.request("POST", f"/api/projects/{pid}/close", {"note": "wrap"}, cookie=cookie, csrf=csrf)
+        response, _ = self.request("POST", f"/api/projects/{pid}/reopen", {}, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 400)
+        response, reopened = self.request("POST", f"/api/projects/{pid}/reopen", {"reason": "Correction"}, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(reopened["project"]["status"], "active")
+        _, history = self.request("GET", f"/api/projects/{pid}/events", cookie=cookie)
+        self.assertIn("project_reopened", [event["event_type"] for event in history["events"]])
+
     def test_portfolio_and_budget_over_http(self):
         cookie, csrf = self._owner_session()
         self.request("POST", "/api/entities/seed", {}, cookie=cookie, csrf=csrf)
