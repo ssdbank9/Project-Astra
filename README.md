@@ -52,6 +52,11 @@ This first vertical slice provides:
   Chairman, a member, a viewer) sees the lists without the parent, criticality, schedule
   proposal, dependency, reviewer and Edit forms, and sees Submit only when allowed
   (`permissions.can_submit`). The Chairman selects tasks for bulk Assign in the List only.
+  Designation as an approver grants only a request for App Owner acceptance of submitted
+  work, including for the Chairman and project viewers (Aly's Q1 decision). The task
+  panel shows that acceptance request without hold, reopen, return-for-changes or
+  schedule-decision controls. Project Managers retain their own authority, and App
+  Owners make the final decision. Reviewer/importer/template eligibility is unchanged.
   An empty date field counts as no date, so a title-only save on an undated task needs no reason;
 - an owner-only People screen: create users, deactivate/reactivate them, grant or revoke
   project access, and reset a forgotten password (`POST /api/users/{id}/password`): any

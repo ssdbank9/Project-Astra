@@ -80,6 +80,28 @@ class ImportServiceTests(unittest.TestCase):
         return [f["code"] for f in row["findings"]]
 
     # -- template -------------------------------------------------------
+    def test_q1_import_and_filled_template_keep_chairman_and_viewer_review_roles(self):
+        people = "chair@example.org; viewer@example.org"
+        config = self.enable_all_columns()
+        for actor in (self.owner, self.jamal):
+            with self.subTest(actor=actor["email"]):
+                key = "Q1-OWNER" if actor == self.owner else "Q1-MANAGER"
+                payload = filled_template([{
+                    "import_key": key, "title": "Oversight roles", "owner_email": "jamal@example.org",
+                    "reviewers": people, "approvers": people,
+                }], config)
+                result = self.service.import_commit(actor, self.project["id"], "reviewers.xlsx", payload)
+                self.assertEqual(result["create"], 1)
+                task = self.task_by_key(key)
+                roles = {(r["user_id"], r["role"]) for r in self.service.list_task_reviewers(self.owner, task["id"])}
+                self.assertEqual(roles, {(p["id"], role) for p in (self.chair, self.viewer)
+                                        for role in ("reviewer", "approver")})
+                payload, _, _ = self.service.import_template(actor, "xlsx", self.project["id"])
+                preview = self.service.import_preview(actor, self.project["id"], "filled.xlsx", payload)
+                row = next(r for r in preview["rows"] if r["import_key"] == key)
+                self.assertNotIn("W_PERSON_NOT_ELIGIBLE", self.codes(row))
+                self.assertEqual(row["action"], "unchanged")
+
     def test_template_workbook_is_locked_validated_and_marked(self):
         payload, filename, content_type = self.service.import_template(self.owner, "xlsx")
         self.assertEqual(filename, "astra-import-template.xlsx")

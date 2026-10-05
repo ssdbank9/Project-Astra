@@ -1865,7 +1865,8 @@ class AstraService:
             # 3FQEKB: the Chairman sees the assignee control and nothing else new.
             "can_assign": can_assign,
             "assign_only": can_assign and not (is_owner or is_manager),
-            "can_request_protected": is_manager or self._is_approver(task_id, actor["id"]),
+            "can_request_protected": self._can_request_protected_action(actor, task, "update_task_status"),
+            "can_request_accept_submission": self._can_request_protected_action(actor, task, "accept_submission"),
             "can_decide_protected": is_owner,
             "can_manage_files": is_owner,
             "can_read_files": True,
@@ -1956,6 +1957,13 @@ class AstraService:
             (project_id, actor["id"]),
         ).fetchone())
 
+    def _can_request_protected_action(self, actor: dict, task: dict, action: str) -> bool:
+        # Aly Q1: designation recommends acceptance only. A Manager's authority is independent.
+        current_actor = self.get_user(actor["id"])
+        return bool(current_actor["active"] and self.can_view_project(current_actor, task["project_id"])
+                    and (self._is_project_manager(current_actor, task["project_id"])
+                         or (action == "accept_submission" and self._is_approver(task["id"], actor["id"]))))
+
     def _request_protected_action(
         self,
         actor: dict,
@@ -1964,13 +1972,14 @@ class AstraService:
         payload: dict | None = None,
         reason: str = "",
     ) -> dict:
-        if not (self._is_project_manager(actor, task["project_id"])
-                or self._is_approver(task["id"], actor["id"])):
+        if not self._can_request_protected_action(actor, task, action):
             self._event(
                 task["id"], actor["id"], "protected_action_blocked", None,
                 {"action": action, "payload": payload or {}}, "Actor cannot request this Owner action",
             )
-            raise Forbidden("Only a project Manager or designated approver may request this Owner action.")
+            if action == "accept_submission":
+                raise Forbidden("Only a project Manager or designated approver may request Owner acceptance.")
+            raise Forbidden("Only a project Manager may request this Owner action.")
         request_payload = dict(payload or {})
         request_payload.setdefault("expected_revision", task["revision"])
         payload_json = json.dumps(request_payload, default=str, sort_keys=True)
@@ -1990,11 +1999,20 @@ class AstraService:
             "decision_reason": None,
         }
         with transaction(self.db):
+            # Access or designation may be removed after the early check; refuse before any request write.
+            if not self._can_request_protected_action(actor, task, action):
+                raise Forbidden("Your permission to request this Owner action changed. Refresh the task.")
             # Review SVC-2: the request is only as good as the state it was based on; a task
             # changed (for example closed) after the caller's checks is a 409, not a queued 202.
-            current = self.db.execute("SELECT revision FROM tasks WHERE id=?", (task["id"],)).fetchone()
+            current = self.db.execute("SELECT revision, status FROM tasks WHERE id=?", (task["id"],)).fetchone()
             if not current or current["revision"] != request_payload["expected_revision"]:
                 raise Conflict("Task revision conflict: the task changed before this request could be filed.")
+            if action == "accept_submission":
+                submission = self.db.execute("SELECT task_id, status FROM task_submissions WHERE id=?",
+                                             (request_payload.get("submission_id"),)).fetchone()
+                if (current["status"] != "submitted" or not submission or submission["task_id"] != task["id"]
+                        or submission["status"] != "submitted"):
+                    raise Conflict("Submission decision conflict: this submission is no longer pending.")
             existing = self._pending_request_by_intent(request)
             if existing:
                 return {"request": existing}
@@ -2704,8 +2722,8 @@ class AstraService:
         if not hold_owner:
             raise ValueError("On-hold work requires a responsible owner.")
         # Aly 2026-09-25 (Slack ts 1790342529.695749): a manager of the project puts work on hold
-        # directly, with the same reason, checkpoint and hold owner. Anyone else keeps today's route
-        # (a designated approver files a request; everyone else is refused and audited). Leaving
+        # directly, with the same reason, checkpoint and hold owner. Q1: approver designation
+        # does not permit holds; other actors are refused and audited. Leaving
         # on_hold is unchanged: a manager's attempt still files an Owner request.
         if not self.can_manage_project(actor, task["project_id"]):
             return self._request_protected_action(

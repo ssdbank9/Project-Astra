@@ -6,7 +6,9 @@ and the source-status protection added for `C9KPH6` on 2026-09-22 (adversarial
 review AS-1, AS-2, DTJ-03); person resolution in import files scoped to the actor's
 view of the directory the same day (regression review SECURITY-4); concurrency and
 Owner-request decisions hardened under `SRFCZD` on 2026-09-22; closed tasks made fixed
-records outside reopen under `T8WHJR` on 2026-09-23.
+records outside reopen under `T8WHJR` on 2026-09-23. Aly's Q1 decision is implemented
+under `2RPSWM` on 2026-10-04: approver designation recommends acceptance only;
+Chairman assignment and collaborator rules remain as settled under `3FQEKB`.
 
 The service layer is the authorization boundary. HTTP and browser controls must
 call the same `AstraService` methods; hiding a control is not an authorization
@@ -16,7 +18,12 @@ decision.
 | --- | --- | --- | --- | --- |
 | View authorized projects/tasks/files | All | Granted projects | Granted projects | Organization-wide read |
 | Create/edit ordinary task work | Yes | Granted projects | No | No |
-| Accept/return submissions, hold, reopen, close, or decide schedule proposals | Direct | Creates pending Owner request; live state unchanged | Blocked and audited | Blocked and audited |
+| Request/decide acceptance of pending submitted work | Direct final decision | Creates pending Owner request; live state unchanged | Designated approver only: Owner request; otherwise blocked and audited | Designated approver only: Owner request; otherwise blocked and audited |
+| Return submissions for changes, reopen tasks, close projects, or decide schedule proposals | Direct | Creates pending Owner request; live state unchanged | Blocked and audited; approver designation adds no permission | Blocked and audited; approver designation adds no permission |
+| Put open work on hold with a reason, checkpoint and responsible Task Owner | Direct | Direct in managed projects | Blocked and audited | Blocked and audited |
+| Assign task/subtask owners | Yes | Managed projects | No | Yes; assignee only |
+| Be assigned or collaborate on work | Yes | Yes | Member: tasks/subtasks; project viewer: subtasks only | Never |
+| Be selected as a reviewer or approver | Yes | Yes | Yes, with active project access | Yes |
 | Add/remove attachment links | Yes | No | No | No |
 | Mark/unmark final results | Yes | No | No | No |
 | Read authorized attachment/final-result records | Yes | Yes | Yes | Yes |
@@ -28,17 +35,31 @@ decision.
 | Move a task *out of* completed, cancelled, abandoned, submitted, on hold, changes requested or reopened (`update_task` with such a source status, or an import row that changes the status) | Completed, cancelled, abandoned: only through `reopen_task` (reason and revised due date, `task_reopened`); submitted: only through the submission decision; on hold, changes requested, reopened: `update_task` with a reason (no dedicated release action exists). An import row never changes it (`W_GOVERNED_STATUS`) | Creates a pending Owner request `update_task_status` whose payload names `from_status` (HTTP 202); live state unchanged. Leaving submitted, or a target of on hold, completed or reopened, is refused with HTTP 400 and no request, as for the Owner (use the dedicated action). An import row keeps the stored status (`W_PROTECTED_STATUS`) | Blocked | Blocked |
 | Change a completed, cancelled or abandoned task in any other way: `update_task` with the status unchanged (even a reason-only save), `set_parent` on it, `confirm_criticality`, `propose_schedule`, `approve_schedule_proposal`, `add_task_dependency` / `remove_task_dependency` with it as the successor, `add_task_reviewer` / `remove_task_reviewer` on it, or an import row for it | Refused with HTTP 400 "reopen the task first" until `reopen_task`; a task closed while the write is in flight is refused with 409; an import row is skipped whole (`W_CLOSED_TASK`). Attachment links, final-result mark/unmark, adding it as the predecessor of an open task and moving an open task under or out of it as a subtask stay allowed (its own row does not change) | Refused the same way; no Owner request is created, and a request whose task changed (for example closed) before it is filed is refused with 409. An import row is skipped whole (`W_CLOSED_TASK`) | Blocked | Blocked |
 
-`Chairman` is retained as an organization-wide read role for compatibility. It
-no longer grants implicit mutation power through `can_manage_project`. A person
-with that global role may receive an explicit project membership; any capability
-then comes from that project role, not from the Chairman label.
+`Chairman` grants organization-wide visibility and the narrow right to assign
+work, without granting project-management authority. A Chairman may receive an
+explicit project membership, whose independent permissions still apply. The
+Chairman and project viewers remain selectable as reviewers/approvers on the
+panel, through import and in filled templates. Collaborator and assignment
+restrictions remain separate; oversight is not receiving work.
 
 ## Protected action outcome
 
-A permitted Manager or designated approver attempt creates one idempotent pending
+A permitted Manager attempt, or a designated approver's acceptance recommendation,
+creates one idempotent pending
 `owner_action_requests` row, task/project audit event, and Owner notification.
 The HTTP endpoint returns `202 Accepted` with a `request` object. The original
 task, submission, schedule proposal, checkpoint, or project remains unchanged.
+The service checks the requested action, current active account and project access
+before filing and again inside the write transaction. Designation permits only
+`accept_submission` for pending submitted work; it grants no hold, reopen,
+return-for-changes, schedule decision or generic protected status request. Removing
+designation/access or deactivating the account before the write refuses the request
+without a partial request, event or notification. An early unauthorized attempt
+retains the existing blocked-action audit/Owner notice. General task-request controls
+use `can_request_protected`; acceptance recommendations use the separate
+`can_request_accept_submission` permission.
+Historical pending requests remain append-only records for an explicit App Owner
+decision; this change does not delete or reclassify them.
 The Owner can list pending requests through `GET /api/owner-action-requests`, and
 the browser Inbox shows them under **Needs action**. The Owner approves, rejects,
 or cancels with `POST /api/owner-action-requests/{id}/decision`; stale task

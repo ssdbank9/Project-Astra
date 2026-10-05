@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from contextlib import contextmanager
 from unittest import mock
 from html.parser import HTMLParser
 from importlib.resources import files
@@ -251,6 +252,136 @@ class AstraWebTests(unittest.TestCase):
         _, detail = self.request("GET", f"/api/tasks/{tid}", cookie=cookie)
         self.assertEqual(detail["task"]["status"], "completed")
         self.assertEqual(detail["task"]["accepted_submission_id"], sid)
+
+    def _q1_approver_http_fixture(self):
+        service = self.server.service
+        owner = service.get_user(service.db.execute("SELECT id FROM users WHERE global_role='owner'").fetchone()["id"])
+        project = service.create_project(owner, "Q1 HTTP")
+        task = service.create_task(owner, {
+            "project_id": project["id"], "title": "Submitted Q1 work", "owner_user_id": owner["id"],
+        })
+        proposal = service.propose_schedule(owner, task["id"], "2027-03-01", "2027-03-04", "Replan")
+        submission = service.submit_task(owner, task["id"], "Ready")
+        closed = service.create_task(owner, {"project_id": project["id"], "title": "Closed Q1 work"})
+        sessions = []
+        for name, global_role, project_role in (
+            ("chairman", "chairman", None), ("viewer", "member", "viewer"),
+            ("member", "member", "member"), ("manager", "member", "manager"),
+        ):
+            person = service.create_user(owner, f"q1-{name}@example.org", name.title(), "q1 test password", global_role)
+            if project_role:
+                service.grant_project_access(owner, project["id"], person["id"], project_role)
+            service.add_task_reviewer(owner, task["id"], person["id"], "approver")
+            service.add_task_reviewer(owner, closed["id"], person["id"], "approver")
+            response, login = self.request("POST", "/api/login", {
+                "email": person["email"], "password": "q1 test password",
+            })
+            self.assertEqual(response.status, 200)
+            sessions.append((name, person, response.getheader("Set-Cookie").split(";", 1)[0], login["csrf"]))
+        service.update_task(owner, closed["id"], {
+            "status": "cancelled", "reason": "Closed", "expected_revision": closed["revision"],
+        })
+        return owner, task, submission, proposal, closed, sessions
+
+    def test_q1_designated_roles_request_acceptance_without_deciding_it(self):
+        owner, task, submission, proposal, closed, sessions = self._q1_approver_http_fixture()
+        service = self.server.service
+        original = service.get_task(owner, task["id"])
+        for name, person, cookie, csrf in sessions:
+            with self.subTest(role=name):
+                response, detail = self.request("GET", f"/api/tasks/{task['id']}", cookie=cookie)
+                self.assertEqual(response.status, 200)
+                self.assertTrue(detail["task"]["permissions"]["can_request_accept_submission"])
+                self.assertEqual(detail["task"]["permissions"]["can_request_protected"], name == "manager")
+                path = f"/api/submissions/{submission['id']}/accept"
+                response, first = self.request("POST", path, {"decision_note": "Recommend"}, cookie=cookie, csrf=csrf)
+                self.assertEqual(response.status, 202)
+                response, second = self.request("POST", path, {"decision_note": "Recommend"}, cookie=cookie, csrf=csrf)
+                self.assertEqual(response.status, 202)
+                self.assertEqual(first["request"]["id"], second["request"]["id"])
+                self.assertEqual(service.get_task(owner, task["id"]), original)
+                self.assertEqual(service.get_submission(owner, submission["id"])["status"], "submitted")
+        owner_cookie, owner_csrf = self._owner_session()
+        response, accepted = self.request("POST", f"/api/submissions/{submission['id']}/accept", {
+            "decision_note": "Accepted by Owner",
+        }, cookie=owner_cookie, csrf=owner_csrf)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(accepted["submission"]["decided_by"], owner["id"])
+        self.assertEqual(service.get_task(owner, task["id"])["status"], "completed")
+
+    def test_q1_nonmanager_approvers_get_403_on_other_protected_routes(self):
+        owner, task, submission, proposal, closed, sessions = self._q1_approver_http_fixture()
+        service = self.server.service
+        routes = [
+            (f"/api/submissions/{submission['id']}/request-changes", {"reason": "Revise"}),
+            (f"/api/tasks/{task['id']}/hold", {"reason": "Wait", "checkpoint_date": "2027-03-04"}),
+            (f"/api/tasks/{closed['id']}/reopen", {"reason": "Resume", "new_due_date": "2027-04-01"}),
+            (f"/api/schedule-proposals/{proposal['id']}/approve", {"decision_reason": "Yes"}),
+            (f"/api/schedule-proposals/{proposal['id']}/reject", {"reason": "No"}),
+        ]
+        original = (service.get_task(owner, task["id"]), service.get_task(owner, closed["id"]),
+                    service.get_submission(owner, submission["id"]), service.list_schedule_proposals(owner, task["id"]))
+        for name, person, cookie, csrf in sessions[:3]:
+            for path, body in routes:
+                with self.subTest(role=name, path=path):
+                    response, denied = self.request("POST", path, body, cookie=cookie, csrf=csrf)
+                    self.assertEqual(response.status, 403)
+                    self.assertIn("Manager", denied["error"])
+                    self.assertEqual(original, (
+                        service.get_task(owner, task["id"]), service.get_task(owner, closed["id"]),
+                        service.get_submission(owner, submission["id"]), service.list_schedule_proposals(owner, task["id"]),
+                    ))
+                    self.assertEqual(service.list_owner_action_requests(owner), [])
+            service.remove_task_reviewer(owner, task["id"], person["id"], "approver")
+            response, denied = self.request("POST", f"/api/submissions/{submission['id']}/accept", {
+                "decision_note": "After designation removed",
+            }, cookie=cookie, csrf=csrf)
+            self.assertEqual(response.status, 403)
+            self.assertEqual(service.list_owner_action_requests(owner), [])
+
+    def test_q1_http_revalidates_request_authority_inside_the_write(self):
+        from astra import service as service_module
+        from astra.db import connect, transaction as database_transaction
+
+        owner, task, submission, proposal, closed, sessions = self._q1_approver_http_fixture()
+        service = self.server.service
+        changes = {"viewer": "remove_designation", "member": "revoke_access",
+                   "chairman": "deactivate", "manager": "manager_downgrade"}
+        for name, person, cookie, csrf in sessions:
+            change = changes[name]
+            if name == "manager":
+                service.remove_task_reviewer(owner, task["id"], person["id"], "approver")
+            changed, after_change = [], []
+
+            @contextmanager
+            def change_before_write(connection):
+                if not changed:
+                    changed.append(True)
+                    other = connect(self.server.db_path)
+                    try:
+                        other_service = service_module.AstraService(other)
+                        if change == "remove_designation":
+                            other_service.remove_task_reviewer(owner, task["id"], person["id"], "approver")
+                        elif change == "revoke_access":
+                            other_service.revoke_project_access(owner, task["project_id"], person["id"])
+                        elif change == "deactivate":
+                            other_service.set_user_active(owner, person["id"], False)
+                        else:
+                            other_service.grant_project_access(owner, task["project_id"], person["id"], "viewer")
+                    finally:
+                        other.close()
+                    after_change.append(tuple(connection.iterdump()))
+                with database_transaction(connection):
+                    yield
+
+            with self.subTest(change=change), mock.patch.object(service_module, "transaction", change_before_write):
+                response, denied = self.request("POST", f"/api/submissions/{submission['id']}/accept", {
+                    "decision_note": "Late recommendation",
+                }, cookie=cookie, csrf=csrf)
+                self.assertEqual(response.status, 403)
+                self.assertEqual(changed, [True])
+                self.assertEqual(tuple(service.db.iterdump()), after_change[0])
+                self.assertEqual(service.list_owner_action_requests(owner), [])
 
     def test_manager_protected_acceptance_returns_202_and_owner_can_list_request(self):
         owner_cookie, owner_csrf = self._owner_session()
@@ -4013,8 +4144,15 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
         cases["chairman-in_progress"]["needs_new_assignee"] = True
         # Review 13a: a viewer who is a valid collaborator may submit; a flagged collaborator row is marked.
         cases["viewer-collaborator"] = _detail_task("in_progress", {**VIEWER_PERMS, "can_submit": True})
-        # Review 13b M1: a designated approver may request the Owner's approval of a pending proposal.
-        cases["approver-in_progress"] = _detail_task("in_progress", {**VIEWER_PERMS, "can_request_protected": True})
+        # Q1: designation grants acceptance recommendations, not other protected actions.
+        for status in ("in_progress", "submitted", "completed"):
+            cases[f"approver-{status}"] = _detail_task(status, {
+                **VIEWER_PERMS, "can_request_accept_submission": True, "can_submit": False,
+            })
+        cases["chairman-approver-submitted"] = _detail_task("submitted", {
+            **VIEWER_PERMS, "can_request_accept_submission": True, "can_assign": True,
+            "assign_only": True, "can_submit": False,
+        })
         cases["viewer-collaborator"]["needs_new_collaborator"] = True
         cases["viewer-collaborator"]["reviewers"] = [{"display_name": "Chair <b>", "role": "collaborator", "user_id": "u3",
                                                       "not_allowed": True}]
@@ -4043,16 +4181,40 @@ class AstraDetailDialogStatusGateTests(unittest.TestCase):
         self.assertIn('data-life="submit"', self.html["viewer-collaborator"])
         self.assertIn('data-life="submit"', self.html["owner-in_progress"])  # no can_submit key: unchanged
 
-    def test_review_13b_an_approver_requests_approval_of_a_pending_proposal(self):
+    def test_q1_an_approver_cannot_request_schedule_decisions(self):
         html = self.html["approver-in_progress"]
-        self.assertIn('data-approve-sched="sp1">Request Owner approval</button>', html)
-        self.assertIn('data-reject-sched="sp1"', html)
+        self.assertNotIn('data-approve-sched=', html)
+        self.assertNotIn('data-reject-sched=', html)
         self.assertNotIn('id="sched-form"', html)  # proposing needs edit rights
         for case in ("chairman-in_progress", "viewer-collaborator", "viewer-unchecked"):
             with self.subTest(case=case):
                 self.assertNotIn("data-approve-sched", self.html[case])
         self.assertIn('id="sched-form"', self.html["manager-in_progress"])
         self.assertIn('data-approve-sched="sp1">Request Owner approval</button>', self.html["manager-in_progress"])
+
+    def test_q1_an_approver_only_gets_the_acceptance_request_action(self):
+        for case in ("approver-submitted", "chairman-approver-submitted"):
+            with self.subTest(case=case):
+                html = self.html[case]
+                self.assertIn('data-life="accept"', html)
+                self.assertIn('>Request Owner acceptance</button>', html)
+                self.assertIn("request App Owner acceptance of submitted work", html)
+                self.assertNotIn("You manage this project", html)
+                for refused in ('data-life="changes"', 'data-life="hold"', 'data-life="reopen"',
+                                'data-approve-sched=', 'data-reject-sched='):
+                    self.assertNotIn(refused, html)
+        self.assertIn('id="detail-assign"', self.html["chairman-approver-submitted"])
+        self.assertNotIn('id="detail-edit"', self.html["chairman-approver-submitted"])
+        self.assertIn('data-life="changes"', self.html["manager-submitted"])
+        self.assertIn('data-life="accept"', self.html["owner-submitted"])
+
+    def test_q1_an_approver_gets_no_protected_controls_without_pending_work(self):
+        for case in ("approver-in_progress", "approver-completed"):
+            with self.subTest(case=case):
+                html = self.html[case]
+                for refused in ('data-life="accept"', 'data-life="changes"', 'data-life="hold"',
+                                'data-life="reopen"', 'data-goto-reopen'):
+                    self.assertNotIn(refused, html)
 
     def test_review_13a_the_panel_sends_empty_dates_as_null(self):
         js = (REPO / "src" / "astra" / "static" / "app.js").read_text(encoding="utf-8")

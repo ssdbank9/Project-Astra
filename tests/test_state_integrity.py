@@ -29,9 +29,8 @@ class AstraStateIntegrityTests(unittest.TestCase):
         allow_attachment_roots(self)
 
     def _hold_request(self, task, reason="vendor", checkpoint="2027-04-01", hold_owner_id=None):
-        """A set_on_hold Owner request. Since Aly's decision of 2026-09-25 (Slack ts 1790342529.695749)
-        a project manager puts work on hold directly, so the request comes from the other route that
-        still files one: a designated approver who is not a manager."""
+        """Seed a historical pre-Q1 approver hold request for Owner execution/reconciliation tests.
+        Q1 no longer lets designation file new holds; existing append-only requests are preserved."""
         email = f"hold-approver-{task['project_id'][:8]}@example.org"
         row = self.db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
         if row:
@@ -40,7 +39,20 @@ class AstraStateIntegrityTests(unittest.TestCase):
             approver = self.service.create_user(self.owner, email, "Hold approver", "approver password safe")
             self.service.grant_project_access(self.owner, task["project_id"], approver["id"], "member")
         self.service.add_task_reviewer(self.owner, task["id"], approver["id"], "approver")
-        return self.service.set_on_hold(approver, task["id"], reason, checkpoint, hold_owner_id)
+        request = {
+            "id": service_module.new_id(), "project_id": task["project_id"], "task_id": task["id"],
+            "action": "set_on_hold", "reason": reason, "requested_by": approver["id"],
+            "requested_at": service_module.now_text(), "status": "pending",
+            "payload_json": json.dumps({"reason": reason, "checkpoint_date": checkpoint,
+                                        "owner_user_id": hold_owner_id, "expected_revision": task["revision"]},
+                                       sort_keys=True),
+        }
+        with database_transaction(self.db):
+            self.service._insert_owner_request(request)
+            self.service._event(task["id"], approver["id"], "protected_action_requested", None,
+                                {"request_id": request["id"], "action": request["action"],
+                                 "payload": json.loads(request["payload_json"])}, reason)
+        return {"request": request}
 
     def test_stale_task_update_is_rejected_without_state_or_event_change(self):
         project = self.service.create_project(self.owner, "Concurrency")

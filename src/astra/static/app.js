@@ -1908,8 +1908,10 @@ function stateTags(task){
 }
 function roleLine(perms){
   if(perms.can_decide_protected)return "You are the App Owner. Changes apply directly and are recorded in History.";
-  if(perms.assign_only)return "You can assign this task to someone. Other changes are made by the project's managers.";
   if(perms.can_request_protected)return "You manage this project. Protected changes go to the App Owner as requests.";
+  const acceptanceHint=perms.can_request_accept_submission?" You may request App Owner acceptance of submitted work.":"";
+  if(perms.assign_only)return "You can assign this task to someone. Other changes are made by the project's managers."+acceptanceHint;
+  if(perms.can_request_accept_submission)return "You are a designated approver."+acceptanceHint;
   if(perms.can_edit_ordinary)return "You can edit this task. Changes are recorded in History.";
   return "You can view this task.";
 }
@@ -1961,7 +1963,9 @@ function renderDetail(task,events){
     ${canReopen?`<button type="button" class="link" data-goto-reopen>${perms.can_decide_protected?"Reopen task…":"Request reopening…"}</button>`:`<p>Ask the App Owner to reopen it.</p>`}</div>`:"";
   // 5GK6SB: name the decision buttons this viewer actually has under Lifecycle.
   const decide=decisionLabels(perms.can_decide_protected);
-  const statusHint=submitted?`<p class="field-hint" id="status-locked-hint">Status is locked while this work is in review. ${perms.can_decide_protected||perms.can_request_protected?escapeHtml(`Use ${decide.accept} or ${decide.changes} under Lifecycle.`):"The App Owner will Accept or Request changes."}</p>`:"";
+  const submissionHint=perms.can_decide_protected||perms.can_request_protected?`Use ${decide.accept} or ${decide.changes} under Lifecycle.`
+    :perms.can_request_accept_submission?`Use ${decide.accept} under Lifecycle.`:"The App Owner will Accept or Request changes.";
+  const statusHint=submitted?`<p class="field-hint" id="status-locked-hint">Status is locked while this work is in review. ${escapeHtml(submissionHint)}</p>`:"";
   // The hint shares the Status grid cell, so it sits under the field it explains (not inside the label, which would add it to the select's name).
   const statusField=submitted?`<div><label>Status<select name="status" aria-disabled="true" aria-describedby="status-locked-hint">${opts}</select></label>${statusHint}</div>`
     :`<label>Status<select name="status">${opts}</select></label>`;
@@ -2061,7 +2065,7 @@ function renderDetail(task,events){
 }
 
 // Review 13b M1: the proposal form needs edit rights; a pending proposal's Approve / Request
-// controls need only the right to decide or request (an owner, a manager, a designated approver).
+// controls need the right to decide or request schedule changes (an owner or a manager).
 function buildSchedule(task,closed,{canPropose=true}={}){
   const b=task.baseline||{};
   const props=task.schedule_proposals||[];
@@ -2147,6 +2151,7 @@ function decisionLabels(canDecide){
 
 function buildLifecycle(task,extra=""){
   const canDecide=task.permissions?.can_decide_protected,canRequest=task.permissions?.can_request_protected;
+  const canRequestAcceptance=task.permissions?.can_request_accept_submission;
   const decide=decisionLabels(canDecide);
   const frBySub={};(task.final_results||[]).forEach(f=>{if(f.submission_id)frBySub[f.submission_id]=f.id});
   const subs=(task.submissions||[]).map(s=>{
@@ -2168,10 +2173,12 @@ function buildLifecycle(task,extra=""){
     actions+=`<form data-life="submit"><label>Submit work (note)<input name="note"></label><div class="actions"><button>Submit for acceptance</button></div></form>`;
   }
   if(task.status==="submitted"&&pending){
-    if(canDecide||canRequest){
+    if(canDecide||canRequest||canRequestAcceptance){
       actions+=`<form data-life="accept" data-sid="${escapeHtml(pending.id)}"><label>Acceptance note<input name="decision_note"></label><div class="actions"><button>${escapeHtml(decide.accept)}</button></div></form>`;
-      actions+=`<form data-life="changes" data-sid="${escapeHtml(pending.id)}"><label>Reason for changes<input name="reason" required></label><div class="actions"><button>${escapeHtml(decide.changes)}</button></div></form>`;
     }else actions+=`<p class="blocked-text">Only the App Owner can decide this submission.</p>`;
+    if(canDecide||canRequest){
+      actions+=`<form data-life="changes" data-sid="${escapeHtml(pending.id)}"><label>Reason for changes<input name="reason" required></label><div class="actions"><button>${escapeHtml(decide.changes)}</button></div></form>`;
+    }
   }
   if(closed&&(canDecide||canRequest)){
     actions+=`<form data-life="reopen" id="reopen-form"><label>Reason to reopen<input name="reason" required></label><label>Revised due date<input name="new_due_date" type="date" required></label><div class="actions"><button>${canDecide?"Reopen":"Request Owner reopening"}</button></div></form>`;
@@ -2217,7 +2224,9 @@ async function lifecycleAction(e,task){
     else if(kind==="hold")outcome=await withConfirms(task,"blocked",more=>api(taskApi(task.id,"/hold"),{method:"POST",body:JSON.stringify({...body,...more})}));
     if(!outcome)return;   // an owner cancelled the dependency confirm
     await load();await openDetail(task.id);
-    if(outcome?.request){const current=document.querySelector("#lifecycle-error");current.style.color="#0c7c86";current.textContent="Owner request created; accepted live state is unchanged."}
+    if(outcome?.request){const current=document.querySelector("#lifecycle-error");current.style.color="var(--teal)";current.textContent=kind==="accept"
+      ?"Owner request created. The submission is still awaiting an App Owner decision."
+      :"Owner request created; the task is unchanged."}
   }catch(x){if(x.status===409)return reloadTaskAfterConflict(task.id,"lifecycle-error",x.message);err.textContent=x.message}
 }
 

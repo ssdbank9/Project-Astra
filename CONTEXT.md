@@ -25,17 +25,26 @@ Owners of the project's individual tasks.
 _Avoid_: owner (unqualified), manager (bare), lead.
 
 **Chairman**:
-An organizational role with org-wide read-only project visibility comparable to the
-App Owner but no access to private sources and no mutation power of its own: it
-cannot grant access, decide protected actions, close projects, or manage files. A
-Chairman gains project powers only through a separately granted project role.
+An organizational role with org-wide project visibility and the narrow right to assign
+task/subtask owners, without private-source access or being assigned work as a Task
+Owner or Collaborator. Designation as an Approver permits acceptance recommendations;
+other project powers require an explicit project role, and the global role cannot
+decide protected actions, close projects, grant access or manage files.
 
-**Collaborator / Reviewer / Approver**:
-Supporting people on a task, tracked separately from its Task Owner. An Approver
-recommends acceptance of a submission by requesting it from the App Owner, who
-decides; a Reviewer is recorded as reviewing the work; a Collaborator contributes to
-the work. Neither the Reviewer nor the Collaborator role carries request or decision
-power. A person in these roles is never the accountable party by virtue of it.
+**Approver**:
+A supporting person designated to recommend acceptance of submitted work to the App
+Owner, who makes the final decision; the Chairman and project viewers may be Approvers.
+Designation grants no other protected-action power or Task Owner accountability.
+_Avoid_: assignee, member (for this specific task role).
+
+**Reviewer**:
+A supporting person recorded as reviewing work, including the Chairman or a project
+viewer, without request/decision power or Task Owner accountability by designation.
+_Avoid_: assignee, member (for this specific task role).
+
+**Collaborator**:
+A supporting person who contributes to work without request/decision power or Task
+Owner accountability by designation.
 _Avoid_: assignee, member (for these specific task roles).
 
 ## AI assessment

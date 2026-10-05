@@ -22,6 +22,12 @@ Manager combined edits and protected status requests are refused without partial
 writes, and the actual browser retains the entered fields. Aly's acceptance and
 the remaining development and hosting gates are still required.
 
+Latest Q1 permission evidence: [2026-10-05 approver permissions](Q1_APPROVER_PERMISSIONS_2026-10-05.md),
+ticket 2RPSWM. Designated approvers may request App Owner acceptance of submitted
+work only; Manager authority and App Owner final decisions remain intact. The
+default Windows suite ran 714 tests, `OK (skipped=1)`. Aly's signoff and hosted
+readiness remain required.
+
 ## What is in the pack
 
 | File | What it is for |
