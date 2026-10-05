@@ -16,10 +16,13 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-05T17:15:26Z
+updated-at: 2026-10-05T17:16:09Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
+outcome-what: "Decisions are settled; map settings write paths, project history visibility, and closed-project lifecycle before implementation."
+outcome-why: "Aly selected owner reopen with reason and notification, settings audit history, and separate project/People history locations."
+outcome-resolves: Turns the backlog item into an implementation-ready plan without changing product behavior yet.
 ---
 
 # Record settings changes and let owners reopen a closed project
