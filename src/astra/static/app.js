@@ -1428,25 +1428,24 @@ function signedOut(){state.user=state.csrf=null;location.replace(location.pathna
 document.querySelector("#logout").onclick=async()=>{await api("/api/logout",{method:"POST",body:"{}"});signedOut()};
 document.querySelector("#logout-all").onclick=async()=>{await api("/api/logout-all",{method:"POST",body:"{}"});signedOut()};
 document.querySelector("#close-project").onclick=()=>closeProject(document.querySelector("#project-filter").value);
-document.querySelector("#project-reopen").onclick=()=>reopenProject(currentRoute().id);
-async function reopenProject(pid){
-  const reason=prompt("Why should this closed project be reopened?","");
-  if(reason===null)return;
-  try{await api(`/api/projects/${pid}/reopen`,{method:"POST",body:JSON.stringify({reason})});await load();showToast("Project reopened.")}
-  catch(err){alert(err.message)}
+document.querySelector("#project-reopen").onclick=()=>openProjectAction("reopen",currentRoute().id);
+function openProjectAction(action,pid){
+  const dialog=document.querySelector("#project-action-dialog"),form=document.querySelector("#project-action-form");
+  form.dataset.action=action;form.dataset.projectId=pid;form.reset();
+  document.querySelector("#project-action-title").textContent=action==="reopen"?"Reopen project":"Close project";
+  document.querySelector("#project-action-reason-label").firstChild.textContent=action==="reopen"?"Reason":"Closure note";
+  document.querySelector("#project-action-exceptional-label").hidden=action!=="close";
+  document.querySelector("#project-action-submit").textContent=action==="reopen"?"Reopen project":"Close project";
+  form.querySelector(".error").textContent="";dialog.showModal();
 }
-async function closeProject(pid){
-  if(!pid){alert("Select a single project in the filter to close it.");return}
-  const note=prompt("Closure note (describe the outcome or any residual work):","");
-  if(note===null)return;
-  try{await api(`/api/projects/${pid}/close`,{method:"POST",body:JSON.stringify({note})});await load()}
-  catch(err){
-    if(/outstanding/i.test(err.message)&&confirm(`${err.message}\n\nProceed with an EXCEPTIONAL owner closure that preserves a residual-work snapshot?`)){
-      try{await api(`/api/projects/${pid}/close`,{method:"POST",body:JSON.stringify({note,exceptional:true})});await load()}
-      catch(e2){alert(e2.message)}
-    }else{alert(err.message)}
-  }
-}
+function reopenProject(pid){openProjectAction("reopen",pid)}
+function closeProject(pid){if(!pid){alert("Select a single project in the filter to close it.");return}openProjectAction("close",pid)}
+document.querySelector("#project-action-form").addEventListener("submit",async e=>{
+  e.preventDefault();const form=e.target,button=e.submitter;if(button?.value==="cancel"){form.closest("dialog").close();return}
+  const action=form.dataset.action,pid=form.dataset.projectId,reason=form.elements.reason.value.trim();
+  try{await api(action==="reopen"?`/api/projects/${pid}/reopen`:`/api/projects/${pid}/close`,{method:"POST",body:JSON.stringify(action==="reopen"?{reason}:{note:reason,exceptional:form.elements.exceptional.checked})});form.closest("dialog").close();await load();if(action==="reopen")showToast("Project reopened.")}
+  catch(err){form.querySelector(".error").textContent=err.message}
+});
 // PZTYC9: a filter change rewrites the Home link (replaceState, so Back leaves the screen) and re-renders.
 for(const id of ["project-filter","status-filter","entity-filter","crit-filter","band-filter","risk-filter"]){document.querySelector(`#${id}`).onchange=filtersChanged}document.querySelector("#open-only").onchange=filtersChanged;document.querySelector("#owner-filter").oninput=filtersChanged;
 // QY0WG2: changing the sort re-fetches the list in the chosen server-side order.
