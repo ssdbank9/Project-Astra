@@ -28,6 +28,13 @@ work only; Manager authority and App Owner final decisions remain intact. The
 default Windows suite ran 714 tests, `OK (skipped=1)`. Aly's signoff and hosted
 readiness remain required.
 
+Latest owner workplan feature: [one-project CSV, 2026-10-07](WORKPLAN_CSV_2026-10-07.md),
+ticket W6ZSGA. Project download/fill/upload supports Shared and alternative plans,
+logged task keys and independent critical paths. The final Windows suite ran
+739 tests, `OK (skipped=1)`; independent review and synthetic desktop/phone
+browser checks passed. Aly's acceptance, real sample population and hosting
+remain separate.
+
 ## What is in the pack
 
 | File | What it is for |

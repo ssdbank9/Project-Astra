@@ -190,7 +190,8 @@ class AstraHandler(BaseHTTPRequestHandler):
             if path in ("/api/import/template.xlsx", "/api/import/template.csv"):
                 user, _ = self._require_user()
                 project = parse_qs(urlparse(self.path).query).get("project_id", [""])[0].strip() or None
-                payload, filename, content_type = self.service.import_template(user, path.rsplit(".", 1)[1], project)
+                workplan_csv = parse_qs(urlparse(self.path).query).get("workplan", [""])[0] == "1"
+                payload, filename, content_type = self.service.import_template(user, path.rsplit(".", 1)[1], project, workplan_csv=workplan_csv)
                 return self._download(payload, filename, content_type)
             if path == "/api/import/targets":
                 user, _ = self._require_user()

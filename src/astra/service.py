@@ -1283,6 +1283,10 @@ class AstraService:
         task_id = new_id()
         timestamp = now_text()
         with transaction(self.db):
+            from . import workplan
+            for linked_id in (parent_task_id, predecessor_task_id):
+                if linked_id and not workplan.compatible(workplan.plan(self.get_task(actor, linked_id)), "Shared"):
+                    raise ValueError("A Shared task cannot be linked to an alternative plan task.")
             self.db.execute(
                 """INSERT INTO tasks(id,project_id,parent_task_id,title,description,owner_user_id,status,criticality,
                    start_date,due_date,progress,created_at,created_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -1683,6 +1687,9 @@ class AstraService:
             )
             result.append(item)
         self._add_dependency_state(result)
+        from . import workplan
+        for item in result:
+            item["plan_option"] = workplan.plan(item)
         self._add_critical_path(result)
         self._add_lock_state(result)
         collaborator_flags = self._collaborator_flags([item["id"] for item in result])
@@ -1715,6 +1722,7 @@ class AstraService:
     def _add_critical_path(self, tasks: list[dict]) -> list[dict]:
         for task in tasks:
             task["is_critical_path"] = False
+            task["critical_for_plans"] = []
         by_id = {task["id"]: task for task in tasks}
         if not by_id:
             return tasks
@@ -1734,8 +1742,13 @@ class AstraService:
             if by_id[pred]["project_id"] == by_id[succ]["project_id"]:
                 edges_by_project.setdefault(by_id[pred]["project_id"], []).append((pred, succ))
         for project_id, task_ids in tasks_by_project.items():
-            for task_id in self._critical_path_nodes(task_ids, edges_by_project.get(project_id, []), by_id):
-                by_id[task_id]["is_critical_path"] = True
+            from . import workplan
+            names = {workplan.plan(by_id[tid]) for tid in task_ids} - {"Shared"}
+            for name in sorted(names | {"Shared"}):
+                selected = [tid for tid in task_ids if workplan.plan(by_id[tid]) in {"Shared", name}]
+                for task_id in self._critical_path_nodes(selected, edges_by_project.get(project_id, []), by_id):
+                    by_id[task_id]["is_critical_path"] = True
+                    by_id[task_id]["critical_for_plans"].append(name)
         return tasks
 
     def _critical_path_nodes(self, task_ids: list, edges: list, by_id: dict) -> set:
@@ -3701,6 +3714,10 @@ class AstraService:
         before = {"parent_task_id": task.get("parent_task_id")}
         with transaction(self.db):
             self._refuse_closed_in_transaction(task_id)
+            if parent_task_id:
+                from . import workplan
+                if not workplan.compatible(workplan.plan(self.get_task(actor, parent_task_id)), workplan.plan(self.get_task(actor, task_id))):
+                    raise ValueError("A parent must be Shared or belong to the same plan.")
             from_column = self._top_column(actor, task["project_id"], task_id)
             self.db.execute(
                 "UPDATE tasks SET parent_task_id=?, updated_at=?, revision=revision+1 WHERE id=?",
@@ -4810,6 +4827,9 @@ class AstraService:
         }
         with transaction(self.db):
             self._refuse_closed_in_transaction(successor_task_id)
+            from . import workplan
+            if not workplan.compatible(workplan.plan(self.get_task(actor, predecessor_task_id)), workplan.plan(self.get_task(actor, successor_task_id))):
+                raise ValueError("A prerequisite must be Shared or belong to the same plan.")
             # Review 12b M1: a new link changes what the predecessor's holder is moving, too.
             self._assert_task_unlocked(predecessor_task_id, actor["id"])
             existing = self.db.execute(
@@ -5091,7 +5111,7 @@ class AstraService:
             self._app_setting_event(actor, "import_template_config_changed", before, config.to_dict())
         return self.get_import_template_config(actor)
 
-    def import_template(self, actor: dict, fmt: str, project_id: str | None = None) -> tuple[bytes, str, str]:
+    def import_template(self, actor: dict, fmt: str, project_id: str | None = None, *, workplan_csv: bool = False) -> tuple[bytes, str, str]:
         """The template a signed-in user downloads; built from the current configuration.
 
         With ``project_id`` the Tasks sheet comes pre-filled with that project's tasks
@@ -5109,6 +5129,11 @@ class AstraService:
         if fmt not in ("csv", "xlsx"):
             raise ValueError("Unknown template format.")
         config = self._import_config()
+        if workplan_csv:
+            from . import workplan
+            if fmt != "csv" or not project_id:
+                raise ValueError("Choose an existing project before downloading its workplan CSV.")
+            config = workplan.config()
         tasks = project = people = None
         key_offset = 0
         stem = "astra-import-template"
@@ -5117,6 +5142,30 @@ class AstraService:
             tasks, project, people, key_offset = self._template_prefill(actor, project_row, config)
             stem = "astra-import-" + (re.sub(r"[^A-Za-z0-9]+", "-", project_row["name"]).strip("-").lower()[:40] or "project")
         if fmt == "csv":
+            if workplan_csv:
+                from . import workplan
+                with transaction(self.db):
+                    project_row = self._template_project(actor, project_id)
+                    entities = self.list_project_entities(actor, project_id)
+                    # Reserve short keys per download. Two owners filling separate
+                    # files must not unknowingly update each other's new tasks.
+                    issued = self.db.execute(
+                        "SELECT detail_json FROM project_events WHERE project_id=? AND event_type='workplan_keys_issued' ORDER BY rowid DESC LIMIT 1",
+                        (project_id,),
+                    ).fetchone()
+                    high = json.loads(issued["detail_json"])["high_water"] if issued else 0
+                    used = {row["import_key"].upper() for row in self.db.execute(
+                        "SELECT import_key FROM tasks WHERE project_id=? AND import_key IS NOT NULL", (project_id,))}
+                    spare = []
+                    while len(spare) < 50:
+                        high += 1
+                        key = f"WP-{high:03d}"
+                        if key not in used:
+                            spare.append(key)
+                    self._project_event(project_id, actor["id"], "workplan_keys_issued",
+                                        {"keys": spare, "high_water": high}, "Reserved for a downloaded workplan CSV")
+                payload = workplan.build(project_row, entities, tasks, blank_keys=spare)
+                return payload.encode("utf-8-sig"), stem + "-workplan.csv", "text/csv; charset=utf-8"
             return (importer.build_template_csv(config, tasks=tasks).encode("utf-8-sig"), stem + ".csv",
                     "text/csv; charset=utf-8")
         payload = importer.build_template_xlsx(config, tasks=tasks, project=project, people=people, key_offset=key_offset)
@@ -5210,6 +5259,10 @@ class AstraService:
                     if column is None:
                         continue
                     row[key] = as_date(value) if column.kind == "date" and isinstance(value, str) else value
+            if "x_plan" in config.by_key:
+                from . import workplan
+                row["x_plan"] = workplan.plan(task)
+                row["x_type"] = "Milestone" if task.get("is_milestone") else row.get("x_type", "Task")
             return row
 
         # Parents before their steps, each level ordered by start, due, title.
@@ -5323,6 +5376,17 @@ class AstraService:
         options = self._import_options(options)
         config = self._import_config()
         parsed = importer.parse_upload(filename, data, config)
+        if parsed.workplan:
+            from . import workplan
+            if not project or parsed.workplan["project_id"] != project["id"]:
+                raise ValueError("This workplan CSV belongs to another project. Choose its project or download a fresh CSV.")
+            actual = {e["id"] for e in self.list_project_entities(actor, project["id"])}
+            if set(parsed.workplan["entity_ids"]) != actual:
+                raise ValueError("The project's linked entities changed. Download a fresh workplan CSV.")
+            if any(not importer.normalize_text(row.cells.get("import_key")) for row in parsed.rows):
+                if self.db.execute("SELECT 1 FROM imports WHERE project_id=? AND sha256=?", (project["id"], importer.sha256_hex(data))).fetchone():
+                    raise ValueError("This file already created tasks with automatic keys. Download the updated CSV before uploading again.")
+            config = workplan.config()
         new_project_name = None
         if project is None:
             header_name = parsed.project_header.get("name")
@@ -5534,6 +5598,7 @@ class AstraService:
             return []
         config = self._import_config()
         labels = {item["key"]: item["label"] for item in config.columns if item.get("custom")}
+        labels["x_plan"] = "Plan"
         result = []
         for key in sorted(extras):
             value = extras[key]

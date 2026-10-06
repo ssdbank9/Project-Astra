@@ -147,12 +147,21 @@ function focusKeyIn(root){const a=document.activeElement;if(!a||!root.contains(a
 function restoreFocus(root,sel){if(!sel)return;const n=root.querySelector(sel);if(n&&!n.closest("[hidden]"))n.focus({preventScroll:true})}
 const GRIPS='<i class="bar-grip start" data-edge="start" aria-hidden="true"></i><i class="bar-grip end" data-edge="end" aria-hidden="true"></i>';
 function renderGantt(tasks){
+  const planSelect=document.querySelector("#gantt-plan");
+  const previous=planSelect.value;
+  const names=[...new Set(tasks.map(t=>t.plan_option||"Shared"))].sort();
+  planSelect.innerHTML='<option value="">All plans</option>'+names.map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+  if(names.includes(previous))planSelect.value=previous;
+  planSelect.hidden=names.every(name=>name==="Shared");
+  planSelect.onchange=()=>refreshGantt();
+  if(planSelect.value)tasks=tasks.filter(t=>(t.plan_option||"Shared")==="Shared"||t.plan_option===planSelect.value).map(t=>({...t,is_critical_path:(t.critical_for_plans||[]).includes(planSelect.value)}));
   const el=document.querySelector("#gantt"),tableEl=document.querySelector("#schedule-table");
   const focusKey=focusKeyIn(el);
   tipMeta.clear();hideTip();
   const showTable=currentView()==="table";
   document.querySelector("#view-table").checked=showTable;
   el.hidden=showTable;tableEl.hidden=!showTable;
+  renderBands(tasks);
   const groups=groupSteps(tasks);
   document.querySelector("#step-legend").hidden=!groups.hasSteps;
   if(!tasks.length){const empty='<div class="empty">No tasks match these filters. Undated or unassigned work will appear here rather than being hidden.</div>';el.innerHTML=empty;tableEl.innerHTML=empty;return}
@@ -707,6 +716,7 @@ function renderProject(r){
   const q=s=>document.querySelector(s),p=(state.projects||[]).find(x=>x.id===r.id),body=q("#project-body"),slot=q("#project-gantt-slot");
   q("#project-tabs").innerHTML=p?PROJECT_TABS.map(([k,l])=>`<a href="#/project/${encodeURIComponent(p.id)}/${k}"${k===r.tab?' aria-current="page"':""}>${l}</a>`).join(""):"";
   q("#project-capture").hidden=!p||p.status==="closed";
+  q("#project-import").hidden=!p||p.status==="closed"||!(importState.targets?.projects||[]).some(project=>project.id===p.id);
   q("#project-save-template").hidden=!p||!isOwner();
   q("#project-close").hidden=!p||!isOwner()||p.status==="closed";
   q("#project-reopen").hidden=!p||!canReopenProject()||p.status!=="closed";
@@ -2664,10 +2674,11 @@ async function apiUpload(path,file,headers){
 }
 async function refreshImportAccess(){
   const button=document.querySelector("#import-btn");
-  try{const {targets}=await api("/api/import/targets");importState.targets=targets;button.hidden=!(targets.projects.length||targets.can_create_project)}
+  try{const {targets}=await api("/api/import/targets");importState.targets=targets;button.hidden=!(targets.projects.length||targets.can_create_project);const r=currentRoute();if(r.name==="project")renderProject(r)}
   catch{importState.targets=null;button.hidden=true}
 }
 document.querySelector("#import-btn").onclick=openImport;
+document.querySelector("#project-import").onclick=openImport;
 const importDialog=document.querySelector("#import-dialog");
 importDialog.addEventListener("close",()=>{const opener=importState.opener;importState.opener=null;if(opener&&typeof opener.focus==="function")opener.focus()});
 async function openImport(){
@@ -2700,10 +2711,10 @@ function renderImportUpload(){
   const options=targets.projects.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("");
   const createOption=targets.can_create_project?`<option value="">Create or find the project named in the file's Project column</option>`:"";
   const settings=targets.can_edit_template?`<button type="button" class="link" id="import-settings-btn">Template settings</button>`:"";
-  const selected=document.querySelector("#project-filter").value;
+  const selected=currentRoute().name==="project"?currentRoute().id:document.querySelector("#project-filter").value;
   document.querySelector("#import-body").innerHTML=`
     <h3>Upload a filled template</h3>
-    <p class="muted">Choose the target project, download the template and fill its <strong>Project</strong> and <strong>Tasks</strong> sheets (dates as dd-mm-yyyy; the Example sheet shows worked rows), then upload it here. With a project chosen the download already lists that project's tasks with their Import Keys, so a re-upload updates them instead of duplicating; add new rows at the bottom. Nothing is written until you confirm in step 3. An import never deletes.</p>
+    <p class="muted">Choose your project and download its workplan CSV. Open it in Excel, fill the task rows, save as CSV, then upload it here. Keep the project details and existing Task IDs unchanged. Enter dates as yyyy-mm-dd. Use Task IDs in Part of (grouping) and Predecessors (tasks that must finish first); separate multiple predecessors with semicolons. Assigned To accepts an existing user’s email. Leave Plan blank for Shared work, or enter an alternative plan name such as Private or Charter. Preview and check the changes before confirming. For the Excel workbook, fill the Project and Tasks sheets. An import never deletes.</p>
     <div class="import-links"><a href="/api/import/template.xlsx" id="import-template-xlsx" download>Download template (.xlsx)</a><a href="/api/import/template.csv" id="import-template-csv" download>Download template (.csv)</a>${settings}</div>
     <label>Target project<select id="import-project">${createOption}${options}</select></label>
     <div id="import-drop" class="dropzone" tabindex="0" role="button" aria-describedby="import-file-name"><strong>Drop your .xlsx or .csv here</strong><span>or press Enter / click to choose a file</span><input type="file" id="import-file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="sr-only" tabindex="-1"></div>
@@ -2721,7 +2732,7 @@ function renderImportUpload(){
   const updateTemplateLinks=()=>{
     const pid=select.value,suffix=pid?`?project_id=${encodeURIComponent(pid)}`:"";
     const label=pid?"Download template (with this project's tasks)":"Download template";
-    for(const [id,ext] of [["import-template-xlsx","xlsx"],["import-template-csv","csv"]]){const a=document.querySelector(`#${id}`);a.href=`/api/import/template.${ext}${suffix}`;a.textContent=`${label} (.${ext})`}
+    for(const [id,ext] of [["import-template-xlsx","xlsx"],["import-template-csv","csv"]]){const a=document.querySelector(`#${id}`);a.href=`/api/import/template.${ext}${suffix}${pid&&ext==="csv"?"&workplan=1":""}`;a.textContent=pid&&ext==="csv"?"Download project workplan (.csv)":`${label} (.${ext})`}
   };
   select.addEventListener("change",updateTemplateLinks);updateTemplateLinks();
   const drop=document.querySelector("#import-drop"),input=document.querySelector("#import-file");
@@ -2827,6 +2838,7 @@ function renderImportConfirm(){
       <p class="muted">${escapeHtml(r.filename)} → <strong>${escapeHtml(r.project.name)}</strong>${r.project.create?" (new project)":""}. Nothing was deleted; existing baselines were kept. Every change is in each task's history, and the import is in the project's history (Project history, with this project selected).</p>
       <div class="facts">${fact("Created",String(r.create))}${fact("Updated",String(r.update))}${fact("Unchanged",String(r.unchanged))}${fact("Skipped (errors)",String(r.skipped_errors||0))}${fact("Dependencies",String(r.dependencies||0))}</div>
       <p><a href="${escapeHtml(r.report_url)}" download>Download the import report (.csv)</a></p>
+      <p><a href="/api/import/template.csv?project_id=${encodeURIComponent(r.project.id)}&amp;workplan=1" download>Download updated workplan CSV</a> with the saved Task IDs for your next edits.</p>
       <div class="actions"><button type="button" id="import-done">Done</button></div>
     </div>`;
   document.querySelector("#import-done").addEventListener("click",()=>importDialog.close());

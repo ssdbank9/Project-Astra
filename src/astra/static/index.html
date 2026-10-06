@@ -111,6 +111,7 @@
         <div class="view-controls">
           <div class="legend"><span class="key"><i class="overdue"></i>Overdue</span> <span class="key"><i class="soon"></i>Due in 7 days</span> <span class="key"><i class="scheduled"></i>Scheduled</span> <span class="key"><i class="blocked"></i>Blocked</span> <span class="key"><i class="undated"></i>Undated</span> <span class="key"><i class="critical"></i>Critical path</span> <span class="key"><i class="proj-start-key"></i>Project start</span> <span class="key"><i class="proj-target-key"></i>Project target</span></div>
           <label class="inline view-toggle"><input type="checkbox" id="view-table"> Schedule table</label>
+          <label>Plan<select id="gantt-plan"><option value="">All plans</option></select></label>
         </div>
         <div id="bands" class="bands"></div>
         <div id="gantt"></div>
@@ -131,6 +132,7 @@
           <p id="project-facts" class="work-meta"></p>
           <div class="project-actions">
             <button type="button" id="project-capture">Add a task</button>
+            <button type="button" id="project-import" hidden>Import workplan</button>
             <button type="button" class="quiet" id="project-save-template" hidden>Save as template</button>
             <button type="button" class="quiet" id="project-close" hidden>Close project</button>
             <button type="button" class="quiet" id="project-reopen" hidden>Reopen project</button>

@@ -1475,6 +1475,7 @@ class ParsedUpload:
     project_header: dict = field(default_factory=dict)     # Project sheet: key -> value (dates as ISO)
     people: list = field(default_factory=list)             # People sheet rows: {row, email, name, role, notes}
     date1904: bool = False                                 # the workbook's date system, for bare serial cells
+    workplan: dict = field(default_factory=dict)
 
 
 def detect_format(filename: str, data: bytes) -> str:
@@ -1498,6 +1499,20 @@ def parse_upload(filename: str, data: bytes, config: TemplateConfig) -> ParsedUp
     fmt = detect_format(filename, data)
     if fmt == "xlsx":
         return _parse_xlsx(data, config)
+    from . import workplan
+    text, _ = _decode_csv(data)
+    # Excel may quote the marker or save using semicolons. Recognize intact
+    # identity and stripped task headers structurally, with all line endings.
+    for delimiter in (",", ";", "\t"):
+        try:
+            records = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
+            for number, record in enumerate(records):
+                if number == 0 and record and record[0] == workplan.MARKER:
+                    return workplan.parse(data)
+                if record and (record[0] == "Project ID" or record[:3] == ["Task ID", "Task", "Part of"]):
+                    raise ImportFileError("The workplan identity is missing. Download a fresh project CSV.")
+        except csv.Error as exc:
+            raise ImportFileError("The CSV is malformed. Download a fresh template.") from exc
     return _parse_csv(data, config)
 
 
@@ -2191,6 +2206,18 @@ class ImportEngine:
         self.project_header = dict(parsed.project_header)
         self.date1904 = parsed.date1904
         self.people = self._check_people(parsed.people)
+        if parsed.workplan:
+            from . import workplan
+            self.config = workplan.config()
+            used = set(self.existing_by_key) | {normalize_text(row.cells.get("import_key")).upper() for row in parsed.rows}
+            missing = [row for row in parsed.rows if not normalize_text(row.cells.get("import_key"))]
+            for row, key in zip(missing, assign_sequence_keys(used, len(missing))):
+                row.cells["import_key"] = key
+            for row in parsed.rows:
+                name = normalize_text(row.cells.get(workplan.PLAN_KEY)) or "Shared"
+                if len(name) > 60:
+                    raise ImportFileError("Plan names must be at most 60 characters.")
+                row.cells[workplan.PLAN_KEY] = name
         self.rows = [self._validate_row(row) for row in parsed.rows]
         for result in self.rows:
             self._settle_closed(result)
@@ -2199,10 +2226,37 @@ class ImportEngine:
         self._check_project_header()
         self._wire_parents()
         self._wire_dependencies()
-        self._propagate_invalid()
+        # Invalid rows are skipped by partial imports. Rebuild the effective plans
+        # after every invalidation so a skipped plan edit cannot justify a link.
+        while True:
+            errors = sum(row.level == "error" for row in self.rows)
+            self._check_plan_links()
+            self._propagate_invalid()
+            if sum(row.level == "error" for row in self.rows) == errors:
+                break
         for result in self.rows:
             self._finish_row(result)
         return self.preview()
+
+    def _check_plan_links(self):
+        from . import workplan
+        # Persistent IDs cover unkeyed tasks created after a CSV download too.
+        names = {tid: workplan.plan(task) for tid, task in self.existing_by_id.items()}
+        edited = {self._node(row.key): row for row in self.rows if row.plan and row.level != "error" and not row.plan.get("closed")}
+        for node, row in edited.items():
+            names[node] = row.plan["extras"].get(workplan.PLAN_KEY, names.get(node, "Shared"))
+        links = set(self.existing_edges)
+        parents = {tid: task["parent_task_id"] for tid, task in self.existing_by_id.items() if task.get("parent_task_id")}
+        for node, row in edited.items():
+            if row.plan.get("parent_key"):
+                parents[node] = self._node(row.plan["parent_key"])
+            links.update((self._node(source), node) for source in row.plan.get("predecessors", []))
+        links.update((parent, child) for child, parent in parents.items())
+        for source, target in links:
+            if source in names and target in names and not workplan.compatible(names[source], names[target]):
+                for node in (source, target):
+                    if node in edited:
+                        edited[node].add("error", "E_PLAN_LINK", "A plan may link to Shared or its own tasks, not another alternative. Check existing links too.", "Plan")
 
     def _validate_row(self, row: ParsedRow) -> RowResult:
         result = RowResult(number=row.number)

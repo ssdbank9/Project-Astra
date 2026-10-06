@@ -2,6 +2,24 @@
 
 Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 
+## ASTRA-20261006-03 — minimal owner CSV draft limits and verification correction
+
+- Date / project: 2026-10-06; Rupani Academy owner CSV preparation.
+- Category / status: Draft artifacts prepared; live project/entity binding is unverified, not an implemented feature.
+- Evidence / impact: Default Astra database path does not exist. Current CSV parser skips lines before the task header and does not verify embedded project/entity IDs. Entities belong to projects, not individual tasks. Do not fabricate identifiers or call a metadata-only CSV bound to a project.
+- Correction / prevention: Request the real app/project location and clarify project-level versus task-level entity allocation. Keep nine task columns; leave exact dates and unapproved predecessors blank. Verify selected import configuration before operational use; Full recognizes the draft headers whereas Simple does not enable all of them.
+- Tool correction: An overcomplicated inline Python verification command failed with shell-quoting SyntaxError. Replaced it with one small reusable checker; do not embed nested exec strings in PowerShell commands.
+- Verification: Three CSV drafts parse with Full configuration; 115 private and 124 charter titles, unique keys and parent links match the workbook. No real project, task, entity, account or application configuration was changed. Operational end-to-end upload, exact IDs and milestone reconciliation remain pending. Global log synchronized on 2026-10-07.
+
+## ASTRA-20261006-02 — sample-workplan inspection corrections
+
+- Date / project: 2026-10-06; Astra planning against Aly's Gantt workbook.
+- Category / status: Inspection mistakes corrected; no workbook or application changes.
+- Evidence / impact: Initial combined skill/memory reads truncated output. A source search guessed nonexistent gantt.js and scheduling.py paths. Relevant rules were reread in bounded chunks; rg --files identified app.js and service.py as the actual implementation paths.
+- Cause / prevention: Repeated oversized reads and guessed module names. Inventory known source directories first and budget combined output below the tool limit.
+- Verification: Read both workplan sheets, numbered rows, date formats, milestones, empty owner/status cells and current importer columns. Planning distinguishes source month targets from exact dates, existing capabilities from proposed changes, and source regulatory notes from verified legal claims. Global log synchronized on 2026-10-07.
+- Preview corrections: The bundled Playwright browser was absent; verified installed Chrome was used successfully. The standalone preview wrapper refused replacement until its explicit overwrite flag was supplied; stale-wrapper checks were discarded and repeated. Browser inspection found clipped labels, corrected with short labels and full detail on selection; an overbroad label replacement briefly changed one task title and was corrected against the workbook. Calendar-day CPM checks show three days float on the occupancy branch and a 17-day selected-chain delay after adding 20 days there. The dependency network and dates are illustrative, not the full project's accepted critical path.
+
 ## ASTRA-20261006-01 — remaining development was incorrectly described as blocked
 
 - Date / project: 2026-10-06; Project-Astra continuation.
@@ -408,3 +426,13 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 - Cause: The empty repository was created and authenticated earlier, but its visibility was not read and confirmed before publishing.
 - Correction / prevention: Verify visibility on the empty repository page before any first push and state the observed setting to the owner. For private work require an explicit private label, then verify again after publication. Repository visibility and external connector access remain separate permission decisions.
 - Verification: Both branches and expected files are visible remotely. On 2026-09-21 Aly explicitly chose to keep `Project-Astra` public for now. Claude connector authorization remains separate and was not completed in that session.
+
+## ASTRA-20261007-01 - workplan implementation and verification corrections
+
+- Date / project: 2026-10-06 to 2026-10-07; Astra W6ZSGA single-project owner CSV.
+- Category / status: Confirmed defects in uncommitted implementation, corrected; final suite Ran 739 tests in 812.249s; OK (skipped=1). Global log synchronized on 2026-10-07.
+- Evidence / impact: Independent probes found partial imports could retain one old plan while applying an incompatible related plan; unkeyed native tasks were absent from plan checks; raw comma/marker detection mishandled stripped semicolon files, intact quoted files and legacy CR line endings. Separate downloads initially reused spare keys. No real data was used or changed.
+- Cause: Graph validation used one prospective snapshot and keyed nodes only; identity detection relied on serialized text; spare keys were computed solely from current tasks.
+- Correction / prevention: Fixed-point validation with retained plans and persistent task IDs; structural CSV detection with explicit newline handling; transactionally reserve WP keys in project history. Cover hostile partial imports and files produced through alternative serialization, including positive legacy cases.
+- Verification: Sixteen focused tests and one HTTP role-matrix test passed in parent and independent reviewer runs; eleven disposable guard-removal experiments each caused its regression to fail. Synthetic Chrome download/fill/upload/preview/commit and desktop/phone plan selection passed.
+- Tool failures / correction: Repeated existing-file apply_patch context failures required inspecting every target for partial application; switched to UTF-8 source edits with exact occurrence assertions. One inspection used implicit cp1252, one test referenced a nonexistent file and another used the wrong create_task signature; corrected encoding, discovered the actual module and checked the actual signature. An undefined JS esc helper was corrected to escapeHtml; plan changes now use refreshGantt to preserve project navigation. Sandbox GitHub access failed and was retried through escalation.

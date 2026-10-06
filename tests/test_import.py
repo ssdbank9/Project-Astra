@@ -1823,6 +1823,25 @@ class ImportHttpTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         return response.getheader("Set-Cookie").split(";", 1)[0], login["csrf"]
 
+    def test_project_bound_workplan_download_role_matrix(self):
+        for email, password, allowed in (
+            ("owner@example.org", "correct horse battery", True),
+            ("waseem@example.org", "waseem password safe", True),
+            ("viewer@example.org", "viewer password safe", False),
+            ("chair@example.org", "chair password safe", False),
+        ):
+            with self.subTest(email=email):
+                cookie, _ = self.login(email, password)
+                response, data = self.request("GET", "/api/import/template.csv?project_id=" + self.project["id"] + "&workplan=1", cookie=cookie)
+                self.assertEqual(response.status, 200 if allowed else 403)
+                if allowed:
+                    from astra import workplan
+                    parsed = workplan.parse(data)
+                    self.assertEqual(parsed.workplan["project_id"], self.project["id"])
+        cookie, _ = self.login("owner@example.org", "correct horse battery")
+        response, _ = self.request("GET", "/api/import/template.csv?workplan=1", cookie=cookie)
+        self.assertEqual(response.status, 400)
+
     def rows(self):
         return [
             {"import_key": "H-001", "title": "First", "owner_email": "waseem@example.org", "start_date": date(2026, 9, 1),
