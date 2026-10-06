@@ -13,14 +13,14 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-06T18:38:12Z
-updated-at: 2026-10-06T19:30:54Z
+updated-at: 2026-10-06T19:31:12Z
 updated-by: Codex
 outcome-what: "Added project-bound nine-column CSV download-fill-upload, logged spare task keys, Shared/alternative plan filtering and independent critical paths."
 outcome-why: Owners need one simple file per project without manual project IDs or repeated uploads.
 outcome-resolves: "Stable task updates, exact project/entity binding and compatible complete graphs verified by 739 tests, browser checks and independent review."
 review-summary: "Independent read-only review passed: project-bound minimal CSV, stable logged spare keys, Shared and alternative critical paths, complete graph checks including partial imports and unkeyed tasks, compatible legacy CSV parsing."
 review-gaps: "none within the approved feature scope; real workbook population, Microsoft Excel desktop saving and hosted deployment remain unverified."
-review-verdict: Source review passed; final full-suite verification is being completed before owner signoff.
+review-verdict: "Independent source review passed, sixteen focused tests and HTTP role test passed independently; parent final suite Ran 739 tests in 812.249s OK (skipped=1), eleven guard-removal checks and desktop/phone Chrome workflow passed. Ready for Aly acceptance within this feature scope."
 review-check: "1. Run .venv\\Scripts\\python.exe tests\\run.py and expect OK. 2. Open an existing project and click Import workplan. 3. Download its CSV and fill spare keyed task rows, keeping project metadata. 4. Upload, preview and confirm; expect the tasks without duplicates. 5. Choose a named plan in Timeline; expect Shared plus that plan and its critical path. 6. Re-download for later edits."
 ---
 
