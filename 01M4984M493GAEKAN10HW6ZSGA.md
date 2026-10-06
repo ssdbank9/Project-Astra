@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-06T18:38:12Z
-updated-at: 2026-10-06T18:40:10Z
+updated-at: 2026-10-06T19:19:02Z
 updated-by: Codex
 outcome-what: Implement minimal project-bound workplan CSV and single-project Shared/alternative plans.
 outcome-why: Aly authorized the download-fill-upload feature.
@@ -36,4 +36,4 @@ outcome-resolves: "Add regression coverage, independent review and browser verif
 <Steps, in order — filled in by the pre-process step, or by you.>
 
 ## Progress
-
+- **2026-10-06 19:19 · Codex** — Implemented project-bound nine-column CSV, separately calculated Shared/alternative critical paths, native/import graph guards and logged spare WP key reservations. Independent read-only review passed after correcting partial-import retained plans, unkeyed nodes and CSV serialization regressions. Sixteen focused tests and HTTP role test passed; synthetic Chrome workflow passed desktop/phone. Final full suite running. Real workbook population and hosted deployment remain unverified.
