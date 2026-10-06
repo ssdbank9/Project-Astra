@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-06T07:11:34Z
-updated-at: 2026-10-06T07:20:30Z
+updated-at: 2026-10-06T07:31:23Z
 updated-by: Aly Jafferani
 outcome-what: Implement Phase A3 CSV and literal-search guards.
 outcome-why: Confirmed defects in current source.
@@ -24,7 +24,8 @@ outcome-resolves: "Regressions, repair and independent review."
 
 ## Definition of Done
 
-- [ ] Whitespace-prefixed formulas are escaped without trimming stored export text; percent, underscore and the escape character search literally for all authorized roles; focused regressions fail on old code and pass on fixed code; independent review and diff hygiene complete.
+- [x] Whitespace-prefixed formulas are escaped without trimming stored export text; percent, underscore and the escape character search literally for all authorized roles; focused regressions fail on old code and pass on fixed code; independent review and diff hygiene complete.
+  proof: Old-code regressions failed 11 cases; four focused tests pass. Independent a3_review found no blocking defects. git diff --check passes.
 
 ## Options
 
