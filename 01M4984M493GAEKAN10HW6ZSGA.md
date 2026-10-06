@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-06T18:38:12Z
-updated-at: 2026-10-06T19:25:40Z
+updated-at: 2026-10-06T19:28:53Z
 updated-by: Codex
 outcome-what: Implement minimal project-bound workplan CSV and single-project Shared/alternative plans.
 outcome-why: Aly authorized the download-fill-upload feature.
@@ -28,7 +28,8 @@ review-check: "1. Run .venv\\Scripts\\python.exe tests\\run.py and expect OK. 2.
 
 ## Definition of Done
 
-- [ ] Bound minimal CSV round-trips exact text and stable keys; blank new keys are generated safely; wrong project/entities and incompatible plan links are refused; Shared plus selected plan has independently calculated critical paths; UI download/upload and plan selection verified; full tests and independent review pass.
+- [x] Bound minimal CSV round-trips exact text and stable keys; blank new keys are generated safely; wrong project/entities and incompatible plan links are refused; Shared plus selected plan has independently calculated critical paths; UI download/upload and plan selection verified; full tests and independent review pass.
+  proof: tests/test_workplan.py:16 tests OK; test_import.ImportHttpTests.test_project_bound_workplan_download_role_matrix OK; tests/run.py Ran 739 tests in 812.249s OK (skipped=1); independent workplan_review passed; synthetic Chrome download-fill-upload-preview-commit and desktop/phone plan selection passed; eleven guard-removal regressions failed as expected.
 
 ## Options
 
