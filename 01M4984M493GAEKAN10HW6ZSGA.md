@@ -1,7 +1,7 @@
 ---
 id: 01M4984M493GAEKAN10HW6ZSGA
 title: Project plan options and minimal bound workplan CSV
-status: in-progress
+status: review
 ready: true
 creator: Codex
 assignee: Codex
@@ -13,11 +13,11 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-06T18:38:12Z
-updated-at: 2026-10-06T19:28:53Z
+updated-at: 2026-10-06T19:30:54Z
 updated-by: Codex
-outcome-what: Implement minimal project-bound workplan CSV and single-project Shared/alternative plans.
-outcome-why: Aly authorized the download-fill-upload feature.
-outcome-resolves: "Add regression coverage, independent review and browser verification."
+outcome-what: "Added project-bound nine-column CSV download-fill-upload, logged spare task keys, Shared/alternative plan filtering and independent critical paths."
+outcome-why: Owners need one simple file per project without manual project IDs or repeated uploads.
+outcome-resolves: "Stable task updates, exact project/entity binding and compatible complete graphs verified by 739 tests, browser checks and independent review."
 review-summary: "Independent read-only review passed: project-bound minimal CSV, stable logged spare keys, Shared and alternative critical paths, complete graph checks including partial imports and unkeyed tasks, compatible legacy CSV parsing."
 review-gaps: "none within the approved feature scope; real workbook population, Microsoft Excel desktop saving and hosted deployment remain unverified."
 review-verdict: Source review passed; final full-suite verification is being completed before owner signoff.
