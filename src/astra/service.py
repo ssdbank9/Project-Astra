@@ -1818,27 +1818,28 @@ class AstraService:
         term = str(query).strip()
         if not term:
             return {"tasks": [], "projects": []}
-        like = f"%{term}%"
+        escaped = term.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        like = f"%{escaped}%"
         if actor["global_role"] in {"owner", "chairman"}:
             task_rows = self.db.execute(
                 """SELECT t.id,t.title,t.status,p.name project_name FROM tasks t JOIN projects p ON p.id=t.project_id
-                   WHERE t.title LIKE ? OR t.description LIKE ? ORDER BY t.title COLLATE NOCASE LIMIT 50""",
+                   WHERE t.title LIKE ? ESCAPE '!' OR t.description LIKE ? ESCAPE '!' ORDER BY t.title COLLATE NOCASE LIMIT 50""",
                 (like, like),
             ).fetchall()
             project_rows = self.db.execute(
-                "SELECT id,name FROM projects WHERE name LIKE ? ORDER BY name COLLATE NOCASE LIMIT 50", (like,)
+                "SELECT id,name FROM projects WHERE name LIKE ? ESCAPE '!' ORDER BY name COLLATE NOCASE LIMIT 50", (like,)
             ).fetchall()
         else:
             task_rows = self.db.execute(
                 """SELECT t.id,t.title,t.status,p.name project_name FROM tasks t JOIN projects p ON p.id=t.project_id
-                   WHERE (t.title LIKE ? OR t.description LIKE ?)
+                   WHERE (t.title LIKE ? ESCAPE '!' OR t.description LIKE ? ESCAPE '!')
                      AND EXISTS(SELECT 1 FROM memberships m WHERE m.project_id=t.project_id AND m.user_id=?)
                    ORDER BY t.title COLLATE NOCASE LIMIT 50""",
                 (like, like, actor["id"]),
             ).fetchall()
             project_rows = self.db.execute(
                 """SELECT p.id,p.name FROM projects p JOIN memberships m ON m.project_id=p.id
-                   WHERE m.user_id=? AND p.name LIKE ? ORDER BY p.name COLLATE NOCASE LIMIT 50""",
+                   WHERE m.user_id=? AND p.name LIKE ? ESCAPE '!' ORDER BY p.name COLLATE NOCASE LIMIT 50""",
                 (actor["id"], like),
             ).fetchall()
         return {"tasks": [dict(r) for r in task_rows], "projects": [dict(r) for r in project_rows]}

@@ -2,6 +2,18 @@
 
 Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 
+## ASTRA-20261006-01 — remaining development was incorrectly described as blocked
+
+- Date / project: 2026-10-06; Project-Astra continuation.
+- Category / status: Confirmed communication omission corrected; Phase A3 CSV/search fixes verified and awaiting Aly's acceptance.
+- Evidence / impact: Earlier responses inferred no development remained from agentic board lanes, although NEXT_STEPS.md Phase A3 lists unbuilt CSV-whitespace and literal-search repairs. They also asked for a hosting choice already recorded as Oracle Cloud, DuckDNS and Caddy.
+- Cause / prevention: Board lane availability is not feature completion. Read the authoritative phase plan and accepted decisions before declaring all work gated; create scoped tickets for authorized, untracked work.
+- Verification: Current source confirmed both defects; new regression run failed 11 cases, then four focused tests passed after repair. Full suite: Ran 722 tests in 873.981s, OK (skipped=1). Independent read-only a3_review passed with no blocking defect. Actual spreadsheet interpretation remains unverified.
+- Tool corrections: Broad combined reads truncated output and an unrestricted file search encountered known inaccessible tmp directories. New Jaira tickets are ref-only until pulled; the ticket created under Codex required explicit self-takeover because the installed CLI identity differs. Use bounded reads, known directories and inspect CLI output before advancing. Git/Jaira writes required sandbox escalation; no existing work was discarded.
+- Canonical log merge pending outside workspace write permissions.
+
+- Final hygiene correction: The byte check found CRLF in web.py despite an earlier diff check passing. Scoped files were normalized to LF and rechecked; this changes no Python semantics. The normalization loop unnecessarily rewrote the CLI-owned ticket file with identical content; ticket fields were still written only through Jaira. Future byte normalization must exclude ticket paths and use the CLI for ticket mutations. An attempted Git stage was denied by the sandbox and was rerun with approved escalation.
+
 ## ASTRA-20261004-09 — approver development and launch-plan inspection corrections
 
 - Date / project: 2026-10-04; Project-Astra Q1 development after the three published repairs.

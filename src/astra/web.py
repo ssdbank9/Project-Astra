@@ -59,11 +59,13 @@ def _csv_cell(value) -> str:
 
     Same rule as importer.csv_cell (template and import-report CSVs): a value starting with
     = + - @ tab or CR gets a leading single quote. Unlike csv_cell it does not normalise the
-    value (no trimming, no Yes/No for booleans), so the export keeps the exact stored text."""
+    value (no trimming, no Yes/No for booleans), so the export keeps the exact stored text.
+    Check past leading whitespace without removing it from the exported value."""
     if value is None:
         return ""
     text = str(value)
-    return "'" + text if text.startswith(FORMULA_PREFIXES) else text
+    unsafe = text.lstrip(" ").startswith(FORMULA_PREFIXES) or text.lstrip().startswith(FORMULA_PREFIXES)
+    return "'" + text if unsafe else text
 
 
 # Filter keys as they appear in a CSV download's filename; anything not listed (sort, format)

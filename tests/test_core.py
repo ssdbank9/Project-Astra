@@ -1261,6 +1261,24 @@ class AstraCoreTests(unittest.TestCase):
         self.assertEqual([t["title"] for t in member_res["tasks"]], ["Alpha task one"])
         self.assertEqual([p["name"] for p in member_res["projects"]], ["Visible Alpha"])
 
+    def test_search_matches_literal_pattern_characters_for_all_roles(self):
+        project = self.service.create_project(self.owner, "Literal %_! project")
+        plain = self.service.create_project(self.owner, "Plain project")
+        self.service.create_task(self.owner, {"project_id": project["id"], "title": "Literal %_! task"})
+        self.service.create_task(self.owner, {"project_id": plain["id"], "title": "Plain task"})
+        for role in ("owner", "chairman", "member"):
+            actor = self.owner if role == "owner" else self.service.create_user(
+                self.owner, role + "-literal@example.org", role, "member password safe", role
+            )
+            if role == "member":
+                self.service.grant_project_access(self.owner, project["id"], actor["id"], "viewer")
+                self.service.grant_project_access(self.owner, plain["id"], actor["id"], "viewer")
+            for term in ("%", "_", "!", "%_!"):
+                with self.subTest(role=role, term=term):
+                    result = self.service.search(actor, term)
+                    self.assertEqual([t["title"] for t in result["tasks"]], ["Literal %_! task"])
+                    self.assertEqual([p["name"] for p in result["projects"]], ["Literal %_! project"])
+
     def test_export_echoes_as_of_and_filters_and_is_scoped(self):
         p = self.service.create_project(self.owner, "Export")
         self.service.create_task(self.owner, {"project_id": p["id"], "title": "Keep", "status": "in_progress"})

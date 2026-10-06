@@ -934,6 +934,13 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual(len(titles("anything")), 5)
         self.assertIsNone(svc.export_tasks({"id": "u"}, {"risk": "anything"})["filters"]["risk"])
 
+    def test_csv_cell_guards_whitespace_without_trimming_export_text(self):
+        from astra.web import _csv_cell
+        for value in ("  =1+1", " \t+SUM(A1:A2)", "\n@cmd", "  -2", " \tx"):
+            with self.subTest(value=value):
+                self.assertEqual(_csv_cell(value), "'" + value)
+        self.assertEqual(_csv_cell("  ordinary text  "), "  ordinary text  ")
+
     def test_search_and_export_over_http(self):
         cookie, csrf = self._owner_session()
         _, project = self.request("POST", "/api/projects", {"name": "Findable"}, cookie=cookie, csrf=csrf)
