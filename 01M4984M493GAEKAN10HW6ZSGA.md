@@ -1,7 +1,7 @@
 ---
 id: 01M4984M493GAEKAN10HW6ZSGA
 title: Project plan options and minimal bound workplan CSV
-status: review
+status: signoff
 ready: true
 creator: Codex
 assignee: Codex
@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-06T18:38:12Z
-updated-at: 2026-10-06T19:31:12Z
+updated-at: 2026-10-06T19:31:30Z
 updated-by: Codex
 outcome-what: "Added project-bound nine-column CSV download-fill-upload, logged spare task keys, Shared/alternative plan filtering and independent critical paths."
 outcome-why: Owners need one simple file per project without manual project IDs or repeated uploads.
