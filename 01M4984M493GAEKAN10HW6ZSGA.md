@@ -1,7 +1,7 @@
 ---
 id: 01M4984M493GAEKAN10HW6ZSGA
 title: Project plan options and minimal bound workplan CSV
-status: backlog
+status: in-progress
 ready: true
 creator: Codex
 assignee: Codex
@@ -13,8 +13,11 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-06T18:38:12Z
-updated-at: 2026-10-06T18:39:20Z
+updated-at: 2026-10-06T18:40:10Z
 updated-by: Codex
+outcome-what: Implement minimal project-bound workplan CSV and single-project Shared/alternative plans.
+outcome-why: Aly authorized the download-fill-upload feature.
+outcome-resolves: "Add regression coverage, independent review and browser verification."
 ---
 
 # Project plan options and minimal bound workplan CSV
