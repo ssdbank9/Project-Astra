@@ -13,11 +13,15 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-06T18:38:12Z
-updated-at: 2026-10-06T19:19:02Z
+updated-at: 2026-10-06T19:25:40Z
 updated-by: Codex
 outcome-what: Implement minimal project-bound workplan CSV and single-project Shared/alternative plans.
 outcome-why: Aly authorized the download-fill-upload feature.
 outcome-resolves: "Add regression coverage, independent review and browser verification."
+review-summary: "Independent read-only review passed: project-bound minimal CSV, stable logged spare keys, Shared and alternative critical paths, complete graph checks including partial imports and unkeyed tasks, compatible legacy CSV parsing."
+review-gaps: "none within the approved feature scope; real workbook population, Microsoft Excel desktop saving and hosted deployment remain unverified."
+review-verdict: Source review passed; final full-suite verification is being completed before owner signoff.
+review-check: "1. Run .venv\\Scripts\\python.exe tests\\run.py and expect OK. 2. Open an existing project and click Import workplan. 3. Download its CSV and fill spare keyed task rows, keeping project metadata. 4. Upload, preview and confirm; expect the tasks without duplicates. 5. Choose a named plan in Timeline; expect Shared plus that plan and its critical path. 6. Re-download for later edits."
 ---
 
 # Project plan options and minimal bound workplan CSV
