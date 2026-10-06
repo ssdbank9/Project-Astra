@@ -16,7 +16,7 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T19:13:21Z
-updated-at: 2026-10-06T00:46:21Z
+updated-at: 2026-10-06T04:37:50Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-63800
 claimed-at: 2026-10-05T17:14:21Z
@@ -66,3 +66,4 @@ question: "Aly: please perform the browser acceptance steps in review-check, esp
 - **2026-10-05 17:15 · Aly Jafferani** — Owner decisions already settled: any active Owner, including primary and secondary owners, may reopen a closed project; reopen requires a reason, is audited and notifies the other owners. Settings changes are recorded in history; app-wide settings history appears in People/access and project settings history appears in project Activity. Reopen notifications follow existing project-change notification behavior.
 - **2026-10-05 17:18 · Aly Jafferani** — Inventory findings: project_events already stores project_id, event_type, actor, occurred_at, reason and detail_json; _project_event can notify other owners. project_events currently expose only project_schedule_changed and project_closed to non-managers. People history currently reads user_events for owner access. set_import_template_config already uses BEGIN IMMEDIATE but stores only current config/version, so app-wide history needs a separate history record or table. close_project has no reverse service/API/UI path.
 - **2026-10-06 00:46 · Aly Jafferani** — Browser verification 2026-10-06: local browser confirmed the accessible Close project dialog, required closure note, exceptional checkbox, closed state, Reopen project button, accessible reopen dialog, and empty-reason blocking. Submitting a valid reopen reason reached the running server but returned HTML 404/Unexpected token '<' because the local Astra backend process predates the /reopen route; backend route remains unverified in this running instance. Replaced unsupported prompt() calls with dialog forms in commit 55d550c; tests/test_web.py Ran 220 tests, OK.
+- **2026-10-06 04:37 · Aly Jafferani** — Browser verification completed after restarting the synthetic fixture against the current checkout: close dialog accepted note and exceptional closure; closed state showed Reopen project; empty reopen reason left dialog open; valid reason reopened project; Activity showed Project reopened with reason and before/after status; People & access showed separate Settings history. Local browser route now verified.
