@@ -3,7 +3,10 @@
 Aly approved the owner workflow: download one CSV from an existing Astra
 project, fill task rows in Excel, upload it, review the preview, then confirm.
 The same project may contain Shared work and named alternative plans.
-This feature is implemented and verified locally; owner acceptance and hosting are separate.
+Aly Jafferani accepted W6ZSGA in this chat on 2026-10-07: "W6ZSGA signed off".
+Acceptance covers feature commit `606bf5423f71f001fad53102914918a3cf0886e8`.
+The Jaira acceptance note is recorded; its human-only transition from signoff
+to done remains Aly's step. Real sample population and hosting remain separate.
 
 ## Owner workflow
 
