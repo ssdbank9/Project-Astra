@@ -13,8 +13,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T19:41:33Z
-updated-at: 2026-10-07T19:44:42Z
+updated-at: 2026-10-07T19:44:46Z
 updated-by: Codex
+claimed-by: X1CarbonPC-32528
+claimed-at: 2026-10-07T19:44:46Z
 ---
 
 # Simple project-bound Excel workplans and task-row timeline scheduling
