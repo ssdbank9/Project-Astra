@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T19:41:33Z
-updated-at: 2026-10-07T19:46:04Z
+updated-at: 2026-10-07T19:46:09Z
 updated-by: Codex
 claimed-by: X1CarbonPC-32528
 claimed-at: 2026-10-07T19:44:46Z
@@ -39,4 +39,4 @@ claimed-at: 2026-10-07T19:44:46Z
 <Steps, in order — filled in by the pre-process step, or by you.>
 
 ## Progress
-
+- **2026-10-07 19:46 · Codex** — Inspection: current Gantt implements bar move/resize only; Kanban has its own card drag. Named Excel references must reject ambiguous/renamed targets. Task row ordering will be recorded per project, separate from dependencies. Excel code must use existing standard-library OOXML facilities; artifact-tool is authoring/verification only, never a runtime dependency. No inferred links from date overlap.
