@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T11:57:29Z
-updated-at: 2026-10-07T12:16:22Z
+updated-at: 2026-10-07T12:21:47Z
 updated-by: Codex
 claimed-by: X1CarbonPC-21680
 claimed-at: 2026-10-07T12:02:00Z
@@ -26,7 +26,8 @@ outcome-resolves: Stable entity identity and project links.
 
 ## Definition of Done
 
-- [ ] Owner rename UI and HTTP/service path work; IDs and project filing stay unchanged; old/new/actor audit recorded; blanks, invalid names, duplicates and unauthorized roles refused without partial writes; browser, full suite, guard mutation and independent review pass.
+- [x] Owner rename UI and HTTP/service path work; IDs and project filing stay unchanged; old/new/actor audit recorded; blanks, invalid names, duplicates and unauthorized roles refused without partial writes; browser, full suite, guard mutation and independent review pass.
+  proof: tests/test_entity_rename.py: 6 tests pass independently and in parent; full suite Ran 745 tests in 746.073s OK (skipped=1); 3 guard-removal probes caught. Synthetic browser rename/history/retained filing and success-then-duplicate feedback pass. Independent workplan_review final PASS. Actual local server activated; user re-login pending.
 
 ## Options
 
