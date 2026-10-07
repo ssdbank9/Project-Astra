@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T11:57:29Z
-updated-at: 2026-10-07T12:02:11Z
+updated-at: 2026-10-07T12:16:22Z
 updated-by: Codex
 claimed-by: X1CarbonPC-21680
 claimed-at: 2026-10-07T12:02:00Z
@@ -38,4 +38,4 @@ outcome-resolves: Stable entity identity and project links.
 <Steps, in order — filled in by the pre-process step, or by you.>
 
 ## Progress
-
+- **2026-10-07 12:16 · Codex** — Approved entity created and school project filed in real authenticated UI. Rename implementation independently reviewed; 6 focused tests and 3 guard-removal probes pass. Synthetic browser rename preserves checked filing and records history; success followed by duplicate refusal restores alert/error styling. Current live DB backed up before activation. Full suite still running; local server activation and push pending.
