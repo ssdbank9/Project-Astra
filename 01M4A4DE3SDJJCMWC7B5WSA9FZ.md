@@ -1,7 +1,7 @@
 ---
 id: 01M4A4DE3SDJJCMWC7B5WSA9FZ
 title: Consolidate local Astra data under the main checkout
-status: review
+status: signoff
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -13,13 +13,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T02:52:21Z
-updated-at: 2026-10-07T08:13:38Z
+updated-at: 2026-10-07T08:13:51Z
 updated-by: Codex
 claimed-by: X1CarbonPC-38872
 claimed-at: 2026-10-07T03:16:32Z
-outcome-what: "Moved existing data folder into checkout/data and added ignored-data rule, launcher and local/handoff instructions."
-outcome-why: Aly requested one containing folder.
-outcome-resolves: Verified no records lost; explicit local launch data path.
+outcome-what: "Independently reviewed local data consolidation."
+outcome-why: Aly requested one main folder.
+outcome-resolves: Verified existing DB preserved and explicit launcher documented.
 review-summary: "Independent workplan_review passed relocation audit, launcher, Git exclusion and final handoff."
 review-gaps: "Actual app startup, login and earlier browser database unverified. Full suite not rerun for local move; no push."
 review-verdict: PASS for local consolidation
