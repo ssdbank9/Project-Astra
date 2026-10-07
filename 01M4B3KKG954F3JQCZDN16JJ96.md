@@ -13,7 +13,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T11:57:29Z
-updated-at: 2026-10-07T11:57:29Z
+updated-at: 2026-10-07T11:59:34Z
+updated-by: Codex
 ---
 
 # Allow owners to rename an entity without breaking project links
