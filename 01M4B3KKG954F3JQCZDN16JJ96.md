@@ -1,7 +1,7 @@
 ---
 id: 01M4B3KKG954F3JQCZDN16JJ96
 title: Allow owners to rename an entity without breaking project links
-status: review
+status: signoff
 ready: true
 creator: Codex
 assignee: Codex
@@ -13,13 +13,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T11:57:29Z
-updated-at: 2026-10-07T12:24:52Z
+updated-at: 2026-10-07T12:25:03Z
 updated-by: Codex
 claimed-by: X1CarbonPC-21680
 claimed-at: 2026-10-07T12:02:00Z
-outcome-what: "Owner entity rename with stable IDs, preserved filing, transactional audit and clear form feedback."
-outcome-why: Aly requested a rename option and selected a separate entity.
-outcome-resolves: "Service, HTTP roles and browser checks pass; full suite 745 OK."
+outcome-what: "Reviewed owner entity-rename feature activated locally."
+outcome-why: Aly requested entity rename and approved entity filing.
+outcome-resolves: "Stable entity identity and project linkage with audited names."
 review-summary: "Independent read-only review passed source, role boundaries, atomic audit, stable links and final feedback correction."
 review-gaps: Windows symlink check skipped. Actual user-session re-login after local restart remains pending; synthetic browser workflow passed.
 review-verdict: PASS
