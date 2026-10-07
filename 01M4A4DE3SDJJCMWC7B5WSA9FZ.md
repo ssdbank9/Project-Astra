@@ -1,7 +1,7 @@
 ---
 id: 01M4A4DE3SDJJCMWC7B5WSA9FZ
 title: Consolidate local Astra data under the main checkout
-status: pre-process
+status: review
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -13,15 +13,21 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T02:52:21Z
-updated-at: 2026-10-07T03:13:10Z
+updated-at: 2026-10-07T03:41:59Z
 updated-by: Codex
+claimed-by: X1CarbonPC-38872
+claimed-at: 2026-10-07T03:16:32Z
+outcome-what: "Moved existing data folder into checkout/data and added ignored-data rule, launcher and local/handoff instructions."
+outcome-why: Aly requested one containing folder.
+outcome-resolves: Verified no records lost; explicit local launch data path.
 ---
 
 # Consolidate local Astra data under the main checkout
 
 ## Definition of Done
 
-- [ ] SQLite backup, integrity and logical contents verified before and after relocation; old folder relocated with all companions; data directory ignored by Git; explicit loopback launcher and local instructions verified; independent read-only review passes.
+- [x] SQLite backup, integrity and logical contents verified before and after relocation; old folder relocated with all companions; data directory ignored by Git; explicit loopback launcher and local instructions verified; independent read-only review passes.
+  proof: Temp/check_astra_data_move.py before/after: SQLite integrity, foreign keys, schema and every table record unchanged; consistent backup matches. Start-Astra.ps1 -Check passed. Temp/check_astra_launcher_guards.ps1 passed both refusals and guard-removal checks. git check-ignore -v data/* and independent workplan_review passed.
 
 ## Options
 
@@ -33,4 +39,4 @@ updated-by: Codex
 <Steps, in order — filled in by the pre-process step, or by you.>
 
 ## Progress
-
+- **2026-10-07 03:16 · Codex** — Source database held 1 user and no projects/tasks. SQLite backup and table hashes match after relocation. No startup, migration, login or real import performed. Missing database/Python checks pass; removing each guard fails its regression. Independent review passed. Earlier browser database unverified.
