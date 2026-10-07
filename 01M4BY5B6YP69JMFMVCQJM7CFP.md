@@ -13,7 +13,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T19:41:33Z
-updated-at: 2026-10-07T19:41:33Z
+updated-at: 2026-10-07T19:44:42Z
+updated-by: Codex
 ---
 
 # Simple project-bound Excel workplans and task-row timeline scheduling
