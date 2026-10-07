@@ -795,6 +795,27 @@ class AstraService:
         )
         return self.get_entity(entity_id)
 
+    def rename_entity(self, actor: dict, entity_id: str, name: str) -> dict:
+        self.require_owner(actor)
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Entity name is required.")
+        name = name.strip()
+        if any(unicodedata.category(character) == "Cc" for character in name):
+            raise ValueError("Entity name cannot contain control characters.")
+        with transaction(self.db):
+            before = self.get_entity(entity_id)
+            others = self.db.execute("SELECT name FROM entities WHERE id<>?", (entity_id,)).fetchall()
+            if any(row["name"].casefold() == name.casefold() for row in others):
+                raise ValueError("An entity with this name already exists.")
+            if before["name"] == name:
+                return before
+            self.db.execute("UPDATE entities SET name=? WHERE id=?", (name, entity_id))
+            after = self.get_entity(entity_id)
+            self._app_setting_event(actor, "entity_renamed",
+                                    {"entity_id": entity_id, "name": before["name"]},
+                                    {"entity_id": entity_id, "name": after["name"]})
+        return after
+
     def set_entity_active(self, actor: dict, entity_id: str, active: bool) -> dict:
         self.require_owner(actor)
         with transaction(self.db):

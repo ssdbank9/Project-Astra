@@ -2409,7 +2409,7 @@ async function openPeople(){
 }
 
 // GTEYTG: every owner has role "owner"; only the primary owner may give or remove owner access.
-const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset",entity_active_changed:"Entity active state changed",import_template_config_changed:"Import template settings changed"};
+const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset",entity_active_changed:"Entity active state changed",entity_renamed:"Entity renamed",import_template_config_changed:"Import template settings changed"};
 // PDDS2D/3M2AYA: a password reset is either a server command or done in the app by an owner.
 const viaServerCommand=e=>(e.event_type==="primary_owner_transferred"||e.event_type==="password_reset")&&e.reason==="server command";
 const MIN_PASSWORD=8;
@@ -2430,7 +2430,7 @@ function renderPeople(users,memberships,ownerEvents){
   };
   const ownerEventRow=e=>{let change="";if(e.detail_json){const d=safeParse(e.detail_json),b=d.before,a=d.after;if(b&&a)change=` · ${escapeHtml(JSON.stringify(b))} → ${escapeHtml(JSON.stringify(a))}`;}return `<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(ownerEventLabel(e))}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`}${viaServerCommand(e)?" via server command":` by ${escapeHtml(e.actor_name)}`}${e.reason&&!viaServerCommand(e)?` · ${escapeHtml(e.reason)}`:""}${change}</li>`};
   const blocked=e=>e.event_type==="owner_change_blocked"||e.event_type==="import_blocked";
-  const settingEvents=new Set(["entity_active_changed","import_template_config_changed"]);
+  const settingEvents=new Set(["entity_active_changed","entity_renamed","import_template_config_changed"]);
   const ownerHistory=(ownerEvents||[]).filter(e=>!blocked(e)&&!settingEvents.has(e.event_type)).slice(0,20).map(ownerEventRow).join("")||"<li>No owner access changes yet.</li>";
   const settingsHistory=(ownerEvents||[]).filter(e=>settingEvents.has(e.event_type)).slice(0,20).map(ownerEventRow).join("")||"<li>No app setting changes yet.</li>";
   const blockedList=type=>(ownerEvents||[]).filter(e=>e.event_type===type).slice(0,10).map(ownerEventRow).join("")||"<li>None.</li>";
@@ -2477,6 +2477,12 @@ function renderPeople(users,memberships,ownerEvents){
       <label>New entity name<input name="name" required></label>
       <div class="actions"><button value="add">Add entity</button><button type="button" id="seed-entities" class="quiet">Seed approved entities</button></div>
       <div class="error" id="entity-error"></div></form>
+    <form id="rename-entity-form"><h3>Rename an entity</h3>
+      <label>Entity to rename<select name="entity_id" required><option value="">Choose an entity…</option>${(state.entities||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`).join("")}</select></label>
+      <label>New name<input name="name" required></label>
+      <p class="fine">Renaming keeps its projects and task links. The old and new names are recorded in Settings history.</p>
+      <div class="actions"><button>Rename entity</button></div>
+      <div class="error" id="rename-entity-error" role="alert"></div></form>
     <form id="filing-form"><h3>Project filing (entities)</h3>
       <label>Project<select id="filing-project"><option value="">Choose a project…</option>${filingProjectOptions}</select></label>
       <div id="filing-entities" class="filing-entities"></div>
@@ -2495,6 +2501,7 @@ function renderPeople(users,memberships,ownerEvents){
   document.querySelectorAll("#people-body [data-owner-grant],#people-body [data-owner-revoke]").forEach(b=>b.addEventListener("click",changeOwnerAccess));
   document.querySelectorAll("#people-body [data-revoke-project]").forEach(b=>b.addEventListener("click",revokeAccess));
   document.querySelector("#add-entity-form").addEventListener("submit",submitAddEntity);
+  document.querySelector("#rename-entity-form").addEventListener("submit",submitRenameEntity);
   document.querySelector("#seed-entities").addEventListener("click",seedEntities);
   document.querySelectorAll("#people-body [data-entity-toggle]").forEach(b=>b.addEventListener("click",toggleEntityActive));
   document.querySelector("#filing-project").addEventListener("change",e=>renderFilingEntities(e.target.value));
@@ -2589,6 +2596,14 @@ async function saveBudget(projectId){
 async function submitAddEntity(e){
   e.preventDefault();const err=document.querySelector("#entity-error");err.textContent="";
   try{await api("/api/entities",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});await load();await openPeople()}
+  catch(x){err.textContent=x.message}
+}
+async function submitRenameEntity(e){
+  e.preventDefault();const err=document.querySelector("#rename-entity-error");err.textContent="";err.className="error";err.setAttribute("role","alert");
+  const values=Object.fromEntries(new FormData(e.target));
+  if(!values.entity_id){err.textContent="Choose an entity.";return}
+  try{await api(`/api/entities/${encodeURIComponent(values.entity_id)}/rename`,{method:"POST",body:JSON.stringify({name:values.name})});await load();await openPeople();
+    const message=document.querySelector("#rename-entity-error");message.className="fine";message.setAttribute("role","status");message.textContent="Entity name saved.";}
   catch(x){err.textContent=x.message}
 }
 async function seedEntities(){

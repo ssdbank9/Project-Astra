@@ -292,6 +292,9 @@ class AstraHandler(BaseHTTPRequestHandler):
                 return self._json({"created": self.service.seed_default_entities(user)})
             if path == "/api/entities":
                 return self._json({"entity": self.service.create_entity(user, payload.get("name", ""))}, HTTPStatus.CREATED)
+            if path.startswith("/api/entities/") and path.endswith("/rename"):
+                entity_id = path.split("/")[3]
+                return self._json({"entity": self.service.rename_entity(user, entity_id, payload.get("name"))})
             if path.startswith("/api/entities/") and path.endswith("/active"):
                 entity_id = path.split("/")[3]
                 return self._json({"entity": self.service.set_entity_active(user, entity_id, bool(payload.get("active")))})
