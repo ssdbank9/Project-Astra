@@ -1,7 +1,7 @@
 ---
 id: 01M4B3KKG954F3JQCZDN16JJ96
 title: Allow owners to rename an entity without breaking project links
-status: in-progress
+status: review
 ready: true
 creator: Codex
 assignee: Codex
@@ -13,13 +13,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T11:57:29Z
-updated-at: 2026-10-07T12:21:47Z
+updated-at: 2026-10-07T12:21:57Z
 updated-by: Codex
 claimed-by: X1CarbonPC-21680
 claimed-at: 2026-10-07T12:02:00Z
-outcome-what: "Add owner-only service/API rename, inline People form and audited name changes."
-outcome-why: Aly requested renaming without recreating entities.
-outcome-resolves: Stable entity identity and project links.
+outcome-what: "Owner entity rename with stable IDs, preserved filing, transactional audit and clear form feedback."
+outcome-why: Aly requested a rename option and selected a separate entity.
+outcome-resolves: "Service, HTTP roles and browser checks pass; full suite 745 OK."
 ---
 
 # Allow owners to rename an entity without breaking project links
