@@ -10,6 +10,7 @@ build/
 dist/
 
 # Local application and fixture data
+/data/
 tmp_ui_accept/
 *.db
 *.db-shm

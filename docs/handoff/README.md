@@ -36,6 +36,14 @@ browser checks passed. Aly accepted W6ZSGA in this chat on 2026-10-07.
 The human-only board transition, real sample population and hosting remain
 separate.
 
+Local data location on Aly's machine, 2026-10-07: `Documents/AstraTest` was
+relocated to this checkout's `data/` directory at Aly's request. Use the root
+`Start-Astra.ps1` launcher; see [local instructions](../../LOCAL_ASTRA.md).
+The directory is ignored by Git. SQLite integrity, foreign keys and every table's
+records matched a consistent backup after relocation. This database contains one
+user and no projects or tasks; the earlier browser-session database remains
+unverified. No server startup or schema migration was performed during the move.
+
 ## What is in the pack
 
 | File | What it is for |
