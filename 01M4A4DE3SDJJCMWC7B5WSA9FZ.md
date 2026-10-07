@@ -13,7 +13,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T02:52:21Z
-updated-at: 2026-10-07T02:52:21Z
+updated-at: 2026-10-07T03:13:10Z
+updated-by: Codex
 ---
 
 # Consolidate local Astra data under the main checkout
