@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T19:41:33Z
-updated-at: 2026-10-08T02:26:23Z
+updated-at: 2026-10-08T02:37:38Z
 updated-by: Codex
 claimed-by: X1CarbonPC-32528
 claimed-at: 2026-10-07T19:44:46Z
@@ -44,3 +44,4 @@ outcome-resolves: Implementation boundaries specified
 ## Progress
 - **2026-10-07 19:46 · Codex** — Inspection: current Gantt implements bar move/resize only; Kanban has its own card drag. Named Excel references must reject ambiguous/renamed targets. Task row ordering will be recorded per project, separate from dependencies. Excel code must use existing standard-library OOXML facilities; artifact-tool is authoring/verification only, never a runtime dependency. No inferred links from date overlap.
 - **2026-10-08 02:26 · Codex** — Excel owner workplan and explicit task-row timeline actions implemented. Seventeen focused tests pass; eight disposable guard removals fail their regressions. Private source sample creates 239 tasks in an isolated copy and repeat upload changes none; live tasks remain untouched. Full suite rerun and independent review are running. Browser control fails before initialization, so browser acceptance is unverified.
+- **2026-10-08 02:37 · Codex** — Independent review found and corrected accidental Unicode changes and missing Excel concurrent target/self/plan/dependency-chain checks. Nineteen focused tests pass; ten disposable guard removals fail. Core and optional sample previews inspected. Final full suite after review corrections is running. Codex browser retry requested by Aly still exits before reading UI; browser verification remains unverified.
