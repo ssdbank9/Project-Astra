@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T19:41:33Z
-updated-at: 2026-10-08T02:41:01Z
+updated-at: 2026-10-08T02:43:09Z
 updated-by: Codex
 claimed-by: X1CarbonPC-32528
 claimed-at: 2026-10-07T19:44:46Z
@@ -24,7 +24,8 @@ outcome-resolves: Implementation boundaries specified
 
 # Simple project-bound Excel workplans and task-row timeline scheduling
 
-- [ ] Add standard-library XLSX workbook with four core fields, grouped optional relationships, hidden stable IDs and project/entity marker; resolve named selections in existing importer.
+- [x] Add standard-library XLSX workbook with four core fields, grouped optional relationships, hidden stable IDs and project/entity marker; resolve named selections in existing importer.
+  proof: src/astra/workplan_excel.py; tests/test_owner_excel_timeline.py OwnerExcelTests; private isolated sample239/replay239
 - [ ] Add governed task-row date/relation/order drops using atomic service validation and existing scheduling authority; refresh critical path.
 - [ ] Exercise parser/service/HTTP roles and guard-removal regressions, isolated browser scenarios and independent review; run full suite and scoped LF-safe push.
 
