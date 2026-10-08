@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T19:41:33Z
-updated-at: 2026-10-08T02:43:54Z
+updated-at: 2026-10-08T02:46:41Z
 updated-by: Codex
 claimed-by: X1CarbonPC-32528
 claimed-at: 2026-10-07T19:44:46Z
@@ -48,3 +48,4 @@ outcome-resolves: Implementation boundaries specified
 - **2026-10-08 02:26 · Codex** — Excel owner workplan and explicit task-row timeline actions implemented. Seventeen focused tests pass; eight disposable guard removals fail their regressions. Private source sample creates 239 tasks in an isolated copy and repeat upload changes none; live tasks remain untouched. Full suite rerun and independent review are running. Browser control fails before initialization, so browser acceptance is unverified.
 - **2026-10-08 02:37 · Codex** — Independent review found and corrected accidental Unicode changes and missing Excel concurrent target/self/plan/dependency-chain checks. Nineteen focused tests pass; ten disposable guard removals fail. Core and optional sample previews inspected. Final full suite after review corrections is running. Codex browser retry requested by Aly still exits before reading UI; browser verification remains unverified.
 - **2026-10-08 02:41 · Codex** — Final source regression result: Ran 764 tests in 388.663s, OK (skipped=1). Focused19 OK and ten guard-removal regressions verified. Source LF/diff check clean. Localroot HTTP200 verified; browser tool still exits before inspection. Final independent code verdict pending; browser and owner acceptance unverified. Do not mark ready or infer acceptance.
+- **2026-10-08 02:46 · Codex** — Browser tool discovery recovered after explicit CUA kernel reset. Inventory exposes Chrome, but requested Codex browser create returns Browser is not available: iab. Asked Aly to open local8765 in this chat right-hand browser. Current browser checks still unverified; do not conflate recovered tool discovery with successful UI verification.
