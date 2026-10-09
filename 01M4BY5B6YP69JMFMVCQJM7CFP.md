@@ -1,7 +1,7 @@
 ---
 id: 01M4BY5B6YP69JMFMVCQJM7CFP
 title: Simple project-bound Excel workplans and task-row timeline scheduling
-status: in-progress
+status: signoff
 ready: true
 creator: Codex
 assignee: Codex
@@ -13,13 +13,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T19:41:33Z
-updated-at: 2026-10-09T18:38:41Z
+updated-at: 2026-10-09T18:39:14Z
 updated-by: Codex
 claimed-by: X1CarbonPC-32528
 claimed-at: 2026-10-07T19:44:46Z
-outcome-what: Plan recorded
-outcome-why: Aly approved XLSX and task-row timeline drops; existing interfaces inspected
-outcome-resolves: Implementation boundaries specified
+outcome-what: Project-bound Excel workplans and governed timeline task-row moves implemented; whitespace reference regression repaired.
+outcome-why: Aly selected readable Excel workplans and task-row scheduling and approved JM7CFP in chat on 2026-10-09.
+outcome-resolves: Owner acceptance recorded. Full suite 765 OK skipped1; focused20 OK; independent static review passed. Browser and desktop Excel verification remain explicitly unverified.
 ---
 
 # Simple project-bound Excel workplans and task-row timeline scheduling
