@@ -13,8 +13,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T19:41:33Z
-updated-at: 2026-10-08T02:46:41Z
-updated-by: Codex
+updated-at: 2026-10-09T18:19:10Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-32528
 claimed-at: 2026-10-07T19:44:46Z
 outcome-what: Plan recorded
@@ -49,3 +49,4 @@ outcome-resolves: Implementation boundaries specified
 - **2026-10-08 02:37 · Codex** — Independent review found and corrected accidental Unicode changes and missing Excel concurrent target/self/plan/dependency-chain checks. Nineteen focused tests pass; ten disposable guard removals fail. Core and optional sample previews inspected. Final full suite after review corrections is running. Codex browser retry requested by Aly still exits before reading UI; browser verification remains unverified.
 - **2026-10-08 02:41 · Codex** — Final source regression result: Ran 764 tests in 388.663s, OK (skipped=1). Focused19 OK and ten guard-removal regressions verified. Source LF/diff check clean. Localroot HTTP200 verified; browser tool still exits before inspection. Final independent code verdict pending; browser and owner acceptance unverified. Do not mark ready or infer acceptance.
 - **2026-10-08 02:46 · Codex** — Browser tool discovery recovered after explicit CUA kernel reset. Inventory exposes Chrome, but requested Codex browser create returns Browser is not available: iab. Asked Aly to open local8765 in this chat right-hand browser. Current browser checks still unverified; do not conflate recovered tool discovery with successful UI verification.
+- **2026-10-09 18:19 · Aly Jafferani** — 2026-10-09 continuation: recovered terminal execution and independent review. Review proved raw-dropdown versus normalized-parser whitespace mismatch; new grouping/dependency regression failed before correction. Shared reference normalization now passes all 20 focused tests; independent static review passed. Corrected-code full suite running with ignored log Temp/jm7cfp-full-suite-20261009.txt. Browser and desktop Excel verification remain unverified per Aly instruction to proceed apart from Chrome; no owner acceptance, deployment or live-task import inferred. Full requirement/evidence record: docs/handoff/JM7CFP_VERIFICATION_2026-10-09.md.
