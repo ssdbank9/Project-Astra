@@ -1461,6 +1461,7 @@ def next_key_offset(keys_in_use, prefilled_rows: int) -> int:
 class ParsedRow:
     number: int
     cells: dict[str, object]                               # column key -> raw cell value
+    workplan_errors: list[str] = field(default_factory=list)
     aliased: dict[str, str] = field(default_factory=dict)  # column key -> header text matched by alias
     extra: list[str] = field(default_factory=list)         # letters of unheaded columns that carried data
 
@@ -1527,7 +1528,11 @@ def _parse_xlsx(data: bytes, config: TemplateConfig) -> ParsedUpload:
         raise ImportTooLarge(str(exc)) from exc
     except XlsxError as exc:
         raise ImportFileError(str(exc)) from exc
+    from . import workplan_excel
     marker = workbook.sheet(MARKER_SHEET)
+    task_sheet = workbook.sheet(TEMPLATE_SHEET)
+    if (marker and marker.cell(1, 1) == workplan_excel.MARKER) or (task_sheet and tuple(task_sheet.row_values(4, 10)) == workplan_excel.HEADERS):
+        return workplan_excel.parse(workbook)
     version = marker.cell(1, 2) if marker is not None else None
     if version is None:
         raise ImportFileError(
@@ -2219,6 +2224,9 @@ class ImportEngine:
                     raise ImportFileError("Plan names must be at most 60 characters.")
                 row.cells[workplan.PLAN_KEY] = name
         self.rows = [self._validate_row(row) for row in parsed.rows]
+        for raw, result in zip(parsed.rows, self.rows):
+            for message in raw.workplan_errors:
+                result.add("error", "E_WORKPLAN_RELATION", message, "Timing relationship")
         for result in self.rows:
             self._settle_closed(result)
         self._check_duplicate_keys()
@@ -2230,6 +2238,8 @@ class ImportEngine:
         # after every invalidation so a skipped plan edit cannot justify a link.
         while True:
             errors = sum(row.level == "error" for row in self.rows)
+            if parsed.workplan.get("excel"):
+                self._check_excel_timing(parsed)
             self._check_plan_links()
             self._propagate_invalid()
             if sum(row.level == "error" for row in self.rows) == errors:
@@ -2237,6 +2247,49 @@ class ImportEngine:
         for result in self.rows:
             self._finish_row(result)
         return self.preview()
+
+    def _check_excel_timing(self, parsed):
+        """Explicit Excel relationships must agree with their scheduled dates."""
+        from . import workplan
+        by_key = self._row_index()
+        graph = {}
+        for source, target in self.existing_edges:
+            graph.setdefault(source, set()).add(target)
+        names = {tid: workplan.plan(task) for tid, task in self.existing_by_id.items()}
+        for row in self.rows:
+            if row.level != "error" and not row.plan.get("closed"):
+                node = self._node(row.key)
+                names[node] = row.plan.get("extras", {}).get(workplan.PLAN_KEY, names.get(node, "Shared"))
+                for key in row.plan.get("predecessors", []):
+                    graph.setdefault(self._node(key), set()).add(node)
+
+        def reaches(source, target):
+            stack, seen = [source], set()
+            while stack:
+                node = stack.pop()
+                if node == target:
+                    return True
+                if node not in seen:
+                    seen.add(node)
+                    stack.extend(graph.get(node, ()))
+            return False
+
+        for raw, result in zip(parsed.rows, self.rows):
+            if result.level == "error":
+                continue
+            concurrent = raw.cells.get("_concurrent_key")
+            if concurrent:
+                source, target = self._node(result.key), self._node(str(concurrent).upper())
+                if names.get(source, "Shared") != "Shared" and names.get(target, "Shared") != "Shared" and names.get(source) != names.get(target):
+                    result.add("error", "E_TIMING_CONFLICT", "Concurrent tasks must belong to the same plan or Shared work.", "Timing relationship")
+                if reaches(source, target) or reaches(target, source):
+                    result.add("error", "E_TIMING_CONFLICT", "These tasks are linked in a dependency chain. Remove the conflicting links on the timeline before importing them as concurrent.", "Timing relationship")
+            start = result.plan.get("start_date") or (result.existing or {}).get("start_date")
+            for key in result.plan.get("predecessors", []):
+                predecessor = by_key.get(key)
+                due = (predecessor.plan.get("due_date") if predecessor and predecessor.level != "error" else None) or (self.existing_by_key.get(key) or {}).get("due_date")
+                if start and due and start <= due:
+                    result.add("error", "E_TIMING_CONFLICT", f"This task starts before predecessor '{key}' has finished. Change the dates or relationship.", "Start")
 
     def _check_plan_links(self):
         from . import workplan

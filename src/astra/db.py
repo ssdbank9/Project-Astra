@@ -46,6 +46,19 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 
 @contextmanager
 def transaction(connection: sqlite3.Connection):
+    if connection.in_transaction:
+        # Composed service operations must not commit their caller's transaction.
+        import uuid
+        name = "astra_nested_" + uuid.uuid4().hex
+        connection.execute("SAVEPOINT " + name)
+        try:
+            yield
+            connection.execute("RELEASE SAVEPOINT " + name)
+        except Exception:
+            connection.execute("ROLLBACK TO SAVEPOINT " + name)
+            connection.execute("RELEASE SAVEPOINT " + name)
+            raise
+        return
     connection.execute("BEGIN IMMEDIATE")
     try:
         yield

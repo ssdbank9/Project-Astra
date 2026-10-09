@@ -119,6 +119,12 @@ Sources:
 | Lock #14 granted, and the exclusive write lock protocol retired ("remove this exclusive code granted guard rail as well a we are moving on") | Slack ts 1790403410.978849 | The exclusive write lock protocol was retired by Aly on 2026-09-26 (Slack ts 1790403410.978849). Lock #14 was the last. Pulling first, checking origin before a push (if it moved: pull, merge, re-run the tests, push normally), normal pushes only and reporting the final SHA and tests stay in force (`HANDOFF_2026-09-26.md` section 4.2). |
 | Fix the two serious fact-check findings (SSH open to everyone; a viewer holding a top-level task could still submit), and make the handoff work for any AI agent or developer, not only Codex ("give a complete laid out plan") | Slack ts 1790405773.430749 | SSH limited to Aly's address in `146a5b3`; the submit gap fixed as G1PPV7 (`ddc3369`); the pack made tool-neutral, with `AGENTS.md` as the single source of the rules and `AGENT_START_PROMPT.md` as the start prompt. |
 
+### 2026-10-09
+
+| Decision | Source | Rule |
+| --- | --- | --- |
+| JM7CFP accepted: project-bound Excel workplans and task-row timeline scheduling | Aly's direct message in the continuation chat: "Approved JM7CFP" | Record owner acceptance and publish the scoped working-branch change. Retain browser/desktop Excel checks as unverified. The ticket may enter signoff; AGENTS.md reserves leaving that lane for a human. Deployment and live-data operations keep their separate approval gates. |
+
 ### Standing preferences (memory note `astra-aly-preferences`)
 
 - Show a live baseline (git status, tests, board) before building, and wait for

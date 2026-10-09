@@ -1707,6 +1707,16 @@ class AstraService:
                 else (date.fromisoformat(item["due_date"]) - date.fromisoformat(today)).days
             )
             result.append(item)
+        timeline_orders = {}
+        for item in result:
+            pid = item["project_id"]
+            if pid not in timeline_orders:
+                event = self.db.execute("SELECT id,detail_json FROM project_events WHERE project_id=? AND event_type='timeline_reordered' ORDER BY rowid DESC LIMIT 1", (pid,)).fetchone()
+                ids = json.loads(event["detail_json"])["task_ids"] if event else []
+                timeline_orders[pid] = ({tid: n for n, tid in enumerate(ids)}, event["id"] if event else None)
+            ranks, event_id = timeline_orders[pid]
+            item["timeline_order"] = ranks.get(item["id"], 1000000)
+            item["timeline_order_event_id"] = event_id
         self._add_dependency_state(result)
         from . import workplan
         for item in result:
@@ -3197,6 +3207,84 @@ class AstraService:
         if due_changed and due and target and due > target:
             impact.append(f"The new due date is after the project target ({target}).")
         return impact
+
+    def timeline_drop(self, actor: dict, task_id: str, payload: dict) -> dict:
+        """Explicit task-row drops: scheduling, relationships or display ordering."""
+        if not actor.get("active"):
+            raise Forbidden("Sign in required.")
+        mode = payload.get("mode")
+        if mode == "date":
+            return self.reschedule_task(actor, task_id, payload)
+        if mode not in {"after", "concurrent", "above", "below"}:
+            raise ValueError("Unknown timeline drop action.")
+        with transaction(self.db):
+            task = self.get_task(actor, task_id)
+            target = self.get_task(actor, payload.get("target_task_id"))
+            if not self.can_manage_project(actor, task["project_id"]):
+                raise Forbidden("Only an owner or this project's manager can move timeline tasks.")
+            if task_id == target["id"] or task["project_id"] != target["project_id"]:
+                raise ValueError("Choose another task in the same project.")
+            project = self.db.execute("SELECT status FROM projects WHERE id=?", (task["project_id"],)).fetchone()
+            if project["status"] == "closed":
+                raise Forbidden("A closed project's timeline cannot be changed.")
+            for item, field in ((task, "expected_revision"), (target, "target_revision")):
+                expected = payload.get(field)
+                if isinstance(expected, bool) or not isinstance(expected, int):
+                    raise ValueError("Integer task revisions are required.")
+                if expected != item["revision"]:
+                    raise Conflict("A task changed since the timeline was loaded. Reload and try again.")
+                self._assert_task_unlocked(item["id"], actor["id"])
+            if mode in {"above", "below"}:
+                if task.get("parent_task_id") != target.get("parent_task_id"):
+                    raise ValueError("Reorder tasks within the same group. Use Part of to change grouping.")
+                previous = self.db.execute("SELECT id,detail_json FROM project_events WHERE project_id=? AND event_type='timeline_reordered' ORDER BY rowid DESC LIMIT 1", (task["project_id"],)).fetchone()
+                if payload.get("order_event_id") != (previous["id"] if previous else None):
+                    raise Conflict("The timeline order changed. Reload before moving another task.")
+                ids = [r[0] for r in self.db.execute("SELECT id FROM tasks WHERE project_id=? ORDER BY created_at,id", (task["project_id"],))]
+                order = json.loads(previous["detail_json"])["task_ids"] if previous else []
+                order = [i for i in order if i in ids] + [i for i in ids if i not in order]
+                order.remove(task_id); index = order.index(target["id"]) + (mode == "below")
+                order.insert(index, task_id)
+                self._project_event(task["project_id"], actor["id"], "timeline_reordered", {"task_ids": order}, "Task row moved " + mode + " another row")
+                return {"mode": mode, "task_ids": order}
+            self._refuse_closed(task)
+            from . import workplan
+            if mode == "concurrent" and workplan.plan(task) != "Shared" and workplan.plan(target) != "Shared" and workplan.plan(task) != workplan.plan(target):
+                raise ValueError("Concurrent tasks must belong to the same plan or Shared work.")
+            if mode == "after":
+                due = target.get("due_date")
+                start = self._date(payload.get("start_date"))
+                if not due or not start or start <= due:
+                    raise ValueError("The following task must start after the related task finishes.")
+                self.add_task_dependency(actor, target["id"], task_id)
+            else:
+                reverse = self.db.execute("SELECT 1 FROM task_dependencies WHERE predecessor_task_id=? AND successor_task_id=?", (task_id, target["id"])).fetchone()
+                if reverse:
+                    raise ValueError("The target currently follows this task. Remove that link before making them concurrent.")
+                edge = self.db.execute("SELECT 1 FROM task_dependencies WHERE predecessor_task_id=? AND successor_task_id=?", (target["id"], task_id)).fetchone()
+                if edge:
+                    self.remove_task_dependency(actor, target["id"], task_id, "Run concurrently: timeline task drop")
+                for source, destination in ((task_id, target["id"]), (target["id"], task_id)):
+                    path = self.db.execute(
+                        """WITH RECURSIVE descendants(task_id) AS (
+                               SELECT successor_task_id FROM task_dependencies WHERE predecessor_task_id=?
+                               UNION
+                               SELECT d.successor_task_id FROM task_dependencies d
+                               JOIN descendants x ON d.predecessor_task_id=x.task_id
+                           ) SELECT 1 FROM descendants WHERE task_id=? LIMIT 1""",
+                        (source, destination),
+                    ).fetchone()
+                    if path:
+                        raise ValueError("These tasks remain linked through another task. Remove that dependency chain before making them concurrent.")
+            dates = {"start_date": payload.get("start_date"), "due_date": payload.get("due_date")}
+            if dates != {"start_date": task.get("start_date"), "due_date": task.get("due_date")}:
+                outcome = self._reschedule_task(actor, self.get_task(actor, task_id), payload)
+                if "request" in outcome:
+                    raise Forbidden("These dates require an App Owner decision. No timeline dates or relationships were changed.")
+            else:
+                outcome = {}
+            self.db.execute("UPDATE tasks SET revision=revision+1 WHERE id=?", (task_id,))
+            return {**outcome, "mode": mode}
 
     def reschedule_task(self, actor: dict, task_id: str, payload: dict) -> dict:
         """A Gantt bar drag or resize: new start and due dates through update_task.
@@ -5152,7 +5240,7 @@ class AstraService:
         config = self._import_config()
         if workplan_csv:
             from . import workplan
-            if fmt != "csv" or not project_id:
+            if not project_id:
                 raise ValueError("Choose an existing project before downloading its workplan CSV.")
             config = workplan.config()
         tasks = project = people = None
@@ -5162,7 +5250,7 @@ class AstraService:
             project_row = self._template_project(actor, project_id)
             tasks, project, people, key_offset = self._template_prefill(actor, project_row, config)
             stem = "astra-import-" + (re.sub(r"[^A-Za-z0-9]+", "-", project_row["name"]).strip("-").lower()[:40] or "project")
-        if fmt == "csv":
+        if fmt == "csv" or workplan_csv:
             if workplan_csv:
                 from . import workplan
                 with transaction(self.db):
@@ -5185,6 +5273,9 @@ class AstraService:
                             spare.append(key)
                     self._project_event(project_id, actor["id"], "workplan_keys_issued",
                                         {"keys": spare, "high_water": high}, "Reserved for a downloaded workplan CSV")
+                if fmt == "xlsx":
+                    from . import workplan_excel
+                    return workplan_excel.build(project_row, entities, tasks, people, spare), stem + "-workplan.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 payload = workplan.build(project_row, entities, tasks, blank_keys=spare)
                 return payload.encode("utf-8-sig"), stem + "-workplan.csv", "text/csv; charset=utf-8"
             return (importer.build_template_csv(config, tasks=tasks).encode("utf-8-sig"), stem + ".csv",
@@ -5246,6 +5337,12 @@ class AstraService:
             members = [dict(row) for row in self.db.execute(
                 """SELECT m.user_id, m.role, u.email, u.display_name FROM memberships m JOIN users u ON u.id=m.user_id
                    WHERE m.project_id=? AND u.active=1 ORDER BY m.created_at, u.email""", (project_id,))]
+            if "x_plan" in config.by_key:
+                # Global owners are eligible even without a project membership.
+                member_ids = {m["user_id"] for m in members}
+                members.extend(dict(row) for row in self.db.execute(
+                    "SELECT id AS user_id, 'owner' AS role, email, display_name FROM users WHERE active=1 AND global_role='owner' ORDER BY email"
+                ) if row["user_id"] not in member_ids)
 
         def as_date(iso):
             try:
@@ -5317,7 +5414,7 @@ class AstraService:
             "start_date": as_date(project.get("start_date")), "target_date": as_date(project.get("target_date")),
         }
         people = ([(m["email"], m["display_name"], m["role"].capitalize(), "") for m in members]
-                  if config.is_extended() else None)
+                  if config.is_extended() or "x_plan" in config.by_key else None)
         key_offset = importer.next_key_offset(key_of.values(), len(rows))
         return rows, header, people, key_offset
 

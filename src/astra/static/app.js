@@ -123,13 +123,14 @@ function groupSteps(tasks){
   const allChildren=new Map();
   for(const t of state.tasks){if(t.parent_task_id){if(!allChildren.has(t.parent_task_id))allChildren.set(t.parent_task_id,[]);allChildren.get(t.parent_task_id).push(t)}}
   const stepIndex=new Map();
-  for(const kids of allChildren.values()){const ordered=stepOrder(kids);ordered.forEach((k,i)=>stepIndex.set(k.id,{idx:i+1,total:ordered.length}))}
+  for(const kids of allChildren.values()){const ordered=timelineOrder(stepOrder(kids));ordered.forEach((k,i)=>stepIndex.set(k.id,{idx:i+1,total:ordered.length}))}
   const childrenOf=new Map(),top=[];
   for(const t of tasks){
     if(t.parent_task_id&&visible.has(t.parent_task_id)){if(!childrenOf.has(t.parent_task_id))childrenOf.set(t.parent_task_id,[]);childrenOf.get(t.parent_task_id).push(t)}
     else top.push(t);
   }
-  for(const [pid,kids] of childrenOf)childrenOf.set(pid,stepOrder(kids));
+  for(const [pid,kids] of childrenOf)childrenOf.set(pid,timelineOrder(stepOrder(kids)));
+  top.splice(0,top.length,...timelineOrder(top));
   return {top,childrenOf,stepIndex,visible,hasSteps:childrenOf.size>0};
 }
 function dateExtent(t,kids){
@@ -184,7 +185,7 @@ function renderGantt(tasks){
   let min=dateVals.length?new Date(Math.min(...dateVals)):new Date();
   let max=dateVals.length?new Date(Math.max(...dateVals)):new Date(min.getTime()+86400000*30);
   min.setDate(min.getDate()-3);max.setDate(max.getDate()+3);
-  const span=Math.max(1,max-min);el.dataset.span=String(span);
+  const span=Math.max(1,max-min);el.dataset.span=String(span);el.dataset.start=String(min.getTime());
   const pct=d=>(d-min)/span*100;
   const inRange=x=>x>=0&&x<=100;
   const markerFlags=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-flag ${m.kind}" data-x="${x}">${escapeHtml(m.label)}</span>`:""}).join("");
@@ -280,9 +281,11 @@ function renderGantt(tasks){
     const expandBtn=kids.length?`<button type="button" class="expand" data-expand="${id}" aria-expanded="${expanded}" aria-controls="steps-${id}" aria-label="${expanded?"Hide":"Show"} ${kids.length} step${kids.length===1?"":"s"} of ${escapeHtml(t.title)}">${expanded?"▾":"▸"}</button>`:"";
     const swatch=isStep?`<i class="sw step-c${stepHue(meta.idx)}${meta.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${meta.idx}</i> `:"";
     const nameTop=isStep?`<span class="step-kicker">${swatch}Step ${meta.idx} of ${meta.total}</span>`:escapeHtml(t.project_name);
-    const name=`<div class="task-name${isStep?" is-step":""}"><div class="name-wrap">${expandBtn}<div>${nameTop}<br><small>${escapeHtml(t.title)}</small>${kids.length?`<br><small class="muted">${kids.length} step${kids.length===1?"":"s"}</small>`:""}<br><button type="button" class="link" data-detail="${id}">Details &amp; history</button></div></div></div>`;
+    const move=canMoveOnBoard(t.project_id)&&!CLOSED_STATUSES.includes(t.status)?`<button type="button" class="task-row-handle quiet" draggable="true" data-task-move="${id}" aria-label="Move task ${escapeHtml(t.title)}">Move task</button>`:"";
+    const zones=move?`<div class="task-drop-zones" aria-label="Task drop targets">${[["above","Above"],["below","Below"],["after","After this task"],["concurrent","Run concurrently"]].map(([mode,title])=>`<button type="button" class="task-drop-zone quiet" data-drop-mode="${mode}" data-drop-target="${id}">${title}</button>`).join("")}</div>`:"";
+    const name=`<div class="task-name${isStep?" is-step":""}"><div class="name-wrap">${expandBtn}<div>${nameTop}<br><small>${escapeHtml(t.title)}</small>${kids.length?`<br><small class="muted">${kids.length} step${kids.length===1?"":"s"}</small>`:""}<br><button type="button" class="link" data-detail="${id}">Details &amp; history</button>${move}${zones}</div></div></div>`;
     const metaCol=`<div class="task-meta">${escapeHtml(t.owner_name||"Unassigned")}<br>${escapeHtml(t.due_date||"No due date")} · ${critLabel(t.criticality)}${derived}${undatedChip}${metaMore}${overrunText}${blocked}${cp}<br><span class="next-action">Next: ${escapeHtml(t.next_action||"—")}</span></div>`;
-    const html=`<div class="gantt-row${isStep?" step-row":""}">${name}${metaCol}<div class="timeline${tall?" tall":""}">${markerLines}${todayLine}${bar}</div></div>`;
+    const html=`<div class="gantt-row${isStep?" step-row":""}">${name}${metaCol}<div class="timeline${tall?" tall":""}" data-timeline-task="${id}">${markerLines}${todayLine}${bar}</div></div>`;
     if(!kids.length)return html;
     return html+`<div class="step-rows" id="steps-${id}" role="group" aria-label="Steps of ${escapeHtml(t.title)}"${expanded?"":" hidden"}>${kids.map(k=>row(k,depth+1)).join("")}</div>`;
   };
@@ -2729,7 +2732,7 @@ function renderImportUpload(){
   const selected=currentRoute().name==="project"?currentRoute().id:document.querySelector("#project-filter").value;
   document.querySelector("#import-body").innerHTML=`
     <h3>Upload a filled template</h3>
-    <p class="muted">Choose your project and download its workplan CSV. Open it in Excel, fill the task rows, save as CSV, then upload it here. Keep the project details and existing Task IDs unchanged. Enter dates as yyyy-mm-dd. Use Task IDs in Part of (grouping) and Predecessors (tasks that must finish first); separate multiple predecessors with semicolons. Assigned To accepts an existing user’s email. Leave Plan blank for Shared work, or enter an alternative plan name such as Private or Charter. Preview and check the changes before confirming. For the Excel workbook, fill the Project and Tasks sheets. An import never deletes.</p>
+    <p class="muted">Choose your project and download its Excel workplan. Fill Task, Responsible person, Start and Finish. Expand optional columns for named relationships and grouping. Astra maintains hidden IDs. Save as .xlsx, upload to the same project, and review before confirming. Imports never delete tasks.</p>
     <div class="import-links"><a href="/api/import/template.xlsx" id="import-template-xlsx" download>Download template (.xlsx)</a><a href="/api/import/template.csv" id="import-template-csv" download>Download template (.csv)</a>${settings}</div>
     <label>Target project<select id="import-project">${createOption}${options}</select></label>
     <div id="import-drop" class="dropzone" tabindex="0" role="button" aria-describedby="import-file-name"><strong>Drop your .xlsx or .csv here</strong><span>or press Enter / click to choose a file</span><input type="file" id="import-file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="sr-only" tabindex="-1"></div>
@@ -2747,7 +2750,7 @@ function renderImportUpload(){
   const updateTemplateLinks=()=>{
     const pid=select.value,suffix=pid?`?project_id=${encodeURIComponent(pid)}`:"";
     const label=pid?"Download template (with this project's tasks)":"Download template";
-    for(const [id,ext] of [["import-template-xlsx","xlsx"],["import-template-csv","csv"]]){const a=document.querySelector(`#${id}`);a.href=`/api/import/template.${ext}${suffix}${pid&&ext==="csv"?"&workplan=1":""}`;a.textContent=pid&&ext==="csv"?"Download project workplan (.csv)":`${label} (.${ext})`}
+    for(const [id,ext] of [["import-template-xlsx","xlsx"],["import-template-csv","csv"]]){const a=document.querySelector(`#${id}`);a.href=`/api/import/template.${ext}${suffix}${pid?"&workplan=1":""}`;a.textContent=pid?`Download project workplan (.${ext})`:`${label} (.${ext})`}
   };
   select.addEventListener("change",updateTemplateLinks);updateTemplateLinks();
   const drop=document.querySelector("#import-drop"),input=document.querySelector("#import-file");
@@ -2853,7 +2856,7 @@ function renderImportConfirm(){
       <p class="muted">${escapeHtml(r.filename)} → <strong>${escapeHtml(r.project.name)}</strong>${r.project.create?" (new project)":""}. Nothing was deleted; existing baselines were kept. Every change is in each task's history, and the import is in the project's history (Project history, with this project selected).</p>
       <div class="facts">${fact("Created",String(r.create))}${fact("Updated",String(r.update))}${fact("Unchanged",String(r.unchanged))}${fact("Skipped (errors)",String(r.skipped_errors||0))}${fact("Dependencies",String(r.dependencies||0))}</div>
       <p><a href="${escapeHtml(r.report_url)}" download>Download the import report (.csv)</a></p>
-      <p><a href="/api/import/template.csv?project_id=${encodeURIComponent(r.project.id)}&amp;workplan=1" download>Download updated workplan CSV</a> with the saved Task IDs for your next edits.</p>
+      <p><a href="/api/import/template.xlsx?project_id=${encodeURIComponent(r.project.id)}&amp;workplan=1" download>Download updated Excel workplan</a> with the saved Task IDs for your next edits.</p>
       <div class="actions"><button type="button" id="import-done">Done</button></div>
     </div>`;
   document.querySelector("#import-done").addEventListener("click",()=>importDialog.close());
@@ -2935,3 +2938,40 @@ function buildImportedFields(task){
 // M3: only a failed /api/me means "signed out"; a failed first load says so and keeps the session.
 async function loadOrSay(){try{await load()}catch(err){showToast(`Astra could not load your work (${err.message}). Reload the page to try again.`)}}
 (async()=>{let data;try{data=await api("/api/me")}catch{showLogin();return}Object.assign(state,data);showApp();await loadOrSay()})();
+
+
+// JM7CFP: task-row drops express dates, relationships and display order explicitly.
+function timelineOrder(tasks){
+  const projects=new Map();
+  for(const task of tasks){if(!projects.has(task.project_id))projects.set(task.project_id,[]);projects.get(task.project_id).push(task)}
+  for(const group of projects.values())group.sort((a,b)=>(a.timeline_order??1000000)-(b.timeline_order??1000000));
+  const positions=new Map();
+  return tasks.map(task=>{const index=positions.get(task.project_id)||0;positions.set(task.project_id,index+1);return projects.get(task.project_id)[index]});
+}
+let timelineTaskDrag=null;
+function clearTaskDrop(){document.querySelectorAll(".task-drop-over").forEach(e=>e.classList.remove("task-drop-over"));document.body.classList.remove("task-row-dragging")}
+async function reviewTaskDrop(t,mode,target,start){
+  const order=mode==="above"||mode==="below",duration=Math.max(1,t.start_date&&t.due_date?Math.round((Date.parse(t.due_date)-Date.parse(t.start_date))/DAY)+1:1);
+  if(!order&&!start){showToast("The related task needs dates before this drop can be scheduled.",null,null,true);return}
+  const end=order?"":iso(Date.parse(start)+(duration-1)*DAY),d=document.createElement("dialog");d.className="task-move-dialog";
+  const description=mode==="after"?`“${t.title}” will follow “${target.title}”.`:mode==="concurrent"?`“${t.title}” will run alongside “${target.title}”. Its direct predecessor link to that task, if present, will be removed.`:order?`Move “${t.title}” ${mode} “${target.title}”. Dates and dependencies stay as they are.`:`Schedule “${t.title}” at the dropped date.`;
+  d.innerHTML=`<form><h2>Review task move</h2><p>${escapeHtml(description)}</p>${order?"":`<div class="grid"><label>Start<input name="start" type="date" value="${escapeHtml(start)}" required></label><label>Finish<input name="finish" type="date" value="${escapeHtml(end)}" required></label></div><p class="muted">${t.start_date&&t.due_date?"Existing duration preserved in this preview.":"This task has no complete duration. The preview starts with one day; set its finish date."} Astra recalculates the critical path after saving.</p>`}<div class="error" role="alert"></div><div class="actions"><button type="button" class="quiet" data-cancel>Cancel</button><button type="submit">Apply move</button></div></form>`;
+  document.body.appendChild(d);d.showModal();
+  const chosen=await new Promise(resolve=>{d.addEventListener("cancel",()=>resolve(null),{once:true});d.querySelector("[data-cancel]").onclick=()=>resolve(null);d.querySelector("form").onsubmit=e=>{e.preventDefault();const f=e.currentTarget,dates=order?{}:{start_date:f.elements.start.value,due_date:f.elements.finish.value};if(!order&&dates.start_date>dates.due_date){f.querySelector(".error").textContent="Finish must be on or after Start.";return}resolve(dates)}});
+  d.close();d.remove();if(!chosen)return;
+  const payload={mode,...chosen,expected_revision:t.revision,...(target?{target_task_id:target.id,target_revision:target.revision}:{}),order_event_id:t.timeline_order_event_id??null};
+  try{let out;const send=extra=>api(taskApi(t.id,"/timeline-drop"),{method:"POST",body:JSON.stringify({...payload,...extra})});
+    try{out=await send({})}catch(err){if(err.status!==409||err.confirm!=="impact")throw err;const ok=await askMove("impact",t,null,{impact:err.impact,dates:chosen});if(!ok)return;out=await send({confirmed:true})}
+    showToast(out.request?"The date change was sent to an owner for approval.":"Task move saved. Critical path recalculated.");
+  }catch(err){showToast(`Task move was not saved: ${err.message}`,null,null,true)}finally{await load()}
+}
+const taskTimeline=document.querySelector("#gantt");
+taskTimeline.addEventListener("dragstart",e=>{const handle=e.target.closest("[data-task-move]");if(!handle)return;const t=state.tasks.find(x=>x.id===handle.dataset.taskMove);if(!t||!canMoveOnBoard(t.project_id)){e.preventDefault();return}timelineTaskDrag=t.id;e.dataTransfer.setData("text/plain",t.id);e.dataTransfer.effectAllowed="move";document.body.classList.add("task-row-dragging");hideTip()});
+taskTimeline.addEventListener("dragover",e=>{if(!timelineTaskDrag)return;const zone=e.target.closest("[data-drop-mode],[data-timeline-task]");if(!zone)return;e.preventDefault();e.dataTransfer.dropEffect="move";document.querySelectorAll(".task-drop-over").forEach(x=>x.classList.remove("task-drop-over"));zone.classList.add("task-drop-over")});
+taskTimeline.addEventListener("drop",e=>{if(!timelineTaskDrag)return;const t=state.tasks.find(x=>x.id===timelineTaskDrag),zone=e.target.closest("[data-drop-mode],[data-timeline-task]");e.preventDefault();timelineTaskDrag=null;clearTaskDrop();if(!t||!zone)return;
+  if(zone.dataset.dropMode){const target=state.tasks.find(x=>x.id===zone.dataset.dropTarget);if(!target||target.id===t.id)return;const mode=zone.dataset.dropMode,start=mode==="after"&&target.due_date?iso(Date.parse(target.due_date)+DAY):target.start_date||target.due_date;reviewTaskDrop(t,mode,target,start)}
+  else{const host=document.querySelector("#gantt"),rect=zone.getBoundingClientRect(),portion=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));reviewTaskDrop(t,"date",null,iso(+host.dataset.start+portion*(+host.dataset.span)))}
+});
+taskTimeline.addEventListener("dragend",()=>{timelineTaskDrag=null;clearTaskDrop()});
+// Keyboard and touch use the same reviewed service action, without a drag gesture.
+taskTimeline.addEventListener("click",e=>{const handle=e.target.closest("[data-task-move]");if(!handle)return;const t=state.tasks.find(x=>x.id===handle.dataset.taskMove);if(!t)return;const d=document.createElement("dialog");d.innerHTML=`<form><h2>Move ${escapeHtml(t.title)}</h2><label>Action<select name="mode"><option value="date">Place on timeline</option><option value="above">Move above</option><option value="below">Move below</option><option value="after">After another task finishes</option><option value="concurrent">Run concurrently</option></select></label><label>Related task<select name="target"><option value="">Choose task</option>${state.tasks.filter(x=>x.project_id===t.project_id&&x.id!==t.id).map(x=>`<option value="${escapeHtml(x.id)}">${escapeHtml(x.title)} (${escapeHtml(x.plan_option||"Shared")})</option>`).join("")}</select></label><label>Start for timeline placement<input name="start" type="date" value="${escapeHtml(t.start_date||ganttToday())}"></label><div class="error" role="alert"></div><div class="actions"><button type="button" data-cancel class="quiet">Cancel</button><button type="submit">Review move</button></div></form>`;document.body.appendChild(d);d.showModal();const close=()=>{d.close();d.remove()};d.addEventListener("cancel",()=>d.remove(),{once:true});d.querySelector("[data-cancel]").onclick=close;d.querySelector("form").onsubmit=ev=>{ev.preventDefault();const f=ev.currentTarget,mode=f.elements.mode.value,target=state.tasks.find(x=>x.id===f.elements.target.value);if(mode!=="date"&&!target){f.querySelector(".error").textContent="Choose a related task.";return}const start=mode==="date"?f.elements.start.value:mode==="after"&&target.due_date?iso(Date.parse(target.due_date)+DAY):target?.start_date||target?.due_date;close();reviewTaskDrop(t,mode,target,start)}});

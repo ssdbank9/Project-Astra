@@ -2540,6 +2540,9 @@ class AstraFoundationStaticTests(unittest.TestCase):
 SHELL_DRIVER = r"""
 const fs=require("fs");
 const src=fs.readFileSync(process.argv[2],"utf8"),mode=process.argv[3];
+// The driver asserts English month/day labels; keep it independent of Windows locale.
+const realLocaleDateString=Date.prototype.toLocaleDateString;
+Date.prototype.toLocaleDateString=function(locale,options){return realLocaleDateString.call(this,locale||"en-US",options)};
 // FKVHH8 review M1: a browser whose clock and timezone disagree with the server (run with TZ and FAKE_NOW).
 if(process.env.FAKE_NOW){const RealDate=Date,NOW=RealDate.parse(process.env.FAKE_NOW);
   globalThis.Date=class extends RealDate{constructor(...a){if(a.length)super(...a);else super(NOW)}static now(){return NOW}}}

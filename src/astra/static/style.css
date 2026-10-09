@@ -819,3 +819,11 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   .cal-agenda { display: block; }
   .cal-scope { margin-left: 0; }
 }
+
+/* JM7CFP: explicit task-row drop targets; all colors reuse semantic tokens. */
+.task-row-handle { display:block; margin-top:var(--space-2); cursor:grab; }
+.task-drop-zones { display:none; gap:var(--space-1); flex-wrap:wrap; margin-top:var(--space-2); }
+.task-row-dragging .task-drop-zones { display:flex; }
+.task-drop-zone { font-size:var(--fs-small); border:1px dashed var(--line-strong); }
+.task-drop-over { outline:2px solid var(--focus); outline-offset:-2px; background:var(--teal-soft); }
+.task-move-dialog { max-width:560px; }
