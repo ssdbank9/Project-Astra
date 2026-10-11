@@ -14,7 +14,7 @@ related: []
 follows: 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T15:54:43Z
-updated-at: 2026-10-11T15:57:25Z
+updated-at: 2026-10-11T16:01:30Z
 updated-by: Codex
 ---
 
@@ -22,7 +22,7 @@ updated-by: Codex
 
 ## Definition of Done
 
-- [ ] Regression proves assignment, reassignment and clearing previews use person names; browser preview shows a name and saved assignment persists; focused and full tests pass; independent diff review completed
+- [ ] Regression proves assignment and reassignment previews use person names and blank fields preserve assignment; browser preview shows a name and saved assignment persists; focused and full tests pass; independent diff review completed
 
 ## Options
 
