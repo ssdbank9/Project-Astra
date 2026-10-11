@@ -14,7 +14,7 @@ related:
   - 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T16:49:25Z
-updated-at: 2026-10-11T17:05:46Z
+updated-at: 2026-10-11T17:07:41Z
 updated-by: Codex
 ---
 
@@ -32,6 +32,11 @@ updated-by: Codex
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
+
+- [ ] Reproduce first reorder and later-row cancellation with failing regression and Chrome probes.
+- [ ] Preserve full unfiltered project order on first reorder; validate IDs and move siblings only.
+- [ ] Show relationship drop controls as stable timeline overlays without changing row geometry.
+- [ ] Verify actual later-row date/order/relationship drops, guards, full suite and independent review; publish scoped receipt.
 
 ## Progress
 
