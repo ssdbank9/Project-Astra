@@ -14,7 +14,7 @@ related: []
 follows: 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T15:54:43Z
-updated-at: 2026-10-11T16:17:35Z
+updated-at: 2026-10-11T16:19:21Z
 updated-by: Codex
 review-summary: Independent owner_preview_review read only scoped importer and regression diff; no blocking findings. Focused regression passed; restoring old UUID behavior in memory made it fail.
 review-gaps: Full app and phone/touch/pointer acceptance not established by this display-only fix.
@@ -26,7 +26,8 @@ review-check: Full Windows suite 766 OK skipped1; focused21 OK; native corrected
 
 ## Definition of Done
 
-- [ ] Regression proves assignment and reassignment previews use person names and blank fields preserve assignment; browser preview shows a name and saved assignment persists; focused and full tests pass; independent diff review completed
+- [x] Regression proves assignment and reassignment previews use person names and blank fields preserve assignment; browser preview shows a name and saved assignment persists; focused and full tests pass; independent diff review completed
+  proof: tests/test_import.py:test_owner_changes_preview_names_and_commit_keeps_user_ids; docs/handoff/DESKTOP_VERIFICATION_2026-10-11.md; full766 OK skipped1; focused21 OK; independent review pass; native Chrome owner preview and save verified
 
 ## Options
 
