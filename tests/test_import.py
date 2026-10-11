@@ -80,6 +80,27 @@ class ImportServiceTests(unittest.TestCase):
         return [f["code"] for f in row["findings"]]
 
     # -- template -------------------------------------------------------
+    def test_owner_changes_preview_names_and_commit_keeps_user_ids(self):
+        seed = {"import_key": "OWNER-1", "title": "Assign responsibility"}
+        self.commit(self.owner, [seed])
+        for email, old_name, new_name, expected_id in (
+            ("jamal@example.org", "Unassigned", "Jamal", self.jamal["id"]),
+            ("waseem@example.org", "Jamal", "Waseem", self.waseem["id"]),
+        ):
+            with self.subTest(email=email):
+                edit = dict(seed, owner_email=email)
+                _, preview = self.preview(self.owner, [edit])
+                self.assertEqual(preview["summary"]["errors"], 0)
+                self.assertEqual(preview["rows"][0]["changes"]["owner_user_id"],
+                                 {"from": old_name, "to": new_name})
+                self.commit(self.owner, [edit])
+                self.assertEqual(self.task_by_key("OWNER-1")["owner_user_id"], expected_id)
+        # A blank import field preserves the existing assignment.
+        _, preview = self.preview(self.owner, [dict(seed, owner_email="")])
+        self.assertNotIn("owner_user_id", preview["rows"][0]["changes"])
+        self.commit(self.owner, [dict(seed, owner_email="")])
+        self.assertEqual(self.task_by_key("OWNER-1")["owner_user_id"], self.waseem["id"])
+
     def test_q1_import_and_filled_template_keep_chairman_and_viewer_review_roles(self):
         people = "chair@example.org; viewer@example.org"
         config = self.enable_all_columns()

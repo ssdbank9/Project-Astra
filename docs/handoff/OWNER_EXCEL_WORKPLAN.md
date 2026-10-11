@@ -3,7 +3,11 @@
 Aly selected XLSX on 2026-10-08 after rejecting the dense owner CSV. Ticket
 JM7CFP implements this decision on codex/migration-safety-remediation.
 Aly accepted this feature in chat on 2026-10-09: "Approved JM7CFP".
-Browser and desktop Excel behavior remain unverified.
+Native Chrome and desktop Excel checks on 2026-10-11 verified download,
+the Responsible person dropdown, Excel save/upload, named dependency import,
+and reviewed timeline relationship changes. See
+[desktop verification and remaining launch gates](DESKTOP_VERIFICATION_2026-10-11.md).
+Pointer dragging, phone/touch behavior and hosting remain unverified.
 
 ## Owner workflow
 

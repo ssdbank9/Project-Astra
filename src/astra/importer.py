@@ -2961,12 +2961,11 @@ class ImportEngine:
             return ""
         return task.get("import_key") or task.get("title") or task_id
 
-    @staticmethod
-    def _display(name: str, value):
+    def _display(self, name: str, value):
         if name in ("start_date", "due_date"):
             return display_date(value)
         if name == "owner_user_id":
-            return value or "Unassigned"
+            return self._owner_name({"owner_user_id": value}) if value else "Unassigned"
         if value is None:
             return ""
         return value
