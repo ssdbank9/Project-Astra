@@ -7,14 +7,14 @@ creator: Codex
 assignee: Codex
 goal: Show readable old and new responsible person names in import previews without changing stored user IDs.
 context: "Native Chrome verification of an Excel-saved workplan showed Unassigned followed by a raw user UUID in the Owner change column. The assignment itself succeeded. src/astra/importer.py _display returns owner_user_id verbatim. JM7CFP remains in signoff, so this is a separate defect follow-up."
-definition-of-done: "Regression proves assignment, reassignment and clearing previews use person names; browser preview shows a name and saved assignment persists; focused and full tests pass; independent diff review completed"
+definition-of-done: "Regression proves assignment and reassignment previews use person names and blank fields preserve assignment; browser preview shows a name and saved assignment persists; focused and full tests pass; independent diff review completed"
 tags: []
 blocked-by: []
 related: []
 follows: 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T15:54:43Z
-updated-at: 2026-10-11T16:01:30Z
+updated-at: 2026-10-11T16:09:14Z
 updated-by: Codex
 ---
 
