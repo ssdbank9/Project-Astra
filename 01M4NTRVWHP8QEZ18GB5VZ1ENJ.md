@@ -1,7 +1,7 @@
 ---
 id: 01M4NTRVWHP8QEZ18GB5VZ1ENJ
 title: Show person names in workplan change preview
-status: in-progress
+status: review
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,12 +14,15 @@ related: []
 follows: 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T15:54:43Z
-updated-at: 2026-10-11T16:19:21Z
+updated-at: 2026-10-11T16:19:55Z
 updated-by: Codex
 review-summary: Independent owner_preview_review read only scoped importer and regression diff; no blocking findings. Focused regression passed; restoring old UUID behavior in memory made it fail.
 review-gaps: Full app and phone/touch/pointer acceptance not established by this display-only fix.
 review-verdict: Pass - independent review
 review-check: Full Windows suite 766 OK skipped1; focused21 OK; native corrected preview and saved assignment verified on synthetic project.
+outcome-what: Resolve responsible person display names in import change previews; add regression and desktop verification record.
+outcome-why: Native Chrome showed an internal user UUID in the owner change column.
+outcome-resolves: "Names displayed, stored IDs preserved, blank fields unchanged; 766 full tests and21 focused passed; independent code/document review passed; corrected preview and persisted assignment verified."
 ---
 
 # Show person names in workplan change preview
