@@ -14,8 +14,12 @@ related: []
 follows: 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T15:54:43Z
-updated-at: 2026-10-11T16:16:44Z
+updated-at: 2026-10-11T16:17:35Z
 updated-by: Codex
+review-summary: Independent owner_preview_review read only scoped importer and regression diff; no blocking findings. Focused regression passed; restoring old UUID behavior in memory made it fail.
+review-gaps: Full app and phone/touch/pointer acceptance not established by this display-only fix.
+review-verdict: Pass - independent review
+review-check: Full Windows suite 766 OK skipped1; focused21 OK; native corrected preview and saved assignment verified on synthetic project.
 ---
 
 # Show person names in workplan change preview
