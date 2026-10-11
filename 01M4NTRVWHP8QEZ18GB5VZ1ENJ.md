@@ -14,7 +14,7 @@ related: []
 follows: 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T15:54:43Z
-updated-at: 2026-10-11T16:09:14Z
+updated-at: 2026-10-11T16:16:44Z
 updated-by: Codex
 ---
 
@@ -35,3 +35,4 @@ updated-by: Codex
 
 ## Progress
 - **2026-10-11 15:57 · Codex** — Native verification found raw owner IDs only in preview labels; follow-up created separately because JM7CFP is in signoff. Ticket creation saved locally but outbox write was denied; this successful follow-up records the ticket through the CLI.
+- **2026-10-11 16:16 · Codex** — Corrected full suite Ran 766 tests in 875.619s, OK (skipped=1), exit 0. Focused 21 OK. Independent read-only review passed and old-behavior restoration failed the regression. Native Chrome preview displays the user name and saved owner persisted. Native Excel dropdown/save/upload and named dependency import verified on synthetic data. Pointer drag produced no dialog, so pointer acceptance remains unverified.
