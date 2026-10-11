@@ -14,7 +14,8 @@ related:
   - 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T16:49:25Z
-updated-at: 2026-10-11T16:49:25Z
+updated-at: 2026-10-11T16:52:39Z
+updated-by: Codex
 ---
 
 # Preserve timeline row order and reliable later-row dragging
