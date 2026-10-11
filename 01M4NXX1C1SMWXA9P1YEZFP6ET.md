@@ -1,7 +1,7 @@
 ---
 id: 01M4NXX1C1SMWXA9P1YEZFP6ET
 title: Preserve timeline row order and reliable later-row dragging
-status: backlog
+status: todo
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -14,7 +14,7 @@ related:
   - 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T16:49:25Z
-updated-at: 2026-10-11T16:52:39Z
+updated-at: 2026-10-11T16:59:20Z
 updated-by: Codex
 ---
 
