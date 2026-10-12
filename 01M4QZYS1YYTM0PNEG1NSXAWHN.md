@@ -1,7 +1,7 @@
 ---
 id: 01M4QZYS1YYTM0PNEG1NSXAWHN
 title: Linked task movement and automatic project schedule
-status: backlog
+status: in-progress
 ready: true
 creator: Codex
 assignee: Codex
@@ -15,7 +15,7 @@ related:
   - 01M4NXX1C1SMWXA9P1YEZFP6ET
 commits: []
 created-at: 2026-10-12T12:03:48Z
-updated-at: 2026-10-12T12:05:24Z
+updated-at: 2026-10-12T12:05:31Z
 updated-by: Codex
 ---
 
