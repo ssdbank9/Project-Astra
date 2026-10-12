@@ -15,7 +15,8 @@ related:
   - 01M4QZYS1YYTM0PNEG1NSXAWHN
 commits: []
 created-at: 2026-10-12T17:34:49Z
-updated-at: 2026-10-12T17:34:49Z
+updated-at: 2026-10-12T17:46:10Z
+updated-by: Codex
 ---
 
 # Expose linked scheduling in the phone schedule table
