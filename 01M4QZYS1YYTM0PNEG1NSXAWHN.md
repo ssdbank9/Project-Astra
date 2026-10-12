@@ -15,7 +15,7 @@ related:
   - 01M4NXX1C1SMWXA9P1YEZFP6ET
 commits: []
 created-at: 2026-10-12T12:03:48Z
-updated-at: 2026-10-12T12:26:14Z
+updated-at: 2026-10-12T12:50:20Z
 updated-by: Codex
 ---
 
@@ -34,7 +34,8 @@ updated-by: Codex
 
 <Steps, in order — filled in by the pre-process step, or by you.>
 
-- [ ] Build a pure affected-chain scheduler and calculated per-plan project forecasts.
+- [x] Build a pure affected-chain scheduler and calculated per-plan project forecasts.
+  proof: timeline_schedule.py; affected-chain, gap and alternative-forecast tests
 - [ ] Add read-only preview and atomic snapshot-checked apply using existing service authorization, history and locks.
 - [ ] Show full change preview, dependency meaning and explicit deadline revision in the plain JS timeline.
 - [ ] Verify branching and role/refusal regressions, Chrome, full suite and independent review; document and publish.
