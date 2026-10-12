@@ -1,7 +1,7 @@
 ---
 id: 01M4RJWWD890Y9KTHJAT827Q51
 title: Expose linked scheduling in the phone schedule table
-status: backlog
+status: in-progress
 ready: true
 creator: Codex
 assignee: Codex
@@ -15,7 +15,7 @@ related:
   - 01M4QZYS1YYTM0PNEG1NSXAWHN
 commits: []
 created-at: 2026-10-12T17:34:49Z
-updated-at: 2026-10-12T17:46:14Z
+updated-at: 2026-10-12T17:46:21Z
 updated-by: Codex
 ---
 
