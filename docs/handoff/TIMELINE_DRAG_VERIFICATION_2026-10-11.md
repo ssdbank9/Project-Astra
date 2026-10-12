@@ -1,7 +1,7 @@
 # Timeline task dragging verification - 2026-10-11
 
 Historical findings below are superseded by the verified
-[ZFP6ET repair](TIMELINE_DRAG_REPAIR_2026-10-12.md). Owner acceptance remains pending.
+[ZFP6ET repair](TIMELINE_DRAG_REPAIR_2026-10-12.md), accepted by Aly on 2026-10-12.
 
 Aly requested verification after compaction and confirmed that VZ1ENJ was
 already done. The board independently reports VZ1ENJ done. This check used

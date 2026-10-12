@@ -3,7 +3,8 @@
 Aly authorized fixing the first-reorder mismatch and investigating later-row
 dragging before calling the feature ready. This repair supersedes the open
 implementation findings in TIMELINE_DRAG_VERIFICATION_2026-10-11.md.
-Only disposable synthetic data was used. App Owner acceptance remains pending.
+Only disposable synthetic data was used. Aly accepted ZFP6ET in this chat on
+2026-10-12 with "I accept ZFP6ET". The human-only board transition remains separate.
 
 ## Behavior and cause
 
@@ -64,7 +65,7 @@ deployment, real import or account operation was performed. The owner's usual
 server may need a normal restart to load the Python repair; its running version
 is unverified here.
 
-Publication: the scoped repair is to be committed with ZFP6ET and pushed
-normally on codex/migration-safety-remediation after the origin check; final SHA
-is reported to Aly after the push. ZFP6ET must remain pending Aly's
-acceptance; do not infer acceptance from tests or the earlier JM7CFP sign-off.
+Published normally on codex/migration-safety-remediation at
+`bf4ea3eaf5d07ef7f7efbfc80e458e88d8871457`, confirmed against origin after push.
+Aly's 2026-10-12 acceptance applies to this repair. It does not authorize
+deployment or change the unverified touch/narrow-screen and running-server limits.

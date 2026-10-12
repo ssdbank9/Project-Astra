@@ -14,20 +14,20 @@ related:
   - 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T16:49:25Z
-updated-at: 2026-10-12T07:34:01Z
+updated-at: 2026-10-12T07:52:55Z
 updated-by: Codex
-question: "Please accept ZFP6ET after the scoped push receipt, or identify any remaining issue."
+question: "Aly accepted 2026-10-12; awaiting the human-only board transition to done."
 outcome-what: Preserved complete visible timeline order and made later-row drop targets stable. Backend and actual-function regressions pass; all desktop Chrome drop modes and filtered-parent reorder persist.
 outcome-why: First reorder changed unrelated rows; in-flow drop controls cancelled later-row drag starts.
-outcome-resolves: Independent review pass; 24 focused and 770 full tests OK. Await Aly acceptance after scoped publication receipt. Touch/narrow-screen and running owner server version unverified.
+outcome-resolves: Independent review and Chrome cases passed; 24 focused and 770 full tests OK. Repair published at bf4ea3eaf5d07ef7f7efbfc80e458e88d8871457. Aly accepted on 2026-10-12. Touch/narrow-screen and running owner server version unverified.
 ---
 
 # Preserve timeline row order and reliable later-row dragging
 
 ## Definition of Done
 
-- [~] First and subsequent Above/Below moves preserve all unrelated visible row positions, including filtered/grouped cases; later-row date and relationship dragging works in Chrome without moving targets; cancellation and persistence work; regression tests fail on original behavior and pass after correction; authorization and conflict guards remain; focused/full tests, independent review, browser evidence and scoped publication receipt recorded.
-  proof: docs/handoff/TIMELINE_DRAG_REPAIR_2026-10-12.md: all implementation, regression, Chrome and review checks pass; 770 tests OK; publication SHA follows scoped push
+- [x] First and subsequent Above/Below moves preserve all unrelated visible row positions, including filtered/grouped cases; later-row date and relationship dragging works in Chrome without moving targets; cancellation and persistence work; regression tests fail on original behavior and pass after correction; authorization and conflict guards remain; focused/full tests, independent review, browser evidence and scoped publication receipt recorded.
+  proof: docs/handoff/TIMELINE_DRAG_REPAIR_2026-10-12.md; published bf4ea3eaf5d07ef7f7efbfc80e458e88d8871457; 770 tests OK; Chrome and independent review pass; Aly accepted 2026-10-12
 
 ## Options
 
@@ -49,3 +49,4 @@ outcome-resolves: Independent review pass; 24 focused and 770 full tests OK. Awa
 
 ## Progress
 - **2026-10-12 07:31 · Codex** — Independent implementation review passed; parent and reviewer focused suite Ran 24 tests OK. Final full suite Ran 770 tests in 508.309s OK (skipped=1), exit 0. Chrome verified all later-row modes, stable geometry, cancel/reload and additional filtered-parent actual reorder. App Owner acceptance pending. No owner data or deployment changed.
+- **2026-10-12 07:50 · Codex** — App Owner Aly explicitly stated I accept ZFP6ET in this chat on 2026-10-12. Repair published and origin verified at bf4ea3eaf5d07ef7f7efbfc80e458e88d8871457; full suite Ran 770 tests in 508.309s OK (skipped=1). This records the human decision, not agent acceptance. Ticket stays human until Aly performs the human-only board transition. No deployment authorized; touch/narrow-screen and running owner server version remain unverified.
