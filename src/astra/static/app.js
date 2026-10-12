@@ -283,9 +283,9 @@ function renderGantt(tasks){
     const nameTop=isStep?`<span class="step-kicker">${swatch}Step ${meta.idx} of ${meta.total}</span>`:escapeHtml(t.project_name);
     const move=canMoveOnBoard(t.project_id)&&!CLOSED_STATUSES.includes(t.status)?`<button type="button" class="task-row-handle quiet" draggable="true" data-task-move="${id}" aria-label="Move task ${escapeHtml(t.title)}">Move task</button>`:"";
     const zones=move?`<div class="task-drop-zones" aria-label="Task drop targets">${[["above","Above"],["below","Below"],["after","After this task"],["concurrent","Run concurrently"]].map(([mode,title])=>`<button type="button" class="task-drop-zone quiet" data-drop-mode="${mode}" data-drop-target="${id}">${title}</button>`).join("")}</div>`:"";
-    const name=`<div class="task-name${isStep?" is-step":""}"><div class="name-wrap">${expandBtn}<div>${nameTop}<br><small>${escapeHtml(t.title)}</small>${kids.length?`<br><small class="muted">${kids.length} step${kids.length===1?"":"s"}</small>`:""}<br><button type="button" class="link" data-detail="${id}">Details &amp; history</button>${move}${zones}</div></div></div>`;
+    const name=`<div class="task-name${isStep?" is-step":""}"><div class="name-wrap">${expandBtn}<div>${nameTop}<br><small>${escapeHtml(t.title)}</small>${kids.length?`<br><small class="muted">${kids.length} step${kids.length===1?"":"s"}</small>`:""}<br><button type="button" class="link" data-detail="${id}">Details &amp; history</button>${move}</div></div></div>`;
     const metaCol=`<div class="task-meta">${escapeHtml(t.owner_name||"Unassigned")}<br>${escapeHtml(t.due_date||"No due date")} · ${critLabel(t.criticality)}${derived}${undatedChip}${metaMore}${overrunText}${blocked}${cp}<br><span class="next-action">Next: ${escapeHtml(t.next_action||"—")}</span></div>`;
-    const html=`<div class="gantt-row${isStep?" step-row":""}">${name}${metaCol}<div class="timeline${tall?" tall":""}" data-timeline-task="${id}">${markerLines}${todayLine}${bar}</div></div>`;
+    const html=`<div class="gantt-row${isStep?" step-row":""}">${name}${metaCol}<div class="timeline${tall?" tall":""}" data-timeline-task="${id}">${markerLines}${todayLine}${bar}${zones}</div></div>`;
     if(!kids.length)return html;
     return html+`<div class="step-rows" id="steps-${id}" role="group" aria-label="Steps of ${escapeHtml(t.title)}"${expanded?"":" hidden"}>${kids.map(k=>row(k,depth+1)).join("")}</div>`;
   };
@@ -2949,9 +2949,27 @@ function timelineOrder(tasks){
   return tasks.map(task=>{const index=positions.get(task.project_id)||0;positions.set(task.project_id,index+1);return projects.get(task.project_id)[index]});
 }
 let timelineTaskDrag=null;
+function timelineTaskOrder(projectId){
+  const tasks=state.tasks.filter(t=>t.project_id===projectId),byId=new Map(tasks.map(t=>[t.id,t])),groups=groupSteps(tasks),ids=[];
+  const walk=t=>{ids.push(t.id);(groups.childrenOf.get(t.id)||[]).forEach(walk)};
+  groups.top.forEach(walk);
+  // Filters can hide a parent and promote its children to top-level rows.
+  // Keep the drawn sibling sequence, while hidden siblings retain their slots.
+  const drawn=new Map();
+  for(const row of document.querySelectorAll("#gantt [data-timeline-task]")){
+    const task=byId.get(row.dataset.timelineTask);if(!task||row.closest("[hidden]"))continue;
+    const parent=task.parent_task_id||null;if(!drawn.has(parent))drawn.set(parent,[]);drawn.get(parent).push(task.id);
+  }
+  for(const siblings of drawn.values()){
+    const visible=new Set(siblings);let index=0;
+    for(let slot=0;slot<ids.length;slot++)if(visible.has(ids[slot]))ids[slot]=siblings[index++];
+  }
+  return ids;
+}
 function clearTaskDrop(){document.querySelectorAll(".task-drop-over").forEach(e=>e.classList.remove("task-drop-over"));document.body.classList.remove("task-row-dragging")}
 async function reviewTaskDrop(t,mode,target,start){
   const order=mode==="above"||mode==="below",duration=Math.max(1,t.start_date&&t.due_date?Math.round((Date.parse(t.due_date)-Date.parse(t.start_date))/DAY)+1:1);
+  const initialOrder=order?timelineTaskOrder(t.project_id):null;
   if(!order&&!start){showToast("The related task needs dates before this drop can be scheduled.",null,null,true);return}
   const end=order?"":iso(Date.parse(start)+(duration-1)*DAY),d=document.createElement("dialog");d.className="task-move-dialog";
   const description=mode==="after"?`“${t.title}” will follow “${target.title}”.`:mode==="concurrent"?`“${t.title}” will run alongside “${target.title}”. Its direct predecessor link to that task, if present, will be removed.`:order?`Move “${t.title}” ${mode} “${target.title}”. Dates and dependencies stay as they are.`:`Schedule “${t.title}” at the dropped date.`;
@@ -2959,7 +2977,7 @@ async function reviewTaskDrop(t,mode,target,start){
   document.body.appendChild(d);d.showModal();
   const chosen=await new Promise(resolve=>{d.addEventListener("cancel",()=>resolve(null),{once:true});d.querySelector("[data-cancel]").onclick=()=>resolve(null);d.querySelector("form").onsubmit=e=>{e.preventDefault();const f=e.currentTarget,dates=order?{}:{start_date:f.elements.start.value,due_date:f.elements.finish.value};if(!order&&dates.start_date>dates.due_date){f.querySelector(".error").textContent="Finish must be on or after Start.";return}resolve(dates)}});
   d.close();d.remove();if(!chosen)return;
-  const payload={mode,...chosen,expected_revision:t.revision,...(target?{target_task_id:target.id,target_revision:target.revision}:{}),order_event_id:t.timeline_order_event_id??null};
+  const payload={mode,...chosen,expected_revision:t.revision,...(target?{target_task_id:target.id,target_revision:target.revision}:{}),order_event_id:t.timeline_order_event_id??null,...(order?{initial_task_order:initialOrder}:{})};
   try{let out;const send=extra=>api(taskApi(t.id,"/timeline-drop"),{method:"POST",body:JSON.stringify({...payload,...extra})});
     try{out=await send({})}catch(err){if(err.status!==409||err.confirm!=="impact")throw err;const ok=await askMove("impact",t,null,{impact:err.impact,dates:chosen});if(!ok)return;out=await send({confirmed:true})}
     showToast(out.request?"The date change was sent to an owner for approval.":"Task move saved. Critical path recalculated.");

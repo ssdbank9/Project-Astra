@@ -1,4 +1,4 @@
-import io, json, tempfile, unittest, zipfile
+import io, json, shutil, subprocess, tempfile, unittest, zipfile
 from pathlib import Path
 from unittest.mock import patch
 from xml.etree import ElementTree as ET
@@ -129,6 +129,37 @@ class OwnerExcelTests(unittest.TestCase):
         for edits in cases:
             with self.subTest(edits=edits): self.assertGreater(self.preview(fill(original,edits))['summary']['errors'],0)
 
+@unittest.skipUnless(shutil.which('node'), 'Node is required for timeline UI checks')
+class TimelineOrderUiTests(unittest.TestCase):
+    def test_filtered_parent_preserves_visible_siblings_and_hidden_slots(self):
+        source=(Path(__file__).parents[1]/'src/astra/static/app.js').read_text(encoding='utf-8')
+        functions=[]
+        for start,end in [('function stepOrder(', 'function stepHue('),
+                          ('function groupSteps(', 'function dateExtent('),
+                          ('function timelineOrder(', 'let timelineTaskDrag'),
+                          ('function timelineTaskOrder(', 'function clearTaskDrop(')]:
+            functions.append(source[source.index(start):source.index(end)])
+        script='''
+const assert=require('node:assert/strict');
+const state={tasks:[
+ {id:'other',project_id:'p'}, {id:'parent',project_id:'p'},
+ {id:'A',project_id:'p',parent_task_id:'parent',start_date:'2026-10-02'},
+ {id:'C',project_id:'p',parent_task_id:'parent',start_date:'2026-10-04'},
+ {id:'B',project_id:'p',parent_task_id:'parent',start_date:'2026-10-01'},
+ {id:'hidden',project_id:'p',parent_task_id:'parent',start_date:'2026-10-03'},
+ {id:'foreign',project_id:'q'}]};
+let drawn=['other','A','C','B','foreign'];
+const document={querySelectorAll:()=>drawn.map(id=>({dataset:{timelineTask:id},closest:()=>null}))};
+'''+'\n'.join(functions)+'''
+assert.deepEqual(timelineTaskOrder('p'),['other','parent','A','C','hidden','B']);
+drawn=['other','parent'];
+assert.deepEqual(timelineTaskOrder('p'),['other','parent','B','A','hidden','C']);
+document.querySelectorAll=()=>['other','parent','A','C','B'].map(id=>({dataset:{timelineTask:id},closest:()=>['A','B','C'].includes(id)?{}:null}));
+assert.deepEqual(timelineTaskOrder('p'),['other','parent','B','A','hidden','C']);
+'''
+        result=subprocess.run([shutil.which('node'),'-e',script],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
 class TimelineTaskDropTests(unittest.TestCase):
     setUp = OwnerExcelTests.setUp
     # Only this class's own scenarios; avoid inheriting the Excel tests again.
@@ -178,6 +209,42 @@ class TimelineTaskDropTests(unittest.TestCase):
         with self.assertRaises(Forbidden): self.s.timeline_drop(dict(self.owner,active=0),b['id'],self.payload(b,a))
         self.db.execute("UPDATE projects SET status='closed' WHERE id=?",(self.p['id'],))
         with self.assertRaises(Forbidden): self.s.timeline_drop(self.owner,b['id'],self.payload(b,a,'above',order_event_id=None))
+
+    def test_first_reorder_preserves_unrelated_task_list_positions(self):
+        b=self.task('Build','2026-10-08','2026-10-10')
+        a=self.task('Prepare','2026-10-05','2026-10-07')
+        d=self.task('Inspect',None,None)
+        c=self.task('Open','2026-10-12','2026-10-14')
+        before=self.s.list_tasks(self.owner,self.p['id'])
+        self.assertEqual([t['id'] for t in before],[a['id'],b['id'],c['id'],d['id']])
+        out=self.s.timeline_drop(self.owner,b['id'],self.payload(b,c,'below',order_event_id=None))
+        self.assertEqual(out['task_ids'],[a['id'],c['id'],b['id'],d['id']])
+        self.assertEqual(self.s.get_task(self.owner,b['id'])['due_date'],'2026-10-10')
+
+    def test_initial_snapshot_preserves_filtered_and_grouped_order(self):
+        parent=self.task('Group');other=self.task('Hidden root')
+        children=[]
+        for title in ['First','Hidden step','Last']:
+            children.append(self.s.create_task(self.owner,{'project_id':self.p['id'],
+                'title':title,'parent_task_id':parent['id']}))
+        first,hidden,last=children
+        snapshot=[other['id'],parent['id'],last['id'],hidden['id'],first['id']]
+        out=self.s.timeline_drop(self.owner,first['id'],self.payload(first,last,'above',
+            order_event_id=None,initial_task_order=snapshot))
+        expected=[other['id'],parent['id'],first['id'],last['id'],hidden['id']]
+        self.assertEqual(out['task_ids'],expected)
+        listed=self.s.list_tasks(self.owner,self.p['id']);event=listed[0]['timeline_order_event_id']
+        out=self.s.timeline_drop(self.owner,first['id'],self.payload(first,hidden,'below',
+            order_event_id=event,initial_task_order=expected))
+        self.assertEqual(out['task_ids'],snapshot)
+
+    def test_incomplete_or_duplicate_order_snapshot_refused_without_writes(self):
+        a=self.task('A');b=self.task('B')
+        for snapshot in ([a['id']],[a['id'],a['id']],[a['id'],b['id'],'unknown']):
+            with self.subTest(snapshot=snapshot),self.assertRaises((ValueError,Conflict)):
+                self.s.timeline_drop(self.owner,b['id'],self.payload(b,a,'above',
+                    order_event_id=None,initial_task_order=snapshot))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM project_events WHERE event_type='timeline_reordered'").fetchone()[0],0)
 
     def test_another_users_source_or_target_lease_refuses_drop(self):
         a=self.task('A');b=self.task('B')

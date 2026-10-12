@@ -3240,11 +3240,27 @@ class AstraService:
                 previous = self.db.execute("SELECT id,detail_json FROM project_events WHERE project_id=? AND event_type='timeline_reordered' ORDER BY rowid DESC LIMIT 1", (task["project_id"],)).fetchone()
                 if payload.get("order_event_id") != (previous["id"] if previous else None):
                     raise Conflict("The timeline order changed. Reload before moving another task.")
-                ids = [r[0] for r in self.db.execute("SELECT id FROM tasks WHERE project_id=? ORDER BY created_at,id", (task["project_id"],))]
+                rows = self.db.execute("SELECT id,parent_task_id FROM tasks WHERE project_id=?", (task["project_id"],)).fetchall()
+                ids = {r["id"] for r in rows}
+                initial = payload.get("initial_task_order")
+                if initial is not None:
+                    if not isinstance(initial, list) or any(not isinstance(i, str) for i in initial):
+                        raise ValueError("The initial timeline order must be a list of task IDs.")
+                    if len(initial) != len(ids) or set(initial) != ids:
+                        raise Conflict("The project task list changed. Reload before reordering tasks.")
+                else:
+                    initial = [t["id"] for t in self.list_tasks(actor, task["project_id"])]
                 order = json.loads(previous["detail_json"])["task_ids"] if previous else []
-                order = [i for i in order if i in ids] + [i for i in ids if i not in order]
-                order.remove(task_id); index = order.index(target["id"]) + (mode == "below")
-                order.insert(index, task_id)
+                order = [i for i in order if i in ids] + [i for i in initial if i not in order]
+                # The browser supplies the full, unfiltered group order. Move only
+                # sibling slots so other groups keep their positions; hidden siblings
+                # remain in the complete order.
+                siblings = {r["id"] for r in rows if r["parent_task_id"] == task.get("parent_task_id")}
+                group = [i for i in order if i in siblings]
+                group.remove(task_id)
+                group.insert(group.index(target["id"]) + (mode == "below"), task_id)
+                moved = iter(group)
+                order = [next(moved) if i in siblings else i for i in order]
                 self._project_event(task["project_id"], actor["id"], "timeline_reordered", {"task_ids": order}, "Task row moved " + mode + " another row")
                 return {"mode": mode, "task_ids": order}
             self._refuse_closed(task)
