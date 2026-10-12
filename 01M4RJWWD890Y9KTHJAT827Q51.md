@@ -15,7 +15,7 @@ related:
   - 01M4QZYS1YYTM0PNEG1NSXAWHN
 commits: []
 created-at: 2026-10-12T17:34:49Z
-updated-at: 2026-10-12T17:46:10Z
+updated-at: 2026-10-12T17:46:14Z
 updated-by: Codex
 ---
 
@@ -33,6 +33,10 @@ updated-by: Codex
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
+
+- [ ] Confirm omitted table rendering with the same owner and a failing actual-function regression.
+- [ ] Add eligible task/subtask table actions and share the existing accessible movement handler.
+- [ ] Verify small widths, desktop List, zoom and keyboard preview/save/cancel/reload; run full suite and independent review.
 
 ## Progress
 
