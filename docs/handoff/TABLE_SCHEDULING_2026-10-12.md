@@ -19,7 +19,7 @@ Gantt. This closes a launch QA gap found after Aly accepted SXAWHN.
 | Browser verification | Actual desktop Chrome, synthetic loopback fixtures: 390px, 320px, desktop List and a 625x430 reduced viewport. See scenarios below. |
 | Actual 200% browser zoom | **Unverified.** Automation shortcuts left viewport width and device pixel ratio unchanged. Reduced-viewport testing is not proof of browser zoom. |
 | Final full suite | Ran 790 tests in 602.540s, OK (skipped=1), exit 0. Existing attachment-symlink rejection skip: symlinks are unavailable here. Earlier 789-test run is superseded. |
-| Owner acceptance | Pending for 827Q51. SXAWHN was accepted by Aly in chat; its board lane remains human until Aly moves it. |
+| Owner acceptance | Aly explicitly accepted 827Q51 in chat after the publication report, with the zoom limitation disclosed. Accepted implementation SHA: `2c514cdf31a7adf5b0fd14d106c12c29359718a5`. Acceptance is recorded through the Jaira CLI; the human lane remains unchanged under `AGENTS.md`. SXAWHN was also accepted by Aly in chat. |
 | Hosted operation / physical devices | **Unverified.** No deployment or physical phone/touch acceptance occurred. |
 
 ## Browser scenarios
@@ -48,10 +48,11 @@ Screenshots are local, ignored verification artifacts under `Temp/`:
 
 ## Remaining gates and next work
 
-827Q51 can be handed to Aly with the zoom criterion explicitly outstanding;
-do not tick its combined definition of done or call overall launch QA complete.
+827Q51's functional repair is accepted by Aly. The zoom criterion remains
+explicitly outstanding; do not tick the combined definition of done or call
+overall launch QA complete. Chat acceptance does not waive unperformed checks.
 Actual 200% browser zoom and physical phone checks remain required for broader
-accessibility/device acceptance. Aly need not repeat SXAWHN acceptance.
+accessibility/device acceptance. Aly need not repeat 827Q51 or SXAWHN acceptance.
 
 Continue Phase A in `NEXT_STEPS.md`, using the current board rather than its
 historical ticket counts. Keep App Owner signoffs, merges, accounts,
