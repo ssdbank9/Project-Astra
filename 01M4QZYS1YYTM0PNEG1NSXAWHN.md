@@ -15,7 +15,7 @@ related:
   - 01M4NXX1C1SMWXA9P1YEZFP6ET
 commits: []
 created-at: 2026-10-12T12:03:48Z
-updated-at: 2026-10-12T12:05:31Z
+updated-at: 2026-10-12T12:26:14Z
 updated-by: Codex
 ---
 
@@ -40,4 +40,4 @@ updated-by: Codex
 - [ ] Verify branching and role/refusal regressions, Chrome, full suite and independent review; document and publish.
 
 ## Progress
-
+- **2026-10-12 12:26 · Codex** — Read-only preview and atomic apply now cover full-project scheduled bounds, separate alternative forecasts and optional owner deadline revision. Core graph/service tests pass (17 incl HTTP role matrix). Independent review caught source task ID missing from fingerprint; dedicated red regression and guard mutation now prove fix. Added bounds helper shadowed a local list once; corrected. Chrome Below saved link reversal, changed task dates and scheduled finish while retaining agreed deadline. Browser finishing Above+deadline, date-chain, concurrent, cancel and reload. Original full suite running; final UI readability pass will need final checks.
