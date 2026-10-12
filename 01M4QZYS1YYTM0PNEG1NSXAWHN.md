@@ -15,7 +15,8 @@ related:
   - 01M4NXX1C1SMWXA9P1YEZFP6ET
 commits: []
 created-at: 2026-10-12T12:03:48Z
-updated-at: 2026-10-12T12:03:48Z
+updated-at: 2026-10-12T12:05:20Z
+updated-by: Codex
 ---
 
 # Linked task movement and automatic project schedule
