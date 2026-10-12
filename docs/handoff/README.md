@@ -1,5 +1,7 @@
 # Astra handoff pack — 2026-09-26
 
+Current phone-size and List scheduling repair: [827Q51 verification](TABLE_SCHEDULING_2026-10-12.md). Table rows now expose Move task and preserve filtered sibling ordering. Browser save/reload checks pass; actual browser zoom, owner acceptance and hosted operation remain separate.
+
 Current automatic task movement and project scheduling: [SXAWHN implementation
 and verification](AUTOMATIC_TIMELINE_SCHEDULING_2026-10-12.md). Above/Below now
 create sequential relationships through the Move task UI; linked dates and

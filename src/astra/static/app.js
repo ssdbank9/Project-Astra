@@ -291,7 +291,7 @@ function renderGantt(tasks){
     const expandBtn=kids.length?`<button type="button" class="expand" data-expand="${id}" aria-expanded="${expanded}" aria-controls="steps-${id}" aria-label="${expanded?"Hide":"Show"} ${kids.length} step${kids.length===1?"":"s"} of ${escapeHtml(t.title)}">${expanded?"▾":"▸"}</button>`:"";
     const swatch=isStep?`<i class="sw step-c${stepHue(meta.idx)}${meta.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${meta.idx}</i> `:"";
     const nameTop=isStep?`<span class="step-kicker">${swatch}Step ${meta.idx} of ${meta.total}</span>`:escapeHtml(t.project_name);
-    const move=canMoveOnBoard(t.project_id)&&!CLOSED_STATUSES.includes(t.status)?`<button type="button" class="task-row-handle quiet" draggable="true" data-task-move="${id}" aria-label="Move task ${escapeHtml(t.title)}">Move task</button>`:"";
+    const move=timelineMoveButton(t,true);
     const zones=move?`<div class="task-drop-zones" aria-label="Task drop targets">${[["above","Above"],["below","Below"],["after","After this task"],["concurrent","Run concurrently"]].map(([mode,title])=>`<button type="button" class="task-drop-zone quiet" data-drop-mode="${mode}" data-drop-target="${id}">${title}</button>`).join("")}</div>`:"";
     const name=`<div class="task-name${isStep?" is-step":""}"><div class="name-wrap">${expandBtn}<div>${nameTop}<br><small>${escapeHtml(t.title)}</small>${kids.length?`<br><small class="muted">${kids.length} step${kids.length===1?"":"s"}</small>`:""}<br><button type="button" class="link" data-detail="${id}">Details &amp; history</button>${move}</div></div></div>`;
     const metaCol=`<div class="task-meta">${escapeHtml(t.owner_name||"Unassigned")}<br>${escapeHtml(t.due_date||"No due date")} · ${critLabel(t.criticality)}${derived}${undatedChip}${metaMore}${overrunText}${blocked}${cp}<br><span class="next-action">Next: ${escapeHtml(t.next_action||"—")}</span></div>`;
@@ -303,16 +303,18 @@ function renderGantt(tasks){
   applyGeometry(el);
   restoreFocus(el,focusKey);
 }
+function canMoveTimelineTask(t){const p=(state.projects||[]).find(x=>x.id===t.project_id);return !!(p&&p.status!=="closed"&&canMoveOnBoard(t.project_id)&&!CLOSED_STATUSES.includes(t.status))}
+function timelineMoveButton(t,draggable=false){return canMoveTimelineTask(t)?`<button type="button" class="quiet task-row-handle"${draggable?' draggable="true"':""} data-task-move="${escapeHtml(t.id)}" aria-label="Move task ${escapeHtml(t.title)}">Move task</button>`:""}
 function renderScheduleTable(groups,tableEl){
   const {top,childrenOf,stepIndex}=groups,scope=bulkScope();
   let steps=0;const rows=[];
   const cell=v=>`<td>${escapeHtml(v??"—")}</td>`;
   const walk=(t,parent)=>{
     const kids=childrenOf.get(t.id)||[];const m=stepIndex.get(t.id);const isStep=!!parent;
-    const link=`<button type="button" class="link" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>`;
+    const link=`<button type="button" class="link" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button>${timelineMoveButton(t)}`;
     const stepNo=isStep?`<i class="sw step-c${stepHue(m.idx)}${m.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${m.idx}</i><span class="sr-only">Step ${m.idx}</span> of ${m.total}`:"—";
     const pick=scope?`<td class="pick">${isStep?"":pickBox(t)}</td>`:"";
-    rows.push(`<tr class="${isStep?"step-tr":"task-tr"}${bulk.ids.has(t.id)?" is-picked":""}">${pick}${cell(t.project_name)}<td>${isStep?escapeHtml(parent.title):link}</td><td>${stepNo}</td><td>${isStep?link:"—"}</td><td>${escapeHtml(t.owner_name||"Unassigned")}${t.needs_new_assignee||t.needs_new_collaborator?" "+reassignChip(t):""}</td>${cell(t.start_date||"—")}${cell(t.due_date||"—")}${cell(statusLabel(t.status))}<td>${critLabel(t.criticality)}</td>${cell(dueText(t)||t.due_state)}<td>${t.is_critical_path?"Yes":"No"}</td></tr>`);
+    rows.push(`<tr data-timeline-task="${escapeHtml(t.id)}" class="${isStep?"step-tr":"task-tr"}${bulk.ids.has(t.id)?" is-picked":""}">${pick}${cell(t.project_name)}<td>${isStep?escapeHtml(parent.title):link}</td><td>${stepNo}</td><td>${isStep?link:"—"}</td><td>${escapeHtml(t.owner_name||"Unassigned")}${t.needs_new_assignee||t.needs_new_collaborator?" "+reassignChip(t):""}</td>${cell(t.start_date||"—")}${cell(t.due_date||"—")}${cell(statusLabel(t.status))}<td>${critLabel(t.criticality)}</td>${cell(dueText(t)||t.due_state)}<td>${t.is_critical_path?"Yes":"No"}</td></tr>`);
     if(isStep)steps++;
     kids.forEach(k=>walk(k,t));
   };
@@ -2969,7 +2971,7 @@ function timelineTaskOrder(projectId){
   // Filters can hide a parent and promote its children to top-level rows.
   // Keep the drawn sibling sequence, while hidden siblings retain their slots.
   const drawn=new Map();
-  for(const row of document.querySelectorAll("#gantt [data-timeline-task]")){
+  for(const row of document.querySelectorAll("#gantt [data-timeline-task], #schedule-table tr[data-timeline-task]")){
     const task=byId.get(row.dataset.timelineTask);if(!task||row.closest("[hidden]"))continue;
     const parent=task.parent_task_id||null;if(!drawn.has(parent))drawn.set(parent,[]);drawn.get(parent).push(task.id);
   }
@@ -3006,4 +3008,6 @@ taskTimeline.addEventListener("drop",e=>{if(!timelineTaskDrag)return;const t=sta
 });
 taskTimeline.addEventListener("dragend",()=>{timelineTaskDrag=null;clearTaskDrop()});
 // Keyboard and touch use the same reviewed service action, without a drag gesture.
-taskTimeline.addEventListener("click",e=>{const handle=e.target.closest("[data-task-move]");if(!handle)return;const t=state.tasks.find(x=>x.id===handle.dataset.taskMove);if(!t)return;const d=document.createElement("dialog");d.innerHTML=`<form><h2>Move ${escapeHtml(t.title)}</h2><label>Action<select name="mode"><option value="date">Place on timeline</option><option value="above">Move above</option><option value="below">Move below</option><option value="after">After another task finishes</option><option value="concurrent">Run concurrently</option></select></label><label>Related task<select name="target"><option value="">Choose task</option>${state.tasks.filter(x=>x.project_id===t.project_id&&x.id!==t.id).map(x=>`<option value="${escapeHtml(x.id)}">${escapeHtml(x.title)} (${escapeHtml(x.plan_option||"Shared")})</option>`).join("")}</select></label><label>Start for timeline placement<input name="start" type="date" value="${escapeHtml(t.start_date||ganttToday())}"></label><div class="error" role="alert"></div><div class="actions"><button type="button" data-cancel class="quiet">Cancel</button><button type="submit">Review move</button></div></form>`;document.body.appendChild(d);d.showModal();const close=()=>{d.close();d.remove()};d.addEventListener("cancel",()=>d.remove(),{once:true});d.querySelector("[data-cancel]").onclick=close;d.querySelector("form").onsubmit=ev=>{ev.preventDefault();const f=ev.currentTarget,mode=f.elements.mode.value,target=state.tasks.find(x=>x.id===f.elements.target.value);if(mode!=="date"&&!target){f.querySelector(".error").textContent="Choose a related task.";return}const start=mode==="date"?f.elements.start.value:mode==="after"&&target.due_date?iso(Date.parse(target.due_date)+DAY):target?.start_date||target?.due_date;close();reviewTaskDrop(t,mode,target,start)}});
+function openTimelineTaskMove(e){const handle=e.target.closest("[data-task-move]");if(!handle)return;const t=state.tasks.find(x=>x.id===handle.dataset.taskMove);if(!t||!canMoveTimelineTask(t))return;const d=document.createElement("dialog");d.innerHTML=`<form><h2>Move ${escapeHtml(t.title)}</h2><label>Action<select name="mode"><option value="date">Place on timeline</option><option value="above">Move above</option><option value="below">Move below</option><option value="after">After another task finishes</option><option value="concurrent">Run concurrently</option></select></label><label>Related task<select name="target"><option value="">Choose task</option>${state.tasks.filter(x=>x.project_id===t.project_id&&x.id!==t.id).map(x=>`<option value="${escapeHtml(x.id)}">${escapeHtml(x.title)} (${escapeHtml(x.plan_option||"Shared")})</option>`).join("")}</select></label><label>Start for timeline placement<input name="start" type="date" value="${escapeHtml(t.start_date||ganttToday())}"></label><div class="error" role="alert"></div><div class="actions"><button type="button" data-cancel class="quiet">Cancel</button><button type="submit">Review move</button></div></form>`;document.body.appendChild(d);d.showModal();const close=()=>{d.close();d.remove()};d.addEventListener("cancel",()=>d.remove(),{once:true});d.querySelector("[data-cancel]").onclick=close;d.querySelector("form").onsubmit=ev=>{ev.preventDefault();const f=ev.currentTarget,mode=f.elements.mode.value,target=state.tasks.find(x=>x.id===f.elements.target.value);if(mode!=="date"&&!target){f.querySelector(".error").textContent="Choose a related task.";return}const start=mode==="date"?f.elements.start.value:mode==="after"&&target.due_date?iso(Date.parse(target.due_date)+DAY):target?.start_date||target?.due_date;close();reviewTaskDrop(t,mode,target,start)}}
+taskTimeline.addEventListener("click",openTimelineTaskMove);
+document.querySelector("#schedule-table").addEventListener("click",openTimelineTaskMove);
