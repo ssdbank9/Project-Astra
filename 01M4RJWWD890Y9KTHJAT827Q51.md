@@ -15,9 +15,9 @@ related:
   - 01M4QZYS1YYTM0PNEG1NSXAWHN
 commits: []
 created-at: 2026-10-12T17:34:49Z
-updated-at: 2026-10-12T18:39:49Z
+updated-at: 2026-10-12T18:41:18Z
 updated-by: Codex
-question: 827Q51 functional repair is published for owner review; actual 200 percent browser zoom remains unverified. No laptop action requested while Aly is away.
+question: Aly accepted the functional repair in chat; actual 200 percent browser zoom remains unverified. Human lane unchanged under AGENTS.md; no repeat acceptance or laptop action requested.
 outcome-what: "Added one eligible Move task action per table task/step, shared the linked preview handler and captured filtered table order."
 outcome-why: Small screens and List views omitted controls; the new table entry point exposed a Gantt-only order snapshot.
 outcome-resolves: "Responsive save/cancel/reload, hidden-parent ordering, four focused tests, full 790-test suite and independent review pass. Actual browser zoom is unverified; combined DOD stays unticked."
