@@ -14,12 +14,12 @@ related:
   - 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T16:49:25Z
-updated-at: 2026-10-12T07:51:01Z
+updated-at: 2026-10-12T07:52:55Z
 updated-by: Codex
-question: "Please accept ZFP6ET after the scoped push receipt, or identify any remaining issue."
+question: "Aly accepted 2026-10-12; awaiting the human-only board transition to done."
 outcome-what: Preserved complete visible timeline order and made later-row drop targets stable. Backend and actual-function regressions pass; all desktop Chrome drop modes and filtered-parent reorder persist.
 outcome-why: First reorder changed unrelated rows; in-flow drop controls cancelled later-row drag starts.
-outcome-resolves: Independent review pass; 24 focused and 770 full tests OK. Await Aly acceptance after scoped publication receipt. Touch/narrow-screen and running owner server version unverified.
+outcome-resolves: Independent review and Chrome cases passed; 24 focused and 770 full tests OK. Repair published at bf4ea3eaf5d07ef7f7efbfc80e458e88d8871457. Aly accepted on 2026-10-12. Touch/narrow-screen and running owner server version unverified.
 ---
 
 # Preserve timeline row order and reliable later-row dragging
