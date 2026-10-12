@@ -15,7 +15,7 @@ related:
   - 01M4QZYS1YYTM0PNEG1NSXAWHN
 commits: []
 created-at: 2026-10-12T17:34:49Z
-updated-at: 2026-10-12T18:25:12Z
+updated-at: 2026-10-12T18:39:49Z
 updated-by: Codex
 question: 827Q51 functional repair is published for owner review; actual 200 percent browser zoom remains unverified. No laptop action requested while Aly is away.
 outcome-what: "Added one eligible Move task action per table task/step, shared the linked preview handler and captured filtered table order."
@@ -47,3 +47,4 @@ outcome-resolves: "Responsive save/cancel/reload, hidden-parent ordering, four f
 
 ## Progress
 - **2026-10-12 18:19 · Codex** — Same-account controls confirmed missing in 390px and desktop List. Actual-function regressions failed before fix, then passed; independent review caught filtered-table order omission, now corrected and regression-proven. Actual Chrome small-width keyboard save/cancel/reload and filtered-parent Above pass. Actual 200 percent zoom is unverified: shortcuts did not alter width/DPR; reduced viewport is separate evidence. Final full suite rerun includes third regression; earlier 789-test run OK skipped1 is not the final receipt.
+- **2026-10-12 18:39 · Codex** — Aly Jafferani accepted 827Q51 in this conversation: Accepted. Acceptance covers the published functional repair at 2c514cdf31a7adf5b0fd14d106c12c29359718a5 with the disclosed limitation. Actual 200 percent browser zoom and physical-device checks remain unverified; combined DOD stays unticked. Agent leaves the human lane unchanged under AGENTS.md. No deployment authorized.
