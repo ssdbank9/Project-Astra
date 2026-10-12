@@ -147,6 +147,13 @@ const FOCUS_ATTRS=["data-detail","data-more","data-expand"],FOCUS_KINDS=["step",
 function focusKeyIn(root){const a=document.activeElement;if(!a||!root.contains(a))return null;const attr=FOCUS_ATTRS.find(x=>a.hasAttribute(x));if(!attr)return null;const kind=FOCUS_KINDS.find(k=>a.classList.contains(k));return `${kind?"."+kind:""}[${attr}="${CSS.escape(a.getAttribute(attr))}"]`}
 function restoreFocus(root,sel){if(!sel)return;const n=root.querySelector(sel);if(n&&!n.closest("[hidden]"))n.focus({preventScroll:true})}
 const GRIPS='<i class="bar-grip start" data-edge="start" aria-hidden="true"></i><i class="bar-grip end" data-edge="end" aria-hidden="true"></i>';
+function projectSchedule(p,selected=""){
+  const forecasts=p.schedule_forecasts||{};
+  if(selected&&forecasts[selected])return forecasts[selected];
+  if(p.scheduled_dates)return p.scheduled_dates;
+  const all=Object.values(forecasts),starts=all.map(f=>f.start_date).filter(Boolean).sort(),finishes=all.map(f=>f.finish_date).filter(Boolean).sort();
+  return {start_date:starts[0]||null,finish_date:finishes.at(-1)||null,undated_count:all.some(f=>f.undated_count)?1:0};
+}
 function renderGantt(tasks){
   const planSelect=document.querySelector("#gantt-plan");
   const previous=planSelect.value;
@@ -178,8 +185,11 @@ function renderGantt(tasks){
     const proj=(state.projects||[]).find(p=>p.id===pid);
     if(!proj)continue;
     const label=n=>singleProject?n:`${proj.name}: ${n}`;
-    if(proj.start_date)projMarkers.push({date:Date.parse(proj.start_date),kind:"start",label:label("Start")});
-    if(proj.target_date)projMarkers.push({date:Date.parse(proj.target_date),kind:"target",label:label("Target")});
+    if(proj.start_date)projMarkers.push({date:Date.parse(proj.start_date),kind:"start",label:label("Agreed start")});
+    if(proj.target_date)projMarkers.push({date:Date.parse(proj.target_date),kind:"target",label:label("Agreed deadline")});
+    const schedule=projectSchedule(proj,planSelect.value),multiple=Object.keys(proj.schedule_forecasts||{}).some(n=>n!=="Shared");
+    if(schedule.start_date)projMarkers.push({date:Date.parse(schedule.start_date),kind:"scheduled-start",label:label("Scheduled start")});
+    if(schedule.finish_date)projMarkers.push({date:Date.parse(schedule.finish_date),kind:"scheduled-finish",label:label(!planSelect.value&&multiple?"Latest plan finish":"Scheduled finish")});
   }
   const dateVals=[...dated.map(t=>Date.parse(t.start_date||t.due_date)),...dated.map(t=>Date.parse(t.due_date||t.start_date)),...projMarkers.map(m=>m.date)];
   let min=dateVals.length?new Date(Math.min(...dateVals)):new Date();
@@ -700,7 +710,9 @@ function projectOverview(p,tasks){
   const open=tasks.filter(isOpen),pct=counted.length?Math.round(done/counted.length*100):0;
   const facts=[
     fact("Status",p.status==="closed"?"Closed":p.status==="on_hold"?"On hold":"Active"),
-    fact("Start",p.start_date?fmtDay(p.start_date):"Not set"),fact("Target",p.target_date?fmtDay(p.target_date):"Not set"),
+    fact("Agreed start",p.start_date?fmtDay(p.start_date):"Not set"),fact("Agreed deadline",p.target_date?fmtDay(p.target_date):"Not set"),
+    fact("Scheduled start",projectSchedule(p).start_date?fmtDay(projectSchedule(p).start_date):"Need task dates"),
+    fact("Scheduled finish",projectSchedule(p).finish_date?fmtDay(projectSchedule(p).finish_date):"Need task dates"),
     fact("Open tasks",String(open.length)),fact("Overdue",String(open.filter(t=>t.due_state==="overdue").length)),
     fact("Blocked",String(open.filter(t=>t.is_blocked).length)),fact("Critical path",String(open.filter(t=>t.is_critical_path).length)),
     fact("Timezone",p.timezone||"—"),
@@ -710,6 +722,7 @@ function projectOverview(p,tasks){
     <div class="progress-line"><label for="project-progress">Progress</label><progress id="project-progress" max="100" value="${pct}">${pct}%</progress>
       <span><strong>${done} of ${counted.length}</strong> task${counted.length===1?"":"s"} accepted (${pct}%)</span></div>
     <div class="facts">${facts}</div>
+    ${Object.keys(p.schedule_forecasts||{}).some(n=>n!=="Shared")?`<p>Scheduled dates above show the range across plans. Each alternative keeps its own finish:</p><ul>${Object.entries(p.schedule_forecasts).filter(([name])=>name!=="Shared").map(([name,s])=>`<li>${escapeHtml(name)}: ${escapeHtml(s.start_date||"Need dates")} → ${escapeHtml(s.finish_date||"Need dates")}${s.undated_count?" (provisional)":""}</li>`).join("")}</ul>`:projectSchedule(p).undated_count?'<p>Scheduled dates are provisional while some tasks need dates.</p>':""}
     ${p.description?`<p class="desc">${escapeHtml(p.description)}</p>`:""}
     ${p.status==="closed"&&p.closure_note?`<div class="state-note"><p><strong>Closed.</strong> ${escapeHtml(p.closure_note)}</p></div>`:""}
     <h3 class="group-head">Next due</h3>${next.length?`<ul class="home-list">${next.map(t=>homeRow(t,`<span class="due-chip" data-due="${workGroup(t)}">${escapeHtml(dueText(t))}</span>`)).join("")}</ul>`:'<p class="empty-line">No open task has a due date.</p>'}
@@ -730,7 +743,7 @@ function renderProject(r){
     return;
   }
   const tasks=state.tasks.filter(t=>t.project_id===p.id),ents=(p.entities||[]).map(e=>e.name).join(", ");
-  q("#project-facts").textContent=[ents,p.status==="closed"?"Closed":null,p.target_date?`Target ${fmtDay(p.target_date)}`:null,(()=>{const ids=new Set(tasks.map(t=>t.id)),steps=tasks.filter(t=>t.parent_task_id&&ids.has(t.parent_task_id)).length,top=tasks.length-steps;
+  q("#project-facts").textContent=[ents,p.status==="closed"?"Closed":null,projectSchedule(p).finish_date?`Scheduled finish ${fmtDay(projectSchedule(p).finish_date)}`:null,p.target_date?`Agreed deadline ${fmtDay(p.target_date)}`:null,(()=>{const ids=new Set(tasks.map(t=>t.id)),steps=tasks.filter(t=>t.parent_task_id&&ids.has(t.parent_task_id)).length,top=tasks.length-steps;
     return `${top} task${top===1?"":"s"}${steps?`, ${steps} step${steps===1?"":"s"}`:""}`})()].filter(Boolean).join(" · ");
   if(!slot.hidden){
     mountGantt(slot,r.tab==="list"||phoneMQ.matches?"table":"chart");
@@ -2969,19 +2982,20 @@ function timelineTaskOrder(projectId){
 function clearTaskDrop(){document.querySelectorAll(".task-drop-over").forEach(e=>e.classList.remove("task-drop-over"));document.body.classList.remove("task-row-dragging")}
 async function reviewTaskDrop(t,mode,target,start){
   const order=mode==="above"||mode==="below",duration=Math.max(1,t.start_date&&t.due_date?Math.round((Date.parse(t.due_date)-Date.parse(t.start_date))/DAY)+1:1);
-  const initialOrder=order?timelineTaskOrder(t.project_id):null;
-  if(!order&&!start){showToast("The related task needs dates before this drop can be scheduled.",null,null,true);return}
-  const end=order?"":iso(Date.parse(start)+(duration-1)*DAY),d=document.createElement("dialog");d.className="task-move-dialog";
-  const description=mode==="after"?`“${t.title}” will follow “${target.title}”.`:mode==="concurrent"?`“${t.title}” will run alongside “${target.title}”. Its direct predecessor link to that task, if present, will be removed.`:order?`Move “${t.title}” ${mode} “${target.title}”. Dates and dependencies stay as they are.`:`Schedule “${t.title}” at the dropped date.`;
-  d.innerHTML=`<form><h2>Review task move</h2><p>${escapeHtml(description)}</p>${order?"":`<div class="grid"><label>Start<input name="start" type="date" value="${escapeHtml(start)}" required></label><label>Finish<input name="finish" type="date" value="${escapeHtml(end)}" required></label></div><p class="muted">${t.start_date&&t.due_date?"Existing duration preserved in this preview.":"This task has no complete duration. The preview starts with one day; set its finish date."} Astra recalculates the critical path after saving.</p>`}<div class="error" role="alert"></div><div class="actions"><button type="button" class="quiet" data-cancel>Cancel</button><button type="submit">Apply move</button></div></form>`;
-  document.body.appendChild(d);d.showModal();
-  const chosen=await new Promise(resolve=>{d.addEventListener("cancel",()=>resolve(null),{once:true});d.querySelector("[data-cancel]").onclick=()=>resolve(null);d.querySelector("form").onsubmit=e=>{e.preventDefault();const f=e.currentTarget,dates=order?{}:{start_date:f.elements.start.value,due_date:f.elements.finish.value};if(!order&&dates.start_date>dates.due_date){f.querySelector(".error").textContent="Finish must be on or after Start.";return}resolve(dates)}});
-  d.close();d.remove();if(!chosen)return;
-  const payload={mode,...chosen,expected_revision:t.revision,...(target?{target_task_id:target.id,target_revision:target.revision}:{}),order_event_id:t.timeline_order_event_id??null,...(order?{initial_task_order:initialOrder}:{})};
-  try{let out;const send=extra=>api(taskApi(t.id,"/timeline-drop"),{method:"POST",body:JSON.stringify({...payload,...extra})});
-    try{out=await send({})}catch(err){if(err.status!==409||err.confirm!=="impact")throw err;const ok=await askMove("impact",t,null,{impact:err.impact,dates:chosen});if(!ok)return;out=await send({confirmed:true})}
-    showToast(out.request?"The date change was sent to an owner for approval.":"Task move saved. Critical path recalculated.");
-  }catch(err){showToast(`Task move was not saved: ${err.message}`,null,null,true)}finally{await load()}
+  const payload={mode,expected_revision:t.revision,...(target?{target_task_id:target.id,target_revision:target.revision}:{}),order_event_id:t.timeline_order_event_id??null,...(order?{initial_task_order:timelineTaskOrder(t.project_id)}:{}),...(mode==="date"?{start_date:start,due_date:iso(Date.parse(start)+(duration-1)*DAY)}:{}),update_deadline:false};
+  const preview=()=>api(taskApi(t.id,"/timeline-schedule-preview"),{method:"POST",body:JSON.stringify(payload)});
+  let plan;try{plan=await preview()}catch(err){showToast(`Move needs review: ${err.message}`,null,null,true);return}
+  const d=document.createElement("dialog");d.className="task-move-dialog";
+  const description=mode==="above"?`“${t.title}” will become a prerequisite of “${target.title}”.`:mode==="below"||mode==="after"?`“${t.title}” will follow “${target.title}”.`:mode==="concurrent"?`“${t.title}” will run alongside “${target.title}”.`:`Schedule “${t.title}” at the dropped date.`;
+  d.innerHTML=`<form><h2>Review linked schedule</h2><p>${escapeHtml(description)}</p>${mode==="date"?`<div class="grid"><label>Start<input name="start" type="date" value="${escapeHtml(payload.start_date)}" required></label><label>Finish<input name="finish" type="date" value="${escapeHtml(payload.due_date)}" required></label></div>`:""}<p>Linked tasks move together. Existing durations and gaps are preserved. Owners and approved baselines stay as they are.</p>${isOwner()?'<label class="schedule-deadline-choice"><input name="deadline" type="checkbox"> Update agreed project deadline to the scheduled finish</label>':""}<div data-schedule-preview></div><div class="error" role="alert"></div><div class="actions"><button type="button" class="quiet" data-cancel>Cancel</button><button type="submit">Apply linked schedule</button></div></form>`;
+  document.body.appendChild(d);d.showModal();const f=d.querySelector("form"),apply=f.querySelector('[type="submit"]'),error=f.querySelector(".error");
+  const dateText=dates=>`${dates.start_date||"—"} → ${dates.due_date||dates.finish_date||"—"}`;
+  const draw=()=>{const p=plan.project;f.querySelector("[data-schedule-preview]").innerHTML=`<h3>${plan.changes.length} task date change${plan.changes.length===1?"":"s"}</h3><div class="schedule-preview-table"><table><thead><tr><th>Task</th><th>Current</th><th>New dates</th></tr></thead><tbody>${plan.changes.map(c=>`<tr><td>${escapeHtml(c.title)}</td><td><span class="schedule-preview-dates"><span>${escapeHtml(c.before.start_date||"—")}</span><span>${escapeHtml(c.before.due_date||"—")}</span></span></td><td><span class="schedule-preview-dates"><span>${escapeHtml(c.after.start_date||"—")}</span><span>${escapeHtml(c.after.due_date||"—")}</span></span></td></tr>`).join("")||'<tr><td colspan="3">Task dates already fit this relationship.</td></tr>'}</tbody></table></div>${plan.links.length?`<ul>${plan.links.map(l=>`<li>${escapeHtml(l.action)}: ${escapeHtml(l.predecessor)} → ${escapeHtml(l.successor)}</li>`).join("")}</ul>`:""}<p><strong>Current project schedule (${escapeHtml(p.plan)}):</strong> ${escapeHtml(dateText(p.before))}</p><p><strong>New project schedule:</strong> ${escapeHtml(dateText(p.after))}</p><p><strong>Agreed deadline:</strong> ${escapeHtml(p.agreed_deadline||"Not set")} → ${escapeHtml(p.new_deadline||"Not set")}</p>${p.after.undated_count?`<p>${p.after.undated_count} task${p.after.undated_count===1?"":"s"} still need complete dates. The scheduled finish is provisional.</p>`:""}${plan.requires_owner?'<p>This linked change needs the App Owner. Nothing has been saved.</p>':""}${plan.impacts.length?`<ul>${plan.impacts.map(s=>`<li>${escapeHtml(s)}</li>`).join("")}</ul>`:""}<p>Dependencies, task dates and project schedule save together; critical paths then recalculate.</p>`;apply.disabled=plan.requires_owner};
+  draw();let generation=0;
+  const refresh=async()=>{const version=++generation;apply.disabled=true;error.textContent="";payload.update_deadline=!!f.elements.deadline?.checked;if(mode==="date"){payload.start_date=f.elements.start.value;payload.due_date=f.elements.finish.value}try{const next=await preview();if(version===generation&&d.isConnected){plan=next;draw();return true}}catch(err){if(version===generation&&d.isConnected)error.textContent=err.message}return false};
+  f.onchange=()=>refresh();
+  const saved=await new Promise(resolve=>{let saving=false;const cancel=()=>{if(!saving)resolve(false)};d.addEventListener("cancel",e=>{if(saving)e.preventDefault();else cancel()});f.querySelector("[data-cancel]").onclick=cancel;f.onsubmit=async e=>{e.preventDefault();if(apply.disabled||saving)return;if(mode==="date"&&(payload.start_date!==f.elements.start.value||payload.due_date!==f.elements.finish.value)){await refresh();return}saving=true;apply.disabled=true;f.querySelector("[data-cancel]").disabled=true;try{await api(taskApi(t.id,"/timeline-schedule"),{method:"POST",body:JSON.stringify({...payload,fingerprint:plan.fingerprint,confirmed:true})});resolve(true)}catch(err){error.textContent=err.message;saving=false;f.querySelector("[data-cancel]").disabled=false;apply.disabled=true}}});
+  generation++;d.close();d.remove();if(saved){showToast("Linked tasks and project schedule saved. Critical paths recalculated.");await load()}
 }
 const taskTimeline=document.querySelector("#gantt");
 taskTimeline.addEventListener("dragstart",e=>{const handle=e.target.closest("[data-task-move]");if(!handle)return;const t=state.tasks.find(x=>x.id===handle.dataset.taskMove);if(!t||!canMoveOnBoard(t.project_id)){e.preventDefault();return}timelineTaskDrag=t.id;e.dataTransfer.setData("text/plain",t.id);e.dataTransfer.effectAllowed="move";document.body.classList.add("task-row-dragging");hideTip()});

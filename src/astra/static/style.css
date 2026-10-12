@@ -824,6 +824,14 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .task-row-handle { display:block; margin-top:var(--space-2); cursor:grab; }
 .task-drop-zones { display:none; position:absolute; top:calc(100% + var(--space-1)); left:0; z-index:4; gap:var(--space-1); background:var(--surface); border-radius:var(--radius); }
 .task-row-dragging .task-drop-zones { display:flex; }
+.schedule-preview-table { max-height:18rem; overflow:auto; }
+.schedule-preview-table table { width:100%; border-collapse:collapse; }
+.schedule-preview-table th, .schedule-preview-table td { text-align:left; padding:var(--space-2); border-bottom:1px solid var(--line); vertical-align:top; }
+.schedule-preview-dates { display:grid; gap:var(--space-1); white-space:nowrap; }
+.task-move-dialog .schedule-deadline-choice { display:flex; flex-direction:row; align-items:flex-start; gap:var(--space-2); }
+.task-move-dialog .schedule-deadline-choice input { width:auto; flex:none; margin:0; }
+.proj-line.scheduled-start, .proj-line.scheduled-finish { border-left:2px dotted var(--teal); }
+.proj-flag.scheduled-start, .proj-flag.scheduled-finish { background:var(--teal); top:0; }
 .task-drop-zone { font-size:var(--fs-small); border:1px dashed var(--line-strong); }
 .task-drop-over { outline:2px solid var(--focus); outline-offset:-2px; background:var(--teal-soft); }
 .task-move-dialog { max-width:560px; }

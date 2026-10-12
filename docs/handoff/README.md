@@ -1,5 +1,11 @@
 # Astra handoff pack — 2026-09-26
 
+Current automatic task movement and project scheduling: [SXAWHN implementation
+and verification](AUTOMATIC_TIMELINE_SCHEDULING_2026-10-12.md). Above/Below now
+create sequential relationships through the Move task UI; linked dates and
+project forecasts update together. Explicit deadline revision is optional.
+Owner acceptance and hosted operation remain separate.
+
 This folder hands Project Astra to whoever works on it next: an AI coding
 agent in any tool, or a human developer. The pack calls that reader "the
 agent". It was written at branch `codex/migration-safety-remediation`, head

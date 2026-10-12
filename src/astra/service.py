@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import sqlite3
@@ -1149,7 +1150,14 @@ class AstraService:
         project = row_dict(self.db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
         if not project:
             raise KeyError("Project not found.")
+        self._attach_schedule_forecasts(project)
         return self._attach_entities([project])[0]
+
+    def _attach_schedule_forecasts(self, project: dict) -> None:
+        from .timeline_schedule import bounds, forecasts
+        tasks = [dict(row) for row in self.db.execute("SELECT * FROM tasks WHERE project_id=?", (project['id'],))]
+        project['schedule_forecasts'] = forecasts(tasks)
+        project['scheduled_dates'] = bounds(tasks)
 
     def list_projects(self, actor: dict) -> list[dict]:
         if actor["global_role"] in {"owner", "chairman"}:
@@ -1161,6 +1169,7 @@ class AstraService:
             ).fetchall()
         projects = self._attach_entities([dict(row) for row in rows])
         for project in projects:  # FKVHH8: today in the project's own timezone, as its tasks' due states use
+            self._attach_schedule_forecasts(project)
             project["today"] = self._today_in_timezone(project.get("timezone"))
             # JN1QYG: the board offers dragging only where the server would allow the move.
             project["can_manage"] = self.can_manage_project(actor, project["id"])
@@ -3207,6 +3216,137 @@ class AstraService:
         if due_changed and due and target and due > target:
             impact.append(f"The new due date is after the project target ({target}).")
         return impact
+
+    def _timeline_schedule_plan(self, actor: dict, task_id: str, payload: dict) -> dict:
+        from . import timeline_schedule, workplan
+        if not actor.get('active'):
+            raise Forbidden('Sign in required.')
+        task = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, task['project_id']):
+            raise Forbidden('Only the App Owner or this project\'s manager can schedule tasks.')
+        project = self.get_project(actor, task['project_id'])
+        if project['status'] == 'closed':
+            raise Forbidden('A closed project cannot be scheduled.')
+        self._refuse_closed(task)
+        mode = payload.get('mode')
+        target = None if mode == 'date' else self.get_task(actor, payload.get('target_task_id'))
+        for item, key in ((task, 'expected_revision'), (target, 'target_revision')):
+            if item is None:
+                continue
+            expected = payload.get(key)
+            if isinstance(expected, bool) or not isinstance(expected, int):
+                raise ValueError('Integer task revisions are required.')
+            if expected != item['revision']:
+                raise Conflict('A task changed. Reload before reviewing this schedule.')
+            self._assert_task_unlocked(item['id'], actor['id'])
+        if target:
+            if target['id'] == task_id or target['project_id'] != task['project_id']:
+                raise ValueError('Choose another task in the same project.')
+            if mode in {'above', 'below'} and task.get('parent_task_id') != target.get('parent_task_id'):
+                raise ValueError('Move Above/Below within the same group.')
+            pred, succ = (task, target) if mode == 'above' else (target, task)
+            if mode != 'concurrent' and not workplan.compatible(workplan.plan(pred), workplan.plan(succ)):
+                raise ValueError('A prerequisite must be Shared or belong to the same plan.')
+            if mode == 'concurrent' and workplan.plan(task) != workplan.plan(target):
+                if workplan.plan(task) != 'Shared' and workplan.plan(target) != 'Shared':
+                    raise ValueError('Concurrent tasks must belong to the same plan or Shared work.')
+        update_deadline = payload.get('update_deadline', False)
+        if not isinstance(update_deadline, bool):
+            raise ValueError('The deadline choice must be true or false.')
+        if update_deadline and actor['global_role'] != 'owner':
+            raise Forbidden('Only the App Owner can revise the agreed project deadline.')
+        tasks = [dict(row) for row in self.db.execute('SELECT * FROM tasks WHERE project_id=? ORDER BY id', (task['project_id'],))]
+        edges = [tuple(row) for row in self.db.execute('SELECT predecessor_task_id,successor_task_id FROM task_dependencies WHERE successor_task_id IN (SELECT id FROM tasks WHERE project_id=?) ORDER BY predecessor_task_id,successor_task_id', (task['project_id'],))]
+        action = {k: payload.get(k) for k in ('mode', 'target_task_id', 'expected_revision', 'target_revision', 'order_event_id', 'initial_task_order')}
+        action.update(start_date=self._date(payload.get('start_date')), due_date=self._date(payload.get('due_date')), update_deadline=update_deadline)
+        plan = timeline_schedule.build(tasks, edges, task_id, mode, target['id'] if target else None, action['start_date'], action['due_date'])
+        by_id = {t['id']: t for t in tasks}
+        for tid in plan['affected_ids']:
+            self._assert_task_unlocked(tid, actor['id'])
+        for change in plan['changes']:
+            self._refuse_closed(by_id[change['task_id']])
+        for pred, succ in plan['add_links'] + plan['remove_links']:
+            self._assert_task_unlocked(pred, actor['id'])
+            self._assert_task_unlocked(succ, actor['id'])
+            self._refuse_closed(by_id[succ])
+        previous = self.db.execute("SELECT id,detail_json FROM project_events WHERE project_id=? AND event_type='timeline_reordered' ORDER BY rowid DESC LIMIT 1", (task['project_id'],)).fetchone()
+        if mode in {'above', 'below'}:
+            if payload.get('order_event_id') != (previous['id'] if previous else None):
+                raise Conflict('The timeline order changed. Reload before moving tasks.')
+            ids = {t['id'] for t in tasks}
+            initial = payload.get('initial_task_order')
+            if not isinstance(initial, list) or any(not isinstance(tid, str) for tid in initial):
+                raise ValueError('A complete initial timeline order is required.')
+            if len(initial) != len(ids) or set(initial) != ids:
+                raise Conflict('The task list changed. Reload before moving tasks.')
+        changed_ids = {change['task_id'] for change in plan['changes']}
+        impacts = []
+        if any(t['id'] in changed_ids and t.get('is_critical_path') for t in self.list_tasks(actor, task['project_id'])):
+            impacts.append('Tasks on the current critical path change; Astra recalculates it after saving.')
+        if project.get('target_date') and any(c['after']['due_date'] > project['target_date'] for c in plan['changes']):
+            impacts.append('The new schedule extends beyond the current agreed deadline.')
+        plan['requires_owner'] = actor['global_role'] != 'owner' and (len(plan['changes']) > 1 or bool(impacts))
+        name = 'All plans' if any(workplan.plan(t) != 'Shared' for t in tasks) else 'Shared'
+        forecast = plan['schedule']
+        plan['project'] = {'id': project['id'], 'name': project['name'], 'plan': name,
+                           'before': plan['before_schedule'], 'after': forecast,
+                           'agreed_deadline': project.get('target_date'),
+                           'new_deadline': forecast['finish_date'] if update_deadline else project.get('target_date')}
+        if update_deadline and (not forecast['finish_date'] or forecast['undated_count']):
+            raise ValueError('Set all start and finish dates in this plan before revising its project deadline.')
+        if update_deadline and project.get('start_date') and forecast['finish_date'] < project['start_date']:
+            raise ValueError('The calculated deadline is before the agreed project start.')
+        plan['links'] = [{'action': verb, 'predecessor': by_id[p]['title'], 'successor': by_id[s]['title']}
+                         for verb, links in (('Add', plan['add_links']), ('Remove', plan['remove_links'])) for p, s in links]
+        plan['impacts'] = list(dict.fromkeys(impacts))
+        snapshot = {'actor_id': actor['id'], 'task_id': task_id, 'action': action, 'tasks': tasks, 'edges': edges,
+                    'project': project, 'order': dict(previous) if previous else None}
+        plan['fingerprint'] = hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        return plan
+
+    def timeline_schedule_preview(self, actor: dict, task_id: str, payload: dict) -> dict:
+        with transaction(self.db):
+            return self._timeline_schedule_plan(actor, task_id, payload)
+
+    def timeline_schedule_apply(self, actor: dict, task_id: str, payload: dict) -> dict:
+        with transaction(self.db):
+            plan = self._timeline_schedule_plan(actor, task_id, payload)
+            if payload.get('fingerprint') != plan['fingerprint']:
+                raise Conflict('Tasks, links or project dates changed after the preview. Review a fresh preview.')
+            if payload.get('confirmed') is not True:
+                raise ValueError('Review and confirm the complete schedule before saving.')
+            if plan['requires_owner']:
+                raise Forbidden('This schedule changes linked tasks or has protected impact. Ask the App Owner to apply it.')
+            for pred, succ in plan['remove_links']:
+                self.remove_task_dependency(actor, pred, succ, 'Confirmed timeline sequence change')
+            for pred, succ in plan['add_links']:
+                self.add_task_dependency(actor, pred, succ)
+            for change in plan['changes']:
+                current = self.get_task(actor, change['task_id'])
+                out = self.update_task(actor, current['id'], dict(change['after'], expected_revision=current['revision'], confirmed=True, reason='Confirmed linked timeline schedule'),
+                                       known_impact=plan['impacts'] + ['Affected successor dates were reviewed together in this schedule.'])
+                if 'request' in out:
+                    raise Forbidden('This schedule needs an App Owner decision; no changes were saved.')
+                # Existing update history/owner notices stay intact. The responsible
+                # person also sees the dates change in their in-app inbox.
+                if current.get('owner_user_id') and current['owner_user_id'] != actor['id']:
+                    event = self._latest_event_id(current['id'], actor['id'], 'task_updated')
+                    self._notify(current['owner_user_id'], event, current['id'], 'timeline_schedule_changed', 'Schedule updated: ' + current['title'], actor_id=actor['id'])
+            changed = {c['task_id'] for c in plan['changes']}
+            for tid in {s for _, s in plan['add_links'] + plan['remove_links']} - changed:
+                self.db.execute('UPDATE tasks SET revision=revision+1 WHERE id=?', (tid,))
+            if payload['mode'] in {'above', 'below'}:
+                source = self.get_task(actor, task_id)
+                target = self.get_task(actor, payload['target_task_id'])
+                self.timeline_drop(actor, task_id, dict(payload, expected_revision=source['revision'], target_revision=target['revision']))
+            if payload.get('update_deadline'):
+                p = plan['project']
+                if p['new_deadline'] != p['agreed_deadline']:
+                    project = self.get_project(actor, p['id'])
+                    self.set_project_schedule(actor, p['id'], project.get('start_date'), p['new_deadline'], 'Confirmed timeline forecast deadline')
+            self._project_event(plan['project']['id'], actor['id'], 'timeline_schedule_applied',
+                {'changes': plan['changes'], 'links': plan['links'], 'project': plan['project']}, 'Confirmed linked timeline schedule')
+            return {'mode': payload['mode'], 'changes': plan['changes'], 'project': self.get_project(actor, plan['project']['id'])}
 
     def timeline_drop(self, actor: dict, task_id: str, payload: dict) -> dict:
         """Explicit task-row drops: scheduling, relationships or display ordering."""

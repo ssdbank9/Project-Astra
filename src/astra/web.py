@@ -375,6 +375,10 @@ class AstraHandler(BaseHTTPRequestHandler):
             if path.startswith("/api/tasks/") and path.endswith("/timeline-drop") and path.count("/") == 4:
                 outcome = self.service.timeline_drop(user, path.split("/")[3], payload)
                 return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json(outcome)
+            if path.startswith("/api/tasks/") and path.endswith("/timeline-schedule-preview") and path.count("/") == 4:
+                return self._json(self.service.timeline_schedule_preview(user, path.split("/")[3], payload))
+            if path.startswith("/api/tasks/") and path.endswith("/timeline-schedule") and path.count("/") == 4:
+                return self._json(self.service.timeline_schedule_apply(user, path.split("/")[3], payload))
             if path.startswith("/api/tasks/") and path.endswith("/reschedule") and path.count("/") == 4:
                 outcome = self.service.reschedule_task(user, path.split("/")[3], payload)
                 return self._json(outcome, HTTPStatus.ACCEPTED) if "request" in outcome else self._json(outcome)

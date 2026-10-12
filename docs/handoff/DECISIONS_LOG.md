@@ -202,3 +202,16 @@ are not Aly's decisions. The agent may keep them, or raise any of them with Aly.
 - An Owner may still leave on hold, changes requested or reopened through an
   ordinary edit with a reason, because no release action exists; managers
   cannot (open design question from the 2026-09-22 review, memory).
+
+### 2026-10-12 — SXAWHN automatic linked scheduling
+
+Aly requested dependency creation and overall project date updates from task
+movement. Aly approved Above as predecessor, Below/After as successor,
+Concurrent as parallel, affected-chain date propagation with duration
+preservation, and one preview before saving. For calculated project dates versus
+agreed deadline, Aly replied "incorporate both the options": calculate scheduled
+bounds automatically, retain the agreed deadline by default and provide an
+explicit App Owner deadline revision in the preview. Owners and approved
+baselines remain unchanged. Behavior, evidence and limits are recorded in
+[SXAWHN](AUTOMATIC_TIMELINE_SCHEDULING_2026-10-12.md); implementation acceptance
+is still separate from these design decisions.
