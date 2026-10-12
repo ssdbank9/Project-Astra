@@ -4,7 +4,9 @@ Aly requested that moving tasks create dependencies and update the overall
 project timeline. On 2026-10-12 Aly approved Above as predecessor, Below/After
 as successor, Concurrent as parallel, affected-chain rescheduling with duration
 preservation and one preview. Aly requested both project deadline choices.
-Implementation acceptance remains pending. ZFP6ET stays accepted and done;
+On 2026-10-12 Aly explicitly stated "I accept SXAWHN" in this chat.
+Implementation is accepted; the human-only board transition remains separate.
+ZFP6ET stays accepted and done;
 this is a new behavior change, not a reopening of that repair.
 
 ## User behavior
@@ -98,4 +100,6 @@ Ignored screenshots `Temp/SXAWHN-linked-preview.png` and
 credentials and databases are excluded from Git. Touch/mobile gestures, the
 owner's usual running server version and hosted operation remain unverified.
 No owner records, accounts, deployment or external notifications changed.
-Final publication SHA is reported to Aly after the scoped normal push.
+Published normally on codex/migration-safety-remediation at
+`d93139db7fa711daec3209a389490f507083552b`, confirmed against origin after push.
+Acceptance does not authorize deployment or remove the unverified limits above.

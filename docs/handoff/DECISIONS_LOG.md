@@ -213,5 +213,6 @@ agreed deadline, Aly replied "incorporate both the options": calculate scheduled
 bounds automatically, retain the agreed deadline by default and provide an
 explicit App Owner deadline revision in the preview. Owners and approved
 baselines remain unchanged. Behavior, evidence and limits are recorded in
-[SXAWHN](AUTOMATIC_TIMELINE_SCHEDULING_2026-10-12.md); implementation acceptance
-is still separate from these design decisions.
+[SXAWHN](AUTOMATIC_TIMELINE_SCHEDULING_2026-10-12.md). Aly subsequently accepted
+the implementation on 2026-10-12 with "I accept SXAWHN". The human-only board
+transition and deployment remain separate.
