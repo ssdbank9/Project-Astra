@@ -1,7 +1,7 @@
 ---
 id: 01M4QZYS1YYTM0PNEG1NSXAWHN
 title: Linked task movement and automatic project schedule
-status: in-progress
+status: human
 ready: true
 creator: Codex
 assignee: Codex
@@ -15,15 +15,20 @@ related:
   - 01M4NXX1C1SMWXA9P1YEZFP6ET
 commits: []
 created-at: 2026-10-12T12:03:48Z
-updated-at: 2026-10-12T12:50:38Z
+updated-at: 2026-10-12T12:50:50Z
 updated-by: Codex
+question: Please accept SXAWHN after reviewing the linked scheduling preview and publication receipt.
+outcome-what: "Task movement previews and atomically saves dependencies, affected task dates, sibling order and optional agreed deadline. Project scheduled dates refresh separately from agreed dates and baselines."
+outcome-why: Aly requested automatic linked scheduling after confirming the earlier ordering repair; old task movement did not reschedule successors or project bounds.
+outcome-resolves: "17 focused tests and six-role HTTP matrix pass; full 787 tests OK; independent code and handoff review pass; actual Chrome modes, deadline choices, owner preservation, cancellation and reload verified. Touch, running owner server and hosting unverified. Scoped publication receipt follows."
 ---
 
 # Linked task movement and automatic project schedule
 
 ## Definition of Done
 
-- [ ] All drag modes show complete dependency/date/project forecast preview and apply atomically; affected successors preserve duration and respect all predecessors; project forecast dates refresh and explicit deadline revision preserves baselines; owners stay assigned; cycles, stale snapshots, roles, locks, closed tasks and alternative plans tested; meaningful regressions, Chrome verification, full suite and independent review pass; handoff and scoped publication recorded.
+- [~] All drag modes show complete dependency/date/project forecast preview and apply atomically; affected successors preserve duration and respect all predecessors; project forecast dates refresh and explicit deadline revision preserves baselines; owners stay assigned; cycles, stale snapshots, roles, locks, closed tasks and alternative plans tested; meaningful regressions, Chrome verification, full suite and independent review pass; handoff and scoped publication recorded.
+  proof: AUTOMATIC_TIMELINE_SCHEDULING_2026-10-12.md; verified implementation, publication receipt follows push
 
 ## Options
 
