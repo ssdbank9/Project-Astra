@@ -15,7 +15,7 @@ related:
   - 01M4QZYS1YYTM0PNEG1NSXAWHN
 commits: []
 created-at: 2026-10-12T17:34:49Z
-updated-at: 2026-10-12T17:46:21Z
+updated-at: 2026-10-12T18:19:31Z
 updated-by: Codex
 ---
 
@@ -39,4 +39,4 @@ updated-by: Codex
 - [ ] Verify small widths, desktop List, zoom and keyboard preview/save/cancel/reload; run full suite and independent review.
 
 ## Progress
-
+- **2026-10-12 18:19 · Codex** — Same-account controls confirmed missing in 390px and desktop List. Actual-function regressions failed before fix, then passed; independent review caught filtered-table order omission, now corrected and regression-proven. Actual Chrome small-width keyboard save/cancel/reload and filtered-parent Above pass. Actual 200 percent zoom is unverified: shortcuts did not alter width/DPR; reduced viewport is separate evidence. Final full suite rerun includes third regression; earlier 789-test run OK skipped1 is not the final receipt.
