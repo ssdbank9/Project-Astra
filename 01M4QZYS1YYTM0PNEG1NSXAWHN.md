@@ -15,7 +15,7 @@ related:
   - 01M4NXX1C1SMWXA9P1YEZFP6ET
 commits: []
 created-at: 2026-10-12T12:03:48Z
-updated-at: 2026-10-12T12:50:50Z
+updated-at: 2026-10-12T13:17:33Z
 updated-by: Codex
 question: Please accept SXAWHN after reviewing the linked scheduling preview and publication receipt.
 outcome-what: "Task movement previews and atomically saves dependencies, affected task dates, sibling order and optional agreed deadline. Project scheduled dates refresh separately from agreed dates and baselines."
@@ -50,3 +50,4 @@ outcome-resolves: "17 focused tests and six-role HTTP matrix pass; full 787 test
 
 ## Progress
 - **2026-10-12 12:26 · Codex** — Read-only preview and atomic apply now cover full-project scheduled bounds, separate alternative forecasts and optional owner deadline revision. Core graph/service tests pass (17 incl HTTP role matrix). Independent review caught source task ID missing from fingerprint; dedicated red regression and guard mutation now prove fix. Added bounds helper shadowed a local list once; corrected. Chrome Below saved link reversal, changed task dates and scheduled finish while retaining agreed deadline. Browser finishing Above+deadline, date-chain, concurrent, cancel and reload. Original full suite running; final UI readability pass will need final checks.
+- **2026-10-12 13:17 · Codex** — Published normally and origin confirmed at d93139db7fa711daec3209a389490f507083552b. Full suite Ran 787 tests in 561.770s OK (skipped=1); existing symlink-unavailable skip. Independent final code/static/handoff review and actual desktop Chrome modes, both deadline choices, owner preservation, Cancel/reload pass. Source-ID fingerprint regression fails with binding removed. Global mistakes log synchronized. Aly implementation acceptance remains pending; touch/mobile, usual running server and hosted operation unverified.
