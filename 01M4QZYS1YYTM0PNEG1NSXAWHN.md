@@ -15,7 +15,7 @@ related:
   - 01M4NXX1C1SMWXA9P1YEZFP6ET
 commits: []
 created-at: 2026-10-12T12:03:48Z
-updated-at: 2026-10-12T12:05:20Z
+updated-at: 2026-10-12T12:05:24Z
 updated-by: Codex
 ---
 
@@ -33,6 +33,11 @@ updated-by: Codex
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
+
+- [ ] Build a pure affected-chain scheduler and calculated per-plan project forecasts.
+- [ ] Add read-only preview and atomic snapshot-checked apply using existing service authorization, history and locks.
+- [ ] Show full change preview, dependency meaning and explicit deadline revision in the plain JS timeline.
+- [ ] Verify branching and role/refusal regressions, Chrome, full suite and independent review; document and publish.
 
 ## Progress
 
