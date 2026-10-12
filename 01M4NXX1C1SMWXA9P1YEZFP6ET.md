@@ -14,7 +14,7 @@ related:
   - 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T16:49:25Z
-updated-at: 2026-10-12T07:34:01Z
+updated-at: 2026-10-12T07:50:55Z
 updated-by: Codex
 question: "Please accept ZFP6ET after the scoped push receipt, or identify any remaining issue."
 outcome-what: Preserved complete visible timeline order and made later-row drop targets stable. Backend and actual-function regressions pass; all desktop Chrome drop modes and filtered-parent reorder persist.
@@ -49,3 +49,4 @@ outcome-resolves: Independent review pass; 24 focused and 770 full tests OK. Awa
 
 ## Progress
 - **2026-10-12 07:31 · Codex** — Independent implementation review passed; parent and reviewer focused suite Ran 24 tests OK. Final full suite Ran 770 tests in 508.309s OK (skipped=1), exit 0. Chrome verified all later-row modes, stable geometry, cancel/reload and additional filtered-parent actual reorder. App Owner acceptance pending. No owner data or deployment changed.
+- **2026-10-12 07:50 · Codex** — App Owner Aly explicitly stated I accept ZFP6ET in this chat on 2026-10-12. Repair published and origin verified at bf4ea3eaf5d07ef7f7efbfc80e458e88d8871457; full suite Ran 770 tests in 508.309s OK (skipped=1). This records the human decision, not agent acceptance. Ticket stays human until Aly performs the human-only board transition. No deployment authorized; touch/narrow-screen and running owner server version remain unverified.
