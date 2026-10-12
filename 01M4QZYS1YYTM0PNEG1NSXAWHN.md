@@ -15,12 +15,12 @@ related:
   - 01M4NXX1C1SMWXA9P1YEZFP6ET
 commits: []
 created-at: 2026-10-12T12:03:48Z
-updated-at: 2026-10-12T16:49:51Z
+updated-at: 2026-10-12T16:49:58Z
 updated-by: Codex
-question: Please accept SXAWHN after reviewing the linked scheduling preview and publication receipt.
+question: Aly accepted on 2026-10-12; awaiting the human-only board transition to done.
 outcome-what: "Task movement previews and atomically saves dependencies, affected task dates, sibling order and optional agreed deadline. Project scheduled dates refresh separately from agreed dates and baselines."
 outcome-why: Aly requested automatic linked scheduling after confirming the earlier ordering repair; old task movement did not reschedule successors or project bounds.
-outcome-resolves: "17 focused tests and six-role HTTP matrix pass; full 787 tests OK; independent code and handoff review pass; actual Chrome modes, deadline choices, owner preservation, cancellation and reload verified. Touch, running owner server and hosting unverified. Scoped publication receipt follows."
+outcome-resolves: "17 focused and 787 full tests OK; independent and Chrome verification passed. Published d93139db7fa711daec3209a389490f507083552b. Aly accepted 2026-10-12. Mobile, usual running server and hosting remain unverified."
 ---
 
 # Linked task movement and automatic project schedule
