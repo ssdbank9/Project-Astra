@@ -15,7 +15,7 @@ related:
   - 01M4NXX1C1SMWXA9P1YEZFP6ET
 commits: []
 created-at: 2026-10-12T12:03:48Z
-updated-at: 2026-10-12T12:50:26Z
+updated-at: 2026-10-12T12:50:32Z
 updated-by: Codex
 ---
 
@@ -38,7 +38,8 @@ updated-by: Codex
   proof: timeline_schedule.py; affected-chain, gap and alternative-forecast tests
 - [x] Add read-only preview and atomic snapshot-checked apply using existing service authorization, history and locks.
   proof: 17 focused tests incl HTTP role matrix; fingerprint guard removal fails regression
-- [ ] Show full change preview, dependency meaning and explicit deadline revision in the plain JS timeline.
+- [x] Show full change preview, dependency meaning and explicit deadline revision in the plain JS timeline.
+  proof: Chrome Below/Above/date/Concurrent and accessible After; both deadline choices
 - [ ] Verify branching and role/refusal regressions, Chrome, full suite and independent review; document and publish.
 
 ## Progress
