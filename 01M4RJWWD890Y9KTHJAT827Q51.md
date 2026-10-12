@@ -15,7 +15,7 @@ related:
   - 01M4QZYS1YYTM0PNEG1NSXAWHN
 commits: []
 created-at: 2026-10-12T17:34:49Z
-updated-at: 2026-10-12T18:20:15Z
+updated-at: 2026-10-12T18:20:24Z
 updated-by: Codex
 ---
 
@@ -36,7 +36,8 @@ updated-by: Codex
 
 - [x] Confirm omitted table rendering with the same owner and a failing actual-function regression.
   proof: tests/test_timeline_table_actions.py:34; pre-fix two failures; same owner browser zero table controls versus four Gantt controls.
-- [ ] Add eligible task/subtask table actions and share the existing accessible movement handler.
+- [x] Add eligible task/subtask table actions and share the existing accessible movement handler.
+  proof: src/astra/static/app.js:306; shared renderer/helper/handler and table order capture; focused four tests OK, independent review passes.
 - [ ] Verify small widths, desktop List, zoom and keyboard preview/save/cancel/reload; run full suite and independent review.
 
 ## Progress
