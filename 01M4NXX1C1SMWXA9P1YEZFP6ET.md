@@ -14,7 +14,7 @@ related:
   - 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T16:49:25Z
-updated-at: 2026-10-12T07:31:20Z
+updated-at: 2026-10-12T07:31:25Z
 updated-by: Codex
 ---
 
@@ -35,7 +35,8 @@ updated-by: Codex
 
 - [x] Reproduce first reorder and later-row cancellation with failing regression and Chrome probes.
   proof: tests/test_owner_excel_timeline.py and TIMELINE_DRAG_VERIFICATION_2026-10-11.md
-- [ ] Preserve full unfiltered project order on first reorder; validate IDs and move siblings only.
+- [x] Preserve full unfiltered project order on first reorder; validate IDs and move siblings only.
+  proof: timelineTaskOrder and AstraService.timeline_drop; 24 focused tests OK
 - [ ] Show relationship drop controls as stable timeline overlays without changing row geometry.
 - [ ] Verify actual later-row date/order/relationship drops, guards, full suite and independent review; publish scoped receipt.
 
