@@ -14,7 +14,7 @@ related:
   - 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T16:49:25Z
-updated-at: 2026-10-12T07:31:35Z
+updated-at: 2026-10-12T07:33:55Z
 updated-by: Codex
 ---
 
@@ -22,7 +22,8 @@ updated-by: Codex
 
 ## Definition of Done
 
-- [ ] First and subsequent Above/Below moves preserve all unrelated visible row positions, including filtered/grouped cases; later-row date and relationship dragging works in Chrome without moving targets; cancellation and persistence work; regression tests fail on original behavior and pass after correction; authorization and conflict guards remain; focused/full tests, independent review, browser evidence and scoped publication receipt recorded.
+- [~] First and subsequent Above/Below moves preserve all unrelated visible row positions, including filtered/grouped cases; later-row date and relationship dragging works in Chrome without moving targets; cancellation and persistence work; regression tests fail on original behavior and pass after correction; authorization and conflict guards remain; focused/full tests, independent review, browser evidence and scoped publication receipt recorded.
+  proof: docs/handoff/TIMELINE_DRAG_REPAIR_2026-10-12.md: all implementation, regression, Chrome and review checks pass; 770 tests OK; publication SHA follows scoped push
 
 ## Options
 
