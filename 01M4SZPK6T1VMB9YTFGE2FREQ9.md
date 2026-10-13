@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T06:37:49Z
-updated-at: 2026-10-13T07:09:36Z
+updated-at: 2026-10-13T07:11:18Z
 updated-by: Codex
 claimed-by: X1CarbonPC-17880
 claimed-at: 2026-10-13T06:45:32Z
@@ -46,3 +46,4 @@ claimed-at: 2026-10-13T06:45:32Z
 ## Progress
 - **2026-10-13 06:46 · Codex** — Use a dedicated deadline recipient helper, not a global expansion of private Owner notices. Watch complete before/after project ranges once per composed transaction so linked moves and multi-row imports do not report intermediate finishes. Initial dates with no previous deadline are not extensions. Notification is explicitly selected by Aly; Chairman decision authority stays unchanged.
 - **2026-10-13 07:09 · Codex** — All 807 tests pass (existing one symlink skip). Chairman browser Inbox verified: saved task and project finish 10 to 14 October; individual mark-read survives reload. Source/test independent review passes with guard-removal proof. Supplemental bulk/Undo and handoff review is being run separately; reviewer capacity failures were tooling only. Preserve all unrelated dirty Owner Done transitions.
+- **2026-10-13 07:11 · Codex** — Independent supplemental bulk+Undo and handoff/screenshot review passed. Full suite807 OK skip1. Publication receipt will be ticked only after the normal push; human lane does not imply acceptance.
