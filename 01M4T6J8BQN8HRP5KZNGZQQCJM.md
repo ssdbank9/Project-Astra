@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T08:37:47Z
-updated-at: 2026-10-13T08:41:30Z
+updated-at: 2026-10-13T08:41:35Z
 updated-by: Codex
 claimed-by: X1CarbonPC-29860
 claimed-at: 2026-10-13T08:39:42Z
@@ -41,4 +41,4 @@ claimed-at: 2026-10-13T08:39:42Z
 - [ ] Verify focused/full suites and guard removals; independently review repairs; record approved proxy policy, residual launch gates and scoped publication.
 
 ## Progress
-
+- **2026-10-13 08:41 · Codex** — Aly selected Caddy access logs for real client IPs; keep Astra peer address and do not trust forwarded headers. Independent review reproduced XML entity expansion and archive error classification gaps; parent identified HTTP length/type and response-header omissions. Create regressions before repairs, not a broad readiness claim.
