@@ -1,7 +1,7 @@
 ---
 id: 01M4QZYS1YYTM0PNEG1NSXAWHN
 title: Linked task movement and automatic project schedule
-status: human
+status: done
 ready: true
 creator: Codex
 assignee: Codex
@@ -15,8 +15,8 @@ related:
   - 01M4NXX1C1SMWXA9P1YEZFP6ET
 commits: []
 created-at: 2026-10-12T12:03:48Z
-updated-at: 2026-10-12T16:49:58Z
-updated-by: Codex
+updated-at: 2026-10-13T06:13:44Z
+updated-by: Aly Jafferani
 question: Aly accepted on 2026-10-12; awaiting the human-only board transition to done.
 outcome-what: "Task movement previews and atomically saves dependencies, affected task dates, sibling order and optional agreed deadline. Project scheduled dates refresh separately from agreed dates and baselines."
 outcome-why: Aly requested automatic linked scheduling after confirming the earlier ordering repair; old task movement did not reschedule successors or project bounds.
