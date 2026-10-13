@@ -14,14 +14,14 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-12T18:51:59Z
-updated-at: 2026-10-13T04:38:49Z
+updated-at: 2026-10-13T05:18:46Z
 updated-by: Codex
 claimed-by: X1CarbonPC-46676
 claimed-at: 2026-10-12T19:07:14Z
-question: AY5EZ0 is independently reviewed for App Owner acceptance. The change covers socket inactivity; broader security and hosting remain separate. No deployment or owner-server restart was performed.
+question: Aly accepted the published inactivity-timeout repair in chat. Human lane remains unchanged under AGENTS.md; broader security review and hosted operation remain separate. No repeat acceptance requested.
 outcome-what: Added a 30-second accepted-socket inactivity policy and explicit body-timeout 408 handling with connection closure.
 outcome-why: Stalled clients could hold request threads and SQLite connections indefinitely; body timeout initially fell through to500.
-outcome-resolves: "Actual sockets, cleanup, valid requests, two guard-removal checks, independent review and full 797-test suite pass; the unmodified production policy releases four stalled cases around 30 seconds. Source and own ticket are prepared for scoped publication."
+outcome-resolves: "Actual socket cleanup, valid requests, two guard-removal checks, independent review and the full 797-test suite passed. The unmodified production policy released four stalled cases around 30 seconds. Source and ticket were published at 6010ca6401aff36e7822e26fb00d626a8daf7440; Aly accepted AY5EZ0 in chat on 2026-10-13. Broader launch gates remain separate."
 ---
 
 # Bound stalled HTTP requests before launch
@@ -50,3 +50,4 @@ outcome-resolves: "Actual sockets, cleanup, valid requests, two guard-removal ch
 ## Progress
 - **2026-10-13 04:23 · Codex** — Installed Python StreamRequestHandler.setup applies self.timeout directly to the accepted socket before header reads. Use a finite socket inactivity timeout, with explicit 408 for stalled bodies and existing finally database cleanup. This is not an absolute request-duration limit: a client continuously sending bytes is a proxy hardening concern, still unverified. Tests shorten only a valid positive policy to exercise actual sockets quickly; they must fail when the production policy is removed.
 - **2026-10-13 04:31 · Codex** — Socket tests shorten only a valid existing positive timeout; timeout=None retains the real missing-policy behavior and fails. Timeout-only probe separated release from response classification: headers/idle pass, stalled bodies returned500 until RequestBodyTimeout handling. Independent source/socket review passes, including two guard-removal mutations. Broader framing and proxy/trickle review stays outside this slice. Full suite is running; no owner-server restart.
+- **2026-10-13 05:15 · Codex** — Aly Jafferani explicitly accepted AY5EZ0 in this conversation: Accept AY5EZ0. Accepted implementation SHA: 6010ca6401aff36e7822e26fb00d626a8daf7440. Acceptance covers the published 30-second socket inactivity repair and its disclosed limits. Broader security review, actual browser zoom, physical-device checks and hosted operation remain separate. Human lane is unchanged under AGENTS.md; no deployment or owner-server restart authorized.

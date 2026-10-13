@@ -24,7 +24,7 @@ The existing request `finally` block closes its SQLite connection.
 | Independent source review | Pass, no blocking findings. |
 | Unmodified production policy | Separate real-socket probe, no timeout shortening: idle and headers closed at 30.007s; JSON returned 408 at 30.007s; raw returned 408 at 30.023s. Normal static response remained 200. |
 | Full suite | Ran 797 tests in 419.228s, OK (skipped=1), exit 0. The existing attachment-symlink test is skipped because symlinks are unavailable here. |
-| Owner acceptance | Pending for AY5EZ0. Aly already accepted 827Q51; its acceptance-only commit accompanies the next publication. |
+| Owner acceptance | Aly explicitly accepted AY5EZ0 in chat on 2026-10-13 after the publication report. Accepted implementation SHA: `6010ca6401aff36e7822e26fb00d626a8daf7440`. Acceptance is recorded through the Jaira CLI; its human lane remains unchanged under `AGENTS.md`. The prior 827Q51 acceptance record was also published with this implementation. |
 | Deployment / current owner server | **Unverified.** No deployment, account creation, real-data change or owner-server restart occurred. A running Python process must restart to load the handler change. |
 
 Tests use disposable databases outside the checkout and new loopback servers.
