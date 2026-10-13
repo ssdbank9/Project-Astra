@@ -14,6 +14,12 @@ Working branch: codex/migration-safety-remediation
 Review-package SHA: USE THE EXACT SHA I SUPPLIED WITH THIS PROMPT.
 App-source baseline: da1b3fd21ed0d4357669f0e727369fda02640672.
 
+The package also includes CRITICAL_UI_UX_REVIEW_2026-10-13.md and
+CRITICAL_REVIEW_COVERAGE_2026-10-13.md. Independently test their wrong-task
+save, failed-assignee lookup and other findings. A passing full suite does
+not refute those browser failures. Local screenshots/fixture logs are ignored
+and are not supplied by Git; create disposable reproductions and state limits.
+
 Your task is REVIEW ONLY. Make no source, document, board, real account,
 credential, deployment, live database or real-user changes. Return findings
 in your response. Synthetic users and test credentials may be created only

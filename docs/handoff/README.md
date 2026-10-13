@@ -1,5 +1,15 @@
 # Astra handoff index
 
+## Critical built-work review — 2026-10-13
+
+Read [the critical UI/UX review](CRITICAL_UI_UX_REVIEW_2026-10-13.md) and
+[all-ticket criterion coverage](CRITICAL_REVIEW_COVERAGE_2026-10-13.md)
+before declaring readiness. Two persisted synthetic browser failures can save
+to the wrong task or silently remove its owner. Full832 tests pass despite
+these defects. This review recommends repairs; it makes no product changes,
+owner acceptance or deployment authorization. External reviewers must inspect
+these findings as well as the plan below.
+
 ## Current pre-deployment review package — 2026-10-13
 
 Start with [the detailed plan and handoff](PRE_DEPLOYMENT_REVIEW_2026-10-13.md),
