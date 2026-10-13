@@ -39,6 +39,10 @@ class RequestBodyTimeout(TimeoutError):
     pass
 
 
+class InvalidRequestBody(ValueError):
+    pass
+
+
 def _as_of_slug(as_of: str | None) -> str:
     """Filesystem-safe token derived from an ISO 'as of' timestamp for CSV filenames.
 
@@ -621,6 +625,14 @@ class AstraHandler(BaseHTTPRequestHandler):
         return self._service
 
     def _login(self, payload: dict):
+        content_type = self.headers.get('Content-Type', '').split(';', 1)[0].strip().casefold()
+        if content_type != 'application/json':
+            raise ValueError('Sign-in requests must use application/json.')
+        origin = self.headers.get('Origin')
+        if origin:
+            parsed = urlparse(origin)
+            if parsed.scheme not in {'http', 'https'} or parsed.netloc.casefold() != self.headers.get('Host', '').casefold():
+                raise Forbidden('Sign-in must come from this Astra site.')
         email = str(payload.get("email", "")).strip().casefold()
         ip = self.client_address[0] if self.client_address else ""
         password = payload.get("password", "")
@@ -680,7 +692,17 @@ class AstraHandler(BaseHTTPRequestHandler):
     RAW_BODY_ROUTES = frozenset({"/api/import/preview", "/api/import/commit"})
 
     def _body(self, path: str) -> dict:
-        length = int(self.headers.get("Content-Length", "0"))
+        # Only fixed-length bodies are supported. Reject ambiguous framing before
+        # reading or dispatching; never let read(-1) bypass the byte ceiling.
+        lengths = self.headers.get_all('Content-Length', [])
+        if self.headers.get_all('Transfer-Encoding'):
+            raise InvalidRequestBody('Transfer-Encoding is not supported. Send a Content-Length body.')
+        if len(lengths) > 1:
+            raise InvalidRequestBody('Exactly one Content-Length header is allowed.')
+        text = lengths[0].strip() if lengths else '0'
+        if not text or not text.isascii() or not text.isdecimal():
+            raise InvalidRequestBody('Content-Length must be a non-negative decimal integer.')
+        length = int(text)
         content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().casefold()
         if path in self.RAW_BODY_ROUTES:
             # Raw upload (import): bytes are handed to the service untouched.
@@ -690,13 +712,37 @@ class AstraHandler(BaseHTTPRequestHandler):
         if length > JSON_MAX_BYTES:
             raise ValueError("Request is too large.")
         raw = self._read_request_bytes(length)
-        return json.loads(raw or b"{}")
+        value = json.loads(raw or b"{}")
+        if not isinstance(value, dict):
+            raise InvalidRequestBody('The request body must be a JSON object.')
+        return value
 
     def _read_request_bytes(self, length: int) -> bytes:
         try:
-            return self.rfile.read(length)
+            data = self.rfile.read(length)
         except TimeoutError as exc:
             raise RequestBodyTimeout("Request body timed out. Send the request again.") from exc
+        if len(data) != length:
+            raise InvalidRequestBody('Request body is incomplete. Send the request again.')
+        return data
+
+    def end_headers(self):
+        # Applies equally to normal serializers and BaseHTTPRequestHandler errors,
+        # including unsupported methods and malformed requests before DB setup.
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('Referrer-Policy', 'no-referrer')
+        self.send_header('Content-Security-Policy', CONTENT_SECURITY_POLICY)
+        if getattr(self, '_framework_error', False):
+            self.send_header('Cache-Control', 'no-store')
+        super().end_headers()
+
+    def send_error(self, code, message=None, explain=None):
+        self._framework_error = True
+        try:
+            super().send_error(code, message, explain)
+        finally:
+            self._framework_error = False
 
     def _header_text(self, name: str) -> str:
         # Header values travel percent-encoded so non-ASCII filenames survive HTTP.
@@ -717,7 +763,6 @@ class AstraHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -728,10 +773,7 @@ class AstraHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Content-Security-Policy", CONTENT_SECURITY_POLICY)
-        if status == HTTPStatus.REQUEST_TIMEOUT:
+        if status == HTTPStatus.REQUEST_TIMEOUT or self.close_connection:
             self.close_connection = True
             self.send_header("Connection", "close")
         if cookie:
@@ -756,7 +798,6 @@ class AstraHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -778,7 +819,6 @@ class AstraHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -796,14 +836,13 @@ class AstraHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", cache)
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", CONTENT_SECURITY_POLICY)
         self.end_headers()
         self.wfile.write(payload)
 
     def _error(self, exc: Exception):
+        if isinstance(exc, InvalidRequestBody):
+            self.close_connection = True
+            return self._json({'error': str(exc)}, HTTPStatus.BAD_REQUEST)
         if isinstance(exc, RequestBodyTimeout):
             return self._json({"error": str(exc)}, HTTPStatus.REQUEST_TIMEOUT)
         if isinstance(exc, Forbidden):

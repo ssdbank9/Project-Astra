@@ -2321,7 +2321,9 @@ class AstraCoreTests(unittest.TestCase):
         manager = self.service.create_user(self.owner, "pm@example.org", "PM", "manager password safe", "member")
         self.service.grant_project_access(self.owner, project["id"], manager["id"], "manager")
         self.service.set_project_schedule(self.owner, project["id"], "2026-03-01", "2026-06-30", "Board approved the plan")
-        self.service.set_project_schedule(manager, project["id"], "2026-03-01", "2026-07-31", "Vendor slipped")
+        with self.assertRaises(Forbidden):
+            self.service.set_project_schedule(manager, project["id"], "2026-03-01", "2026-07-31", "Vendor slipped")
+        self.service.set_project_schedule(self.owner, project["id"], "2026-03-01", "2026-07-31", "Vendor slipped")
         rows = [e for e in self.service.project_events(self.owner, project["id"])
                 if e["event_type"] == "project_schedule_changed"]
         self.assertEqual(len(rows), 2)
@@ -2332,8 +2334,8 @@ class AstraCoreTests(unittest.TestCase):
             "before": {"start_date": None, "target_date": None},
             "after": {"start_date": "2026-03-01", "target_date": "2026-06-30"},
         })
-        self.assertEqual(second["actor_user_id"], manager["id"])
-        self.assertEqual(second["actor_name"], "PM")
+        self.assertEqual(second["actor_user_id"], self.owner["id"])
+        self.assertEqual(second["actor_name"], self.owner['display_name'])
         self.assertEqual(second["reason"], "Vendor slipped")
         self.assertEqual(json.loads(second["detail_json"]), {
             "before": {"start_date": "2026-03-01", "target_date": "2026-06-30"},
@@ -2356,8 +2358,10 @@ class AstraCoreTests(unittest.TestCase):
         self.assertEqual((unchanged["start_date"], unchanged["target_date"]), (None, None))
         self.assertEqual([e for e in self.service.project_events(self.owner, project["id"])
                           if e["event_type"] == "project_schedule_changed"], [])
-        updated = self.service.set_project_schedule(manager, project["id"], "2026-03-01", "2026-06-30", "PM set it")
-        self.assertEqual(updated["target_date"], "2026-06-30")
+        with self.assertRaises(Forbidden):
+            self.service.set_project_schedule(manager, project["id"], "2026-03-01", "2026-06-30", "PM set it")
+        updated = self.service.set_project_schedule(manager, project["id"], "2026-03-01", None, "PM set start")
+        self.assertIsNone(updated["target_date"])
 
     def test_project_history_readable_by_members_not_outsiders(self):
         # 5WZ4A8 review gap 4: anyone who can view the project can read its history.
@@ -2920,9 +2924,11 @@ class SecondaryOwnerTests(unittest.TestCase):
         self.assertEqual(first["summary"], "project dates changed: Dated · start none → 2026-10-01, "
                                            "target none → 2026-12-31 · by Primary")
         self.assertEqual(self.project_notices(self.primary, "project_schedule_changed"), [])
-        self.service.set_project_schedule(manager, project["id"], "2026-10-01", "2027-01-31", "slip")
+        with self.assertRaises(Forbidden):
+            self.service.set_project_schedule(manager, project["id"], "2026-10-01", "2027-01-31", "slip")
+        self.service.set_project_schedule(self.primary, project["id"], "2026-10-01", "2027-01-31", "slip")
         summaries = {n["summary"] for n in self.project_notices(self.primary, "project_schedule_changed")}
-        self.assertEqual(summaries, {"project dates changed: Dated · target 2026-12-31 → 2027-01-31 · by Pm"})
+        self.assertEqual(summaries, {"project dates changed: Dated · target 2026-12-31 → 2027-01-31 · by Primary"})
         self.assertEqual(len(self.project_notices(secondary, "project_schedule_changed")), 2)
         self.assertEqual(self.project_notices(manager, "project_schedule_changed"), [])
 

@@ -1821,6 +1821,9 @@ class AstraWebTests(unittest.TestCase):
         self.assertEqual([e for e in history["events"] if e["event_type"] == "project_schedule_changed"], [])
         cookie, csrf = sessions["manager"]
         response, updated = self.request("POST", f"/api/projects/{pid}/schedule", change, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 403)
+        change['target_date'] = None
+        response, updated = self.request("POST", f"/api/projects/{pid}/schedule", change, cookie=cookie, csrf=csrf)
         self.assertEqual(response.status, 200)
         self.assertEqual(updated["project"]["start_date"], "2026-02-01")
         response, history = self.request("GET", f"/api/projects/{pid}/events", cookie=sessions["viewer"][0])

@@ -59,6 +59,13 @@ class XlsxTooLarge(XlsxError):
     """The workbook declares more content than the reader will inflate."""
 
 
+class _NoDtdTreeBuilder(ET.TreeBuilder):
+    def doctype(self, name, pubid, system):
+        # Parser callback, not a byte search: handles UTF-16 and rejects the DTD
+        # before expanding entities while retaining ordinary escaped cell text.
+        raise XlsxError('Workbook refused: XML DTD/DOCTYPE declarations are not supported.')
+
+
 class Percent(float):
     """A numeric cell whose number format is a percentage.
 
@@ -231,6 +238,11 @@ def read_workbook(data: bytes) -> Workbook:
             raise XlsxError("Workbook refused: it contains too many parts.")
         total = 0
         for member in members:
+            if member.flag_bits & 1:
+                raise XlsxError('Encrypted workbook parts are not supported. Save an unencrypted .xlsx file.')
+            if member.compress_type not in {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED,
+                                            zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA}:
+                raise XlsxError('Workbook refused: unsupported ZIP compression method.')
             if member.file_size > MAX_MEMBER_BYTES:
                 raise XlsxTooLarge(
                     f"Workbook refused: a part declares more than {MAX_MEMBER_BYTES // (1024 * 1024)} MB. "
@@ -254,10 +266,10 @@ def _read(archive: zipfile.ZipFile, names: set[str]) -> Workbook:
     def parse(name: str):
         try:
             data = archive.read(name)
-        except (zipfile.BadZipFile, zlib.error, EOFError, OSError) as exc:
+        except (zipfile.BadZipFile, zlib.error, EOFError, OSError, RuntimeError, NotImplementedError) as exc:
             raise XlsxError(f"Workbook part {name} is corrupt or incomplete. Save the workbook again and retry.") from exc
         try:
-            return ET.fromstring(data)
+            return ET.fromstring(data, parser=ET.XMLParser(target=_NoDtdTreeBuilder()))
         except ET.ParseError as exc:
             raise XlsxError(f"Workbook part {name} is not well-formed XML.") from exc
 
@@ -284,6 +296,7 @@ def _read(archive: zipfile.ZipFile, names: set[str]) -> Workbook:
     sheets_element = workbook_xml.find(_tag("sheets"))
     if sheets_element is None:
         raise XlsxError("The workbook lists no sheets.")
+    sheet_targets = set()
     for index, sheet_element in enumerate(sheets_element):
         rel_id = sheet_element.get(f"{{{NS_REL}}}id")
         target = rels.get(rel_id, ("", ""))[1] if rel_id else ""
@@ -291,6 +304,9 @@ def _read(archive: zipfile.ZipFile, names: set[str]) -> Workbook:
             target = f"xl/worksheets/sheet{index + 1}.xml"
         if target not in names:
             raise XlsxError(f"Sheet part {target} is missing from the workbook.")
+        if target in sheet_targets:
+            raise XlsxError('Workbook refused: repeated worksheet targets are not supported.')
+        sheet_targets.add(target)
         sheet = Sheet(
             name=sheet_element.get("name", f"Sheet{index + 1}"),
             index=index,

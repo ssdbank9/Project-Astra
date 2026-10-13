@@ -464,11 +464,14 @@ class AstraService:
         if self.db.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
             raise ValueError("A user with this email already exists.")
         user_id = new_id()
-        self.db.execute(
-            "INSERT INTO users(id,email,display_name,password_hash,global_role,active,created_at,created_by)"
-            " VALUES(?,?,?,?,?,?,?,?)",
-            (user_id, email, display_name.strip(), hash_password(password), role, 1, now_text(), actor["id"]),
-        )
+        password_hash = hash_password(password)
+        with transaction(self.db):
+            self._require_owner_now(actor)
+            self.db.execute(
+                "INSERT INTO users(id,email,display_name,password_hash,global_role,active,created_at,created_by)"
+                " VALUES(?,?,?,?,?,?,?,?)",
+                (user_id, email, display_name.strip(), password_hash, role, 1, now_text(), actor["id"]),
+            )
         return self.get_user(user_id)
 
     def list_users(self, actor: dict) -> list[dict]:
@@ -546,6 +549,7 @@ class AstraService:
         audited after the rollback."""
         try:
             with transaction(self.db):
+                self._require_owner_now(actor)
                 target = self.get_user(user_id)
                 if target["global_role"] == "owner":
                     self._require_primary_now(actor)  # re-read: the actor dict may predate a transfer
@@ -1069,10 +1073,17 @@ class AstraService:
         with transaction(self.db):
             # Read the old values inside the write transaction so two concurrent edits
             # cannot both record the same "before" (5WZ4A8 review gap 5).
+            actor = self.get_user(actor['id'])
+            if not actor['active'] or not self.can_manage_project(actor, project_id):
+                raise Forbidden('Project-management access denied.')
             row = self.db.execute(
                 "SELECT start_date, target_date FROM projects WHERE id=?", (project_id,)
             ).fetchone()
             old = {"start_date": row["start_date"], "target_date": row["target_date"]}
+            if old['target_date'] != target_date:
+                # Aly, B1 review 2026-10-13: agreed deadline changes are Owner-only
+                # in the project date screen as well as linked timeline movement.
+                self._require_owner_now(actor)
             if old == new:
                 raise ValueError("The project schedule is already set to those dates.")
             if not reason:
@@ -1157,6 +1168,13 @@ class AstraService:
     def require_owner(self, actor: dict) -> None:
         if not actor.get("active") or actor.get("global_role") != "owner":
             raise Forbidden("Owner access required.")
+
+    def _require_owner_now(self, actor: dict) -> None:
+        """Account writes must recheck authority under their write lock; an
+        authenticated request's actor snapshot may predate revocation/deactivation."""
+        if not self.db.execute("SELECT 1 FROM users WHERE id=? AND global_role='owner' AND active=1",
+                               (actor['id'],)).fetchone():
+            raise Forbidden('Owner access required.')
 
     def can_view_project(self, actor: dict, project_id: str) -> bool:
         if actor["global_role"] in {"owner", "chairman"}:
@@ -1361,6 +1379,14 @@ class AstraService:
         task_id = new_id()
         timestamp = now_text()
         with self._schedule_transaction(actor, project_id):
+            actor = self.get_user(actor['id'])
+            if not actor['active'] or not self.can_manage_project(actor, project_id):
+                raise Forbidden('Task-management access denied.')
+            if actor['global_role'] != 'owner' and status not in MANAGER_ORDINARY_STATUSES:
+                raise Forbidden('Managers may create tasks only in an ordinary working status.')
+            if self.db.execute('SELECT status FROM projects WHERE id=?', (project_id,)).fetchone()['status'] == 'closed':
+                raise Forbidden('Reopen the project before adding tasks.')
+            owner_user_id = self._validate_assignee(project_id, owner_user_id, subtask=bool(parent_task_id))
             from . import workplan
             for linked_id in (parent_task_id, predecessor_task_id):
                 if linked_id and not workplan.compatible(workplan.plan(self.get_task(actor, linked_id)), "Shared"):
@@ -1647,6 +1673,25 @@ class AstraService:
     ) -> dict:
         """The body of one task update; the caller holds the transaction (XV92JJ: a bulk
         change writes many of these in one)."""
+        # The account and membership may have changed after the early form/API
+        # authorization. Reuse the same rules under the write lock, including the
+        # Chairman's narrow assignment permission, before any task or notice write.
+        actor = self.get_user(actor['id'])
+        if not actor['active']:
+            raise Forbidden('Task-management access denied.')
+        try:
+            current, _ = self._authorize_task_update(actor, task_id, dict(
+                {key: fields[key] for key in ('title', 'description', 'owner_user_id', 'status',
+                                             'criticality', 'start_date', 'due_date', 'progress')},
+                expected_revision=expected_revision,
+            ))
+        except Conflict:
+            # Preserve the established late-write conflict contract after the
+            # locked authorization check catches a concurrent revision change.
+            raise Conflict("Task revision conflict: the task changed before this update could be saved.") from None
+        if fields['owner_user_id'] != current.get('owner_user_id'):
+            self._validate_assignee(current['project_id'], fields['owner_user_id'],
+                                    subtask=bool(current.get('parent_task_id')))
         # An approval re-checks, under the write lock, that its request is still pending.
         self._assert_active_request_revision(before, owner_decision)
         # Review 12c L1: the dependency and work-in-progress rules are evaluated here, under the

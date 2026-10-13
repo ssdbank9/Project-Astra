@@ -157,6 +157,17 @@ def open_without_migrating(path):
         return db.connect(path)
 
 
+def legacy_task(connection, owner, project, title):
+    """Write a historical task without calling today's post-migration service."""
+    task_id = "legacy-task"
+    timestamp = "2026-01-01T00:00:00Z"
+    connection.execute(
+        "INSERT INTO tasks(id,project_id,title,created_at,created_by,updated_at) VALUES(?,?,?,?,?,?)",
+        (task_id, project["id"], title, timestamp, owner["id"], timestamp),
+    )
+    return dict(connection.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
+
+
 def first_statement_then_fail(connection, script):
     """Stand-in for ``db._execute_statements``: run the script's first statement, then fail."""
     buffer = ""
@@ -539,11 +550,11 @@ class MigrationTests(unittest.TestCase):
         return connection
 
     def submitted_task(self, connection):
-        """One real task with one version-1 submission, written by the service."""
+        """A historical task with one version-1 submission written by the service."""
         service = AstraService(connection)
         owner = legacy_user(connection, "legacy-owner", "owner")
         project = service.create_project(owner, "Migration")
-        task = service.create_task(owner, {"project_id": project["id"], "title": "Deliverable"})
+        task = legacy_task(connection, owner, project, "Deliverable")
         service.submit_task(owner, task["id"], "first")
         return task["id"]
 
@@ -752,11 +763,11 @@ class PendingRequestIntentKeyTests(unittest.TestCase):
         return connection
 
     def fixture(self, connection):
-        """Owner, project and task created by the service; the task's id and revision."""
+        """Historical owner/task rows, a service project and the task's revision."""
         service = AstraService(connection)
         owner = legacy_user(connection, "legacy-owner", "owner")
         project = service.create_project(owner, "Intent key")
-        task = service.create_task(owner, {"project_id": project["id"], "title": "Governed secret title"})
+        task = legacy_task(connection, owner, project, "Governed secret title")
         return owner, project, task
 
     def legacy_request(self, connection, request_id, owner, project, task, status="pending", reason="private reason"):

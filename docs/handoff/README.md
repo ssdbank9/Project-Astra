@@ -1,5 +1,7 @@
 # Astra handoff pack — 2026-09-26
 
+Current local security review: [ZQQCJM B1 evidence](B1_SECURITY_2026-10-13.md). Request framing, response headers, workbook XML/archive budgets and write-time authority/assignee checks were repaired; Aly's closed-project and agreed-deadline decisions are applied. Hosted readiness is unverified. [Current free-hosting comparison](FREE_HOSTING_2026-10-13.md) recommends an eligible Oracle Always Free VM with DuckDNS and Caddy; no account or deployment action is authorized by that recommendation.
+
 Current deadline-extension routing: [2FREQ9 verification](DEADLINE_NOTICES_2026-10-13.md). Active App Owners and Chairman receive in-app old/new-date notices for saved task deadlines, agreed targets and calculated project finish extensions. Existing approval rules remain in force. Aly accepted 2FREQ9 on 2026-10-13; hosted operation remains unverified.
 
 Current server inactivity repair: [AY5EZ0 verification](HTTP_TIMEOUT_2026-10-13.md). Stalled connections now have a finite socket timeout; timed-out body reads return 408 and close their request database. Broader security review, owner acceptance and hosted operation remain separate.

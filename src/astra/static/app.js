@@ -2583,11 +2583,11 @@ function renderFilingEntities(projectId){
     <div class="budget-block">
       <div class="grid">
         <label>Project start date<input id="project-start" type="date" value="${escapeHtml(project.start_date||"")}"></label>
-        <label>Project target date<input id="project-target" type="date" value="${escapeHtml(project.target_date||"")}"></label>
+        <label>Agreed project deadline<input id="project-target" type="date" value="${escapeHtml(project.target_date||"")}"${isOwner()?"":" readonly"}></label>
       </div>
       <label>Reason for date change<input id="project-schedule-reason" placeholder="Required to change project dates"></label>
       <div class="actions"><button type="button" id="save-schedule">Save project dates</button></div>
-      <p class="fine">Informational only — project dates are logged on every change but never block task dates.</p>
+      <p class="fine">Only App Owners change the agreed deadline. Project dates are logged but never block task dates.</p>
       <div class="error" id="schedule-error"></div>
     </div>`;
   document.querySelector("#save-budget").addEventListener("click",()=>saveBudget(projectId));
