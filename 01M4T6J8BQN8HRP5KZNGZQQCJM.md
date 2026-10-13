@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T08:37:47Z
-updated-at: 2026-10-13T08:41:41Z
+updated-at: 2026-10-13T08:52:11Z
 updated-by: Codex
 claimed-by: X1CarbonPC-29860
 claimed-at: 2026-10-13T08:39:42Z
@@ -42,3 +42,4 @@ claimed-at: 2026-10-13T08:39:42Z
 
 ## Progress
 - **2026-10-13 08:41 · Codex** — Aly selected Caddy access logs for real client IPs; keep Astra peer address and do not trust forwarded headers. Independent review reproduced XML entity expansion and archive error classification gaps; parent identified HTTP length/type and response-header omissions. Create regressions before repairs, not a broad readiness claim.
+- **2026-10-13 08:52 · Codex** — Aly selected on2026-10-13: keep former importers own old reports accessible; closed project must reopen before new tasks; agreed project deadline changes Owner-only in both project date screen and linked scheduling. Record these accepted decisions; do not remove retained own-report access. Independent role-drift regressions reproduced Manager-to-Viewer task writes and revoked Owner account writes; add under-lock rechecks.
