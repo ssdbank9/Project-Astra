@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T06:37:49Z
-updated-at: 2026-10-13T07:14:55Z
+updated-at: 2026-10-13T07:22:07Z
 updated-by: Codex
 claimed-by: X1CarbonPC-17880
 claimed-at: 2026-10-13T06:45:32Z
@@ -53,3 +53,4 @@ question: Does Aly accept the independently verified deadline-extension notifica
 - **2026-10-13 06:46 · Codex** — Use a dedicated deadline recipient helper, not a global expansion of private Owner notices. Watch complete before/after project ranges once per composed transaction so linked moves and multi-row imports do not report intermediate finishes. Initial dates with no previous deadline are not extensions. Notification is explicitly selected by Aly; Chairman decision authority stays unchanged.
 - **2026-10-13 07:09 · Codex** — All 807 tests pass (existing one symlink skip). Chairman browser Inbox verified: saved task and project finish 10 to 14 October; individual mark-read survives reload. Source/test independent review passes with guard-removal proof. Supplemental bulk/Undo and handoff review is being run separately; reviewer capacity failures were tooling only. Preserve all unrelated dirty Owner Done transitions.
 - **2026-10-13 07:11 · Codex** — Independent supplemental bulk+Undo and handoff/screenshot review passed. Full suite807 OK skip1. Publication receipt will be ticked only after the normal push; human lane does not imply acceptance.
+- **2026-10-13 07:22 · Codex** — Aly explicitly accepted 2FREQ9 in chat on 2026-10-13: I accept 2FREQ9. Accepted published receipt e9a15f42c83c514dab64cc6cf8556a436806836b, implementation79a1f881ca5451646249616a27dd41b8484545d8. Do not ask Aly to repeat acceptance. Human lane remains unchanged under AGENTS.md; only Aly performs its Done transition. Acceptance does not authorize deployment, accounts or external delivery.
