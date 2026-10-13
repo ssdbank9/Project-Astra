@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T06:37:49Z
-updated-at: 2026-10-13T07:12:41Z
+updated-at: 2026-10-13T07:14:50Z
 updated-by: Codex
 claimed-by: X1CarbonPC-17880
 claimed-at: 2026-10-13T06:45:32Z
@@ -45,7 +45,8 @@ question: Does Aly accept the independently verified deadline-extension notifica
   proof: 10 regressions: 8 product failures before repair; corrected fixture errors; focused final receipt
 - [x] Route deadline notices and compare complete project finish snapshots inside composed transactions.
   proof: Dedicated active recipient helper plus composed write transaction range snapshots
-- [~] Verify a disposable Chairman Inbox, independent diff review and full suite; publish scoped handoff.
+- [x] Verify a disposable Chairman Inbox, independent diff review and full suite; publish scoped handoff.
+  proof: Published79a1f881ca5451646249616a27dd41b8484545d8; handoff DEADLINE_NOTICES_2026-10-13.md; full807 OK skip1; Chairman browser and independent source/bulk/Undo/handoff pass
 
 ## Progress
 - **2026-10-13 06:46 · Codex** — Use a dedicated deadline recipient helper, not a global expansion of private Owner notices. Watch complete before/after project ranges once per composed transaction so linked moves and multi-row imports do not report intermediate finishes. Initial dates with no previous deadline are not extensions. Notification is explicitly selected by Aly; Chairman decision authority stays unchanged.
