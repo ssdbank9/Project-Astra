@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T06:37:49Z
-updated-at: 2026-10-13T06:46:23Z
+updated-at: 2026-10-13T06:46:27Z
 updated-by: Codex
 claimed-by: X1CarbonPC-17880
 claimed-at: 2026-10-13T06:45:32Z
@@ -41,4 +41,4 @@ claimed-at: 2026-10-13T06:45:32Z
 - [ ] Verify a disposable Chairman Inbox, independent diff review and full suite; publish scoped handoff.
 
 ## Progress
-
+- **2026-10-13 06:46 · Codex** — Use a dedicated deadline recipient helper, not a global expansion of private Owner notices. Watch complete before/after project ranges once per composed transaction so linked moves and multi-row imports do not report intermediate finishes. Initial dates with no previous deadline are not extensions. Notification is explicitly selected by Aly; Chairman decision authority stays unchanged.
