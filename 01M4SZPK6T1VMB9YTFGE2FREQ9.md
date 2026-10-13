@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T06:37:49Z
-updated-at: 2026-10-13T06:51:19Z
+updated-at: 2026-10-13T06:51:24Z
 updated-by: Codex
 claimed-by: X1CarbonPC-17880
 claimed-at: 2026-10-13T06:45:32Z
@@ -39,7 +39,8 @@ claimed-at: 2026-10-13T06:45:32Z
   proof: service.py _event/_project_event/import_apply and existing notification uniqueness
 - [x] Add failing recipient, saved-date, rollback, import and HTTP regressions.
   proof: 10 regressions: 8 product failures before repair; corrected fixture errors; focused final receipt
-- [ ] Route deadline notices and compare complete project finish snapshots inside composed transactions.
+- [x] Route deadline notices and compare complete project finish snapshots inside composed transactions.
+  proof: Dedicated active recipient helper plus composed write transaction range snapshots
 - [ ] Verify a disposable Chairman Inbox, independent diff review and full suite; publish scoped handoff.
 
 ## Progress
