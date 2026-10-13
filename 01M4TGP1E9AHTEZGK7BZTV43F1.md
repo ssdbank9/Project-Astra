@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T11:34:37Z
-updated-at: 2026-10-13T11:55:53Z
+updated-at: 2026-10-13T11:56:03Z
 updated-by: Codex
 claimed-by: X1CarbonPC-44056
 claimed-at: 2026-10-13T11:35:43Z
@@ -24,7 +24,7 @@ claimed-at: 2026-10-13T11:35:43Z
 
 ## Definition of Done
 
-- [ ] All existing board tickets inventoried with lanes and declared DoD; launch gates mapped to evidence or gaps; independent review prompt and handoff committed locally and normally pushed after full suite and scoped LF/private-file checks; independent package review passes; owner acceptance stays Aly-only.
+- [ ] All86 tickets and28 handoff documents inventoried; dated gate plan and independent LLM prompt prepared; independent package review, fresh full suite and scoped LF/private-file checks pass; package ready for scoped local commit and normal GitHub publication; owner acceptance stays Aly-only.
 
 ## Options
 
