@@ -1,5 +1,7 @@
 # Astra handoff pack — 2026-09-26
 
+Current deadline-extension routing: [2FREQ9 verification](DEADLINE_NOTICES_2026-10-13.md). Active App Owners and Chairman receive in-app old/new-date notices for saved task deadlines, agreed targets and calculated project finish extensions. Existing approval rules remain in force; App Owner acceptance and hosted operation remain separate.
+
 Current server inactivity repair: [AY5EZ0 verification](HTTP_TIMEOUT_2026-10-13.md). Stalled connections now have a finite socket timeout; timed-out body reads return 408 and close their request database. Broader security review, owner acceptance and hosted operation remain separate.
 
 Current phone-size and List scheduling repair: [827Q51 verification](TABLE_SCHEDULING_2026-10-12.md). Table rows now expose Move task and preserve filtered sibling ordering. Actual 200% Chrome zoom and save/reload checks passed on 2026-10-13; Aly accepted the repair. Physical-device and hosted checks remain separate.

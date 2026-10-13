@@ -530,3 +530,25 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 - Independent review: Screenshot and handoff inspected; remaining zoom criterion is proven. Prior accepted functional repair is unchanged. Physical-phone/touch/screen-reader/hosting remain unverified. No owner data, credentials or deployment changed; no repeat acceptance required. Canonical synchronization pending.
 
 - Canonical synchronization completed; older zoom-unverified status is superseded. Independent screenshot/handoff review passed and owner Done move dry-run is allowed. Human lane is unchanged.
+
+
+## ASTRA-20261013-03 - deadline extension routing clarification
+
+- Date / project: 2026-10-13; Aly requested that increased deadlines go to Owner and Chairman.
+- Verified current gap: timeline_schedule_apply notifies responsible task owners, while generic task/project notices go to other active App Owners. Neither generic recipient helper includes Chairman. A linked project's calculated finish can move later without changing its agreed target date.
+- Scope / decision: Aly selected in-app notification on 2026-10-13, retaining existing approval rules. Do not interpret Chairman notification as new protected-change approval authority or enable external delivery.
+- Tool recurrence: Initial searches guessed three nonexistent test filenames; corrected by rg --files and searches over the tests directory. Use actual module names before file arguments. No app behavior, data or ticket lane changed; global synchronization pending.
+
+- Reproduction / correction: Initial focused run exposed eight product failures; separate test errors guessed a nonexistent authenticate API and PATCH/PUT instead of the actual POST task route. An initial-date fixture retained a start date, which correctly already contributes a project finish; removed both dates for the true no-prior-range case. Final focused Ran10 in11.164s OK. Task event IDs are reused for extension notices; a dedicated active Owner/Chairman recipient helper leaves other private routing unchanged. Whole-operation transaction snapshots avoid intermediate project finishes for composed changes.
+- Verification: Independent source review passed; focused Ran10 in8.469s OK; in-memory extension-detection removal fails the regression. Actual Chrome Owner save/confirmation and Chairman Inbox show task/project old/new dates; Chairman read status persists after reload. Initial browser Inbox selector missed its new unread-count accessible name; refreshed DOM and used the observed name. Synthetic data only; full suite and publication pending.
+- Tool limitations: Combined reads again exceeded output budgets; use bounded reads. Two supplemental reviewer turns failed at model capacity after the successful independent source/test review; this is a tooling limitation, not a code defect. No other model selected or external delivery enabled. Canonical global synchronization pending.
+
+- Full verification: Ran807 in525.988s OK (skipped=1), exit0, existing unavailable-symlink skip. Source unchanged since independent review and browser check. Supplemental handoff/bulk verification and scoped publication remain pending; no real data, accounts or deployment changed.
+
+- Supplemental verification: Independent +3-day bulk/Undo and -3-day bulk/restoring Undo passed. One original-to-final project finish notice per recipient; earlier changes emit none. Handoff and saved Chairman screenshot independently reviewed, no blocking findings. Screenshot proves initial two unread; later one-unread reload was separately observed by browser. Publication remains pending.
+
+- Canonical synchronization completed after rereading mistakes.md; earlier pending synchronization lines are superseded. Prior global entries preserved.
+
+- Board/tool correction: First move to human omitted the required --question field and was refused without mutation; read CLI help and supplied the owner acceptance question. Validation has no errors and existing unrelated warnings; do not regenerate agent instructions or repair unrelated board entries. Publication criterion remains unticked until the normal push completes.
+
+- Scoped staging correction: Refreshing the own-fragment patch against HEAD failed because those fragments were already staged. Generate the incremental patch against the current index while constructing the desired scope from HEAD plus only this task's content; preserve unrelated working edits and avoid resetting the index.

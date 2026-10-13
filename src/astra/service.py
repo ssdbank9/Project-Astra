@@ -8,6 +8,7 @@ import sqlite3
 import time
 import unicodedata
 from dataclasses import dataclass
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -309,6 +310,52 @@ class ImportBlocked(Forbidden):
 class AstraService:
     def __init__(self, connection: sqlite3.Connection):
         self.db = connection
+        self._watched_schedule_projects: set[str] = set()
+
+    @staticmethod
+    def _deadline_extended(before, after) -> bool:
+        # Dates have already passed the service's ISO-date validation. A first
+        # date, a cleared date and an earlier date are not deadline extensions.
+        return bool(before and after and after > before)
+
+    def _notify_deadline_recipients(self, actor_id: str, event_id: str, task_id: str | None,
+                                    kind: str, summary: str) -> None:
+        # Aly, 2026-10-13: active primary/secondary App Owners and Chairman,
+        # including the acting Owner. Do not broaden other private Owner notices.
+        for row in self.db.execute(
+            "SELECT id FROM users WHERE active=1 AND global_role IN ('owner','chairman')"
+        ).fetchall():
+            self._notify(row['id'], event_id, task_id, kind, summary, actor_id=actor_id)
+
+    def _project_schedule_bounds(self, project_id: str) -> dict:
+        from .timeline_schedule import bounds
+        return bounds([dict(row) for row in self.db.execute(
+            'SELECT start_date,due_date,status FROM tasks WHERE project_id=?', (project_id,)
+        ).fetchall()])
+
+    @contextmanager
+    def _schedule_transaction(self, actor: dict, project_id: str):
+        """Compare the complete project range inside the write lock. Nested task
+        edits share their linked/bulk/import caller's snapshot and emit one final
+        finish notice. Notices and history roll back with the dates on any failure."""
+        with transaction(self.db):
+            if project_id in self._watched_schedule_projects:
+                yield
+                return
+            before = self._project_schedule_bounds(project_id)
+            self._watched_schedule_projects.add(project_id)
+            try:
+                yield
+                after = self._project_schedule_bounds(project_id)
+                if self._deadline_extended(before['finish_date'], after['finish_date']):
+                    project = self.db.execute('SELECT name FROM projects WHERE id=?', (project_id,)).fetchone()
+                    notice = (f"Project scheduled finish extended: {project['name']} · "
+                              f"{before['finish_date']} → {after['finish_date']} · by {self._actor_name(actor)}")
+                    self._project_event(project_id, actor['id'], 'project_finish_extended',
+                                        {'before': before, 'after': after}, None, notice=notice,
+                                        deadline_notice=True)
+            finally:
+                self._watched_schedule_projects.remove(project_id)
 
     def _notify(self, user_id: str, event_id: str, task_id: str | None, kind: str, summary: str,
                 created_at: str | None = None, actor_id: str | None = None) -> None:
@@ -1039,7 +1086,8 @@ class AstraService:
             self._project_event(project_id, actor["id"], "project_schedule_changed",
                                 {"before": old, "after": new}, reason,
                                 notice=f"project dates changed: {project_name} · {', '.join(changes)}"
-                                       f" · by {self._actor_name(actor)}")
+                                       f" · by {self._actor_name(actor)}",
+                                deadline_notice=self._deadline_extended(old['target_date'], new['target_date']))
         return self.get_project(actor, project_id)
 
     def set_primary_entity(self, actor: dict, project_id: str, entity_id) -> dict:
@@ -1312,7 +1360,7 @@ class AstraService:
                 raise ValueError("A predecessor task must belong to the same project.")
         task_id = new_id()
         timestamp = now_text()
-        with transaction(self.db):
+        with self._schedule_transaction(actor, project_id):
             from . import workplan
             for linked_id in (parent_task_id, predecessor_task_id):
                 if linked_id and not workplan.compatible(workplan.plan(self.get_task(actor, linked_id)), "Shared"):
@@ -1586,7 +1634,7 @@ class AstraService:
     ) -> dict:
         """The single write transaction: every guard that must see committed state runs
         inside it, under the write lock, not before it."""
-        with transaction(self.db):
+        with self._schedule_transaction(actor, before['project_id']):
             return self._apply_task_update(actor, task_id, before, fields, expected_revision, owner_decision,
                                            move_kind=move_kind, audit_events=audit_events,
                                            override_dependencies=override_dependencies, override_wip=override_wip)
@@ -2756,7 +2804,7 @@ class AstraService:
             )
         timestamp = now_text()
         before = {"status": task["status"], "due_date": task.get("due_date")}
-        with transaction(self.db):
+        with self._schedule_transaction(actor, task['project_id']):
             current = self.get_task(actor, task_id)
             if current["revision"] != (task["revision"] if expected_revision is None else expected_revision):
                 raise Conflict("Task revision conflict: the task changed before reopening began.")
@@ -3309,7 +3357,7 @@ class AstraService:
             return self._timeline_schedule_plan(actor, task_id, payload)
 
     def timeline_schedule_apply(self, actor: dict, task_id: str, payload: dict) -> dict:
-        with transaction(self.db):
+        with self._schedule_transaction(actor, self.get_task(actor, task_id)['project_id']):
             plan = self._timeline_schedule_plan(actor, task_id, payload)
             if payload.get('fingerprint') != plan['fingerprint']:
                 raise Conflict('Tasks, links or project dates changed after the preview. Review a fresh preview.')
@@ -3805,7 +3853,7 @@ class AstraService:
         self._take_bulk_leases(actor, [r["id"] for r in rows], token)
         try:
             written = []
-            with transaction(self.db):
+            with self._schedule_transaction(actor, project_id):
                 if recheck:
                     recheck()
                 # Review 12d M1: one snapshot of the board before the writes and one after them,
@@ -4866,7 +4914,7 @@ class AstraService:
                                   self.NON_MANAGER_PROJECT_EVENT_KINDS)
 
     def _project_event(self, project_id: str, actor_id: str, kind: str, detail: dict | None, reason: str | None,
-                       *, notice: str | None = None) -> None:
+                       *, notice: str | None = None, deadline_notice: bool = False) -> None:
         event_id = new_id()
         self.db.execute(
             "INSERT INTO project_events VALUES(?,?,?,?,?,?,?)",
@@ -4876,6 +4924,9 @@ class AstraService:
         if notice:
             # XX9RFM (Aly, 2026-09-24): project closes and date changes reach every other
             # active owner, like task changes. Ordinary notices, so the KBWY86 cap does not apply.
+            if deadline_notice:
+                self._notify_deadline_recipients(actor_id, event_id, None, kind, notice)
+            else:
                 self._notify_owners(actor_id, event_id, None, kind, notice)
 
     def _project_setting_event(self, actor: dict, project_id: str, kind: str,
@@ -4982,7 +5033,7 @@ class AstraService:
         before = {"start_date": task.get("start_date"), "due_date": task.get("due_date")}
         after = {"start_date": proposal["start_date"], "due_date": proposal["due_date"]}
         expected_task_revision = task["revision"]
-        with transaction(self.db):
+        with self._schedule_transaction(actor, task['project_id']):
             proposal = self.get_schedule_proposal(actor, proposal_id)
             task = self.get_task(actor, proposal["task_id"])
             if task["revision"] != expected_task_revision:
@@ -5214,7 +5265,18 @@ class AstraService:
              json.dumps(before, default=str, sort_keys=True) if before else None,
              json.dumps(after, default=str, sort_keys=True) if after else None),
         )
-        if notify:
+        if (kind in {'task_updated', 'task_reopened', 'schedule_revised'}
+                and self._deadline_extended((before or {}).get('due_date'), (after or {}).get('due_date'))):
+            row = self.db.execute(
+                'SELECT t.title,p.name FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?',
+                (task_id,),
+            ).fetchone()
+            summary = (f"Task deadline extended: {row['title']} · {row['name']} · "
+                       f"{before['due_date']} → {after['due_date']}")
+            # Use the same event: the notification uniqueness key prevents the
+            # linked-movement responsible-person notice from duplicating this copy.
+            self._notify_deadline_recipients(actor_id, event_id, task_id, kind, summary)
+        elif notify:
             subject = None
             if kind in SELF_NOTICE_KINDS:  # name the attachment or final result (Item 2)
                 detail = after or before or {}
@@ -5762,7 +5824,8 @@ class AstraService:
                                 (project_id, user_id, role, now_text(), actor["id"]))
         else:
             project_id = engine.project["id"]
-        summary = engine.apply(self, project_id, import_id, valid_rows_only=options["valid_rows_only"])
+        with self._schedule_transaction(actor, project_id):
+            summary = engine.apply(self, project_id, import_id, valid_rows_only=options["valid_rows_only"])
         summary["project"] = {"id": project_id, "name": engine.project["name"], "create": engine.new_project_name is not None}
         summary["filename"] = os.path.basename(filename or "upload")
         summary["sha256"] = digest
