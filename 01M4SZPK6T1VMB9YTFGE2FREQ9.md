@@ -1,7 +1,7 @@
 ---
 id: 01M4SZPK6T1VMB9YTFGE2FREQ9
 title: Notify App Owners and Chairman when deadlines move later
-status: in-progress
+status: human
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,13 +14,14 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T06:37:49Z
-updated-at: 2026-10-13T07:11:24Z
+updated-at: 2026-10-13T07:12:41Z
 updated-by: Codex
 claimed-by: X1CarbonPC-17880
 claimed-at: 2026-10-13T06:45:32Z
-outcome-what: "Durable in-app deadline extension notices for active App Owners and Chairman, including acting Owner; complete project-range snapshots for linked/bulk/import changes."
-outcome-why: Aly selected notification on deadline increase; generic routing omitted Chairman and acting Owner.
-outcome-resolves: "Focused10, full807 OK(skip1), independent source/guard/bulk/Undo/handoff review and actual Chrome Chairman Inbox/read-reload pass; normal publication next; only Aly accepts."
+outcome-what: "Durable deadline notices for active App Owners and Chairman; complete composed-operation project finish snapshots."
+outcome-why: Aly selected in-app notification; generic routing omitted Chairman and acting Owner.
+outcome-resolves: "Focused10 and full807 OK(skip1); independent source/guard/bulk/Undo/handoff review; Chrome Chairman Inbox and read-reload verified. Publication receipt follows normal push."
+question: Does Aly accept the independently verified deadline-extension notification behavior?
 ---
 
 # Notify App Owners and Chairman when deadlines move later
