@@ -35,6 +35,10 @@ class PayloadTooLarge(ValueError):
     pass
 
 
+class RequestBodyTimeout(TimeoutError):
+    pass
+
+
 def _as_of_slug(as_of: str | None) -> str:
     """Filesystem-safe token derived from an ISO 'as of' timestamp for CSV filenames.
 
@@ -109,6 +113,9 @@ def _filter_slug(filters: dict | None) -> str:
 
 
 class AstraHandler(BaseHTTPRequestHandler):
+    # Bound stalled header/body reads and writes; this is an inactivity limit,
+    # not a total request deadline. Proxy/concurrency protections remain separate.
+    timeout = 30
     server_version = "Astra/0.1"
 
     def do_GET(self):
@@ -679,11 +686,17 @@ class AstraHandler(BaseHTTPRequestHandler):
             # Raw upload (import): bytes are handed to the service untouched.
             if length > IMPORT_MAX_BYTES:
                 raise PayloadTooLarge("The file is larger than 5 MB.")
-            return {"_raw": self.rfile.read(length), "_content_type": content_type}
+            return {"_raw": self._read_request_bytes(length), "_content_type": content_type}
         if length > JSON_MAX_BYTES:
             raise ValueError("Request is too large.")
-        raw = self.rfile.read(length)
+        raw = self._read_request_bytes(length)
         return json.loads(raw or b"{}")
+
+    def _read_request_bytes(self, length: int) -> bytes:
+        try:
+            return self.rfile.read(length)
+        except TimeoutError as exc:
+            raise RequestBodyTimeout("Request body timed out. Send the request again.") from exc
 
     def _header_text(self, name: str) -> str:
         # Header values travel percent-encoded so non-ASCII filenames survive HTTP.
@@ -718,6 +731,9 @@ class AstraHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        if status == HTTPStatus.REQUEST_TIMEOUT:
+            self.close_connection = True
+            self.send_header("Connection", "close")
         if cookie:
             self.send_header("Set-Cookie", cookie)
         self.end_headers()
@@ -788,6 +804,8 @@ class AstraHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def _error(self, exc: Exception):
+        if isinstance(exc, RequestBodyTimeout):
+            return self._json({"error": str(exc)}, HTTPStatus.REQUEST_TIMEOUT)
         if isinstance(exc, Forbidden):
             return self._json({"error": str(exc)}, HTTPStatus.FORBIDDEN)
         if isinstance(exc, TaskLocked):

@@ -499,3 +499,24 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 - Final verification: Ran 790 tests in 602.540s, OK (skipped=1), exit 0. Existing unavailable-symlink skip. Final Node syntax/focused tests and independent review pass. Earlier 789-test receipt is superseded. Combined definition of done remains unticked because actual browser zoom is unverified; handoff discloses it. Synthetic fixtures on different localhost ports share cookie scope: bootstrap the fixture session when switching ports; do not mistake the resulting sign-in page for a broken app. Initial evidence frame was discarded and recaptured after fresh DOM confirmation. Sandbox remote lookup failed; elevated lookup verified origin unchanged.
 
 - Global synchronization completed: ASTRA-20261012-02 appended after rereading canonical mistakes.md; prior entries preserved. Independent final handoff review passes with the stated zoom limitation.
+
+## ASTRA-20261013-01 - stalled HTTP connections and verification corrections
+
+- Date / project: 2026-10-13; AY5EZ0 launch hardening, NEXT_STEPS B1.
+- Confirmed defect / evidence: Actual loopback tests reproduced idle connections, incomplete headers and JSON/raw request bodies remaining open past the test deadline. AstraHandler inherits timeout=None; installed StreamRequestHandler.setup applies a timeout only when configured. Production has no finite socket inactivity policy.
+- Scope / impact: Stalled clients hold request threads; body reads also hold per-request SQLite connections. This repair covers inactivity, not an absolute total request duration, continuous trickle clients, concurrency caps, proxy rate limiting or deployed security.
+- Test correction: Initial red run had five timeout failures plus a Windows temporary-database cleanup error. Closing the client was not followed by waiting for the observed request handler to finish; synchronize cleanup before removing files. Treat harness cleanup errors separately from product repro.
+- Tool recurrence: Combined context/search output was truncated; bound each result and inspect exact references. PowerShell rg with literal filename globs failed again; use -g and directory arguments. Jaira planning option was initially omitted, so pre-process move was refused; enable planning before moving. One elevated ticket pull hit temporary GitHub DNS failure; retry succeeded without changing configuration or taking over another ticket.
+- Status / prevention: Production correction and final verification pending. Keep real socket regressions and guard-removal checks; shorten only a valid positive policy so tests do not install the missing guard themselves. No real data or deployment changed. Canonical global synchronization pending.
+
+- Reproduction/fix verification: Corrected the test cleanup race; pre-fix Ran7 in8.872s failed5 (no cleanup errors). Setting timeout alone released idle/header sockets but three body tests returned500. Wrapped only socket body-read timeouts in RequestBodyTimeout and returned408 with Connection close, preserving finally cleanup. Focused Ran7 in4.026s OK. Full and independent verification pending.
+
+- Independent verification: Ran7 in4.192s OK; timeout=None mutation fails idle release, and removing body-timeout classification fails with500 versus408. Independent scope/source review passes. Evidence is socket inactivity only; final full suite and publication pending.
+
+- Hygiene scope: A broad core.autocrlf=false working-diff check exposed pre-existing CR line endings in unrelated dirty ticket files and produced oversized output. Preserve those owner edits; run scoped and staged checks on this repair. Scoped source, tests, handoff and own ticket contain no CR bytes.
+
+- Handoff review correction: README initially said all incomplete bodies return408, which was too broad; only timed-out body reads use this path. Revised that wording. EOF/truncated framing remains separate; do not describe timeout evidence as a full request-framing repair. Detailed handoff/source scope review otherwise passed.
+
+- Final verification: Ran797 in419.228s OK (skipped=1), exit0; existing unavailable-symlink skip. Independent focused/source review passed. An unmodified production-policy probe measured idle/header closure and JSON/raw408 at30.007-30.023 seconds, with normalstatic200; no timeout patch. Tests and default-probe receipts are ignored. Publication and App Owner acceptance remain separate.
+
+- Canonical synchronization completed: ASTRA-20261013-01 appended after rereading mistakes.md; earlier pending-log/verification lines are superseded. Final independent receipt and handoff review passed. Publication remains the next step.

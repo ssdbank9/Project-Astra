@@ -1,5 +1,7 @@
 # Astra handoff pack — 2026-09-26
 
+Current server inactivity repair: [AY5EZ0 verification](HTTP_TIMEOUT_2026-10-13.md). Stalled connections now have a finite socket timeout; timed-out body reads return 408 and close their request database. Broader security review, owner acceptance and hosted operation remain separate.
+
 Current phone-size and List scheduling repair: [827Q51 verification](TABLE_SCHEDULING_2026-10-12.md). Table rows now expose Move task and preserve filtered sibling ordering. Browser save/reload checks pass; actual browser zoom, owner acceptance and hosted operation remain separate.
 
 Current automatic task movement and project scheduling: [SXAWHN implementation
