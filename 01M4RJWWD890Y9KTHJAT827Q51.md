@@ -15,12 +15,12 @@ related:
   - 01M4QZYS1YYTM0PNEG1NSXAWHN
 commits: []
 created-at: 2026-10-12T17:34:49Z
-updated-at: 2026-10-13T06:26:31Z
+updated-at: 2026-10-13T06:26:35Z
 updated-by: Codex
-question: Aly accepted the functional repair in chat; actual 200 percent browser zoom remains unverified. Human lane unchanged under AGENTS.md; no repeat acceptance or laptop action requested.
+question: "Aly accepted 827Q51 and its remaining actual 200 percent browser zoom check passed on 2026-10-13. Definition of done is complete; only Aly may move it out of human. Physical-device, screen-reader and hosted checks remain separate."
 outcome-what: "Added one eligible Move task action per table task/step, shared the linked preview handler and captured filtered table order."
 outcome-why: Small screens and List views omitted controls; the new table entry point exposed a Gantt-only order snapshot.
-outcome-resolves: "Responsive save/cancel/reload, hidden-parent ordering, four focused tests, full 790-test suite and independent review pass. Actual browser zoom is unverified; combined DOD stays unticked."
+outcome-resolves: "Responsive table movement and filtered ordering are verified, including native Chrome 200 percent zoom, keyboard preview/cancel/apply/reload, deadline control and restored zoom. Independent review and full-suite receipts pass. Published functional repair is already accepted by Aly; broader launch gates remain separate."
 ---
 
 # Expose linked scheduling in the phone schedule table
