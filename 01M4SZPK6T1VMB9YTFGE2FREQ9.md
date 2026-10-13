@@ -1,7 +1,7 @@
 ---
 id: 01M4SZPK6T1VMB9YTFGE2FREQ9
 title: Notify App Owners and Chairman when deadlines move later
-status: pre-process
+status: in-progress
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T06:37:49Z
-updated-at: 2026-10-13T06:46:27Z
+updated-at: 2026-10-13T06:46:33Z
 updated-by: Codex
 claimed-by: X1CarbonPC-17880
 claimed-at: 2026-10-13T06:45:32Z
