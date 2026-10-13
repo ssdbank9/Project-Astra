@@ -57,9 +57,16 @@ protected changes or enable external delivery.
 
 ## Release boundary
 
+Aly explicitly accepted **2FREQ9** in chat on **2026-10-13**: "I accept 2FREQ9".
+Accepted implementation: `79a1f881ca5451646249616a27dd41b8484545d8`;
+published verification receipt: `e9a15f42c83c514dab64cc6cf8556a436806836b`.
+Acceptance is recorded through the Jaira CLI. The ticket's `human` lane remains
+unchanged under `AGENTS.md`; only Aly performs its Done transition. Do not ask
+for repeat acceptance. No application source changed for this acceptance record.
+
 Only disposable records were used. No real users, owner records, accounts,
 credentials, deployment or external delivery changed. Hosted behavior is
-unverified. App Owner acceptance is separate from test/review evidence.
+unverified. Acceptance does not authorize deployment or external delivery.
 
 Implementation: `src/astra/service.py`; regressions:
 `tests/test_deadline_notifications.py`. No schema migration or new dependency.
