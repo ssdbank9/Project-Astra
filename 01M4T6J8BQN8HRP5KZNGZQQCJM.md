@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T08:37:47Z
-updated-at: 2026-10-13T10:58:00Z
+updated-at: 2026-10-13T10:58:05Z
 updated-by: Codex
 claimed-by: X1CarbonPC-29860
 claimed-at: 2026-10-13T08:39:42Z
@@ -41,7 +41,7 @@ claimed-at: 2026-10-13T08:39:42Z
   proof: Initial17 tests48failingconditions plus actor/assignee/foreignlogin RED regressions; tests/test_http_security.py
 - [x] Implement bounded parser/framing and common-response protections without permission or login-policy changes.
   proof: Current web.py/xlsx_reader.py/service.py guards; independent diff and guard removal receipts
-- [ ] Verify focused/full suites and guard removals; independently review repairs; record approved proxy policy, residual launch gates and scoped publication.
+- [~] Verify focused/full suites and guard removals; independently review repairs; record approved proxy policy, residual launch gates and scoped publication.
 
 ## Progress
 - **2026-10-13 08:41 · Codex** — Aly selected Caddy access logs for real client IPs; keep Astra peer address and do not trust forwarded headers. Independent review reproduced XML entity expansion and archive error classification gaps; parent identified HTTP length/type and response-header omissions. Create regressions before repairs, not a broad readiness claim.
