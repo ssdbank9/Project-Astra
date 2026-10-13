@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T06:37:49Z
-updated-at: 2026-10-13T06:45:43Z
+updated-at: 2026-10-13T06:46:23Z
 updated-by: Codex
 claimed-by: X1CarbonPC-17880
 claimed-at: 2026-10-13T06:45:32Z
@@ -34,6 +34,11 @@ claimed-at: 2026-10-13T06:45:32Z
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
+
+- [ ] Read recipient, event, transaction and importer contracts; retain existing permission checks.
+- [ ] Add failing recipient, saved-date, rollback, import and HTTP regressions.
+- [ ] Route deadline notices and compare complete project finish snapshots inside composed transactions.
+- [ ] Verify a disposable Chairman Inbox, independent diff review and full suite; publish scoped handoff.
 
 ## Progress
 
