@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T06:37:49Z
-updated-at: 2026-10-13T07:14:50Z
+updated-at: 2026-10-13T07:14:55Z
 updated-by: Codex
 claimed-by: X1CarbonPC-17880
 claimed-at: 2026-10-13T06:45:32Z
@@ -28,7 +28,8 @@ question: Does Aly accept the independently verified deadline-extension notifica
 
 ## Definition of Done
 
-- [ ] Failing recipient/date regressions pass after repair; active primary/secondary Owners and Chairman including an acting Owner receive in-app extension notices with old/new dates and project context; committed edit/timeline/revision/reopen/import and project-target paths covered; no notice for initial/earlier/unchanged/preview/refused/rolled-back dates, duplicates prevented; service/HTTP recipient isolation and unchanged authority verified; actual Chairman Inbox check, full suite, independent review and scoped handoff/publication pass.
+- [x] Failing recipient/date regressions pass after repair; active primary/secondary Owners and Chairman including an acting Owner receive in-app extension notices with old/new dates and project context; committed edit/timeline/revision/reopen/import and project-target paths covered; no notice for initial/earlier/unchanged/preview/refused/rolled-back dates, duplicates prevented; service/HTTP recipient isolation and unchanged authority verified; actual Chairman Inbox check, full suite, independent review and scoped handoff/publication pass.
+  proof: tests/test_deadline_notifications.py focused10 OK; tests/run.py Ran807 in525.988s OK(skip1); independent guard-removal and bulk/Undo checks pass; actual Chrome Chairman Inbox and read/reload; scoped normal push79a1f881ca5451646249616a27dd41b8484545d8; no authority/deployment change
 
 ## Options
 
