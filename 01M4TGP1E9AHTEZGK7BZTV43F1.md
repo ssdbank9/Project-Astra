@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T11:34:37Z
-updated-at: 2026-10-13T11:38:29Z
+updated-at: 2026-10-13T11:38:37Z
 updated-by: Codex
 claimed-by: X1CarbonPC-44056
 claimed-at: 2026-10-13T11:35:43Z
@@ -34,6 +34,11 @@ claimed-at: 2026-10-13T11:35:43Z
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
+
+- [ ] Read current rules and handoffs; inspect safe pending changes and inventory all existing board tickets.
+- [ ] Write a current launch gate plan, full board audit and independent read-only LLM prompt; reconcile stale entry-point wording.
+- [ ] Independently review the entire publication scope; finish the full suite and validate board, LF and private-file exclusions.
+- [ ] Commit the review package and inspected existing tracked changes; push normally and report exact SHA, test result and unresolved gates.
 
 ## Progress
 
