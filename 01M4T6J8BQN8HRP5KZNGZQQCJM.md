@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T08:37:47Z
-updated-at: 2026-10-13T11:21:41Z
+updated-at: 2026-10-13T11:21:49Z
 updated-by: Codex
 claimed-by: X1CarbonPC-29860
 claimed-at: 2026-10-13T08:39:42Z
@@ -24,7 +24,8 @@ claimed-at: 2026-10-13T08:39:42Z
 
 ## Definition of Done
 
-- [ ] Full suite, independent final diff review, LF/scoped hygiene and short security handoff pass; ticket waits for Aly acceptance.
+- [x] Full suite, independent final diff review, LF/scoped hygiene and short security handoff pass; ticket waits for Aly acceptance.
+  proof: docs/handoff/B1_SECURITY_2026-10-13.md; tests/run.py832 OK(skip1symlink), independent final delta81 OK; scoped LF check before commit
 
 ## Options
 
