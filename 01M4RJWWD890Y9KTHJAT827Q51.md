@@ -15,7 +15,7 @@ related:
   - 01M4QZYS1YYTM0PNEG1NSXAWHN
 commits: []
 created-at: 2026-10-12T17:34:49Z
-updated-at: 2026-10-13T06:24:07Z
+updated-at: 2026-10-13T06:26:26Z
 updated-by: Codex
 question: Aly accepted the functional repair in chat; actual 200 percent browser zoom remains unverified. Human lane unchanged under AGENTS.md; no repeat acceptance or laptop action requested.
 outcome-what: "Added one eligible Move task action per table task/step, shared the linked preview handler and captured filtered table order."
@@ -27,8 +27,8 @@ outcome-resolves: "Responsive save/cancel/reload, hidden-parent ordering, four f
 
 ## Definition of Done
 
-- [ ] Regression fails before fix and passes after; eligible task and subtask table rows expose one accessible Move task action; forbidden/closed project controls hidden; clicks reach the same linked preview; browser checks at 390px, 320px, desktop List and zoom plus cancel/save/reload pass; full suite and independent review pass; scoped handoff and publication recorded.
-  proof: docs/handoff/TABLE_SCHEDULING_2026-10-12.md:7: focused four tests and independent review pass; final Ran 790 tests in 602.540s OK skipped1; responsive/table save/reload passes. Actual 200 percent browser zoom remains unverified, so criterion is not ticked.
+- [x] Regression fails before fix and passes after; eligible task and subtask table rows expose one accessible Move task action; forbidden/closed project controls hidden; clicks reach the same linked preview; browser checks at 390px, 320px, desktop List and zoom plus cancel/save/reload pass; full suite and independent review pass; scoped handoff and publication recorded.
+  proof: TABLE_SCHEDULING_2026-10-12.md; actual Chrome native200 percent on2026-10-13, screenshot827Q51-native-200-preview.png; width1251/DPR1.5 to625/DPR3 and restored; keyboard preview/checkbox/cancel/apply/reload and Timeline table pass; prior focused4/full790 and subsequent797 OK skipped1; independent screenshot/handoff review passes; published implementation2c514cdf.
 
 ## Options
 
