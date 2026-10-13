@@ -520,3 +520,13 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 - Final verification: Ran797 in419.228s OK (skipped=1), exit0; existing unavailable-symlink skip. Independent focused/source review passed. An unmodified production-policy probe measured idle/header closure and JSON/raw408 at30.007-30.023 seconds, with normalstatic200; no timeout patch. Tests and default-probe receipts are ignored. Publication and App Owner acceptance remain separate.
 
 - Canonical synchronization completed: ASTRA-20261013-01 appended after rereading mistakes.md; earlier pending-log/verification lines are superseded. Final independent receipt and handoff review passed. Publication remains the next step.
+
+## ASTRA-20261013-02 - actual browser zoom verification completed
+
+- Date / project: 2026-10-13; 827Q51 outstanding zoom check, explicitly requested by Aly.
+- Status / evidence: Earlier browser automation shortcuts changed neither zoom nor DPR. Native Windows computer-use controls now visibly set Chrome to200 percent. Without viewport override, document width/DPR changed1251/1.5 to625/3; native200 popup and reachable preview buttons are saved in ignored Temp/827Q51-native-200-preview.png.
+- Verification: At actual200 percent, keyboard Move task, linked preview, deadline checkbox, Cancel, Apply/reload and Timeline automatic table4controls/0Ganttrows passed on fresh disposable data. Build15-17, Open19-21 and Inspect22-23 persisted; Taylor Example ownership and unchecked agreed deadline16 remained; scheduledfinish23. After dependency preview also passed and cancelled. Restored original100 percent and1251/1.5.
+- Tool prevention: Native Chrome capture initially combined stale Google AX text with fresh Astra pixels. Reobserved matching Astra title/address before zoom input or index actions. Use native browser controls when page-level shortcuts do not affect browser zoom; distinguish actual zoom from viewport emulation and never act on mixed stale/fresh captures.
+- Independent review: Screenshot and handoff inspected; remaining zoom criterion is proven. Prior accepted functional repair is unchanged. Physical-phone/touch/screen-reader/hosting remain unverified. No owner data, credentials or deployment changed; no repeat acceptance required. Canonical synchronization pending.
+
+- Canonical synchronization completed; older zoom-unverified status is superseded. Independent screenshot/handoff review passed and owner Done move dry-run is allowed. Human lane is unchanged.

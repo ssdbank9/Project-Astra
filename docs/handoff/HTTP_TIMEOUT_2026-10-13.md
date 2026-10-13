@@ -49,6 +49,6 @@ not changed. Broader B1 authentication, route authorization, input framing,
 download headers and proxy review remain outstanding. No claim of complete
 internet-facing security or hosted readiness follows from this repair.
 
-827Q51's actual 200% browser zoom and physical-device checks remain
-**unverified**, despite Aly's acceptance of its functional repair. Do not mark
-those tests as performed or repeat the acceptance request.
+827Q51's actual 200% browser zoom passed on 2026-10-13; see
+`TABLE_SCHEDULING_2026-10-12.md`. Physical-device checks remain **unverified**.
+Aly's acceptance is already recorded; do not repeat the acceptance request.

@@ -2,7 +2,7 @@
 
 Current server inactivity repair: [AY5EZ0 verification](HTTP_TIMEOUT_2026-10-13.md). Stalled connections now have a finite socket timeout; timed-out body reads return 408 and close their request database. Broader security review, owner acceptance and hosted operation remain separate.
 
-Current phone-size and List scheduling repair: [827Q51 verification](TABLE_SCHEDULING_2026-10-12.md). Table rows now expose Move task and preserve filtered sibling ordering. Browser save/reload checks pass; actual browser zoom, owner acceptance and hosted operation remain separate.
+Current phone-size and List scheduling repair: [827Q51 verification](TABLE_SCHEDULING_2026-10-12.md). Table rows now expose Move task and preserve filtered sibling ordering. Actual 200% Chrome zoom and save/reload checks passed on 2026-10-13; Aly accepted the repair. Physical-device and hosted checks remain separate.
 
 Current automatic task movement and project scheduling: [SXAWHN implementation
 and verification](AUTOMATIC_TIMELINE_SCHEDULING_2026-10-12.md). Above/Below now
