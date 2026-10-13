@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T08:37:47Z
-updated-at: 2026-10-13T08:39:53Z
+updated-at: 2026-10-13T08:41:30Z
 updated-by: Codex
 claimed-by: X1CarbonPC-29860
 claimed-at: 2026-10-13T08:39:42Z
@@ -34,6 +34,11 @@ claimed-at: 2026-10-13T08:39:42Z
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
+
+- [ ] Inventory all B1 requirements and independently audit authentication, route roles and input/output boundaries on disposable fixtures.
+- [ ] Add reproducible failing real-socket framing/header and XLSX XML/archive rejection tests.
+- [ ] Implement bounded parser/framing and common-response protections without permission or login-policy changes.
+- [ ] Verify focused/full suites and guard removals; independently review repairs; record approved proxy policy, residual launch gates and scoped publication.
 
 ## Progress
 
