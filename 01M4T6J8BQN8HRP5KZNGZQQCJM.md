@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T08:37:47Z
-updated-at: 2026-10-13T10:58:05Z
+updated-at: 2026-10-13T10:58:09Z
 updated-by: Codex
 claimed-by: X1CarbonPC-29860
 claimed-at: 2026-10-13T08:39:42Z
@@ -46,3 +46,4 @@ claimed-at: 2026-10-13T08:39:42Z
 ## Progress
 - **2026-10-13 08:41 · Codex** — Aly selected Caddy access logs for real client IPs; keep Astra peer address and do not trust forwarded headers. Independent review reproduced XML entity expansion and archive error classification gaps; parent identified HTTP length/type and response-header omissions. Create regressions before repairs, not a broad readiness claim.
 - **2026-10-13 08:52 · Codex** — Aly selected on2026-10-13: keep former importers own old reports accessible; closed project must reopen before new tasks; agreed project deadline changes Owner-only in both project date screen and linked scheduling. Record these accepted decisions; do not remove retained own-report access. Independent role-drift regressions reproduced Manager-to-Viewer task writes and revoked Owner account writes; add under-lock rechecks.
+- **2026-10-13 10:58 · Codex** — Final assignee fix required restarting superseded full suite after exact process verification. Final focused44 OK, independent finalassignment29/18 OK with create/update eligibility mutations. Browser Owner deadline20to23 persisted; closedOverview controls hidden/reopenrestored. Manageradmin dialog is inaccessible, not a claimed browser readonly branch. B1 note explicitly bounds static/runtime route coverage and retains hosted gates/A5 password feature gap. Full final receipt pending.
