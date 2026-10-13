@@ -1,7 +1,7 @@
 ---
 id: 01M4T6J8BQN8HRP5KZNGZQQCJM
 title: B1 security review and verified HTTP hardening
-status: backlog
+status: pre-process
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T08:37:47Z
-updated-at: 2026-10-13T08:39:47Z
+updated-at: 2026-10-13T08:39:53Z
 updated-by: Codex
 claimed-by: X1CarbonPC-29860
 claimed-at: 2026-10-13T08:39:42Z
