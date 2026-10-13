@@ -1,5 +1,12 @@
 # Astra next steps — from today to distribution
 
+**Current planning entry point (2026-10-13):** use
+[PRE_DEPLOYMENT_REVIEW_2026-10-13.md](PRE_DEPLOYMENT_REVIEW_2026-10-13.md) for
+current gates/evidence and [BOARD_AUDIT_2026-10-13.md](BOARD_AUDIT_2026-10-13.md)
+for every ticket. This original phase outline is retained for requirement
+traceability. Its counts, 'today' claims, default proposals and PR state are
+historical; accepted later decisions and current code take precedence.
+
 This plan runs from the current state (branch head `0b90ceb` when it was
 written, schema v20, 676 tests then and 680 after G1PPV7, 34 tickets in
 signoff) to Astra being online for real users and
@@ -58,10 +65,10 @@ after the pilot unless Aly pulls one in.
    - 2026-09-24: 3M2AYA, XX9RFM, PDDS2D, KBWY86, 6G89SJ, GTEYTG, K62ZAP, ZSZ9T2.
    - Reworks: QY0WG2, Y3WC71, AYW0QC, 8B9NBH, CS93C6, 5WZ4A8.
    - Older: HS3JRY, D73AQW, C9KPH6, 9R7A87, Z24KVH, JZACMP, XDA2JR, JPEBCM.
-3. Accept a ticket from the board TUI sign-off screen (key `a`), or with
-   `jaira move <id> --to done --force`, which the jaira notes say is the human
-   CLI route out of signoff. Send one back by moving it to the lane it should
-   return to, with a note saying why.
+3. Aly accepts through the board's human sign-off screen and records a reason
+   when returning work. AGENTS.md forbids force operations; agents never leave
+   human/signoff/done lanes or impersonate Aly. Verify the current human UI
+   flow rather than copying the older CLI advice.
 4. Move the four human-lane tickets (JQY55P, AX572Q, Z9JCZ6, MTEDTM). Their
    notes already record Aly's decisions from 2026-09-19 and 2026-09-20.
 5. Decide what to do with backlog tickets the build has overtaken: RWMRKM

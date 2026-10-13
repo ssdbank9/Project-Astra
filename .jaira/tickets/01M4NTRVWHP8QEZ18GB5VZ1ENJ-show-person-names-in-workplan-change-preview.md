@@ -1,7 +1,7 @@
 ---
 id: 01M4NTRVWHP8QEZ18GB5VZ1ENJ
 title: Show person names in workplan change preview
-status: signoff
+status: done
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,8 +14,8 @@ related: []
 follows: 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T15:54:43Z
-updated-at: 2026-10-11T16:25:44Z
-updated-by: Codex
+updated-at: 2026-10-11T16:30:36Z
+updated-by: Aly Jafferani
 review-summary: Independent owner_preview_review read only scoped importer and regression diff; no blocking findings. Focused regression passed; restoring old UUID behavior in memory made it fail.
 review-gaps: Full app and phone/touch/pointer acceptance not established by this display-only fix.
 review-verdict: Pass - independent review

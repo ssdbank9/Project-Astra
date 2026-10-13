@@ -1,4 +1,39 @@
-# Astra handoff pack — 2026-09-26
+# Astra handoff index
+
+## Current pre-deployment review package — 2026-10-13
+
+Start with [the detailed plan and handoff](PRE_DEPLOYMENT_REVIEW_2026-10-13.md),
+[every-ticket audit](BOARD_AUDIT_2026-10-13.md), and
+[the prompt for independent LLMs](INDEPENDENT_LLM_REVIEW_PROMPT.md).
+These supersede historical status/count statements below. AGENTS.md remains
+the authority for working rules; Aly alone accepts and authorizes deployment.
+
+App-source baseline: `da1b3fd21ed0d4357669f0e727369fda02640672`, working branch
+`codex/migration-safety-remediation`, schema 20, package 0.1.0. Source full receipt:
+832 tests OK (one unavailable Windows symlink case). The fresh package receipt
+is in the detailed plan and is reported with the final pushed SHA.
+
+Existing board: **85 tickets, 25 done / 39 signoff / 7 human / 14 backlog**.
+TV43F1 adds one coordination ticket; use the final 86-ticket audit for its lane.
+The board is not cleared, and hosted readiness is unverified. First-login/self
+password changes, backup/recovery, production checks and release work remain.
+
+For Claude, Gemini, Codex or another reviewer: use the new independent prompt,
+pin the supplied package SHA, read every handoff listed in the audit, and return
+findings without edits. Other-LLM reviews have not been performed by writing a
+prompt. The September AGENT_START_PROMPT remains historical startup context.
+
+JM7CFP, W6ZSGA and 2FREQ9 have recorded chat acceptance; do not request repeat
+acceptance. Native Excel/Chrome evidence from October 11 and later drag/zoom
+receipts supersede older blanket 'browser unverified' wording only within their
+documented scope. Owner-only board closure remains separate.
+
+## Historical index notes — preserved for traceability
+
+The notes below were accumulated from September 26 onward. Their test counts,
+open-question statements and acceptance/board wording are dated snapshots,
+not the current pre-deployment baseline. Follow the package above for current
+planning, scope and review instructions.
 
 Current local security review: [ZQQCJM B1 evidence](B1_SECURITY_2026-10-13.md). Request framing, response headers, workbook XML/archive budgets and write-time authority/assignee checks were repaired; Aly's closed-project and agreed-deadline decisions are applied. Hosted readiness is unverified. [Current free-hosting comparison](FREE_HOSTING_2026-10-13.md) recommends an eligible Oracle Always Free VM with DuckDNS and Caddy; no account or deployment action is authorized by that recommendation.
 
@@ -19,6 +54,13 @@ agent in any tool, or a human developer. The pack calls that reader "the
 agent". It was written at branch `codex/migration-safety-remediation`, head
 `0b90ceb` (schema v20, 676 tests OK, nothing deployed); the commits made since
 are listed in `HANDOFF_2026-09-26.md` section 1.
+
+Current owner Excel and task-row timeline work: [JM7CFP verification](OWNER_EXCEL_WORKPLAN.md).
+Aly selected XLSX with four main columns and explicit named relationships.
+Implementation and isolated sample checks are recorded there. Aly accepted
+JM7CFP on October 9; later bounded native/browser evidence is in
+[desktop verification](DESKTOP_VERIFICATION_2026-10-11.md) and the dated drag
+repairs. This is not a launch-readiness claim.
 
 Latest Windows baseline evidence: [A0 repair, 2026-10-04](A0_2026-10-04.md),
 ticket SFAZD7. The default Windows command ran 684 tests, `OK (skipped=1)`;

@@ -216,3 +216,20 @@ baselines remain unchanged. Behavior, evidence and limits are recorded in
 [SXAWHN](AUTOMATIC_TIMELINE_SCHEDULING_2026-10-12.md). Aly subsequently accepted
 the implementation on 2026-10-12 with "I accept SXAWHN". The human-only board
 transition and deployment remain separate.
+
+### 2026-10-13 — deadline notices, B1 policy and independent launch review
+
+- Aly accepted 2FREQ9 in chat: deadline extensions notify active App Owners and
+  Chairman in-app, retaining approval rules. Board closure remains Aly's;
+  no repeated acceptance request. See DEADLINE_NOTICES_2026-10-13.md.
+- During B1, Aly selected Caddy logs for real client IPs; Astra retains the
+  direct peer address. Former importers retain their own historical reports
+  after access removal. Closed projects require reopening before new tasks.
+  Agreed deadline changes require an App Owner on both direct and linked paths.
+  See B1_SECURITY_2026-10-13.md. These selections do not accept ZQQCJM itself.
+- Aly requested a detailed plan before deployment, all safe pending work
+  committed locally/GitHub, an independent-LLM handoff/prompt and every-ticket
+  closure audit. Preparing/publishing that package does not authorize new
+  implementation, accounts, credentials, merges, provisioning or deployment.
+- Only actual dated owner decisions count. The local decision-checkbox form
+  is draft/not submitted; its values do not complete OPEN_QUESTIONS.

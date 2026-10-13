@@ -1,5 +1,11 @@
 # Open questions for Aly
 
+**Historical question register:** the questions and defaults below originated
+in September. Read [the current pre-deployment plan](PRE_DEPLOYMENT_REVIEW_2026-10-13.md),
+DECISIONS_LOG.md and later dated receipts first. Several items have been decided
+or implemented; defaults are not authorization and draft checkbox choices are
+not submitted decisions. Reconcile each item before asking Aly again.
+
 Each question says what is undecided, why it matters, and a recommended
 default. "Go with your defaults" is a valid answer to any of them. The first
 five matter most, because they block phase A work or the server move.

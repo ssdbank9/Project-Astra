@@ -1,7 +1,7 @@
 ---
 id: 01M4RQA630B88TH08R1QAY5EZ0
 title: Bound stalled HTTP requests before launch
-status: human
+status: done
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,8 +14,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-12T18:51:59Z
-updated-at: 2026-10-13T05:18:46Z
-updated-by: Codex
+updated-at: 2026-10-13T06:13:36Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-46676
 claimed-at: 2026-10-12T19:07:14Z
 question: Aly accepted the published inactivity-timeout repair in chat. Human lane remains unchanged under AGENTS.md; broader security review and hosted operation remain separate. No repeat acceptance requested.

@@ -1,7 +1,7 @@
 ---
 id: 01M3AFJ8EQKFNHGY528E3M2AYA
 title: Sign-in never locks anyone out; owners reset passwords in the app; 8-character minimum
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -28,8 +28,8 @@ related:
   - 01M2HQJZ6KSPH67PP6746BXYJZ
 commits: []
 created-at: 2026-09-24T19:51:32Z
-updated-at: 2026-09-24T20:28:38Z
-updated-by: Claude
+updated-at: 2026-10-05T17:12:24Z
+updated-by: Aly Jafferani
 claimed-by: vm-12405
 claimed-at: 2026-09-24T20:27:50Z
 outcome-what: "Sign-in no longer locks anyone out: the per-email throttle and its 429 are gone, a wrong password or unknown email returns 401 'Incorrect email or password.', and attempts stay in login_attempts as history (pruned after 90 days). Passwords need 8 characters (was 12) everywhere. Owners reset passwords in the app: POST /api/users/<id>/password and a 'Reset a password' form plus a 'Reset password' action on the People screen. Any active owner may reset any active user's password except the primary owner's, which only the primary may reset (refused 403, audited as owner_change_blocked, capped notice). The reset signs the user out (keeping the actor's own current session when they reset their own), clears failed sign-ins, writes a password_reset user event 'in app', and notifies the user, plus the other owners when the user is an owner. The CLI reset shares the same code."

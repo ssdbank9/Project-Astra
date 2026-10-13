@@ -1,5 +1,12 @@
 # Agent start prompt — Project Astra (2026-09-26)
 
+**Current review entry point (2026-10-13):** for pre-deployment independent
+review, use [INDEPENDENT_LLM_REVIEW_PROMPT.md](INDEPENDENT_LLM_REVIEW_PROMPT.md)
+and the supplied frozen package SHA. [The current plan](PRE_DEPLOYMENT_REVIEW_2026-10-13.md)
+and [board audit](BOARD_AUDIT_2026-10-13.md) supersede the counts, status and
+first-task assumptions below. This September prompt is retained as historical
+startup context; it does not authorize deployment or current implementation.
+
 Aly: paste everything between the two lines below as your first message to
 whichever agent takes over next. It works for any AI coding agent and for a
 human developer. It assumes the handoff pack is committed under

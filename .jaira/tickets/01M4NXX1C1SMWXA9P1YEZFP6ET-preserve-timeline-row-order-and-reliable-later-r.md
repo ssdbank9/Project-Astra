@@ -1,7 +1,7 @@
 ---
 id: 01M4NXX1C1SMWXA9P1YEZFP6ET
 title: Preserve timeline row order and reliable later-row dragging
-status: human
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -14,8 +14,8 @@ related:
   - 01M4BY5B6YP69JMFMVCQJM7CFP
 commits: []
 created-at: 2026-10-11T16:49:25Z
-updated-at: 2026-10-12T07:52:55Z
-updated-by: Codex
+updated-at: 2026-10-12T07:56:19Z
+updated-by: Aly Jafferani
 question: "Aly accepted 2026-10-12; awaiting the human-only board transition to done."
 outcome-what: Preserved complete visible timeline order and made later-row drop targets stable. Backend and actual-function regressions pass; all desktop Chrome drop modes and filtered-parent reorder persist.
 outcome-why: First reorder changed unrelated rows; in-flow drop controls cancelled later-row drag starts.

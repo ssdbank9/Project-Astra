@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-06T18:38:12Z
-updated-at: 2026-10-07T02:13:06Z
+updated-at: 2026-10-07T13:56:29Z
 updated-by: Codex
 outcome-what: "Added project-bound nine-column CSV download-fill-upload, logged spare task keys, Shared/alternative plan filtering and independent critical paths."
 outcome-why: Owners need one simple file per project without manual project IDs or repeated uploads.
@@ -43,3 +43,4 @@ review-check: "1. Run .venv\\Scripts\\python.exe tests\\run.py and expect OK. 2.
 ## Progress
 - **2026-10-06 19:19 · Codex** — Implemented project-bound nine-column CSV, separately calculated Shared/alternative critical paths, native/import graph guards and logged spare WP key reservations. Independent read-only review passed after correcting partial-import retained plans, unkeyed nodes and CSV serialization regressions. Sixteen focused tests and HTTP role test passed; synthetic Chrome workflow passed desktop/phone. Final full suite running. Real workbook population and hosted deployment remain unverified.
 - **2026-10-07 02:13 · Codex** — Aly Jafferani explicitly accepted W6ZSGA in this chat on 2026-10-07: W6ZSGA signed off. Acceptance applies to feature commit 606bf5423f71f001fad53102914918a3cf0886e8, verified by 739 tests OK (skipped=1). Agent has recorded the decision without leaving the human signoff lane. Real sample population, Microsoft Excel desktop saving and hosted deployment remain unverified.
+- **2026-10-07 13:56 · Codex** — 2026-10-07: Prepared separate private Rupani owner CSV against verified real project/entity IDs; 239 source tasks and 11 spare Astra-issued IDs, nine columns. Five ordinary template downloads reserve 250 keys with a pre-reservation database backup. Dates/assignees/predecessors blank pending owner decisions. Isolated import and identical replay pass; wrong bindings refused; live project remains 0 tasks. No application source changes or owner acceptance inferred. Browser control and Excel desktop operation remain unverified. Private artifacts kept outside Git.

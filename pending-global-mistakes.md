@@ -14,6 +14,7 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 - Artifact-hygiene correction: This continuation initially described Temp logs as ignored without checking .gitignore. Current .gitignore lacked /Temp/ and the starting status listed Temp/ as untracked. Added the scoped /Temp/ ignore so local generated logs, review packets and existing browser/sample artifacts stay outside normal staging. No artifacts were staged or published. Verify the effective ignore rule rather than inferring it from the directory's name.
 - Ticket-attribution correction: The first continuation note was appended through the CLI, but its inherited local identity recorded the author as Aly Jafferani. It was an automated progress note, not an owner decision or acceptance; the ticket remained in-progress. The final note supplied JAIRA_USER=Codex explicitly to the Windows CLI subprocess and appended the attribution correction while preserving earlier history. Reread confirmed its author is Codex and ticket status is still in-progress. Never edit ticket files by hand.
 - Owner acceptance follow-up: Aly explicitly stated Approved JM7CFP in this chat on 2026-10-09. Record that actual owner decision in the handoff, decisions log and CLI ticket history; retain browser/desktop checks as unverified. The agent may place the ticket in signoff but may not leave that human lane. A combined approval-start context read again exceeded the aggregate output budget; bounded ticket and rule reads recovered the required evidence before mutation.
+- Recurrence 2026-10-10: The how-to-check context lookup again combined overly broad memory and global-log searches, truncating output. No product change resulted. Recovered the exact workflow from bounded owner instructions, local launcher documentation and UI labels. Limit context searches to the named entry or file and budget the aggregate output before batching.
 - Publication environment limitation: The Linux Git push of the accepted local commit failed before authentication with could not read Username for https://github.com: No such device or address. Read-only inspection confirmed the installed Windows Git has the manager credential helper. Use the existing Windows Git credential setup for the retry; never print credentials or infer remote publication from a local commit. The same Linux-versus-Windows authentication distinction was already recorded in the global log, so check it before future pushes.
 
 ## ASTRA-20261006-03 — minimal owner CSV draft limits and verification correction
@@ -500,6 +501,7 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 
 - Global synchronization completed: ASTRA-20261012-02 appended after rereading canonical mistakes.md; prior entries preserved. Independent final handoff review passes with the stated zoom limitation.
 
+
 ## ASTRA-20261013-01 - stalled HTTP connections and verification corrections
 
 - Date / project: 2026-10-13; AY5EZ0 launch hardening, NEXT_STEPS B1.
@@ -520,6 +522,7 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 - Final verification: Ran797 in419.228s OK (skipped=1), exit0; existing unavailable-symlink skip. Independent focused/source review passed. An unmodified production-policy probe measured idle/header closure and JSON/raw408 at30.007-30.023 seconds, with normalstatic200; no timeout patch. Tests and default-probe receipts are ignored. Publication and App Owner acceptance remain separate.
 
 - Canonical synchronization completed: ASTRA-20261013-01 appended after rereading mistakes.md; earlier pending-log/verification lines are superseded. Final independent receipt and handoff review passed. Publication remains the next step.
+
 
 ## ASTRA-20261013-02 - actual browser zoom verification completed
 
@@ -553,7 +556,6 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 
 - Scoped staging correction: Refreshing the own-fragment patch against HEAD failed because those fragments were already staged. Generate the incremental patch against the current index while constructing the desired scope from HEAD plus only this task's content; preserve unrelated working edits and avoid resetting the index.
 
-
 ## ASTRA-20261013-04 - B1 security review, parser budgets and authority drift
 
 - Date / project: 2026-10-13; ZQQCJM, Aly-authorized B1 whole-app review. Category: confirmed input/authorization defects repaired locally; final full/publication pending, hosted operation unverified.
@@ -577,3 +579,16 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 - Superseding verification: Full suite Ran832 in976.020s, OK(skipped=1); Node/UI tests ran, unavailable Windows symlink case unverified. Independent final source/delta/document review passed; required guards fail when removed. Browser and canonical log sync complete; publication pending. Earlier pending verification statements are superseded; failed run retained.
 
 - Scoped publication verification:13 intended files; staged blobs/diff LF, cached diff check passes, private/database/browser files excluded. Unrelated working changes retained. ZQQCJM moved into human through CLI; only Aly accepts or moves it out. No deployed result claimed.
+
+## ASTRA-20261013-05 - release planning, board and handoff drift
+
+- Date/project:2026-10-13, TV43F1; Aly requested planning, independent-LLM package and complete safe publication, not new implementation/deployment.
+- Confirmed documentation drift: September counts and several current-worded acceptance/browser claims persisted. Current board85:25done/39signoff/7human/14backlog; JM7CFP and3NT40T declared DoD incomplete despite later child evidence, and accepted W6ZSGA/JM7CFP/2FREQ9 not Done. First-login/self password, backup/version CLI, CI and hosted gates remain gaps. Added current plan/board/prompt, dated entry-point notices and decision sources; remove historical force-command advice conflicting with AGENTS. No inferred acceptance or ticket closure.
+- Prevention: Recount all CLI tickets and reconcile lanes, ticked criteria, actual proof and owner acceptance separately. All Done is not hosted readiness; superseded/deferred tickets need explicit owner disposition. Distinguish local gates from drills requiring an authorized staging VM. Other LLM reviews are unverified until actual reports exist. Keep draft checkbox data distinct from owner decisions.
+- Inspection/tool recurrence: Early batched broad reads again truncated; bounded rereads recovered skill and source context. Guessed cli.py/deployment/CI paths absent; use rg --files before naming them. Windows literal docs/handoff/*.md failed; use rg -g '*.md' on the directory. Unsupported jaira plan/option help resolved to root help; dod --help documents --plan --add and --option. Inaccessible tmp directories remain unverified/excluded. Do not infer their contents or delete them. No product source changed.
+- Verification/publication: fresh full suite and independent package review pending; explicit tracked scope will include inspected pre-existing Aly Done transitions and safe notes, excluding private XLSX/PDF/data/Temp/keys/environments. Canonical global synchronization pending.
+
+- Independent completeness correction: Reviewer found WCAG2.2AA was implied rather than named, and F1 incident/offline guide and F3 Owner/scoped user-data exports were not explicit. Added each to preparation and review criteria; read the full F phase and distinguish later monthly/quarterly operating evidence from pre-launch proof. An initial combined patch included a board-text context in the plan file and failed atomically; reread exact targets and apply only matching hunks. No source changes or partial patch.
+- Fresh verification: Ran832 in1011.192s, OK(skipped=1), exit0; Node drivers ran, unavailable Windows symlink case unverified. All86 unique local ticket rows and28 handoff docs/link targets checked; app/tests/package source unchanged from da1b3fd. jaira validation checked86, errors=false,40 existing warnings. Independent final review and scoped publication pending.
+
+- Final package reviews: independent content/metadata and source/factual reviewers pass after completeness corrections.20 exact safe staged files, LF/cached diff check pass; no application/test/private artifact staged. Own TV43F1 criteria clarify commit-readiness versus post-push Git proof; the actual publication requirement is retained and verified/reported after execution. An initial staging call followed a still-running multi-command CLI session; waited for completion and refreshed final ticket/audit before commit. Always finish dependent CLI sessions before staging their output. Publication/canonical synchronization next; hosted/external-LLM reviews unverified.

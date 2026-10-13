@@ -1,5 +1,14 @@
 # Astra deployment runbook — Oracle Cloud Always Free, DuckDNS, Caddy
 
+**Pre-deployment checkpoint (2026-10-13):** this is a historical command-level
+template, not an executed or current-certified deployment. Follow the gate plan
+in [PRE_DEPLOYMENT_REVIEW_2026-10-13.md](PRE_DEPLOYMENT_REVIEW_2026-10-13.md).
+Refresh tools/vendor commands and validate complete configuration before use.
+Request inactivity timeouts and B1 local protections now exist; missing backup,
+version and first-login tools and hosted proxy controls remain separate gates.
+Use [current dated hosting limits](FREE_HOSTING_2026-10-13.md); only Aly may
+authorize staging/provisioning or real-user deployment.
+
 This runbook covers phase D of `NEXT_STEPS.md`. It turns a tagged Astra release
 into a public HTTPS site on an Oracle Cloud Always Free VM, with a free DuckDNS
 name and Caddy in front. Aly chose this setup on 2026-09-20: zero direct cost,

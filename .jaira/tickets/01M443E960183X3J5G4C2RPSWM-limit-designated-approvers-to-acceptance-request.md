@@ -1,7 +1,7 @@
 ---
 id: 01M443E960183X3J5G4C2RPSWM
 title: Limit designated approvers to acceptance requests
-status: signoff
+status: done
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,8 +14,8 @@ related: []
 commits:
   - bb07b6ca844a43dfdc11d3f83dca462822f6608f
 created-at: 2026-10-04T18:39:54Z
-updated-at: 2026-10-05T14:14:36Z
-updated-by: Codex
+updated-at: 2026-10-05T14:34:33Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-55344
 claimed-at: 2026-10-04T18:40:24Z
 outcome-what: "Q1 approver permissions are narrowed to acceptance recommendations, with service lock revalidation, separate UI capability, importer eligibility preservation and role-specific HTTP/browser coverage."
