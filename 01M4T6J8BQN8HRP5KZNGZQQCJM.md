@@ -14,7 +14,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T08:37:47Z
-updated-at: 2026-10-13T08:37:47Z
+updated-at: 2026-10-13T08:39:38Z
+updated-by: Codex
 ---
 
 # B1 security review and verified HTTP hardening
