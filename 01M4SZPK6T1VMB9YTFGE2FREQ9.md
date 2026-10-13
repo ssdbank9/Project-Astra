@@ -14,10 +14,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T06:37:49Z
-updated-at: 2026-10-13T07:11:18Z
+updated-at: 2026-10-13T07:11:24Z
 updated-by: Codex
 claimed-by: X1CarbonPC-17880
 claimed-at: 2026-10-13T06:45:32Z
+outcome-what: "Durable in-app deadline extension notices for active App Owners and Chairman, including acting Owner; complete project-range snapshots for linked/bulk/import changes."
+outcome-why: Aly selected notification on deadline increase; generic routing omitted Chairman and acting Owner.
+outcome-resolves: "Focused10, full807 OK(skip1), independent source/guard/bulk/Undo/handoff review and actual Chrome Chairman Inbox/read-reload pass; normal publication next; only Aly accepts."
 ---
 
 # Notify App Owners and Chairman when deadlines move later
