@@ -1,7 +1,7 @@
 ---
 id: 01M4T6J8BQN8HRP5KZNGZQQCJM
 title: B1 security review and verified HTTP hardening
-status: in-progress
+status: human
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,10 +14,14 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T08:37:47Z
-updated-at: 2026-10-13T11:21:49Z
+updated-at: 2026-10-13T11:22:01Z
 updated-by: Codex
 claimed-by: X1CarbonPC-29860
 claimed-at: 2026-10-13T08:39:42Z
+question: "Aly, do you accept the reviewed B1 security repair ZQQCJM? Deployment remains separate."
+outcome-what: Reject ambiguous/incomplete request bodies and unsafe workbook XML/archive structures; protect all response headers; recheck current Owner/task/assignee authority; apply closed-project and agreed-deadline rules.
+outcome-why: "Independent probes reproduced input-budget, response-protection and stale-authority gaps before hosting."
+outcome-resolves: "Full832 OK(skip1symlink), independent final source and guard-removal checks, browser fixture and dated B1/hosting handoff; awaits Aly acceptance."
 ---
 
 # B1 security review and verified HTTP hardening
