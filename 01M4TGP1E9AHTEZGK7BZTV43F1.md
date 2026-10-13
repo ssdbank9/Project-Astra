@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T11:34:37Z
-updated-at: 2026-10-13T11:57:30Z
+updated-at: 2026-10-13T11:57:39Z
 updated-by: Codex
 claimed-by: X1CarbonPC-44056
 claimed-at: 2026-10-13T11:35:43Z
@@ -42,7 +42,8 @@ claimed-at: 2026-10-13T11:35:43Z
   proof: 28 handoff docs inventoried; current plan25 gates, everyticket audit86, independent prompt and entry-point notices
 - [x] Independently review the entire publication scope; finish the full suite and validate board, LF and private-file exclusions.
   proof: Full832 in1011.192s OK(skip1symlink), source unchanged; independent package review and factual completeness check; validator86rows/all links, boarderrorsfalse
-- [ ] Prepare the reviewed scoped local commit and normal GitHub publication, including an exact SHA/test receipt and private-file exclusions.
+- [x] Prepare the reviewed scoped local commit and normal GitHub publication, including an exact SHA/test receipt and private-file exclusions.
+  proof: 20 exact safe files staged and checked; full/source/independent receipts recorded; normal commit/push and exact remote SHA receipt prepared
 
 ## Progress
 - **2026-10-13 11:52 · Codex** — Independent review found omitted explicit WCAG2.2AA, F1 incident guide and F3 scoped exports; all added before publication. Original85 counts preserved; final package86 includes this coordination ticket. Other LLM reports still unverified. User authorized committing inspected safe pending changes; no real data/credentials/private workbook/PDF/source edits.
