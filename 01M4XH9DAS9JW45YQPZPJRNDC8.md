@@ -1,7 +1,7 @@
 ---
 id: 01M4XH9DAS9JW45YQPZPJRNDC8
 title: First-login and self-service password change
-status: todo
+status: pre-process
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-14T15:45:52Z
+updated-at: 2026-10-14T15:46:01Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
