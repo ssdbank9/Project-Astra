@@ -1,7 +1,7 @@
 ---
 id: 01M4XH9DAS9JW45YQPZPJRNDC8
 title: First-login and self-service password change
-status: pre-process
+status: in-progress
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,13 +14,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-14T15:47:53Z
+updated-at: 2026-10-14T15:48:03Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
-outcome-what: A5 scope is specified from the accepted launch handoff and the existing account/reset/session implementation.
-outcome-why: First-login password replacement is a staging gate before inviting users.
-outcome-resolves: "The implementation plan will cover schema, service authorization, HTTP gating, UI and migrations, then full verification."
+outcome-what: "Mapped owner create/reset, session validation, API route gating, frontend login/resume and the schema20 migration chain; recorded the v21 compatibility plan."
+outcome-why: The A5 gate needs server-enforced forced-change access and must preserve existing accounts and no-lockout behavior.
+outcome-resolves: "Begin implementing v21 flag, atomic password changes, HTTP restrictions and accessible UI in vertical slices."
 ---
 
 # First-login and self-service password change
