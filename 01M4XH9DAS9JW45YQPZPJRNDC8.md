@@ -14,13 +14,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-14T15:44:44Z
+updated-at: 2026-10-14T15:45:33Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
-outcome-what: Captured the A5 password-change gate with the existing owner reset and no-lockout rules.
-outcome-why: The release plan requires forced changes for temporary passwords and a self-service change path before inviting users.
-outcome-resolves: "Service, HTTP and browser behavior, session revocation, audit, migration and rollout details are specified for implementation."
+outcome-what: A5 scope is specified from the accepted launch handoff and the existing account/reset/session implementation.
+outcome-why: First-login password replacement is a staging gate before inviting users.
+outcome-resolves: "The implementation plan will cover schema, service authorization, HTTP gating, UI and migrations, then full verification."
 ---
 
 # First-login and self-service password change
