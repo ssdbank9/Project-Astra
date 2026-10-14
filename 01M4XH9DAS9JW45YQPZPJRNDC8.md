@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-14T19:52:04Z
+updated-at: 2026-10-14T19:53:39Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
@@ -27,7 +27,7 @@ outcome-resolves: "Begin implementing v21 flag, atomic password changes, HTTP re
 
 ## Definition of Done
 
-- [ ] Service, HTTP and browser checks prove owner-created/reset passwords are forced to change before protected app access; an authenticated user changes their own password only after the correct current password; minimum length remains 8; user_events records the change without storing either password; all other sessions are revoked while the active session remains usable; malformed and wrong-current-password requests do not alter hashes or sessions; the existing no-lockout behavior remains; migration, rollback and old-schema cases pass; independent review and full suite pass.
+- [ ] Service, HTTP and browser checks prove accounts created by or passwords reset by an App Owner are forced to change before protected app access; an authenticated user changes their own password only after the correct current password; minimum length remains 8; user_events records the change without storing either password; all other sessions are revoked while the active session remains usable; malformed and wrong-current-password requests do not alter hashes or sessions; existing no-lockout sign-in behavior remains; migration, rollback and old-schema cases pass; independent review and full suite pass.
 
 ## Options
 
