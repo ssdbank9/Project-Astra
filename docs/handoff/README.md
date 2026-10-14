@@ -1,5 +1,19 @@
 # Astra handoff index
 
+## Current independent-review guard repairs — 2026-10-14
+
+Read [MJ5Q35's repair receipt](REVIEW_GUARD_REPAIRS_2026-10-14.md) first.
+Closed-project template/dependency writes and stale write authority are
+repaired; project reopening follows the dated App Owner-only rule. Aly
+explicitly kept ordinary submitted edits allowed. Independent source review
+and focused role/HTTP/guard checks pass. Final full suite: **881 tests in
+830.547s, OK (skipped=1)**. Pin the published SHA supplied with this receipt.
+MJ5Q35 awaits Aly's acceptance.
+WMW428 remains accepted. Password/recovery/CI/hosted gates remain separate.
+Current board: **89 tickets: 25 Done / 39 signoff / 11 human / 14 backlog**.
+Validation: 89 checked, no errors, 44 warnings; generated AGENTS/CLAUDE note
+drift remains disclosed. No existing protected lane was moved.
+
 ## Current frontend repair package — 2026-10-14
 
 Read [the F1–F9 repair receipt](FRONTEND_REPAIRS_2026-10-14.md) first.
@@ -9,7 +23,7 @@ review and a fresh **849 tests OK (skipped=1)**. Aly chose direct project-task
 creation named **Add a task**. Aly accepted **WMW428** in chat on October 14
 ("Ticket accepted"). Its board lane remains human until Aly moves it; no prior
 acceptance lane was closed by the agent. The board is not cleared.
-Current board: **88 tickets: 25 Done / 39 signoff / 10 human / 14 backlog**.
+Historical package board: **88 tickets: 25 Done / 39 signoff / 10 human / 14 backlog**.
 Validation has no errors; 44 warnings and generated-note drift remain disclosed.
 
 Pin the published package SHA supplied with the independent-review prompt.

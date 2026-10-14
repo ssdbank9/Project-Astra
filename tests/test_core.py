@@ -1342,17 +1342,17 @@ class AstraCoreTests(unittest.TestCase):
         self.assertIn("project_closed", kinds)
         self.assertIn("project_reopened", kinds)
 
-    def test_chairman_can_reopen_a_closed_project_with_a_reason(self):
+    def test_chairman_cannot_reopen_a_closed_project(self):
         chairman = self.service.create_user(
             self.owner, "reopen-chair@example.org", "Chairman", "chairman password safe", "chairman"
         )
         project = self.service.create_project(self.owner, "Chairman reopen")
         self.service.close_project(self.owner, project["id"], "Finished review")
-        reopened = self.service.reopen_project(chairman, project["id"], "Chairman approved correction")
-        self.assertEqual(reopened["status"], "active")
-        event = self.service.project_events(self.owner, project["id"])[-1]
-        self.assertEqual(event["event_type"], "project_reopened")
-        self.assertEqual(event["actor_user_id"], chairman["id"])
+        before = tuple(self.db.iterdump())
+        with self.assertRaises(Forbidden):
+            self.service.reopen_project(chairman, project["id"], "Chairman requested correction")
+        self.assertEqual(self.service.get_project(self.owner, project["id"])["status"], "closed")
+        self.assertEqual(tuple(self.db.iterdump()), before)
 
     def test_all_settings_paths_record_before_and_after_values(self):
         self.service.seed_default_entities(self.owner)

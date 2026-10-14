@@ -6,6 +6,12 @@ DECISIONS_LOG.md and later dated receipts first. Several items have been decided
 or implemented; defaults are not authorization and draft checkbox choices are
 not submitted decisions. Reconcile each item before asking Aly again.
 
+**October 14 reconciliation:** Q3 is settled by Z72D79's October 5 owner note:
+active primary/secondary App Owners may reopen with a reason, history and
+notices; MJ5Q35 aligns the contradictory Chairman implementation. Aly also
+explicitly keeps ordinary edits allowed while submitted. See DECISIONS_LOG
+and REVIEW_GUARD_REPAIRS_2026-10-14.md; do not ask those questions again.
+
 Each question says what is undecided, why it matters, and a recommended
 default. "Go with your defaults" is a valid answer to any of them. The first
 five matter most, because they block phase A work or the server move.

@@ -254,3 +254,18 @@ transition and deployment remain separate.
 - The agent records the decision in a CLI note while preserving human.
   Only Aly performs its board closure. No other ticket, whole-app launch,
   hosting, account or deployment acceptance follows from this statement.
+
+### 2026-10-14 — independent-review repairs and submitted editing
+
+- Aly said "fix these" after the Claude review was reconciled against actual
+  source and disposable service probes. MJ5Q35 repairs the confirmed closed-
+  project and write-time authority gaps, including related membership and
+  target eligibility drift. No hosting/account/deployment authorization follows.
+- Asked whether submitted title/details/responsible-person/date fields should
+  be locked until an App Owner requests changes, Aly selected **Keep ordinary
+  edits allowed during review**. Preserve existing role, reason, revision,
+  history and App Owner acceptance rules; do not introduce a review freeze.
+- Project reopening is aligned with Z72D79's October 5 dated owner note:
+  any active App Owner, primary or secondary, with reason/history/notices.
+  The Chairman exception in the old code/test conflicted with that rule.
+  This is reconciliation with the recorded decision, not a new attributed quote.

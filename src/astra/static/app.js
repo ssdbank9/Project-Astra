@@ -1303,7 +1303,7 @@ document.querySelector("#project-close").addEventListener("click",()=>closeProje
 // VPYGY5: the Command Center. Everything is drawn from what is already loaded (tasks, projects, the Owner's
 // cached requests) plus /api/portfolio; each count links to the list behind it, and rows open the task panel.
 function isOwner(){return !!state.user&&state.user.global_role==="owner"}
-function canReopenProject(){return !!state.user&&["owner","chairman"].includes(state.user.global_role)}
+function canReopenProject(){return isOwner()}
 function isOpen(t){return !CLOSED_STATUSES.includes(t.status)}
 function hhmm(){return new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}
 function homeTiles(){

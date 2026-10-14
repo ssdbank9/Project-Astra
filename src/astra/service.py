@@ -312,6 +312,43 @@ class AstraService:
         self.db = connection
         self._watched_schedule_projects: set[str] = set()
 
+    def _require_actor_now(self, actor: dict):
+        """Called under a write lock; primary-only actions keep their audited guards."""
+        # These authority columns exist in historical schemas too. Migration
+        # fault/retry fixtures must not depend on later directory-view columns.
+        current = row_dict(self.db.execute(
+            'SELECT id,global_role,active FROM users WHERE id=?', (actor.get('id'),)).fetchone())
+        if (not current or not current['active'] or actor.get('global_role') != current['global_role']
+                or bool(actor.get('active', True)) != bool(current['active'])):
+            raise Forbidden('Your access changed; reload and try again.')
+        return current
+
+    @contextmanager
+    def _actor_transaction(self, actor: dict, *, project_id=None, permission=None):
+        """Validate the authenticated snapshot after acquiring the write lock.
+
+        Session revocation cannot cancel a request already in flight. Do not
+        silently upgrade/downgrade its intent; changed authority requires retry.
+        Project permissions are queried under the same lock when supplied.
+        Rejection auditing stays at its existing caller boundary.
+        """
+        with transaction(self.db):
+            current = self._require_actor_now(actor)
+            if permission == 'manage' and not self.can_manage_project(current, project_id):
+                raise Forbidden('Task-management access denied.')
+            if permission == 'assign' and not self.can_assign(current, project_id):
+                raise Forbidden('Assignment access denied.')
+            if permission == 'view' and not self.can_view_project(current, project_id):
+                raise Forbidden('Project access denied.')
+            yield
+
+    def _require_open_project(self, project_id):
+        project = self.db.execute('SELECT status FROM projects WHERE id=?', (project_id,)).fetchone()
+        if project is None:
+            raise KeyError('Project not found.')
+        if project['status'] == 'closed':
+            raise Forbidden('Reopen the project before changing its work.')
+
     @staticmethod
     def _deadline_extended(before, after) -> bool:
         # Dates have already passed the service's ISO-date validation. A first
@@ -338,7 +375,7 @@ class AstraService:
         """Compare the complete project range inside the write lock. Nested task
         edits share their linked/bulk/import caller's snapshot and emit one final
         finish notice. Notices and history roll back with the dates on any failure."""
-        with transaction(self.db):
+        with self._actor_transaction(actor, project_id=project_id, permission='view'):
             if project_id in self._watched_schedule_projects:
                 yield
                 return
@@ -465,7 +502,7 @@ class AstraService:
             raise ValueError("A user with this email already exists.")
         user_id = new_id()
         password_hash = hash_password(password)
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             self._require_owner_now(actor)
             self.db.execute(
                 "INSERT INTO users(id,email,display_name,password_hash,global_role,active,created_at,created_by)"
@@ -839,12 +876,13 @@ class AstraService:
         name = str(name).strip()
         if not name:
             raise ValueError("Entity name is required.")
-        if self.db.execute("SELECT 1 FROM entities WHERE name=?", (name,)).fetchone():
-            raise ValueError("An entity with this name already exists.")
         entity_id = new_id()
-        self.db.execute(
-            "INSERT INTO entities VALUES(?,?,?,?,?)", (entity_id, name, 1, now_text(), actor["id"])
-        )
+        with self._actor_transaction(actor):
+            if self.db.execute("SELECT 1 FROM entities WHERE name=?", (name,)).fetchone():
+                raise ValueError("An entity with this name already exists.")
+            self.db.execute(
+                "INSERT INTO entities VALUES(?,?,?,?,?)", (entity_id, name, 1, now_text(), actor["id"])
+            )
         return self.get_entity(entity_id)
 
     def rename_entity(self, actor: dict, entity_id: str, name: str) -> dict:
@@ -854,7 +892,7 @@ class AstraService:
         name = name.strip()
         if any(unicodedata.category(character) == "Cc" for character in name):
             raise ValueError("Entity name cannot contain control characters.")
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             before = self.get_entity(entity_id)
             others = self.db.execute("SELECT name FROM entities WHERE id<>?", (entity_id,)).fetchall()
             if any(row["name"].casefold() == name.casefold() for row in others):
@@ -870,7 +908,7 @@ class AstraService:
 
     def set_entity_active(self, actor: dict, entity_id: str, active: bool) -> dict:
         self.require_owner(actor)
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             before = self.get_entity(entity_id)
             self.db.execute("UPDATE entities SET active=? WHERE id=?", (1 if active else 0, entity_id))
             after = self.get_entity(entity_id)
@@ -881,12 +919,13 @@ class AstraService:
     def seed_default_entities(self, actor: dict) -> list[str]:
         self.require_owner(actor)
         created = []
-        for name in APPROVED_ENTITIES:
-            if not self.db.execute("SELECT 1 FROM entities WHERE name=?", (name,)).fetchone():
-                self.db.execute(
-                    "INSERT INTO entities VALUES(?,?,?,?,?)", (new_id(), name, 1, now_text(), actor["id"])
-                )
-                created.append(name)
+        with self._actor_transaction(actor):
+            for name in APPROVED_ENTITIES:
+                if not self.db.execute("SELECT 1 FROM entities WHERE name=?", (name,)).fetchone():
+                    self.db.execute(
+                        "INSERT INTO entities VALUES(?,?,?,?,?)", (new_id(), name, 1, now_text(), actor["id"])
+                    )
+                    created.append(name)
         return created
 
     def set_project_entities(self, actor: dict, project_id: str, entity_ids: list) -> list[dict]:
@@ -895,7 +934,7 @@ class AstraService:
         self.require_owner(actor)
         self._require_project(project_id)
         seen = []
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             before = [r["id"] for r in self.db.execute("SELECT entity_id AS id FROM project_entities WHERE project_id=?", (project_id,)).fetchall()]
             current = self.db.execute("SELECT primary_entity_id FROM projects WHERE id=?", (project_id,)).fetchone()
             self.db.execute("DELETE FROM project_entities WHERE project_id=?", (project_id,))
@@ -995,7 +1034,7 @@ class AstraService:
         cleaned = "".join(sorted({c for c in str(days) if c in "0123456"}))
         if not cleaned:
             raise ValueError("At least one working day is required.")
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             before = self.db.execute("SELECT working_days FROM projects WHERE id=?", (project_id,)).fetchone()["working_days"]
             self.db.execute("UPDATE projects SET working_days=? WHERE id=?", (cleaned, project_id))
             if before != cleaned:
@@ -1015,7 +1054,7 @@ class AstraService:
         day = self._date(holiday_date)
         if not day:
             raise ValueError("A holiday date is required.")
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             before = self.db.execute("SELECT label FROM project_holidays WHERE project_id=? AND holiday_date=?", (project_id, day)).fetchone()
             self.db.execute(
                 "INSERT OR REPLACE INTO project_holidays(project_id,holiday_date,label,created_by,created_at)"
@@ -1030,7 +1069,7 @@ class AstraService:
     def remove_holiday(self, actor: dict, project_id: str, holiday_date) -> None:
         self.require_owner(actor)
         day = self._date(holiday_date)
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             before = self.db.execute("SELECT label FROM project_holidays WHERE project_id=? AND holiday_date=?", (project_id, day)).fetchone()
             self.db.execute("DELETE FROM project_holidays WHERE project_id=? AND holiday_date=?", (project_id, day))
             if before:
@@ -1048,7 +1087,7 @@ class AstraService:
             if amount < 0:
                 raise ValueError("Budget cannot be negative.")
         currency = (str(currency).strip().upper() or "PKR")
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             before = self.db.execute("SELECT budget_amount,budget_currency FROM projects WHERE id=?", (project_id,)).fetchone()
             self.db.execute("UPDATE projects SET budget_amount=?, budget_currency=? WHERE id=?", (amount, currency, project_id))
             after = self.get_project(actor, project_id)
@@ -1070,7 +1109,7 @@ class AstraService:
             raise ValueError("Target date cannot be earlier than the start date.")
         new = {"start_date": start_date, "target_date": target_date}
         reason = str(reason or "").strip()
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             # Read the old values inside the write transaction so two concurrent edits
             # cannot both record the same "before" (5WZ4A8 review gap 5).
             actor = self.get_user(actor['id'])
@@ -1105,7 +1144,7 @@ class AstraService:
         self.require_owner(actor)
         self._require_project(project_id)
         entity_id = entity_id or None
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             before = self.db.execute("SELECT primary_entity_id FROM projects WHERE id=?", (project_id,)).fetchone()["primary_entity_id"]
             if entity_id and not self.db.execute(
                 "SELECT 1 FROM project_entities WHERE project_id=? AND entity_id=?",
@@ -1204,10 +1243,11 @@ class AstraService:
         if not name.strip():
             raise ValueError("Project name is required.")
         project_id = new_id()
-        self.db.execute(
-            "INSERT INTO projects(id,name,description,timezone,created_at,created_by) VALUES(?,?,?,?,?,?)",
-            (project_id, name.strip(), description.strip(), timezone_name, now_text(), actor["id"]),
-        )
+        with self._actor_transaction(actor):
+            self.db.execute(
+                "INSERT INTO projects(id,name,description,timezone,created_at,created_by) VALUES(?,?,?,?,?,?)",
+                (project_id, name.strip(), description.strip(), timezone_name, now_text(), actor["id"]),
+            )
         return self.get_project(actor, project_id)
 
     def get_project(self, actor: dict, project_id: str) -> dict:
@@ -2191,7 +2231,7 @@ class AstraService:
             "decided_at": None,
             "decision_reason": None,
         }
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             # Access or designation may be removed after the early check; refuse before any request write.
             if not self._can_request_protected_action(actor, task, action):
                 raise Forbidden("Your permission to request this Owner action changed. Refresh the task.")
@@ -2255,7 +2295,10 @@ class AstraService:
             "decided_at": None,
             "decision_reason": None,
         }
-        with transaction(self.db):
+        with self._actor_transaction(actor, project_id=project['id'], permission='manage'):
+            if not self._is_project_manager(actor, project['id']):
+                raise Forbidden('Only a project Manager may request this Owner action.')
+            self._require_open_project(project['id'])
             existing = self._pending_request_by_intent(request)
             if existing:
                 return {"request": existing}
@@ -2466,7 +2509,7 @@ class AstraService:
             if not reason:
                 raise ValueError(f"A reason is required when a request is {decision}.")
             timestamp = now_text()
-            with transaction(self.db):
+            with self._actor_transaction(actor):
                 cursor = self.db.execute(
                     """UPDATE owner_action_requests
                        SET status=?, decided_by=?, decided_at=?, decision_reason=?
@@ -2665,7 +2708,7 @@ class AstraService:
         submission_id = new_id()
         timestamp = now_text()
         note = str(note).strip()
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             # Re-read under the write lock (03G8EH). The permission and status checks
             # above ran before BEGIN IMMEDIATE, so a concurrent submit, an Owner cancel
             # or acceptance, or a reassignment may have landed since; only a task still
@@ -2729,7 +2772,7 @@ class AstraService:
         decision_note = str(decision_note).strip()
         checklist_text = json.dumps(checklist, default=str, sort_keys=True) if checklist else None
         expected_task_revision = task["revision"] if expected_revision is None else expected_revision
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             # Re-read after the write lock is held. Two Owner requests may both have
             # observed "submitted" before entering this transaction; only the first
             # may decide it and emit the acceptance event.
@@ -2791,7 +2834,7 @@ class AstraService:
             )
         timestamp = now_text()
         expected_task_revision = task["revision"]
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             submission = self.get_submission(actor, submission_id)
             task = self.get_task(actor, submission["task_id"])
             if task["revision"] != expected_task_revision:
@@ -2927,7 +2970,7 @@ class AstraService:
                 reason,
             )
         timestamp = now_text()
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             current = self.get_task(actor, task_id)
             if current["revision"] != (task["revision"] if expected_revision is None else expected_revision):
                 raise Conflict("Task revision conflict: the task changed before the hold began.")
@@ -3014,6 +3057,14 @@ class AstraService:
             raise
 
     def _move_task(self, actor: dict, task: dict, source: str, target: str, payload: dict) -> dict:
+        # The lifecycle write, rank bookkeeping and response share one write lock.
+        # A failure in the final step must not leave a successful move behind.
+        if not self.can_manage_project(actor, task['project_id']):
+            raise Forbidden('Only an owner or a manager of this project can move its tasks on the board.')
+        with self._actor_transaction(actor, project_id=task['project_id'], permission='manage'):
+            return self._move_task_locked(actor, task, source, target, payload)
+
+    def _move_task_locked(self, actor: dict, task: dict, source: str, target: str, payload: dict) -> dict:
         task_id, title = task["id"], task["title"]
         if not self.can_manage_project(actor, task["project_id"]):
             raise Forbidden("Only an owner or a manager of this project can move its tasks on the board.")
@@ -3090,7 +3141,7 @@ class AstraService:
             return {"request": outcome["request"]}
         # Review 12a L3: a card that changes column is appended there (unranked) unless the
         # board sends its place; ranks belong to a column.
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             self.db.execute("UPDATE tasks SET board_rank=NULL WHERE id=?", (task_id,))
         result = {"task": self.get_task(actor, task_id)}
         if undo and undo["event_id"]:
@@ -3147,7 +3198,7 @@ class AstraService:
         if not isinstance(task_ids, list) or not task_ids or len(task_ids) > 500 \
                 or not all(isinstance(t, str) for t in task_ids) or len(set(task_ids)) != len(task_ids):
             raise ValueError("Send the column's task ids in their new order.")
-        with transaction(self.db):
+        with self._actor_transaction(actor, project_id=project_id, permission='manage'):
             tasks = self.list_tasks(actor, project_id)
             by_id = {t["id"]: t for t in tasks}
             for tid in task_ids:
@@ -3224,7 +3275,7 @@ class AstraService:
             raise Forbidden("Only an owner or a manager of this project can change this task.")
         stamp = datetime.now(timezone.utc)
         expires = (stamp + timedelta(seconds=LOCK_LEASE_SECONDS)).isoformat()
-        with transaction(self.db):
+        with self._actor_transaction(actor, project_id=task['project_id'], permission='manage'):
             lock = self._active_lock(task_id)
             if lock and lock["holder_user_id"] != actor["id"]:
                 raise TaskLocked(self._lock_message(task["title"], lock), lock)
@@ -3239,9 +3290,9 @@ class AstraService:
     def renew_task_lock(self, actor: dict, task_id: str, token: str) -> dict:
         """Extend your own lease. A lease that is gone (released, expired and retaken, or
         force-unlocked by an owner) is not silently taken back: the client stops."""
-        self.get_task(actor, task_id)
+        task = self.get_task(actor, task_id)
         expires = (datetime.now(timezone.utc) + timedelta(seconds=LOCK_LEASE_SECONDS)).isoformat()
-        with transaction(self.db):
+        with self._actor_transaction(actor, project_id=task['project_id'], permission='manage'):
             cursor = self.db.execute(
                 "UPDATE task_locks SET expires_at=? WHERE task_id=? AND holder_user_id=? AND token=? AND expires_at>?",
                 (expires, task_id, actor["id"], str(token), now_text()))
@@ -3255,8 +3306,8 @@ class AstraService:
         return {"task_id": task_id, "token": str(token), "expires_at": expires, "seconds": LOCK_LEASE_SECONDS}
 
     def release_task_lock(self, actor: dict, task_id: str, token: str) -> dict:
-        self.get_task(actor, task_id)
-        with transaction(self.db):
+        task = self.get_task(actor, task_id)
+        with self._actor_transaction(actor, project_id=task['project_id'], permission='view'):
             cursor = self.db.execute("DELETE FROM task_locks WHERE task_id=? AND holder_user_id=? AND token=?",
                                      (task_id, actor["id"], str(token)))
         return {"released": cursor.rowcount == 1}
@@ -3268,7 +3319,7 @@ class AstraService:
         if actor["global_role"] != "owner":
             raise Forbidden("Only an owner can unlock a task someone else is changing.")
         reason = str(reason or "").strip() or "Unlocked by an owner"
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             lock = self._active_lock(task_id)
             if not lock:
                 raise ValueError("Nobody holds a lock on this task now.")
@@ -3398,7 +3449,7 @@ class AstraService:
         return plan
 
     def timeline_schedule_preview(self, actor: dict, task_id: str, payload: dict) -> dict:
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             return self._timeline_schedule_plan(actor, task_id, payload)
 
     def timeline_schedule_apply(self, actor: dict, task_id: str, payload: dict) -> dict:
@@ -3450,7 +3501,7 @@ class AstraService:
             return self.reschedule_task(actor, task_id, payload)
         if mode not in {"after", "concurrent", "above", "below"}:
             raise ValueError("Unknown timeline drop action.")
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             task = self.get_task(actor, task_id)
             target = self.get_task(actor, payload.get("target_task_id"))
             if not self.can_manage_project(actor, task["project_id"]):
@@ -3543,7 +3594,7 @@ class AstraService:
         try:
             return self._reschedule_task(actor, task, payload)
         except (Forbidden, RuleRefusal) as exc:  # as on the board (review 12a L4)
-            with transaction(self.db):
+            with self._actor_transaction(actor):
                 self._event(task_id, actor["id"], "gantt_move_blocked",
                             {"start_date": task.get("start_date"), "due_date": task.get("due_date")},
                             {"start_date": payload.get("start_date"), "due_date": payload.get("due_date")}, str(exc))
@@ -3635,7 +3686,7 @@ class AstraService:
             if column not in WIP_COLUMNS:
                 raise ValueError("A limit can be set on Draft, Ready, In progress, Blocked or Submitted.")
             wanted[column] = self._wip_value(value)
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             current = self.wip_limits(project_id)
             changed = {c: v for c, v in wanted.items() if current.get(c) != v}
             if refuse_unchanged and not changed:
@@ -3864,7 +3915,7 @@ class AstraService:
         holders are named (owner decision: bulk locking)."""
         stamp = datetime.now(timezone.utc)
         expires = (stamp + timedelta(seconds=LOCK_LEASE_SECONDS)).isoformat()
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             held = []
             for task_id in task_ids:
                 lock = self._active_lock(task_id)
@@ -4046,12 +4097,8 @@ class AstraService:
             current = parent
         return ancestors
 
-    def set_parent(self, actor: dict, task_id: str, parent_task_id, *, override_wip: bool = False) -> dict:
-        task = self.get_task(actor, task_id)
-        if not self.can_manage_project(actor, task["project_id"]):
-            raise Forbidden("Task-management access denied.")
-        self._refuse_closed(task)
-        parent_task_id = parent_task_id or None
+    def _validate_parent_change(self, actor, task, parent_task_id):
+        task_id = task['id']
         if parent_task_id:
             if parent_task_id == task_id:
                 raise ValueError("A task cannot be its own parent.")
@@ -4068,10 +4115,21 @@ class AstraService:
         elif task.get("parent_task_id") and self._viewer_collaborators(task):
             raise ValueError(f"“{task['title']}” has a project viewer as a collaborator, who can collaborate on "
                              "subtasks only. Remove them first, then make it a top-level task.")
+
+    def set_parent(self, actor: dict, task_id: str, parent_task_id, *, override_wip: bool = False) -> dict:
+        task = self.get_task(actor, task_id)
+        if not self.can_manage_project(actor, task['project_id']):
+            raise Forbidden('Task-management access denied.')
+        self._refuse_closed(task)
+        parent_task_id = parent_task_id or None
+        self._validate_parent_change(actor, task, parent_task_id)
         timestamp = now_text()
         before = {"parent_task_id": task.get("parent_task_id")}
-        with transaction(self.db):
+        with self._actor_transaction(actor, project_id=task['project_id'], permission='manage'):
             self._refuse_closed_in_transaction(task_id)
+            task = self.get_task(actor, task_id)
+            self._validate_parent_change(actor, task, parent_task_id)
+            before = {'parent_task_id': task.get('parent_task_id')}
             if parent_task_id:
                 from . import workplan
                 if not workplan.compatible(workplan.plan(self.get_task(actor, parent_task_id)), workplan.plan(self.get_task(actor, task_id))):
@@ -4107,7 +4165,7 @@ class AstraService:
                                               or not isinstance(expected_revision, int)):
             raise ValueError("expected_revision must be an integer.")
         timestamp = now_text()
-        with transaction(self.db):
+        with self._actor_transaction(actor, project_id=task['project_id'], permission='manage'):
             self._refuse_closed_in_transaction(task_id)
             # QY0WG2 review: the old level and revision are re-read under the write lock.
             # Read before BEGIN IMMEDIATE, a confirmation that landed in between would be
@@ -4144,8 +4202,15 @@ class AstraService:
                                              as_collaborator=True)
             if refusal:
                 raise ValueError(refusal)
-        with transaction(self.db):
+        with self._actor_transaction(actor, project_id=task['project_id'], permission='manage'):
             self._refuse_closed_in_transaction(task_id)
+            self._validate_project_user(task['project_id'], user_id)
+            if role == 'collaborator':
+                current_task = self.get_task(actor, task_id)
+                refusal = self._assignee_refusal(task['project_id'], user_id,
+                    subtask=bool(current_task.get('parent_task_id')), as_collaborator=True)
+                if refusal:
+                    raise ValueError(refusal)
             cursor = self.db.execute(
                 "INSERT OR IGNORE INTO task_reviewers VALUES(?,?,?,?,?)",
                 (task_id, user_id, role, now_text(), actor["id"]),
@@ -4160,7 +4225,7 @@ class AstraService:
         if not self.can_manage_project(actor, task["project_id"]):
             raise Forbidden("Task-management access denied.")
         self._refuse_closed(task)
-        with transaction(self.db):
+        with self._actor_transaction(actor, project_id=task['project_id'], permission='manage'):
             self._refuse_closed_in_transaction(task_id)
             cursor = self.db.execute(
                 "DELETE FROM task_reviewers WHERE task_id=? AND user_id=? AND role=?", (task_id, user_id, role)
@@ -4203,7 +4268,7 @@ class AstraService:
         path = validate_attachment_path(path)
         display_name = str(display_name or "").strip() or os.path.basename(path.rstrip("/\\")) or path
         attachment_id = new_id()
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             self.db.execute(
                 "INSERT INTO task_attachments(id,task_id,path,display_name,note,added_by,added_at)"
                 " VALUES(?,?,?,?,?,?,?)",
@@ -4246,7 +4311,7 @@ class AstraService:
         # 6G89SJ (Owner decision 2026-09-19, Item 2): a link marked as a final result stays
         # until the final result is explicitly unmarked, which is audited. The schema's
         # ON DELETE CASCADE would otherwise drop the final result without a trace.
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             final_result = self.db.execute(
                 "SELECT id, title FROM final_results WHERE attachment_id=?", (attachment_id,)
             ).fetchone()
@@ -4381,36 +4446,39 @@ class AstraService:
         if not name:
             raise ValueError("A template name is required.")
         template_id = new_id()
-        self.db.execute(
-            "INSERT INTO templates(id,kind,name,description,body_json,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
-            (template_id, kind, name, str(description or "").strip(),
-             json.dumps(body, default=str, sort_keys=True), actor["id"], now_text()),
-        )
+        with self._actor_transaction(actor):
+            self.db.execute(
+                "INSERT INTO templates(id,kind,name,description,body_json,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
+                (template_id, kind, name, str(description or "").strip(),
+                 json.dumps(body, default=str, sort_keys=True), actor["id"], now_text()),
+            )
         return self.get_template(actor, template_id)
 
     def save_project_as_template(self, actor: dict, project_id: str, name: str, description: str = "") -> dict:
         self.require_owner(actor)
-        project = self.get_project(actor, project_id)
-        rows = [dict(r) for r in self.db.execute(
-            "SELECT * FROM tasks WHERE project_id=?", (project_id,)
-        ).fetchall()]
-        body = self._snapshot_tasks(rows)
-        body["kind"] = "project"
-        body["project"] = {
-            "description": project.get("description", ""),
-            "timezone": project.get("timezone", "Asia/Karachi"),
-            "working_days": project.get("working_days", "0123456"),
-        }
-        return self._store_template(actor, "project", name, description, body)
+        with self._actor_transaction(actor):
+            project = self.get_project(actor, project_id)
+            rows = [dict(r) for r in self.db.execute(
+                "SELECT * FROM tasks WHERE project_id=?", (project_id,)
+            ).fetchall()]
+            body = self._snapshot_tasks(rows)
+            body["kind"] = "project"
+            body["project"] = {
+                "description": project.get("description", ""),
+                "timezone": project.get("timezone", "Asia/Karachi"),
+                "working_days": project.get("working_days", "0123456"),
+            }
+            return self._store_template(actor, "project", name, description, body)
 
     def save_task_as_template(self, actor: dict, task_id: str, name: str, description: str = "") -> dict:
         self.require_owner(actor)
-        self.get_task(actor, task_id)  # existence + view (owner sees all)
-        rows = self._subtree_rows(task_id)
-        body = self._snapshot_tasks(rows)
-        body["kind"] = "task"
-        body["project"] = None
-        return self._store_template(actor, "task", name, description, body)
+        with self._actor_transaction(actor):
+            self.get_task(actor, task_id)  # existence + view (owner sees all)
+            rows = self._subtree_rows(task_id)
+            body = self._snapshot_tasks(rows)
+            body["kind"] = "task"
+            body["project"] = None
+            return self._store_template(actor, "task", name, description, body)
 
     def list_templates(self, actor: dict, kind: str | None = None) -> list[dict]:
         self.require_owner(actor)
@@ -4443,9 +4511,10 @@ class AstraService:
 
     def delete_template(self, actor: dict, template_id: str) -> None:
         self.require_owner(actor)
-        if not self.db.execute("SELECT 1 FROM templates WHERE id=?", (template_id,)).fetchone():
-            raise KeyError("Template not found.")
-        self.db.execute("DELETE FROM templates WHERE id=?", (template_id,))
+        with self._actor_transaction(actor):
+            if not self.db.execute("SELECT 1 FROM templates WHERE id=?", (template_id,)).fetchone():
+                raise KeyError("Template not found.")
+            self.db.execute("DELETE FROM templates WHERE id=?", (template_id,))
 
     def _owner_role(self, project_id: str, user_id: str | None) -> str | None:
         """The template role a task owner holds: 'owner'/'chairman' globally, else
@@ -4637,9 +4706,9 @@ class AstraService:
             raise ValueError("A project name is required.")
         anchor_date = self._date(anchor_date)
         body = template["body"]
-        picks = self._check_role_assignments(body, None, role_assignments, grants_membership=True)
         meta = body.get("project") or {}
-        with transaction(self.db):
+        with self._actor_transaction(actor):
+            picks = self._check_role_assignments(body, None, role_assignments, grants_membership=True)
             project_id = new_id()
             self.db.execute(
                 "INSERT INTO projects(id,name,description,timezone,working_days,created_at,created_by)"
@@ -4672,8 +4741,13 @@ class AstraService:
                 raise ValueError("A parent task must belong to the same project.")
         anchor_date = self._date(anchor_date)
         body = template["body"]
-        picks = self._check_role_assignments(body, project_id, role_assignments, grants_membership=False)
-        with transaction(self.db):
+        with self._actor_transaction(actor):
+            self._require_open_project(project_id)
+            if parent_task_id:
+                parent = self.get_task(actor, parent_task_id)
+                if parent['project_id'] != project_id:
+                    raise ValueError('A parent task must belong to the same project.')
+            picks = self._check_role_assignments(body, project_id, role_assignments, grants_membership=False)
             self._instantiate_tasks(actor, body, project_id, parent_task_id, anchor_date, template["name"], picks)
         return {"project_id": project_id, "created": len(body.get("tasks", []))}
 
@@ -4716,7 +4790,7 @@ class AstraService:
                 raise KeyError("Attachment not found on this task.")
             title = attachment["display_name"]
             columns, values = ("attachment_id",), (source_id,)
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             cursor = self.db.execute(
                 f"INSERT OR IGNORE INTO final_results(id,task_id,source_type,{columns[0]},title,note,marked_by,marked_at)"
                 " VALUES(?,?,?,?,?,?,?,?)",
@@ -4742,7 +4816,7 @@ class AstraService:
                 "Owner-only final-result publication",
             )
             raise Forbidden("Owner access required for final-result publication.")
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             cursor = self.db.execute("DELETE FROM final_results WHERE id=?", (result_id,))
             if cursor.rowcount != 1:
                 raise KeyError("Final result not found.")
@@ -4820,12 +4894,11 @@ class AstraService:
         return [dict(row) for row in rows]
 
     def reopen_project(self, actor: dict, project_id: str, reason: str = "") -> dict:
-        if not actor.get("active") or actor.get("global_role") not in {"owner", "chairman"}:
-            raise Forbidden("Owner or Chairman access required.")
+        self.require_owner(actor)
         reason = str(reason).strip()
         if not reason:
             raise ValueError("A reason is required to reopen a project.")
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             current = row_dict(self.db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
             if not current:
                 raise KeyError("Project not found.")
@@ -4872,7 +4945,7 @@ class AstraService:
             if not note:
                 raise ValueError("Exceptional closure requires a note describing the residual work.")
         timestamp = now_text()
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             current = row_dict(self.db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
             if not current or current["status"] == "closed":
                 raise Conflict("Project closure conflict: this project is already closed.")
@@ -5044,7 +5117,7 @@ class AstraService:
         if start and due and due < start:
             raise ValueError("Due date cannot be earlier than start date.")
         proposal_id, timestamp = new_id(), now_text()
-        with transaction(self.db):
+        with self._actor_transaction(actor, project_id=task['project_id'], permission='manage'):
             self._refuse_closed_in_transaction(task_id)
             self.db.execute(
                 "INSERT INTO task_schedule_proposals(id,task_id,start_date,due_date,reason,proposed_by,proposed_at,status)"
@@ -5134,7 +5207,7 @@ class AstraService:
             return self._request_protected_action(
                 actor, task, "reject_schedule_proposal", {"proposal_id": proposal_id, "reason": reason}, reason
             )
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             proposal = self.get_schedule_proposal(actor, proposal_id)
             task = self.get_task(actor, proposal["task_id"])
             self._assert_active_request_revision(task, owner_decision)
@@ -5186,7 +5259,8 @@ class AstraService:
             "dependency_type": dependency_type,
             "created": True,
         }
-        with transaction(self.db):
+        with self._actor_transaction(actor, project_id=successor['project_id'], permission='manage'):
+            self._require_open_project(successor['project_id'])
             self._refuse_closed_in_transaction(successor_task_id)
             from . import workplan
             if not workplan.compatible(workplan.plan(self.get_task(actor, predecessor_task_id)), workplan.plan(self.get_task(actor, successor_task_id))):
@@ -5241,7 +5315,8 @@ class AstraService:
             "successor_task_id": successor_task_id,
             "dependency_type": existing["dependency_type"],
         }
-        with transaction(self.db):
+        with self._actor_transaction(actor, project_id=successor['project_id'], permission='manage'):
+            self._require_open_project(successor['project_id'])
             self._refuse_closed_in_transaction(successor_task_id)
             self._assert_task_unlocked(predecessor_task_id, actor["id"])
             self.db.execute(
@@ -5361,14 +5436,16 @@ class AstraService:
         if row["user_id"] != actor["id"]:
             raise Forbidden("Notification access denied.")
         # Marking read only sets read_at; it never deletes the record or changes task state.
-        self.db.execute(
-            "UPDATE notifications SET read_at=? WHERE id=? AND read_at IS NULL", (now_text(), notification_id)
-        )
+        with self._actor_transaction(actor):
+            self.db.execute(
+                "UPDATE notifications SET read_at=? WHERE id=? AND read_at IS NULL", (now_text(), notification_id)
+            )
 
     def mark_all_notifications_read(self, actor: dict) -> int:
-        cursor = self.db.execute(
-            "UPDATE notifications SET read_at=? WHERE user_id=? AND read_at IS NULL", (now_text(), actor["id"])
-        )
+        with self._actor_transaction(actor):
+            cursor = self.db.execute(
+                "UPDATE notifications SET read_at=? WHERE user_id=? AND read_at IS NULL", (now_text(), actor["id"])
+            )
         return cursor.rowcount
 
     @staticmethod
@@ -5470,7 +5547,7 @@ class AstraService:
             config = importer.TemplateConfig.preset(str(payload["preset"]))
         else:
             config = importer.TemplateConfig.normalize(payload.get("columns", []))
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             before = self._import_config().to_dict()
             row = self.db.execute("SELECT version FROM import_template_config WHERE id=1").fetchone()
             version = (row["version"] if row else 0) + 1
@@ -5516,7 +5593,7 @@ class AstraService:
         if fmt == "csv" or workplan_csv:
             if workplan_csv:
                 from . import workplan
-                with transaction(self.db):
+                with self._actor_transaction(actor):
                     project_row = self._template_project(actor, project_id)
                     entities = self.list_project_entities(actor, project_id)
                     # Reserve short keys per download. Two owners filling separate
@@ -5566,7 +5643,7 @@ class AstraService:
         overwritten), Type only repeats a value the task already carries in import_extras.
         """
         project_id = project["id"]
-        with transaction(self.db):
+        with self._actor_transaction(actor):
             # Recheck under the write lock: the project may have closed after lookup.
             project = self._template_project(actor, project_id)
             tasks = [dict(row) for row in self.db.execute(
@@ -5829,6 +5906,11 @@ class AstraService:
         import_id = new_id()
         try:
             with transaction(self.db):
+                try:
+                    self._require_actor_now(actor)
+                except Forbidden:
+                    project = row_dict(self.db.execute('SELECT * FROM projects WHERE id=?', (project_id,)).fetchone()) if project_id else None
+                    raise ImportBlocked(actor, project, 'import_commit') from None
                 engine, preview, options = self._import_engine(actor, project_id, filename, data, options, "import_commit")
                 if plan_required and not expected_plan:
                     raise ValueError("Run the preview first: the commit needs the preview's plan fingerprint (X-Plan-Fingerprint).")

@@ -15,7 +15,8 @@ Review-package SHA: USE THE EXACT SHA I SUPPLIED WITH THIS PROMPT.
 App-source target: the supplied review-package SHA, including October 14 repairs.
 Historical pre-repair baseline: da1b3fd21ed0d4357669f0e727369fda02640672.
 
-The package includes FRONTEND_REPAIRS_2026-10-14.md,
+The package includes REVIEW_GUARD_REPAIRS_2026-10-14.md,
+FRONTEND_REPAIRS_2026-10-14.md,
 CRITICAL_UI_UX_REVIEW_2026-10-13.md and
 CRITICAL_REVIEW_COVERAGE_2026-10-13.md. Independently test their wrong-task
 save, failed-assignee lookup and other findings against the repaired source.
@@ -38,9 +39,16 @@ Tests and loopback browser fixtures may write disposable data only. Disable
 jaira ref/snapshot synchronization in a disposable container as AGENTS.md directs;
 read the board without claims or mutations.
 
+Also challenge the closed-project template/dependency guards and current
+actor/membership/target checks at write boundaries. Verify rejection audits,
+bulk cleanup, atomic board moves and historical template capture. App Owners
+alone reopen projects per the dated decision; Aly explicitly retained ordinary
+submitted edits. Do not propose a freeze as though it were the accepted rule.
+
 1. **Establish scope and rules.** Read root AGENTS.md, pending-global-mistakes.md
    (and Aly's canonical global log only if actually available), then
-   docs/handoff/README.md, FRONTEND_REPAIRS_2026-10-14.md,
+   docs/handoff/README.md, REVIEW_GUARD_REPAIRS_2026-10-14.md,
+   FRONTEND_REPAIRS_2026-10-14.md,
    PRE_DEPLOYMENT_REVIEW_2026-10-13.md and
    BOARD_AUDIT_2026-10-13.md. Inventory every tracked docs/handoff file from git;
    read all of them, including AGENT_START_PROMPT, HANDOFF_2026-09-26,
@@ -90,7 +98,8 @@ read the board without claims or mutations.
    disposable environment if needed. Node must be on PATH. Run node --check
    src/astra/static/app.js and read-only jaira validate/list. Record Python/Node,
    OS, exact command, test count, failures/errors/skips and duration. Prior receipt
-   is 849 OK with one unavailable Windows symlink skip; obtain your own result.
+   is 881 in 830.547s, OK with one unavailable Windows symlink skip; obtain
+   your own result.
    For critical guards, remove them only in memory or a disposable copy and
    demonstrate that the relevant regression fails; preserve reviewed source.
    Completion: actual receipts, not 'should pass'; list unavailable environments.
