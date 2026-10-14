@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-14T15:46:01Z
+updated-at: 2026-10-14T15:47:31Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
@@ -37,6 +37,13 @@ outcome-resolves: "The implementation plan will cover schema, service authorizat
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
+
+- [ ] Map every protected HTTP/API entry point and the existing owner create/reset, session, UI and migration paths; write the allowed change-only route list.
+- [ ] Add schema v21 must_change_password default 0 and service-level failing cases for new/reset accounts, verified current-password change, audit, session revocation and legacy rows.
+- [ ] Implement atomic service changes while preserving the initial-owner bootstrap and no-lockout sign-in rule.
+- [ ] Add HTTP change-only gating and self-change endpoint with CSRF, and failing HTTP cases for blocked APIs, allowed sign-out/change, wrong password and session behavior.
+- [ ] Add accessible UI for forced first sign-in and voluntary self-change; test login, reload/session restoration and route bypass prevention.
+- [ ] Run migration compatibility, service/HTTP/UI/full suites, guard-removal check and local browser on synthetic data; get independent source review and update handoff.
 
 ## Progress
 
