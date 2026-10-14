@@ -14,8 +14,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-14T15:44:18Z
+updated-at: 2026-10-14T15:44:36Z
 updated-by: Codex
+claimed-by: X1CarbonPC-39188
+claimed-at: 2026-10-14T15:44:36Z
 ---
 
 # First-login and self-service password change
