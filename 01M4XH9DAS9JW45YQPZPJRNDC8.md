@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-14T18:45:55Z
+updated-at: 2026-10-14T18:46:17Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
@@ -52,3 +52,4 @@ outcome-resolves: "Begin implementing v21 flag, atomic password changes, HTTP re
 
 ## Progress
 - **2026-10-14 15:47 · Codex** — Planning found schema20. Add nullable-free INTEGER must_change_password NOT NULL DEFAULT 0 in schema21 so existing users and the initial owner remain unaffected. Set it for accounts created by an App Owner and all App Owner/server password resets. A5 explicitly says a reset password is temporary; never set the flag for an ordinary successful self-change. Enforce forced state server-side in _require_user, not only by hiding navigation. Allow GET /api/me, POST /api/password/change, POST /api/logout only while flagged; logout-all should be blocked because it invalidates the only forced-change session. Self-change verifies current password, writes password_changed audit without secrets, clears the flag and keeps this session while revoking all others.
+- **2026-10-14 18:46 · Codex** — The first full suite exposed 71 failures and 11 errors because unrelated HTTP tests logged in newly created users and then attempted protected APIs without changing the temporary password. The dedicated A5 cases were correct; only legacy fixtures needed to model established accounts. After updating those disposable fixtures, 30 focused tests passed and the full 891-test suite passed with one skip. Isolated Chrome exposed and verified the fix for password dialog markup appearing after app.js, which stopped initialization. Next: complete handoff, local fixed-point commit, independent Standards and Spec review; then leave the ticket awaiting Aly.
