@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-14T19:50:37Z
+updated-at: 2026-10-14T19:52:04Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
@@ -38,7 +38,7 @@ outcome-resolves: "Begin implementing v21 flag, atomic password changes, HTTP re
 
 <Steps, in order — filled in by the pre-process step, or by you.>
 
-- [x] Map every protected HTTP/API entry point and the existing owner create/reset, session, UI and migration paths; write the allowed change-only route list.
+- [x] Map every protected HTTP/API entry point and the existing App Owner create/reset, session, UI and migration paths; write the allowed change-only route list.
   proof: tests/test_password_change.py; src/astra/web.py:_require_user
 - [x] Add schema v21 must_change_password default 0 and service-level failing cases for new/reset accounts, verified current-password change, audit, session revocation and legacy rows.
   proof: src/astra/db.py:_migrate_v21; tests/test_db.py:ForcedPasswordChangeMigrationTests; tests/test_password_change.py
