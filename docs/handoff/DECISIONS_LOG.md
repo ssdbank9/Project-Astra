@@ -233,3 +233,15 @@ transition and deployment remain separate.
   implementation, accounts, credentials, merges, provisioning or deployment.
 - Only actual dated owner decisions count. The local decision-checkbox form
   is draft/not submitted; its values do not complete OPEN_QUESTIONS.
+
+### 2026-10-14 — repair authorization and Add a task
+
+- Aly authorized fixing all issues from the critical built-work review.
+  This authorizes implementation/verification, not acceptance or deployment.
+- After explanations of project-task creation versus private drafts, Aly said
+  "Go with your recommendatons and change name to add a task."
+  Use direct project-task creation for launch and label it **Add a task**.
+  Only authorized project managers/App Owners can create project tasks;
+  project access determines visibility. Private drafts remain separate future
+  scope. Supersede the conflicting private-Capture recommendation in the UX
+  baseline; no permissions or existing data are changed by that choice.

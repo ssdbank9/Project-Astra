@@ -68,7 +68,7 @@ request; they do not pretend to have completed.
 | Adopt | Trello-level board legibility | A card defaults to title, accountable owner, due state, criticality and blocker/dependency state. Depth opens in a drawer. |
 | Adopt | Monday-style portfolio and workload visibility | Aggregate multiple projects with permission-aware drill-through, explicit metric definitions, capacity and effort. |
 | Adopt | Unscheduled work tray | Timeline exposes undated tasks without inventing dates. |
-| Adopt | Personal quick capture | Private captures stay private until the user deliberately files them into an authorized project. |
+| Adapt | Add a task | Aly selected direct project-task creation on 2026-10-14. Choose an authorized open project; the new task is visible within its project permissions immediately. Private drafts are a separate future feature. |
 | Adopt | Keyboard efficiency and undo | Pointer operations have keyboard/menu equivalents; ordinary reversible actions have 15-second Undo and audited restoration. |
 | Adapt | Direct drag-and-drop | Every drop is previewed, authorized, revalidated, audited and recoverable according to impact. |
 | Adapt | Dependencies and cascading dates | Astra previews downstream effects and asks whether permitted work moves; it never silently shifts a governed plan. |
@@ -90,7 +90,7 @@ The permanent navigation is intentionally short:
 2. **My Work** — assigned work and personal planning.
 3. **Inbox** — Needs action and Activity.
 4. **Projects** — project switcher and workspaces.
-5. **Capture** — private quick capture.
+5. **Add a task** — create work directly in an authorized open project (Aly, 2026-10-14).
 
 Owner-only administration lives under one **Manage** entry rather than competing
 with daily work:
@@ -257,7 +257,7 @@ downstream effect and either requires Owner confirmation or creates an Owner
 request. Cross-project links are Owner-only and limited to approved interface
 records.
 
-### 7. My Work, Inbox and Capture
+### 7. My Work, Inbox and Add a task
 
 These are different products and must not collapse into one feed.
 
@@ -267,8 +267,10 @@ These are different products and must not collapse into one feed.
   conflicts, failed automations and file-action requests. Reading is not approval.
 - **Inbox — Activity:** mentions, watched changes and ordinary subscribed updates,
   bundled to prevent noise.
-- **Capture:** private title-first intake with optional note/date. Filing previews
-  destination, resulting access and any required fields.
+- **Add a task:** title-first project-task creation with a required authorized
+  project and optional person/dates. The task is shared within that project's
+  access rules immediately. Aly chose this simpler launch flow on 2026-10-14;
+  the earlier private-Capture proposal is superseded, not an existing feature.
 
 Each actionable item states the actor, intended change, affected records, reason,
 time, consequence, deadline and available decisions. Owner mandatory alerts

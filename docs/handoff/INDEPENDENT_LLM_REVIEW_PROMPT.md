@@ -12,12 +12,16 @@ Treat existing claims and checked ticket boxes as evidence to test, not as proof
 Repository: https://github.com/ssdbank9/Project-Astra.git
 Working branch: codex/migration-safety-remediation
 Review-package SHA: USE THE EXACT SHA I SUPPLIED WITH THIS PROMPT.
-App-source baseline: da1b3fd21ed0d4357669f0e727369fda02640672.
+App-source target: the supplied review-package SHA, including October 14 repairs.
+Historical pre-repair baseline: da1b3fd21ed0d4357669f0e727369fda02640672.
 
-The package also includes CRITICAL_UI_UX_REVIEW_2026-10-13.md and
+The package includes FRONTEND_REPAIRS_2026-10-14.md,
+CRITICAL_UI_UX_REVIEW_2026-10-13.md and
 CRITICAL_REVIEW_COVERAGE_2026-10-13.md. Independently test their wrong-task
-save, failed-assignee lookup and other findings. A passing full suite does
-not refute those browser failures. Local screenshots/fixture logs are ignored
+save, failed-assignee lookup and other findings against the repaired source.
+The earlier browser failures refer to the historical baseline; independently
+challenge the new guards and repair receipts. A passing suite alone does not
+prove the workflows. Local screenshots/fixture logs are ignored
 and are not supplied by Git; create disposable reproductions and state limits.
 
 Your task is REVIEW ONLY. Make no source, document, board, real account,
@@ -36,7 +40,8 @@ read the board without claims or mutations.
 
 1. **Establish scope and rules.** Read root AGENTS.md, pending-global-mistakes.md
    (and Aly's canonical global log only if actually available), then
-   docs/handoff/README.md, PRE_DEPLOYMENT_REVIEW_2026-10-13.md and
+   docs/handoff/README.md, FRONTEND_REPAIRS_2026-10-14.md,
+   PRE_DEPLOYMENT_REVIEW_2026-10-13.md and
    BOARD_AUDIT_2026-10-13.md. Inventory every tracked docs/handoff file from git;
    read all of them, including AGENT_START_PROMPT, HANDOFF_2026-09-26,
    NEXT_STEPS, OPEN_QUESTIONS, DECISIONS_LOG and DEPLOYMENT_RUNBOOK. Read the
@@ -85,7 +90,7 @@ read the board without claims or mutations.
    disposable environment if needed. Node must be on PATH. Run node --check
    src/astra/static/app.js and read-only jaira validate/list. Record Python/Node,
    OS, exact command, test count, failures/errors/skips and duration. Prior receipt
-   was 832 OK with one unavailable Windows symlink skip; obtain your own result.
+   is 849 OK with one unavailable Windows symlink skip; obtain your own result.
    For critical guards, remove them only in memory or a disposable copy and
    demonstrate that the relevant regression fails; preserve reviewed source.
    Completion: actual receipts, not 'should pass'; list unavailable environments.

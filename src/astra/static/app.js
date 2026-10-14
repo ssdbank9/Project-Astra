@@ -1,10 +1,12 @@
 const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality"};
 async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.lock&&data.error?data.error.replace(/at \d{2}:\d{2}:\d{2} UTC/,`at ${lockTime(data.lock)}`):data.error||"Request failed");err.status=response.status;err.confirm=data.confirm;err.impact=data.impact;err.lock=data.lock;throw err}return data}
+function clearFeedback(element){if(!element)return;element.classList.remove("message-info","message-success");element.textContent=""}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
 function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);document.querySelector("#new-project").hidden=document.querySelector("#people").hidden=!isOwner();projectActions();refreshImportAccess()}
-async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>({notifications:[],unread:0}))]);state.projects=p.projects;state.tasks=t.tasks;state.today=t.today||null;state.timezone=t.timezone||null;state.entities=e.entities;state.notifications=n.notifications;state.unread=n.unread;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
-function updateBell(){const n=state.unread||0,badge=document.querySelector("#unread-count"),inbox=document.querySelector("#inbox");badge.textContent=n;badge.hidden=!n;inbox.classList.toggle("has-unread",n>0);inbox.setAttribute("aria-label",n?`Inbox, ${n} unread`:"Inbox")}
-function fillFilters(){const pf=document.querySelector("#project-filter"),tp=document.querySelector('#task-form select[name="project_id"]');const selected=pf.value;pf.innerHTML='<option value="">All projects</option>';tp.innerHTML="";for(const p of state.projects){pf.add(new Option(p.status==="closed"?`${p.name} (closed)`:p.name,p.id));if(p.status!=="closed")tp.add(new Option(p.name,p.id))}pf.value=selected;const statuses=[...new Set(state.tasks.map(t=>t.status))].sort();document.querySelector("#status-filter").innerHTML='<option value="">All statuses</option>'+statuses.map(s=>`<option>${escapeHtml(s)}</option>`).join("");const ef=document.querySelector("#entity-filter"),efSel=ef.value;ef.innerHTML='<option value="">All entities</option>'+(state.entities||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`).join("");ef.value=efSel;fillPredecessors()}
+async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>null)]);state.projects=p.projects;state.tasks=t.tasks;state.today=t.today||null;state.timezone=t.timezone||null;state.entities=e.entities;if(n){state.notifications=n.notifications;state.unread=n.unread;state.notificationsKnown=true}state.notificationsStale=!n;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
+function updateBell(){const n=state.unread||0,stale=state.notificationsStale,badge=document.querySelector("#unread-count"),inbox=document.querySelector("#inbox");badge.textContent=stale&&!state.notificationsKnown?"!":n;badge.hidden=!n&&!stale;inbox.classList.toggle("has-unread",n>0);inbox.setAttribute("aria-label",stale?(state.notificationsKnown?`Inbox, ${n} unread (may be outdated)`:"Inbox, notifications unavailable"):n?`Inbox, ${n} unread`:"Inbox");inbox.title=stale?"Cannot refresh notifications. Open Inbox to retry.":""}
+function fillFilters(){const pf=document.querySelector("#project-filter"),tp=document.querySelector('#task-form select[name="project_id"]');const selected=pf.value;pf.innerHTML='<option value="">All projects</option>';tp.innerHTML="";for(const p of state.projects){pf.add(new Option(p.status==="closed"?`${p.name} (closed)`:p.name,p.id));if(canCaptureProject(p))tp.add(new Option(p.name,p.id))}document.querySelector("#new-task").hidden=!state.projects.some(canCaptureProject);pf.value=selected;const statuses=[...new Set(state.tasks.map(t=>t.status))].sort();document.querySelector("#status-filter").innerHTML='<option value="">All statuses</option>'+statuses.map(s=>`<option>${escapeHtml(s)}</option>`).join("");const ef=document.querySelector("#entity-filter"),efSel=ef.value;ef.innerHTML='<option value="">All entities</option>'+(state.entities||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`).join("");ef.value=efSel;fillPredecessors()}
+function canCaptureProject(project){return project.status!=="closed"&&(isOwner()||project.can_manage===true)}
 function projectEntityIds(projectId){const p=state.projects.find(p=>p.id===projectId);return new Set((p&&p.entities?p.entities:[]).map(e=>e.id))}
 function fillPredecessors(){const project=document.querySelector('#task-form select[name="project_id"]').value,select=document.querySelector('#task-form select[name="predecessor_task_id"]'),parent=document.querySelector('#task-form select[name="parent_task_id"]');select.innerHTML='<option value="">No predecessor</option>';parent.innerHTML='<option value="">No parent</option>';for(const task of state.tasks.filter(t=>t.project_id===project)){select.add(new Option(task.title,task.id));parent.add(new Option(task.title,task.id))}}
 function render(){
@@ -733,7 +735,7 @@ function projectOverview(p,tasks){
 function renderProject(r){
   const q=s=>document.querySelector(s),p=(state.projects||[]).find(x=>x.id===r.id),body=q("#project-body"),slot=q("#project-gantt-slot");
   q("#project-tabs").innerHTML=p?PROJECT_TABS.map(([k,l])=>`<a href="#/project/${encodeURIComponent(p.id)}/${k}"${k===r.tab?' aria-current="page"':""}>${l}</a>`).join(""):"";
-  q("#project-capture").hidden=!p||p.status==="closed";
+  q("#project-capture").hidden=!p||!canCaptureProject(p);
   q("#project-import").hidden=!p||p.status==="closed"||!(importState.targets?.projects||[]).some(project=>project.id===p.id);
   q("#project-save-template").hidden=!p||!isOwner();
   q("#project-close").hidden=!p||!isOwner()||p.status==="closed";
@@ -832,7 +834,7 @@ function askMove(kind,t,column,err){
   if(kind==="hold")fillAssignees(t.project_id,f.querySelector('select[name="owner_user_id"]'),t.owner_user_id,t.parent_task_id?"subtask":"task",t.owner_name);
   return new Promise(resolve=>{
     let settled=false;const done=v=>{if(settled)return;settled=true;if(d.open)d.close();resolve(v)};
-    f.onsubmit=e=>{e.preventDefault();const data=Object.fromEntries(new FormData(f));
+    f.onsubmit=e=>{e.preventDefault();if(kind==="hold"&&f.querySelector('select[name="owner_user_id"]')?.disabled===true){document.querySelector("#move-error").textContent="Load the people list before choosing a responsible owner. Use Retry people.";return}const data=Object.fromEntries(new FormData(f));
       if(kind==="dependencies")return done({override_dependencies:true});
       if(kind==="wip")return done({override_wip:true});
       if(kind==="impact")return done({confirmed:true});
@@ -1050,7 +1052,7 @@ async function forceUnlock(task){
   const answer=await askMove("unlock",task,null,{lock:task.lock});if(!answer)return;
   try{await api(taskApi(task.id,"/lock/force"),{method:"POST",body:JSON.stringify(answer)});showToast(`Unlocked “${task.title}”; ${task.lock?task.lock.holder_name:"the holder"} has been told.`)}
   catch(err){showToast(`Not unlocked: ${err.message}`,null,null,true)}
-  await load();await openDetail(task.id);
+  await refreshDetail(task.id);
 }
 document.querySelector("#detail-body").addEventListener("click",e=>{if(e.target.closest("#force-unlock")&&panelState.task)forceUnlock(panelState.task)});
 // The panel's edit form takes an edit lease as soon as someone types in it.
@@ -1229,6 +1231,7 @@ function bulkPayload(){
   return {task_ids:[...bulk.ids],action:bulk.action,value:bulk.action==="due_shift"?Number(raw):raw};
 }
 async function reviewBulk(pid){
+  if(bulk.action==="assignee"&&document.querySelector("#bulk-input").disabled===true){showToast("Load the people list before reviewing assignments. Use Retry people.",null,null,true);return}
   const payload=bulkPayload();
   let plan;
   try{({preview:plan}=await api(`/api/projects/${encodeURIComponent(pid)}/bulk/preview`,{method:"POST",body:JSON.stringify(payload)}))}
@@ -1410,6 +1413,7 @@ document.querySelector("#my-work-body").addEventListener("change",e=>{
 function openCapture(pidArg){
   const r=currentRoute(),pid=typeof pidArg==="string"?pidArg:r.name==="project"?r.id:r.name==="portfolio"?document.querySelector("#project-filter").value:"";
   const form=document.querySelector("#task-form"),project=form.querySelector('select[name="project_id"]');
+  if(!state.projects.some(canCaptureProject)||(pid&&!state.projects.some(p=>p.id===pid&&canCaptureProject(p)))){showToast("You can add tasks only to an open project you manage.");return}
   if(pid&&[...project.options].some(o=>o.value===pid))project.value=pid;
   fillPredecessors();fillCaptureAssignees();
   form.querySelector(".error").textContent="";
@@ -1532,6 +1536,7 @@ async function openTemplates(){
   }catch(err){document.querySelector("#templates-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`;document.querySelector("#templates-dialog").showModal()}
 }
 function renderTemplates(templates){
+  templatePicker.templates=templates||[];
   const rows=(templates||[]).map(t=>`<li><strong>${escapeHtml(t.name)}</strong> · <span class="muted">${escapeHtml(t.kind)} · ${t.task_count} task(s)${(t.roles||[]).length?` · roles: ${escapeHtml(t.roles.map(r=>TEMPLATE_ROLE_LABELS[r]||r).join(", "))}`:""}</span>
     ${t.description?`<br><em class="muted">${escapeHtml(t.description)}</em>`:""}
     <br><button type="button" class="link" data-use-template="${escapeHtml(t.id)}" data-kind="${escapeHtml(t.kind)}" data-roles="${escapeHtml((t.roles||[]).join(","))}">Use</button>
@@ -1552,55 +1557,64 @@ async function saveProjectAsTemplate(pid=document.querySelector("#project-filter
 // 8B9NBH: templates carry suggested owner ROLES; the Owner picks a person per role when using one.
 const TEMPLATE_ROLE_LABELS={owner:"App Owner",chairman:"Chairman",manager:"Project manager",member:"Project member",viewer:"Project viewer"};
 async function useTemplate(id,kind,roles){
-  try{
-    let url,payload,done;
-    if(kind==="project"){
-      const name=prompt("New project name:");if(!name)return;
-      const anchor_date=prompt("Anchor date for relative schedule (YYYY-MM-DD, blank to leave dates unset):")||null;
-      url=`/api/templates/${id}/create-project`;payload={name,anchor_date};done="Project created from template.";
-    }else{
-      const project_id=prompt("Target project id to add this task subtree to:\n(Tip: open the project, a task's detail shows its project.)");if(!project_id)return;
-      const parent_task_id=prompt("Parent task id (optional, blank for top-level):")||null;
-      const anchor_date=prompt("Anchor date for relative schedule (YYYY-MM-DD, blank to leave dates unset):")||null;
-      url=`/api/templates/${id}/create-task`;payload={project_id,parent_task_id,anchor_date};done="Task subtree created from template.";
-    }
-    const finish=async role_assignments=>{
-      await api(url,{method:"POST",body:JSON.stringify({...payload,role_assignments})});
-      alert(done);document.querySelector("#templates-dialog").close();await load();
-    };
-    if(!(roles||[]).some(r=>r!=="owner"))return await finish({});
-    await renderRolePicker(kind,roles,finish);
-  }catch(x){const e=document.querySelector("#templates-error");if(e)e.textContent=x.message;else alert(x.message)}
-}
-async function renderRolePicker(kind,roles,finish){
-  const {users}=await api("/api/users");
-  const active=(users||[]).filter(u=>u.active);
-  const fallback=kind==="project"?"Leave unassigned":"Automatic (the role's only holder, else unassigned)";
-  const rows=roles.map(r=>{
-    const label=escapeHtml(TEMPLATE_ROLE_LABELS[r]||r);
-    if(r==="owner")return `<label>${label}<select disabled><option>${escapeHtml(state.user.display_name)} (App Owner)</option></select></label>`;
-    const people=active.filter(u=>r==="chairman"?u.global_role==="chairman":u.global_role==="member");
-    const options=people.map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.display_name)}</option>`).join("");
-    return `<label>${label}<select name="${escapeHtml(r)}"><option value="">${escapeHtml(fallback)}</option>${options}</select></label>`;
-  }).join("");
-  const hint=kind==="project"?"Each person you pick is given that role on the new project and is pre-filled on its tasks.":"A person you pick must already hold that role on the target project.";
-  document.querySelector("#templates-body").innerHTML=`<form id="template-role-form"><h2>Who fills each role?</h2>
-    <p class="fine">${hint}</p>${rows}
-    <div class="actions"><button type="button" class="quiet" id="template-role-back">Back</button><button>Create</button></div>
-    <div class="error" id="templates-error"></div></form>`;
+  const template=(templatePicker.templates||[]).find(t=>t.id===id);
+  const name=template?.name||"Template",project=kind==="project";
+  const body=document.querySelector("#templates-body");
+  body.innerHTML=`<form id="template-role-form"><h2>Use ${escapeHtml(name)}</h2>
+    <p class="fine">Copy the task structure into ${project?"a new project":"an existing project"}. History, evidence and accepted baselines are not copied.</p>
+    ${project?'<label>New project name<input name="name" required></label>':`<label>Target project<select name="project_id" id="template-project" required><option value="">Choose a project…</option>${state.projects.filter(p=>p.status!=="closed").map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("")}</select></label><label>Part of task (optional)<select name="parent_task_id" id="template-parent"><option value="">Top-level task</option></select></label>`}
+    <label>Schedule starts on (optional)<input name="anchor_date" type="date"></label>
+    <p class="field-hint">Leave the schedule date blank to set dates later in Astra.</p>
+    <h3>Responsible people</h3><div id="template-role-fields"><p role="status">Loading people…</p></div>
+    <div class="actions"><button type="button" class="quiet" id="template-role-back">Back</button><button type="submit" id="template-create" disabled>Create ${project?"project":"tasks"}</button></div>
+    <div class="error" id="templates-error" role="alert"></div></form>`;
+  const form=document.querySelector("#template-role-form"),create=document.querySelector("#template-create");
+  let ready=false,roleVersion=0;
   document.querySelector("#template-role-back").addEventListener("click",openTemplates);
-  document.querySelector("#template-role-form").addEventListener("submit",async ev=>{
-    ev.preventDefault();
-    const picks={};for(const [role,user] of new FormData(ev.target))if(user)picks[role]=user;
-    try{await finish(picks)}catch(x){document.querySelector("#templates-error").textContent=x.message}
+  const populate=async()=>{
+    const version=++roleVersion;ready=false;create.disabled=true;
+    const pid=project?null:form.querySelector('[name="project_id"]').value;
+    if(!project){document.querySelector("#template-parent").innerHTML='<option value="">Top-level task</option>'+state.tasks.filter(t=>t.project_id===pid).map(t=>`<option value="${escapeHtml(t.id)}">${escapeHtml(t.title)}</option>`).join("")}
+    try{
+      if(!project&&!pid){document.querySelector("#template-role-fields").innerHTML='<p class="field-hint">Choose a project to see its people.</p>';return}
+      const {users}=await api(project?"/api/users":`/api/assignable-users?project_id=${encodeURIComponent(pid)}&for=reviewer`);
+      if(version!==roleVersion||!form.isConnected)return;
+      renderRolePicker(kind,roles,users);
+      ready=true;create.disabled=false;document.querySelector("#templates-error").textContent="";
+    }catch(err){if(version!==roleVersion||!form.isConnected)return;document.querySelector("#templates-error").textContent=`People could not be loaded. ${err.message}`;document.querySelector("#template-role-fields").innerHTML='<button type="button" id="template-people-retry">Retry people</button>';document.querySelector("#template-people-retry").addEventListener("click",populate)}
+  };
+  document.querySelector("#template-project")?.addEventListener("change",populate);
+  form.addEventListener("submit",async ev=>{
+    ev.preventDefault();if(!ready)return;
+    const data=Object.fromEntries(new FormData(form)),role_assignments={};
+    for(const role of roles)if(role!=="owner"&&data['role_'+role])role_assignments[role]=data['role_'+role];
+    const payload=project?{name:data.name,anchor_date:data.anchor_date||null,role_assignments}
+      :{project_id:data.project_id,parent_task_id:data.parent_task_id||null,anchor_date:data.anchor_date||null,role_assignments};
+    create.disabled=true;
+    try{await api(`/api/templates/${encodeURIComponent(id)}/${project?"create-project":"create-task"}`,{method:"POST",body:JSON.stringify(payload)});document.querySelector("#templates-dialog").close();await load();showToast(project?"Project created from template.":"Tasks created from template.")}
+    catch(err){if(form.isConnected){document.querySelector("#templates-error").textContent=err.message;create.disabled=false}}
   });
+  await populate();form.querySelector("input,select")?.focus();
+}
+const templatePicker={templates:[]};
+function renderRolePicker(kind,roles,users){
+  const active=(users||[]).filter(u=>u.active==null||!!u.active),project=kind==="project";
+  const fallback=project?"Leave unassigned":"Automatic (only eligible person, otherwise unassigned)";
+  const rows=roles.filter(r=>r!=="chairman").map(r=>{
+    const label=escapeHtml(TEMPLATE_ROLE_LABELS[r]||r);
+    if(r==="owner")return `<p class="field-hint">App Owner: ${escapeHtml(state.user.display_name)}</p>`;
+    const people=active.filter(u=>project?u.global_role==="member":u.project_role===r&&u.global_role!=="chairman");
+    const options=people.map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(personLabel(u,people))}</option>`).join("");
+    return `<label>${label}<select name="role_${escapeHtml(r)}"><option value="">${escapeHtml(fallback)}</option>${options}</select></label>`;
+  }).join("");
+  document.querySelector("#template-role-fields").innerHTML=rows||'<p class="field-hint">No suggested roles. New tasks will be unassigned.</p>';
 }
 async function markFinalResult(taskId,sourceType,sourceId){
-  try{await api("/api/final-results",{method:"POST",body:JSON.stringify({task_id:taskId,source_type:sourceType,source_id:sourceId})});await openDetail(taskId)}
+  try{await api("/api/final-results",{method:"POST",body:JSON.stringify({task_id:taskId,source_type:sourceType,source_id:sourceId})});await refreshDetail(taskId)}
   catch(x){alert(x.message)}
 }
 async function unmarkFinalResult(taskId,resultId){
-  try{await api("/api/final-results",{method:"DELETE",body:JSON.stringify({result_id:resultId})});await openDetail(taskId)}
+  try{await api("/api/final-results",{method:"DELETE",body:JSON.stringify({result_id:resultId})});await refreshDetail(taskId)}
   catch(x){alert(x.message)}
 }
 async function saveTaskAsTemplate(taskId){
@@ -1666,9 +1680,10 @@ async function openSearch(q){
   try{
     const {results}=await api(`/api/search?q=${encodeURIComponent(q)}`);
     const tasks=(results.tasks||[]).map(t=>`<li><button type="button" class="link" data-detail="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button> · ${escapeHtml(t.status)} · <span class="muted">${escapeHtml(t.project_name)}</span></li>`).join("")||"<li>No matching tasks.</li>";
-    const projects=(results.projects||[]).map(p=>`<li>${escapeHtml(p.name)}</li>`).join("")||"<li>No matching projects.</li>";
+    const projects=(results.projects||[]).map(p=>`<li><a href="#/project/${encodeURIComponent(p.id)}/overview">${escapeHtml(p.name)}</a></li>`).join("")||"<li>No matching projects.</li>";
     document.querySelector("#search-body").innerHTML=`<h2>Search: ${escapeHtml(q)}</h2><h3>Tasks</h3><ul class="people-list">${tasks}</ul><h3>Projects</h3><ul class="people-list">${projects}</ul>`;
     document.querySelectorAll("#search-body [data-detail]").forEach(b=>b.addEventListener("click",()=>{document.querySelector("#search-dialog").close();openDetail(b.dataset.detail)}));
+    document.querySelectorAll("#search-body a").forEach(a=>a.addEventListener("click",()=>document.querySelector("#search-dialog").close()));
     const d=document.querySelector("#search-dialog");if(!d.open)d.showModal();
   }catch(err){document.querySelector("#search-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`;document.querySelector("#search-dialog").showModal()}
 }
@@ -1686,10 +1701,10 @@ async function openInbox(){
       api("/api/notifications"),
       state.user.global_role==="owner"?api("/api/owner-action-requests"):Promise.resolve({requests:[]}),
     ]);
-    state.notifications=data.notifications;state.unread=data.unread;updateBell();
+    state.notifications=data.notifications;state.unread=data.unread;state.notificationsKnown=true;state.notificationsStale=false;updateBell();
     renderInbox(data.notifications,ownerQueue.requests);
     if(currentRoute().name==="home")renderHome();   // Home shows the same cached requests
-  }catch(err){document.querySelector("#inbox-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`}
+  }catch(err){state.notificationsStale=true;updateBell();document.querySelector("#inbox-body").innerHTML=`<p class="error" role="alert">Notifications could not be refreshed. ${escapeHtml(err.message)}</p><button type="button" id="inbox-retry">Retry notifications</button>`;document.querySelector("#inbox-retry").addEventListener("click",openInbox)}
 }
 // FKVHH8: the Inbox has tabs. Needs action (Owners) holds the requests waiting for a decision; Unread and All
 // hold notifications, grouped by day. An Owner lands on Needs action while anything waits there, anyone
@@ -1755,9 +1770,10 @@ function requestGates(r){
 // 0D9Q3X: a 409 means the record moved on under the user; show the current one instead of the stale form.
 // The first line says what happened and what to do; the server's own reason follows on its own line.
 const TASK_CONFLICT="This task changed since you opened it, so nothing was saved.";
-function showConflict(box,text,detail){if(!box)return;box.style.color="";box.innerHTML=escapeHtml(text)+(detail&&detail!==text?`<small class="conflict-detail">${escapeHtml(detail)}</small>`:"");box.focus?.()}
+function showConflict(box,text,detail){if(!box)return;box.classList.remove("message-info","message-success");box.innerHTML=escapeHtml(text)+(detail&&detail!==text?`<small class="conflict-detail">${escapeHtml(detail)}</small>`:"");box.focus?.()}
 async function reloadTaskAfterConflict(taskId,errorId,detail){
-  await load().catch(()=>{});const task=await openDetail(taskId);
+  if(detailTaskId!==taskId){showToast("The earlier task changed; reopen it to review the latest version.");return}
+  await load().catch(()=>{});if(detailTaskId!==taskId)return;const task=await openDetail(taskId);
   const next=!task?"It could not be reloaded."
     :CLOSED_STATUSES.includes(task.status)?`It is now ${statusLabel(task.status)}; this is the latest version.`
     :"It now shows the latest version; check it and try again.";
@@ -1783,7 +1799,7 @@ async function decideOwnerRequest(id,decision,errorId="inbox-error"){
   const reason=prompt(decision==="approved"?"Decision note (optional)":`Reason this request is ${decision}:`);
   if(reason===null)return;
   if(decision!=="approved"&&!reason.trim()){alert("A reason is required.");return}
-  const box=()=>document.querySelector(`#${errorId}`),err=box();if(err)err.textContent="";
+  const box=()=>document.querySelector(`#${errorId}`),err=box();if(err)clearFeedback(err);
   // Review 12d M2: an approval meets the same dependency, limit and date rules as acting
   // directly; each one the server names is confirmed in turn, or the approval is left alone.
   const r=(state.ownerRequests||[]).find(q=>q.id===id)||{};
@@ -1806,15 +1822,29 @@ async function markAllRead(){
 // 3FQEKB: an assignee picker never lists the Chairman and lists a project viewer only for a
 // subtask ("(viewer)"); the reviewer picker keeps everyone with access. A current owner the rules
 // no longer allow stays selected, marked, so saving other fields never unassigns them silently.
+const assigneeLoads=new WeakMap();let assigneeHintCount=0;
+function personLabel(user,people){const name=user.display_name||"Person",duplicates=people.filter(p=>(p.display_name||"").trim().toLowerCase()===name.trim().toLowerCase()).length>1;return name+(duplicates?` · ${user.email||user.id}`:"")}
 async function fillAssignees(projectId,select,selectedId,purpose="task",currentName=""){
-  if(!select)return;
+  if(!select)return false;
+  const prior=assigneeLoads.get(select),hint=prior?.hint||document.createElement("p"),request={hint};
+  if(!prior){hint.className="field-hint";hint.id=`assignee-hint-${++assigneeHintCount}`;hint.setAttribute("role","status");const label=select.closest?.("label");if(label)label.insertAdjacentElement("afterend",hint);else select.parentElement?.appendChild?.(hint);select.setAttribute("aria-describedby",hint.id)}
+  assigneeLoads.set(select,request);select.disabled=true;select.dataset.assigneesState="loading";
   select.innerHTML='<option value="">Unassigned</option>';
-  if(!projectId)return;
+  if(selectedId){const option=new Option(currentName||"Current owner",selectedId);option.selected=true;select.add(option)}
+  hint.textContent=projectId?"Loading people. The existing assignment is kept.":"Choose a project first.";
+  if(!projectId)return false;
   try{
     const {users}=await api(`/api/assignable-users?project_id=${encodeURIComponent(projectId)}&for=${encodeURIComponent(purpose)}`);
-    for(const u of users){const o=new Option(u.display_name+(u.project_role==="viewer"?" (viewer)":""),u.id);if(u.id===selectedId)o.selected=true;select.add(o)}
+    if(assigneeLoads.get(select)!==request)return false;
+    select.innerHTML='<option value="">Unassigned</option>';
+    for(const u of users){const o=new Option(personLabel(u,users)+(u.project_role==="viewer"?" (viewer)":""),u.id);if(u.id===selectedId)o.selected=true;select.add(o)}
     if(selectedId&&!users.some(u=>u.id===selectedId)){const o=new Option(`${currentName||"Current owner"} (needs a new assignee)`,selectedId);o.selected=true;select.add(o)}
-  }catch{}
+    select.disabled=false;select.dataset.assigneesState="ready";hint.textContent="";return true;
+  }catch{
+    if(assigneeLoads.get(select)!==request)return false;
+    select.dataset.assigneesState="error";hint.textContent="People could not be loaded. The existing assignment is kept. ";
+    const retry=document.createElement("button");retry.type="button";retry.className="link";retry.textContent="Retry people";retry.addEventListener("click",()=>fillAssignees(projectId,select,selectedId,purpose,currentName));hint.appendChild(retry);return false;
+  }
 }
 document.querySelector("#project-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{await api("/api/projects",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load()}catch(err){e.target.querySelector(".error").textContent=err.message}});
 document.querySelector("#task-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{const data=Object.fromEntries(new FormData(e.target));const out=await withConfirms({title:data.title||"the new task"},COLUMN_OF_STATUS[data.status]||"draft",more=>api("/api/tasks",{method:"POST",body:JSON.stringify({...data,...more})}));if(!out)return;const {task}=out;e.target.reset();e.target.closest("dialog").close();await load();if(task&&currentRoute().name==="portfolio"&&!visibleTasks().some(t=>t.id===task.id))showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnPortfolio)}catch(err){e.target.querySelector(".error").textContent=err.message}});
@@ -1826,7 +1856,7 @@ const GOVERNED=["submitted","completed","on_hold","reopened"];
 const BACK_TO_WORK=["draft","assigned","in_progress","delayed"];
 const EVENT_LABELS={reviewer_added:"Reviewer added",reviewer_removed:"Reviewer removed",board_move_blocked:"Board move refused",dependency_override:"Dependency overridden",wip_limit_override:"Work-in-progress limit overridden",task_lock_forced:"Lock forced open",gantt_move_blocked:"Date drag refused",schedule_impact_confirmed:"Date change with consequences confirmed",import_committed:"Import committed",import_key_assigned:"Import key assigned",task_created:"Task created",task_updated:"Task updated",dependency_added:"Dependency added",dependency_removed:"Dependency removed",task_submitted:"Work submitted",submission_accepted:"Submission accepted",changes_requested:"Changes requested",task_reopened:"Task reopened",task_on_hold:"Put on hold",criticality_changed:"Criticality changed",parent_changed:"Parent changed",schedule_proposed:"Schedule change proposed",schedule_revised:"Schedule revised",schedule_proposal_rejected:"Schedule proposal rejected",attachment_added:"Attachment linked",attachment_removed:"Attachment link removed"};
 const DIFF_FIELDS=[["title","Title"],["status","Status"],["criticality","Criticality"],["start_date","Start date"],["due_date","Due date"],["progress","Progress"],["description","Description"]];
-let detailTaskId=null;
+let detailTaskId=null,detailLoadVersion=0;
 
 document.querySelector("#gantt").addEventListener("click",e=>{
   const ex=e.target.closest("[data-expand]");if(ex){toggleSteps(ex.dataset.expand);return}
@@ -1843,16 +1873,24 @@ document.querySelector("#gantt").addEventListener("click",e=>{
 document.querySelector("#schedule-table").addEventListener("click",e=>{const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail)});
 
 async function openDetail(taskId){
+  const version=++detailLoadVersion;
+  const moveFocus=panelState.shown!==taskId||document.querySelector("#detail-dialog").hidden;
   if(detailTaskId&&detailTaskId!==taskId&&leases.get(detailTaskId)?.kind==="edit")dropLease(detailTaskId,"edit");
   detailTaskId=taskId;
+  panelState.task=null;
+  document.querySelector("#detail-body").innerHTML='<h2 id="detail-heading" tabindex="-1">Loading task…</h2><p role="status">Please wait for the task details.</p>';
+  openPanel(taskId);
   try{
     const [d,ev]=await Promise.all([api(taskApi(taskId)),api(taskApi(taskId,"/events"))]);
+    if(version!==detailLoadVersion||detailTaskId!==taskId)return null;
     renderDetail(d.task,ev.events);
     openPanel(taskId);
     panelState.task=d.task;if(currentRoute().name==="task")shellTitle(currentRoute());
+    if(moveFocus)document.querySelector("#detail-heading")?.focus({preventScroll:true});
     return d.task;
-  }catch(err){document.querySelector("#detail-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`;openPanel(taskId);return null}
+  }catch(err){if(version!==detailLoadVersion||detailTaskId!==taskId)return null;document.querySelector("#detail-body").innerHTML=`<p class="error" role="alert">${escapeHtml(err.message)}</p><button type="button" id="detail-retry">Retry task</button>`;document.querySelector("#detail-retry").addEventListener("click",()=>openDetail(taskId));return null}
 }
+async function refreshDetail(taskId){await load();if(detailTaskId!==taskId)return null;return openDetail(taskId)}
 // DR3PKR: the task panel. It is docked on the right (non-modal) and has its own link: ?task=<id> over the
 // current screen, or #/task/<id> as a full page. Opening adds a history entry, so Back closes it; closing
 // fires "close" (as the old dialog did) so the Inbox can refresh. The aside keeps the id detail-dialog.
@@ -1876,6 +1914,7 @@ function openPanel(taskId){
   if(isNew)document.querySelector("#detail-heading")?.focus({preventScroll:true});
 }
 function closePanel(fromRoute){
+  ++detailLoadVersion;detailTaskId=null;panelState.task=null;
   const panel=document.querySelector("#detail-dialog");
   if(panel.hidden)return;
   panel.hidden=true;panelState.shown=null;
@@ -2058,7 +2097,7 @@ function renderDetail(task,events){
     <p class="role-line">${escapeHtml(roleLine(perms))}</p>
     <div id="lock-slot">${lockedByOther(task)?lockBanner(task.lock,"",perms.can_force_unlock):""}</div>
     <div class="facts">${facts}</div>
-    <div class="panel-sections" role="group" aria-label="Jump to a section">${[["desc","Details"],["subtasks","Steps"],["deps","Dependencies"],["attachments","Files"],["history","History"]].map(([c,l])=>`<button type="button" class="link" data-jump="${c}">${l}</button>`).join("")}</div>
+    <div class="panel-sections" role="group" aria-label="Jump to a section">${[["desc","Details"],["subtasks","Steps"],["deps","Dependencies"],["lifecycle","Lifecycle"],["reviewers","Reviewers"],["attachments","Files"],["schedule","Schedule"],["edit-section","Edit"],["history","History"]].map(([c,l])=>`<button type="button" class="link" data-jump="${c}">${l}</button>`).join("")}</div>
     ${closedNote}
     <p class="desc">${escapeHtml(task.description||"No description.")}</p>
     ${buildImportedFields(task)}
@@ -2074,9 +2113,10 @@ function renderDetail(task,events){
     ${attachments}
     ${critForm}
     ${schedule}
-    ${editForm}
+    <div class="edit-section">${editForm}</div>
     ${ro?"":'<p><button type="button" class="link" id="save-task-template">Save this task (and its subtasks) as a template</button></p>'}
     <div class="history"><h3>History</h3><ul>${timeline}</ul></div>`;
+  document.querySelectorAll("#detail-body form").forEach(form=>{form.dataset.taskId=task.id});
   document.querySelector("#detail-edit")?.addEventListener("submit",e=>submitDetailEdit(e,{statusLocked:submitted}));
   document.querySelector("#detail-assign")?.addEventListener("submit",submitAssign);
   document.querySelectorAll("#detail-body [data-jump]").forEach(b=>b.addEventListener("click",()=>document.querySelector(`#detail-body .${b.dataset.jump}`)?.scrollIntoView({block:"start"})));
@@ -2132,23 +2172,25 @@ function buildSchedule(task,closed,{canPropose=true}={}){
 }
 
 async function submitSchedule(e){
-  e.preventDefault();const err=document.querySelector("#sched-error");err.textContent="";err.style.color="";
+  const taskId=e.target.dataset.taskId||detailTaskId;
+  e.preventDefault();const err=document.querySelector("#sched-error");clearFeedback(err);err.classList.remove("message-info","message-success");
   try{
-    const {proposal}=await api(taskApi(detailTaskId,"/schedule-proposals"),{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
+    const {proposal}=await api(taskApi(taskId,"/schedule-proposals"),{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
     const impacted=proposal.impacted_successors||[];
-    await load();await openDetail(detailTaskId);
-    if(impacted.length){const el=document.querySelector("#sched-error");if(el){el.style.color="#667085";el.textContent=`Heads up — approving this may affect: ${impacted.map(t=>t.title).join(", ")} (they are not moved automatically).`;}}
+    const shown=await refreshDetail(taskId);
+    if(shown&&impacted.length){const el=document.querySelector("#sched-error");if(el){el.classList.add("message-info");el.textContent=`Heads up — approving this may affect: ${impacted.map(t=>t.title).join(", ")} (they are not moved automatically).`;}}
   }catch(x){err.textContent=x.message}
 }
 async function decideSchedule(id,action,btn){
-  const err=document.querySelector("#sched-error");if(err)err.textContent="";
+  const taskId=detailTaskId;
+  const err=document.querySelector("#sched-error");if(err)clearFeedback(err);
   try{
     let outcome;
     // Review 12d L1: approving new dates with consequences asks first, as on the chart.
-    if(action==="approve"){outcome=await withConfirms(state.tasks.find(t=>t.id===detailTaskId),null,more=>api(`/api/schedule-proposals/${id}/approve`,{method:"POST",body:JSON.stringify(more)}));if(!outcome)return}
+    if(action==="approve"){outcome=await withConfirms(state.tasks.find(t=>t.id===taskId),null,more=>api(`/api/schedule-proposals/${id}/approve`,{method:"POST",body:JSON.stringify(more)}));if(!outcome)return}
     else{const reason=btn.parentElement.querySelector(".sched-reject-reason").value;outcome=await api(`/api/schedule-proposals/${id}/reject`,{method:"POST",body:JSON.stringify({reason})});}
-    await load();await openDetail(detailTaskId);
-    if(outcome.request){const current=document.querySelector("#sched-error");current.style.color="#0c7c86";current.textContent="Owner request created; the live schedule is unchanged."}
+    const shown=await refreshDetail(taskId);
+    if(shown&&outcome.request){const current=document.querySelector("#sched-error");if(current){current.classList.add("message-success");current.textContent="Owner request created; the live schedule is unchanged."}}
   }catch(x){if(err)err.textContent=x.message}
 }
 
@@ -2166,17 +2208,19 @@ function buildSubtasks(task,closed){
 }
 
 async function submitParent(e){
-  e.preventDefault();const err=document.querySelector("#parent-error");err.textContent="";
+  const taskId=e.target.dataset.taskId||detailTaskId;
+  e.preventDefault();const err=document.querySelector("#parent-error");clearFeedback(err);
   const parent_task_id=e.target.querySelector('select[name="parent_task_id"]').value;
   try{const t=panelState.task||{title:""};
-    const out=await withConfirms(t,boardColumn(t),more=>api(taskApi(detailTaskId,"/parent"),{method:"POST",body:JSON.stringify({parent_task_id,...more})}));
-    if(!out)return;await load();await openDetail(detailTaskId)}
+    const out=await withConfirms(t,boardColumn(t),more=>api(taskApi(taskId,"/parent"),{method:"POST",body:JSON.stringify({parent_task_id,...more})}));
+    if(!out)return;await refreshDetail(taskId)}
   catch(x){err.textContent=x.message}
 }
 
 async function submitCriticality(e){
-  e.preventDefault();const err=document.querySelector("#crit-error");err.textContent="";
-  try{await api(taskApi(detailTaskId,"/criticality"),{method:"POST",body:JSON.stringify({...Object.fromEntries(new FormData(e.target)),expected_revision:Number(e.target.dataset.revision)})});await load();await openDetail(detailTaskId)}
+  const taskId=e.target.dataset.taskId||detailTaskId;
+  e.preventDefault();const err=document.querySelector("#crit-error");clearFeedback(err);
+  try{await api(taskApi(taskId,"/criticality"),{method:"POST",body:JSON.stringify({...Object.fromEntries(new FormData(e.target)),expected_revision:Number(e.target.dataset.revision)})});await refreshDetail(taskId)}
   catch(x){err.textContent=x.message}
 }
 
@@ -2234,8 +2278,8 @@ function buildReviewers(task,closed){
   if(closed)return `<div class="reviewers"><h3>Reviewers &amp; approvers</h3><ul>${rows}</ul></div>`;
   return `<div class="reviewers"><h3>Reviewers &amp; approvers</h3><ul>${rows}</ul>
     <div class="add-reviewer">
-      <select id="reviewer-user"><option value="">Choose a person…</option></select>
-      <select id="reviewer-role"><option value="approver">Approver</option><option value="reviewer">Reviewer</option><option value="collaborator">Collaborator</option></select>
+      <select id="reviewer-user" aria-label="Reviewer person"><option value="">Choose a person…</option></select>
+      <select id="reviewer-role" aria-label="Reviewer role"><option value="approver">Approver</option><option value="reviewer">Reviewer</option><option value="collaborator">Collaborator</option></select>
       <button type="button" id="add-reviewer-button">Add</button>
       <div class="error" id="reviewer-error"></div>
     </div></div>`;
@@ -2249,7 +2293,8 @@ function wireLifecycle(task){
 
 async function lifecycleAction(e,task){
   e.preventDefault();
-  const form=e.target,kind=form.dataset.life,err=document.querySelector("#lifecycle-error");err.textContent="";
+  const form=e.target,kind=form.dataset.life,err=document.querySelector("#lifecycle-error");clearFeedback(err);
+  if(kind==="hold"&&form.querySelector('select[name="owner_user_id"]')?.disabled){err.textContent="Load the people list before choosing a responsible owner. Use Retry people.";return}
   const body=Object.fromEntries(new FormData(form));
   try{
     let outcome;
@@ -2260,8 +2305,8 @@ async function lifecycleAction(e,task){
     else if(kind==="reopen")outcome=await withConfirms(task,"progress",more=>api(taskApi(task.id,"/reopen"),{method:"POST",body:JSON.stringify({...body,...more})}));
     else if(kind==="hold")outcome=await withConfirms(task,"blocked",more=>api(taskApi(task.id,"/hold"),{method:"POST",body:JSON.stringify({...body,...more})}));
     if(!outcome)return;   // an owner cancelled the dependency confirm
-    await load();await openDetail(task.id);
-    if(outcome?.request){const current=document.querySelector("#lifecycle-error");current.style.color="var(--teal)";current.textContent=kind==="accept"
+    const shown=await refreshDetail(task.id);
+    if(shown&&outcome?.request){const current=document.querySelector("#lifecycle-error");current.classList.add("message-success");current.textContent=kind==="accept"
       ?"Owner request created. The submission is still awaiting an App Owner decision."
       :"Owner request created; the task is unchanged."}
   }catch(x){if(x.status===409)return reloadTaskAfterConflict(task.id,"lifecycle-error",x.message);err.textContent=x.message}
@@ -2298,12 +2343,12 @@ function buildAttachments(task){
 
 async function wireAttachments(task){
   document.querySelector("#attachment-form")?.addEventListener("submit",async e=>{
-    e.preventDefault();const err=document.querySelector("#attachment-error");err.textContent="";
-    try{await api(taskApi(task.id,"/attachments"),{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});await openDetail(task.id)}
+    e.preventDefault();const err=document.querySelector("#attachment-error");clearFeedback(err);
+    try{await api(taskApi(task.id,"/attachments"),{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});if(detailTaskId===task.id)await openDetail(task.id)}
     catch(x){err.textContent=x.message}
   });
   document.querySelectorAll("#detail-body [data-remove-attachment]").forEach(b=>b.addEventListener("click",async()=>{
-    try{await api("/api/task-attachments",{method:"DELETE",body:JSON.stringify({task_id:task.id,attachment_id:b.dataset.removeAttachment})});await openDetail(task.id)}
+    try{await api("/api/task-attachments",{method:"DELETE",body:JSON.stringify({task_id:task.id,attachment_id:b.dataset.removeAttachment})});if(detailTaskId===task.id)await openDetail(task.id)}
     catch(x){document.querySelector("#attachment-error").textContent=x.message}
   }));
   document.querySelectorAll("#detail-body [data-copy-path]").forEach(b=>b.addEventListener("click",async()=>{
@@ -2316,13 +2361,14 @@ function wireReviewers(task){
   // Only people who may add reviewers load the list (the Chairman and members are refused it).
   if((task.permissions||{}).can_edit_ordinary)fillAssignees(task.project_id,document.querySelector("#reviewer-user"),"","reviewer");
   document.querySelector("#add-reviewer-button")?.addEventListener("click",async()=>{
-    const err=document.querySelector("#reviewer-error");err.textContent="";
+    const err=document.querySelector("#reviewer-error");clearFeedback(err);
+    const picker=document.querySelector("#reviewer-user");if(picker.disabled){err.textContent="Load the people list before adding a reviewer. Use Retry people.";return}
     const user_id=document.querySelector("#reviewer-user").value,role=document.querySelector("#reviewer-role").value;
-    try{await api("/api/task-reviewers",{method:"POST",body:JSON.stringify({task_id:task.id,user_id,role})});await openDetail(task.id)}
+    try{await api("/api/task-reviewers",{method:"POST",body:JSON.stringify({task_id:task.id,user_id,role})});if(detailTaskId===task.id)await openDetail(task.id)}
     catch(x){err.textContent=x.message}
   });
   document.querySelectorAll("#detail-body [data-remove-reviewer-user]").forEach(b=>b.addEventListener("click",async()=>{
-    try{await api("/api/task-reviewers",{method:"DELETE",body:JSON.stringify({task_id:task.id,user_id:b.dataset.removeReviewerUser,role:b.dataset.removeReviewerRole})});await openDetail(task.id)}
+    try{await api("/api/task-reviewers",{method:"DELETE",body:JSON.stringify({task_id:task.id,user_id:b.dataset.removeReviewerUser,role:b.dataset.removeReviewerRole})});if(detailTaskId===task.id)await openDetail(task.id)}
     catch(x){document.querySelector("#reviewer-error").textContent=x.message}
   }));
 }
@@ -2336,6 +2382,7 @@ function renderEvent(ev){
     const before=safeParse(ev.before_json),after=safeParse(ev.after_json);
     const changes=DIFF_FIELDS.filter(([k])=>String(before[k]??"")!==String(after[k]??""))
       .map(([k,l])=>`${escapeHtml(l)}: ${escapeHtml(String(before[k]??"—"))} → ${escapeHtml(String(after[k]??"—"))}`);
+    if((before.owner_user_id||null)!==(after.owner_user_id||null)){const owner=t=>t.owner_user_id?`${t.owner_name||"Person"} (${t.owner_user_id})`:"Unassigned";changes.push(`Owner: ${escapeHtml(owner(before))} → ${escapeHtml(owner(after))}`)}
     detail=changes.length?`<br>${changes.join("<br>")}`:"<br>No field changes.";
   }else if(ev.event_type==="dependency_added"){
     const a=safeParse(ev.after_json);detail=`<br>Predecessor: ${escapeHtml(a.predecessor_task_id||"")}`;
@@ -2370,54 +2417,60 @@ async function withConfirms(task,column,send,extra){
 }
 function withDependencyConfirm(task,status,send,extra){return withConfirms(task,STATUS_COLUMN[status]||COLUMN_OF_STATUS[status]||"progress",send,extra)}
 async function submitDetailEdit(e,{statusLocked=false}={}){
+  const taskId=e.target.dataset.taskId||detailTaskId;
   e.preventDefault();
-  const form=e.target,error=document.querySelector("#detail-edit-error");error.textContent="";
+  const form=e.target,error=document.querySelector("#detail-edit-error");clearFeedback(error);
   const body=Object.fromEntries(new FormData(form));
   if(statusLocked)delete body.status; // shown for context only; Accept or Request changes moves it
   body.expected_revision=Number(body.expected_revision);
   // Review 13a L1: an empty date field is no date (null), so a title-only save needs no reason.
   for(const k of ["start_date","due_date"])if(k in body&&!body[k])body[k]=null;
   try{
-    const outcome=await withDependencyConfirm(panelState.task,body.status,more=>api(taskApi(detailTaskId),{method:"POST",body:JSON.stringify({...body,...more})}),
+    const outcome=await withDependencyConfirm(panelState.task,body.status,more=>api(taskApi(taskId),{method:"POST",body:JSON.stringify({...body,...more})}),
       {dates:{start_date:body.start_date||null,due_date:body.due_date||null}});
     if(!outcome)return;
-    await dropLease(detailTaskId,"edit");
-    await load();await openDetail(detailTaskId);
-    if(outcome.request){const current=document.querySelector("#detail-edit-error");current.style.color="#0c7c86";current.textContent="Owner request created; accepted live state is unchanged."}
-  }catch(err){if(err.status===409)return reloadTaskAfterConflict(detailTaskId,"detail-edit-error",err.message);error.textContent=err.message}
+    await dropLease(taskId,"edit");
+    const shown=await refreshDetail(taskId);
+    if(shown&&outcome.request){const current=document.querySelector("#detail-edit-error");if(current){current.classList.add("message-success");current.textContent="Owner request created; accepted live state is unchanged."}}
+  }catch(err){if(err.status===409)return reloadTaskAfterConflict(taskId,"detail-edit-error",err.message);error.textContent=err.message}
 }
 
 // 3FQEKB: the Chairman's assign-only save sends the assignee, a reason and the revision.
 async function submitAssign(e){
+  const taskId=e.target.dataset.taskId||detailTaskId;
   e.preventDefault();
-  const form=e.target,error=document.querySelector("#detail-assign-error");error.textContent="";
+  const form=e.target,error=document.querySelector("#detail-assign-error");clearFeedback(error);
+  const picker=form.querySelector('select[name="owner_user_id"]');if(picker?.disabled){error.textContent="Load the people list before saving an assignment. Use Retry people.";return}
   const data=Object.fromEntries(new FormData(form));
   const body={owner_user_id:data.owner_user_id||null,reason:data.reason||"",expected_revision:Number(data.expected_revision)};
   try{
-    await api(taskApi(detailTaskId),{method:"POST",body:JSON.stringify(body)});
-    await load();await openDetail(detailTaskId);showToast("Assignee saved.");
-  }catch(err){if(err.status===409)return reloadTaskAfterConflict(detailTaskId,"detail-assign-error",err.message);error.textContent=err.message}
+    await api(taskApi(taskId),{method:"POST",body:JSON.stringify(body)});
+    await refreshDetail(taskId);showToast("Assignee saved.");
+  }catch(err){if(err.status===409)return reloadTaskAfterConflict(taskId,"detail-assign-error",err.message);error.textContent=err.message}
 }
 
 async function addDependency(){
-  const select=document.querySelector("#add-dep-select"),error=document.querySelector("#dep-error");error.textContent="";
+  const taskId=detailTaskId;
+  const select=document.querySelector("#add-dep-select"),error=document.querySelector("#dep-error");clearFeedback(error);
   const predecessor=select.value;
   if(!predecessor){error.textContent="Choose a predecessor task.";return}
   try{
-    await api("/api/task-dependencies",{method:"POST",body:JSON.stringify({predecessor_task_id:predecessor,successor_task_id:detailTaskId})});
-    await load();await openDetail(detailTaskId);
+    await api("/api/task-dependencies",{method:"POST",body:JSON.stringify({predecessor_task_id:predecessor,successor_task_id:taskId})});
+    await refreshDetail(taskId);
   }catch(err){error.textContent=err.message}
 }
 
 async function removeDependency(e){
-  const button=e.target,error=document.querySelector("#dep-error");error.textContent="";
+  const taskId=detailTaskId;
+  const button=e.target,error=document.querySelector("#dep-error");clearFeedback(error);
   const reason=button.parentElement.querySelector(".dep-reason").value;
   try{
     await api("/api/task-dependencies",{method:"DELETE",body:JSON.stringify({predecessor_task_id:button.dataset.removePred,successor_task_id:button.dataset.removeSucc,reason})});
-    await load();await openDetail(detailTaskId);
+    await refreshDetail(taskId);
   }catch(err){error.textContent=err.message}
 }
 
+document.querySelector("#people-body").addEventListener("click",e=>{const button=e.target.closest("[data-admin-section]");if(button){const section=document.querySelector("#admin-"+button.dataset.adminSection);section?.scrollIntoView({block:"start"});section?.focus({preventScroll:true})}if(e.target.id==="admin-templates"||e.target.id==="admin-results"){document.querySelector("#people-dialog").close();if(e.target.id==="admin-templates")openTemplates();else openFinalResults()}});
 async function openPeople(){
   try{
     const [u,m,h]=await Promise.all([api("/api/users"),api("/api/memberships"),api("/api/user-events")]);
@@ -2456,15 +2509,16 @@ function renderPeople(users,memberships,ownerEvents){
   const resetOptions=users.filter(u=>canResetPassword(u,primary)).map(u=>`<option value="${escapeHtml(u.id)}" data-name="${escapeHtml(u.display_name)}">${escapeHtml(u.display_name)} · ${escapeHtml(u.email)}</option>`).join("");
   // Only the primary may change an owner's project access, so others are not offered it.
   const ownerIds=new Set(users.filter(u=>u.global_role==="owner").map(u=>u.id));
-  const userOptions=users.filter(u=>u.active&&(primary||!ownerIds.has(u.id))).map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.display_name)}</option>`).join("");
+  const userOptions=users.filter(u=>u.active&&(primary||!ownerIds.has(u.id))).map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(personLabel(u,users))}</option>`).join("");
   const projectOptions=state.projects.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("");
   const grants=memberships.map(m=>`<li>${escapeHtml(m.project_name)} · ${escapeHtml(m.user_name)} · ${escapeHtml(m.role)} ${!primary&&ownerIds.has(m.user_id)?"":`<button type="button" class="link" data-revoke-project="${escapeHtml(m.project_id)}" data-revoke-user="${escapeHtml(m.user_id)}">Revoke</button>`}</li>`).join("")||"<li>No access grants yet.</li>";
   const entityRows=(state.entities||[]).map(e=>`<li><strong>${escapeHtml(e.name)}</strong>${e.active?"":' · <em>inactive</em>'} <button type="button" class="link" data-entity-toggle="${escapeHtml(e.id)}" data-active="${e.active?1:0}">${e.active?"Deactivate":"Reactivate"}</button></li>`).join("")||"<li>No entities yet.</li>";
   const filingProjectOptions=state.projects.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("");
   document.querySelector("#people-body").innerHTML=`
     <h2>People &amp; access</h2>
-    <h3>Users</h3><ul class="people-list">${rows}</ul>
-    <h3>Owner access history</h3><ul class="people-list">${ownerHistory}</ul>
+    <nav class="admin-sections" aria-label="Administration sections">${[["users","People"],["access","Project access"],["entities","Entities"],["calendar","Calendars"],["history","History"]].map(([id,label])=>`<button type="button" class="quiet" data-admin-section="${id}">${label}</button>`).join("")}<button type="button" class="quiet" id="admin-templates">Templates</button><button type="button" class="quiet" id="admin-results">Final results</button></nav>
+    <h3 id="admin-users" tabindex="-1">Users</h3><ul class="people-list">${rows}</ul>
+    <h3 id="admin-history" tabindex="-1">Owner access history</h3><ul class="people-list">${ownerHistory}</ul>
     <h3>Settings history</h3><ul class="people-list">${settingsHistory}</ul>
     <h3>Blocked owner-access attempts</h3><ul class="people-list">${blockedHistory}</ul>
     <h3>Blocked imports without a project</h3><ul class="people-list">${blockedImports}</ul>
@@ -2482,7 +2536,7 @@ function renderPeople(users,memberships,ownerEvents){
         <label>Confirm new password<input name="confirm" type="password" minlength="${MIN_PASSWORD}" autocomplete="new-password" required></label>
       </div>
       <div class="actions"><button value="reset">Reset password</button></div><div class="error" id="reset-password-error" role="status"></div></form>
-    <form id="grant-form"><h3>Grant project access</h3>
+    <form id="grant-form"><h3 id="admin-access" tabindex="-1">Grant project access</h3>
       <div class="grid">
         <label>User<select name="user_id" required>${userOptions}</select></label>
         <label>Project<select name="project_id" required>${projectOptions}</select></label>
@@ -2490,7 +2544,7 @@ function renderPeople(users,memberships,ownerEvents){
       </div>
       <div class="actions"><button value="grant">Grant access</button></div><div class="error" id="grant-error"></div></form>
     <h3>Current access</h3><ul class="people-list">${grants}</ul>
-    <h3>Entities</h3><ul class="people-list">${entityRows}</ul>
+    <h3 id="admin-entities" tabindex="-1">Entities</h3><ul class="people-list">${entityRows}</ul>
     <form id="add-entity-form">
       <label>New entity name<input name="name" required></label>
       <div class="actions"><button value="add">Add entity</button><button type="button" id="seed-entities" class="quiet">Seed approved entities</button></div>
@@ -2506,7 +2560,7 @@ function renderPeople(users,memberships,ownerEvents){
       <div id="filing-entities" class="filing-entities"></div>
       <div class="actions"><button value="save">Save filing</button></div>
       <div class="error" id="filing-error"></div></form>
-    <form id="calendar-form"><h3>Project calendar (working days &amp; holidays)</h3>
+    <form id="calendar-form"><h3 id="admin-calendar" tabindex="-1">Project calendar (working days &amp; holidays)</h3>
       <label>Project<select id="calendar-project"><option value="">Choose a project…</option>${filingProjectOptions}</select></label>
       <p class="fine">Every day counts by default. Uncheck days or add holidays only if this project should skip them.</p>
       <div id="calendar-body"></div>
@@ -2529,7 +2583,7 @@ function renderPeople(users,memberships,ownerEvents){
 }
 
 async function renderCalendar(projectId){
-  const body=document.querySelector("#calendar-body"),err=document.querySelector("#calendar-error");err.textContent="";
+  const body=document.querySelector("#calendar-body"),err=document.querySelector("#calendar-error");clearFeedback(err);
   if(!projectId){body.innerHTML="";return}
   try{
     const {calendar}=await api(`/api/projects/${projectId}/calendar`);
@@ -2594,30 +2648,30 @@ function renderFilingEntities(projectId){
   document.querySelector("#save-schedule").addEventListener("click",()=>saveProjectSchedule(projectId));
 }
 async function saveProjectSchedule(projectId){
-  const err=document.querySelector("#schedule-error");err.textContent="";err.style.color="";
+  const err=document.querySelector("#schedule-error");clearFeedback(err);err.classList.remove("message-info","message-success");
   const start_date=document.querySelector("#project-start").value||null,target_date=document.querySelector("#project-target").value||null,reason=document.querySelector("#project-schedule-reason").value;
   try{
     await api(`/api/projects/${projectId}/schedule`,{method:"POST",body:JSON.stringify({start_date,target_date,reason})});
-    await load();err.style.color="#0c7c86";err.textContent="Saved and logged.";
+    await load();err.classList.add("message-success");err.textContent="Saved and logged.";
   }catch(x){err.textContent=x.message}
 }
 async function saveBudget(projectId){
-  const err=document.querySelector("#budget-error");err.textContent="";err.style.color="";
+  const err=document.querySelector("#budget-error");clearFeedback(err);err.classList.remove("message-info","message-success");
   const amount=document.querySelector("#budget-amount").value,currency=document.querySelector("#budget-currency").value,primary=document.querySelector("#primary-entity").value;
   try{
     await api(`/api/projects/${projectId}/budget`,{method:"POST",body:JSON.stringify({amount:amount===""?null:Number(amount),currency})});
     await api(`/api/projects/${projectId}/primary-entity`,{method:"POST",body:JSON.stringify({entity_id:primary})});
-    await load();err.style.color="#0c7c86";err.textContent="Saved.";
+    await load();err.classList.add("message-success");err.textContent="Saved.";
   }catch(x){err.textContent=x.message}
 }
 
 async function submitAddEntity(e){
-  e.preventDefault();const err=document.querySelector("#entity-error");err.textContent="";
+  e.preventDefault();const err=document.querySelector("#entity-error");clearFeedback(err);
   try{await api("/api/entities",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});await load();await openPeople()}
   catch(x){err.textContent=x.message}
 }
 async function submitRenameEntity(e){
-  e.preventDefault();const err=document.querySelector("#rename-entity-error");err.textContent="";err.className="error";err.setAttribute("role","alert");
+  e.preventDefault();const err=document.querySelector("#rename-entity-error");clearFeedback(err);err.className="error";err.setAttribute("role","alert");
   const values=Object.fromEntries(new FormData(e.target));
   if(!values.entity_id){err.textContent="Choose an entity.";return}
   try{await api(`/api/entities/${encodeURIComponent(values.entity_id)}/rename`,{method:"POST",body:JSON.stringify({name:values.name})});await load();await openPeople();
@@ -2625,7 +2679,7 @@ async function submitRenameEntity(e){
   catch(x){err.textContent=x.message}
 }
 async function seedEntities(){
-  const err=document.querySelector("#entity-error");err.textContent="";
+  const err=document.querySelector("#entity-error");clearFeedback(err);
   try{const r=await api("/api/entities/seed",{method:"POST",body:"{}"});await load();await openPeople();
     document.querySelector("#entity-error").textContent=r.created.length?`Added ${r.created.length} entities.`:"All approved entities already exist.";}
   catch(x){err.textContent=x.message}
@@ -2636,7 +2690,7 @@ async function toggleEntityActive(e){
   catch(x){document.querySelector("#entity-error").textContent=x.message}
 }
 async function submitFiling(e){
-  e.preventDefault();const err=document.querySelector("#filing-error");err.textContent="";
+  e.preventDefault();const err=document.querySelector("#filing-error");clearFeedback(err);
   const pid=document.querySelector("#filing-project").value;
   if(!pid){err.textContent="Choose a project.";return}
   const entity_ids=[...document.querySelectorAll("#filing-entities input:checked")].map(i=>i.value);
@@ -2646,7 +2700,7 @@ async function submitFiling(e){
 }
 
 async function submitAddUser(e){
-  e.preventDefault();const err=document.querySelector("#add-user-error");err.textContent="";
+  e.preventDefault();const err=document.querySelector("#add-user-error");clearFeedback(err);
   try{await api("/api/users",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();await openPeople()}
   catch(x){err.textContent=x.message}
 }
@@ -2677,7 +2731,7 @@ async function submitResetPassword(e){
   }catch(x){out.textContent=x.message}
 }
 async function submitGrant(e){
-  e.preventDefault();const err=document.querySelector("#grant-error");err.textContent="";
+  e.preventDefault();const err=document.querySelector("#grant-error");clearFeedback(err);
   try{await api("/api/project-access",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});await load();await openPeople()}
   catch(x){err.textContent=x.message}
 }
@@ -2938,7 +2992,7 @@ async function renderTemplateSettings(){
     catch(err){document.querySelector("#tpl-error").textContent=err.message}
   });
   document.querySelector("#tpl-save").addEventListener("click",async()=>{
-    readBack();const err=document.querySelector("#tpl-error");err.textContent="";
+    readBack();const err=document.querySelector("#tpl-error");clearFeedback(err);
     try{const {config}=await api("/api/import/template-config",{method:"PUT",body:JSON.stringify({columns:cfg.columns})});importState.settings=config;renderTemplateSettings();document.querySelector("#tpl-error").textContent="Saved. Download the template again before filling it."}
     catch(x){err.textContent=x.message}
   });
@@ -2994,7 +3048,7 @@ async function reviewTaskDrop(t,mode,target,start){
   const dateText=dates=>`${dates.start_date||"—"} → ${dates.due_date||dates.finish_date||"—"}`;
   const draw=()=>{const p=plan.project;f.querySelector("[data-schedule-preview]").innerHTML=`<h3>${plan.changes.length} task date change${plan.changes.length===1?"":"s"}</h3><div class="schedule-preview-table"><table><thead><tr><th>Task</th><th>Current</th><th>New dates</th></tr></thead><tbody>${plan.changes.map(c=>`<tr><td>${escapeHtml(c.title)}</td><td><span class="schedule-preview-dates"><span>${escapeHtml(c.before.start_date||"—")}</span><span>${escapeHtml(c.before.due_date||"—")}</span></span></td><td><span class="schedule-preview-dates"><span>${escapeHtml(c.after.start_date||"—")}</span><span>${escapeHtml(c.after.due_date||"—")}</span></span></td></tr>`).join("")||'<tr><td colspan="3">Task dates already fit this relationship.</td></tr>'}</tbody></table></div>${plan.links.length?`<ul>${plan.links.map(l=>`<li>${escapeHtml(l.action)}: ${escapeHtml(l.predecessor)} → ${escapeHtml(l.successor)}</li>`).join("")}</ul>`:""}<p><strong>Current project schedule (${escapeHtml(p.plan)}):</strong> ${escapeHtml(dateText(p.before))}</p><p><strong>New project schedule:</strong> ${escapeHtml(dateText(p.after))}</p><p><strong>Agreed deadline:</strong> ${escapeHtml(p.agreed_deadline||"Not set")} → ${escapeHtml(p.new_deadline||"Not set")}</p>${p.after.undated_count?`<p>${p.after.undated_count} task${p.after.undated_count===1?"":"s"} still need complete dates. The scheduled finish is provisional.</p>`:""}${plan.requires_owner?'<p>This linked change needs the App Owner. Nothing has been saved.</p>':""}${plan.impacts.length?`<ul>${plan.impacts.map(s=>`<li>${escapeHtml(s)}</li>`).join("")}</ul>`:""}<p>Dependencies, task dates and project schedule save together; critical paths then recalculate.</p>`;apply.disabled=plan.requires_owner};
   draw();let generation=0;
-  const refresh=async()=>{const version=++generation;apply.disabled=true;error.textContent="";payload.update_deadline=!!f.elements.deadline?.checked;if(mode==="date"){payload.start_date=f.elements.start.value;payload.due_date=f.elements.finish.value}try{const next=await preview();if(version===generation&&d.isConnected){plan=next;draw();return true}}catch(err){if(version===generation&&d.isConnected)error.textContent=err.message}return false};
+  const refresh=async()=>{const version=++generation;apply.disabled=true;clearFeedback(error);payload.update_deadline=!!f.elements.deadline?.checked;if(mode==="date"){payload.start_date=f.elements.start.value;payload.due_date=f.elements.finish.value}try{const next=await preview();if(version===generation&&d.isConnected){plan=next;draw();return true}}catch(err){if(version===generation&&d.isConnected)error.textContent=err.message}return false};
   f.onchange=()=>refresh();
   const saved=await new Promise(resolve=>{let saving=false;const cancel=()=>{if(!saving)resolve(false)};d.addEventListener("cancel",e=>{if(saving)e.preventDefault();else cancel()});f.querySelector("[data-cancel]").onclick=cancel;f.onsubmit=async e=>{e.preventDefault();if(apply.disabled||saving)return;if(mode==="date"&&(payload.start_date!==f.elements.start.value||payload.due_date!==f.elements.finish.value)){await refresh();return}saving=true;apply.disabled=true;f.querySelector("[data-cancel]").disabled=true;try{await api(taskApi(t.id,"/timeline-schedule"),{method:"POST",body:JSON.stringify({...payload,fingerprint:plan.fingerprint,confirmed:true})});resolve(true)}catch(err){error.textContent=err.message;saving=false;f.querySelector("[data-cancel]").disabled=false;apply.disabled=true}}});
   generation++;d.close();d.remove();if(saved){showToast("Linked tasks and project schedule saved. Critical paths recalculated.");await load()}

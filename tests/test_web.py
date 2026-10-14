@@ -2312,10 +2312,12 @@ class AstraStaticAssetTests(unittest.TestCase):
         self.assertEqual(sorted(hues), list("1234567"))
         self.assertEqual(sorted(tints), list("1234567"))
         self.assertEqual(sorted(edges), list("1234567"))
-        track_rules = re.findall(rf"\.bar\.track[^{{]*\{{[^}}]*?background:\s*({HEX})", self.css)
+        tokens = dict(re.findall(rf"(--[\w-]+):\s*({HEX})", self.css.split("}\n* { box-sizing")[0]))
+        track_rules = [tokens[name] for name in re.findall(r"\.bar\.track[^\{]*\{[^}]*?background:\s*var\((--[\w-]+)\)", self.css)]
         self.assertGreaterEqual(len(track_rules), 8, "default, overdue, soon/today, scheduled, blocked, closed, critical, derived")
         ink = re.search(rf"--ink:\s*({HEX})", self.css).group(1)
-        done_text = re.search(rf"\.step\.done \{{[^}}]*color:\s*({HEX})", self.css).group(1)
+        done_token = re.search(r"\.step\.done \{[^}]*color:\s*var\((--[\w-]+)\)", self.css).group(1)
+        done_text = tokens[done_token]
         for i in "1234567":
             self.assertGreaterEqual(contrast_ratio(edges[i], tints[i]), 3.0, f"edge {i} vs tint {i}")
             for background in track_rules + ["#FFFFFF"]:
@@ -2895,7 +2897,8 @@ if(mode==="bulk"){
   globalThis.askMove=async()=>null;n=0;await decideOwnerRequest("r1","approved");
   out.cancelledPosts=posts.splice(0).map(p=>p[0]);
   // 3FQEKB: pickers ask for the purpose, label viewers and keep a current owner the rules now forbid.
-  const opts=[];const sel={innerHTML:"",add:o=>opts.push([o.text,o.value,!!o.selected])};
+  const opts=[];const sel={dataset:{},disabled:false,setAttribute(){},closest(){return null},add:o=>opts.push([o.text,o.value,!!o.selected])};
+  Object.defineProperty(sel,"innerHTML",{get:()=>"",set:()=>{opts.splice(0)}});
   reply=u=>u.startsWith("/api/assignable-users")?{body:{users:[{id:"u-m",display_name:"Mo Member",project_role:"member"},{id:"u-v",display_name:"Vi <b>Viewer</b>",project_role:"viewer"}]}}:null;
   posts.splice(0);await fillAssignees(U1,sel,"u-chair","subtask","Chair Person");
   out.pickerUrl=posts.splice(0).map(p=>p[0]);out.pickerOptions=opts.splice(0);
@@ -3252,7 +3255,7 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertIn('<nav class="rail" aria-label="Main">', html)
         for href, label in (("#/home", "Home"), ("#/my-work", "My Work"), ("#/inbox", "Inbox"), ("#/projects", "Projects")):
             self.assertRegex(html, rf'<a class="rail-item" href="{href}" data-nav="{href[2:]}"[^>]*>.*?<span>{label}</span>')
-        self.assertRegex(html, r'<button type="button" class="rail-item" id="new-task">.*?<span>Capture</span></button>')
+        self.assertRegex(html, r'<button type="button" class="rail-item" id="new-task">.*?<span>Add a task</span></button>')
         self.assertIn('<a class="skip-link" id="skip-link" href="#main">Skip to content</a>', html)
         self.assertIn('<main id="main" tabindex="-1">', html)
         user_menu = html[html.index('id="user-menu"'):]
@@ -3276,7 +3279,7 @@ class AstraShellRouterTests(unittest.TestCase):
         self.assertIn('<div id="toast" class="toast" role="status" aria-live="polite"></div>', html)
 
     def test_capture_reuses_the_create_form(self):
-        self.assertIn('<h2 id="task-dialog-title">Capture a task</h2>', self.html)
+        self.assertIn('<h2 id="task-dialog-title">Add a task</h2>', self.html)
         self.assertIn('<details class="more-fields"><summary>More fields</summary>', self.html)
         self.assertIn('document.querySelector("#new-task").onclick=openCapture;', self.js)
         self.assertIn('showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnPortfolio)', self.js)
@@ -3375,8 +3378,8 @@ class AstraProjectPageTests(unittest.TestCase):
             ["my-work", None, None, "my-work", ""]])
         self.assertIn("This project is not available", self.out["missing"])
         self.assertIn(f'href="#/project/{U1}/board" aria-current="page">Board</a>', self.out["tabsHtml"])
-        # [capture, save as template, close] hidden? Members can add tasks; only owners save or close.
-        self.assertEqual(self.out["memberActions"], [False, True, True])
+        # Capture must mirror service.create_task: members/viewers cannot manage projects.
+        self.assertEqual(self.out["memberActions"], [True, True, True])
         self.assertEqual(self.out["ownerActions"], [False, False, False])
         self.assertIn("tasks, 2 steps", self.out["facts"])
         self.assertIn('<progress id="project-progress" max="100" value="33">', self.out["overview"])

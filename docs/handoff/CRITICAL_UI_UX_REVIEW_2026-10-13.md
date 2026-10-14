@@ -1,5 +1,11 @@
 # Critical built-work and UI/UX review — 2026-10-13
 
+**Historical review:** F1–F9 and the related picker/token/navigation debt were
+repaired in [the October 14 repair package](FRONTEND_REPAIRS_2026-10-14.md).
+The findings below remain the record of the frozen pre-repair source, not
+claims that the same defects persist in the supplied repaired package.
+Whole-app acceptance and deployment gates remain separate.
+
 **Verdict: do not deploy or call this top-tier UI/UX yet.** Two confirmed
 frontend defects can save to the wrong task or silently remove its owner.
 Passing tests and polished screenshots do not override those failures.

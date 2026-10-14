@@ -1,5 +1,21 @@
 # Astra handoff index
 
+## Current frontend repair package — 2026-10-14
+
+Read [the F1–F9 repair receipt](FRONTEND_REPAIRS_2026-10-14.md) first.
+The nine confirmed October 13 defects and related picker/token/navigation
+debt are repaired, with synthetic Chrome persistence checks, independent diff
+review and a fresh **849 tests OK (skipped=1)**. Aly chose direct project-task
+creation named **Add a task**. WMW428 awaits Aly's acceptance; no prior
+acceptance lane was closed by the agent. The board is not cleared.
+Current board: **88 tickets: 25 Done / 39 signoff / 10 human / 14 backlog**.
+Validation has no errors; 44 warnings and generated-note drift remain disclosed.
+
+Pin the published package SHA supplied with the independent-review prompt.
+The older app baseline and defect statements below are historical snapshots;
+schema 20/package 0.1.0 are unchanged. Physical-device, assistive-technology,
+whole-app usability and hosted launch gates remain separate and unverified.
+
 ## Critical built-work review — 2026-10-13
 
 Read [the critical UI/UX review](CRITICAL_UI_UX_REVIEW_2026-10-13.md) and
