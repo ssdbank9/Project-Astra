@@ -1,7 +1,7 @@
 ---
 id: 01M4XH9DAS9JW45YQPZPJRNDC8
 title: First-login and self-service password change
-status: backlog
+status: todo
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,10 +14,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-14T15:44:36Z
+updated-at: 2026-10-14T15:44:44Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
+outcome-what: Captured the A5 password-change gate with the existing owner reset and no-lockout rules.
+outcome-why: The release plan requires forced changes for temporary passwords and a self-service change path before inviting users.
+outcome-resolves: "Service, HTTP and browser behavior, session revocation, audit, migration and rollout details are specified for implementation."
 ---
 
 # First-login and self-service password change
