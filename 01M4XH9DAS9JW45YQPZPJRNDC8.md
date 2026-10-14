@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-14T18:42:32Z
+updated-at: 2026-10-14T18:45:55Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
@@ -46,7 +46,8 @@ outcome-resolves: "Begin implementing v21 flag, atomic password changes, HTTP re
   proof: src/astra/service.py:change_own_password; tests/test_password_change.py
 - [x] Add HTTP change-only gating and self-change endpoint with CSRF, and failing HTTP cases for blocked APIs, allowed sign-out/change, wrong password and session behavior.
   proof: src/astra/web.py:_require_user; tests/test_web.py forced password change cases
-- [ ] Add accessible UI for forced first sign-in and voluntary self-change; test login, reload/session restoration and route bypass prevention.
+- [x] Add accessible UI for forced first sign-in and voluntary self-change; test login, reload/session restoration and route bypass prevention.
+  proof: src/astra/static/index.html; src/astra/static/app.js; tests/test_web.py UI checks; isolated Chrome smoke
 - [ ] Run migration compatibility, service/HTTP/UI/full suites, guard-removal check and local browser on synthetic data; get independent source review and update handoff.
 
 ## Progress
