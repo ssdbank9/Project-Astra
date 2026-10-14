@@ -14,7 +14,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-14T15:42:55Z
+updated-at: 2026-10-14T15:44:18Z
+updated-by: Codex
 ---
 
 # First-login and self-service password change
