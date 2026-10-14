@@ -1842,6 +1842,12 @@ class ImportHttpTests(unittest.TestCase):
     def login(self, email, password):
         response, login = self.request("POST", "/api/login", {"email": email, "password": password})
         self.assertEqual(response.status, 200)
+        if login["user"].get("must_change_password"):
+            # This test class verifies importer roles for established fixture accounts;
+            # the dedicated A5 HTTP tests cover the forced-change request path.
+            self.server.service.db.execute(
+                "UPDATE users SET must_change_password=0 WHERE id=?", (login["user"]["id"],)
+            )
         return response.getheader("Set-Cookie").split(";", 1)[0], login["csrf"]
 
     def test_project_bound_workplan_download_role_matrix(self):

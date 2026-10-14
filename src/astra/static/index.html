@@ -19,6 +19,19 @@
       <div id="login-error" class="error"></div>
     </form>
   </main>
+  <main id="password-required" class="login-card" aria-labelledby="password-required-title" hidden>
+    <div class="brand">ASTRA</div>
+    <h1 id="password-required-title">Choose a new password</h1>
+    <p>Your account is using a temporary password. Change it to continue to Astra.</p>
+    <form id="forced-password-form">
+      <label>Current password<input name="current_password" type="password" autocomplete="current-password" required></label>
+      <label>New password (at least 8 characters)<input name="new_password" type="password" minlength="8" autocomplete="new-password" required></label>
+      <label>Confirm new password<input name="confirm_password" type="password" minlength="8" autocomplete="new-password" required></label>
+      <button>Change password</button>
+      <div id="forced-password-error" class="error" role="alert"></div>
+    </form>
+    <button type="button" class="quiet" id="forced-password-logout">Sign out</button>
+  </main>
   <div id="app" class="shell" hidden>
     <a class="skip-link" id="skip-link" href="#main">Skip to content</a>
     <nav class="rail" aria-label="Main">
@@ -37,6 +50,7 @@
         <div class="menu menu-right" id="user-menu" role="menu" aria-labelledby="user-menu-btn" hidden>
           <div class="menu-head"><strong id="user-name"></strong><span id="user-role"></span></div>
           <button type="button" role="menuitem" id="people" hidden>People and access</button>
+          <button type="button" role="menuitem" id="change-password">Change my password</button>
           <button type="button" role="menuitem" id="keys-btn">Keyboard shortcuts</button>
           <button type="button" role="menuitem" id="logout">Sign out</button>
           <button type="button" role="menuitem" id="logout-all">Sign out everywhere</button>
@@ -186,6 +200,16 @@
   <div id="drag-tip" class="drag-tip" aria-hidden="true" hidden></div>
   <div id="bulk-bar" class="bulk-bar" role="region" aria-label="Bulk change" hidden></div>
   <div id="step-tip" role="tooltip" hidden></div>
+  <dialog id="password-change-dialog" aria-labelledby="password-change-title">
+    <form id="password-change-form" method="dialog">
+      <h2 id="password-change-title">Change my password</h2>
+      <label>Current password<input name="current_password" type="password" autocomplete="current-password" required></label>
+      <label>New password (at least 8 characters)<input name="new_password" type="password" minlength="8" autocomplete="new-password" required></label>
+      <label>Confirm new password<input name="confirm_password" type="password" minlength="8" autocomplete="new-password" required></label>
+      <div id="password-change-error" class="error" role="alert"></div>
+      <div class="dialog-actions"><button type="button" class="quiet" id="password-change-cancel">Cancel</button><button type="submit">Change password</button></div>
+    </form>
+  </dialog>
   <script src="/static/app.js"></script>
 </body>
 </html>

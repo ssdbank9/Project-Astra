@@ -1,8 +1,10 @@
 const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality"};
 async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.lock&&data.error?data.error.replace(/at \d{2}:\d{2}:\d{2} UTC/,`at ${lockTime(data.lock)}`):data.error||"Request failed");err.status=response.status;err.confirm=data.confirm;err.impact=data.impact;err.lock=data.lock;throw err}return data}
 function clearFeedback(element){if(!element)return;element.classList.remove("message-info","message-success");element.textContent=""}
-function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#app").hidden=true}
-function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);document.querySelector("#new-project").hidden=document.querySelector("#people").hidden=!isOwner();projectActions();refreshImportAccess()}
+function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#password-required").hidden=true;document.querySelector("#app").hidden=true}
+function showForcedPasswordChange(){document.querySelector("#login").hidden=true;document.querySelector("#app").hidden=true;document.querySelector("#password-required").hidden=false;document.querySelector('#forced-password-form [name="current_password"]').focus()}
+function showApp(){document.querySelector("#login").hidden=true;document.querySelector("#password-required").hidden=true;document.querySelector("#app").hidden=false;document.querySelector("#user-name").textContent=state.user.display_name;document.querySelector("#user-role").textContent=roleLabel(state.user);document.querySelector("#user-initials").textContent=initials(state.user.display_name);document.querySelector("#new-project").hidden=document.querySelector("#people").hidden=!isOwner();projectActions();refreshImportAccess()}
+function showSignedInState(){if(state.user.must_change_password)showForcedPasswordChange();else showApp()}
 async function load(){if(!state.loads){const s=currentRoute().params.get("sort");if(s==="due_date")state.sort=s}const [p,t,e,n]=await Promise.all([api("/api/projects"),api(`/api/tasks?sort=${encodeURIComponent(state.sort)}`),api("/api/entities").catch(()=>({entities:[]})),api("/api/notifications").catch(()=>null)]);state.projects=p.projects;state.tasks=t.tasks;state.today=t.today||null;state.timezone=t.timezone||null;state.entities=e.entities;if(n){state.notifications=n.notifications;state.unread=n.unread;state.notificationsKnown=true}state.notificationsStale=!n;state.loads=(state.loads||0)+1;updateBell();fillFilters();applyRoute(false,true)}
 function updateBell(){const n=state.unread||0,stale=state.notificationsStale,badge=document.querySelector("#unread-count"),inbox=document.querySelector("#inbox");badge.textContent=stale&&!state.notificationsKnown?"!":n;badge.hidden=!n&&!stale;inbox.classList.toggle("has-unread",n>0);inbox.setAttribute("aria-label",stale?(state.notificationsKnown?`Inbox, ${n} unread (may be outdated)`:"Inbox, notifications unavailable"):n?`Inbox, ${n} unread`:"Inbox");inbox.title=stale?"Cannot refresh notifications. Open Inbox to retry.":""}
 function fillFilters(){const pf=document.querySelector("#project-filter"),tp=document.querySelector('#task-form select[name="project_id"]');const selected=pf.value;pf.innerHTML='<option value="">All projects</option>';tp.innerHTML="";for(const p of state.projects){pf.add(new Option(p.status==="closed"?`${p.name} (closed)`:p.name,p.id));if(canCaptureProject(p))tp.add(new Option(p.name,p.id))}document.querySelector("#new-task").hidden=!state.projects.some(canCaptureProject);pf.value=selected;const statuses=[...new Set(state.tasks.map(t=>t.status))].sort();document.querySelector("#status-filter").innerHTML='<option value="">All statuses</option>'+statuses.map(s=>`<option>${escapeHtml(s)}</option>`).join("");const ef=document.querySelector("#entity-filter"),efSel=ef.value;ef.innerHTML='<option value="">All entities</option>'+(state.entities||[]).map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`).join("");ef.value=efSel;fillPredecessors()}
@@ -1453,12 +1455,28 @@ document.addEventListener("keydown",e=>{
   if(state.user&&(e.ctrlKey||e.metaKey)&&!e.altKey&&String(e.key).toLowerCase()==="k"){e.preventDefault();focusSearch()}
 });
 document.querySelector("#keys-btn").addEventListener("click",()=>document.querySelector("#keys-dialog").showModal());
-document.querySelector("#login-form").addEventListener("submit",async e=>{e.preventDefault();try{const data=await api("/api/login",{method:"POST",body:JSON.stringify({email:e.target.querySelector("#email").value,password:e.target.querySelector("#password").value})});Object.assign(state,data)}catch(err){document.querySelector("#login-error").textContent=err.message;return}showApp();await loadOrSay()});
+document.querySelector("#login-form").addEventListener("submit",async e=>{e.preventDefault();try{const data=await api("/api/login",{method:"POST",body:JSON.stringify({email:e.target.querySelector("#email").value,password:e.target.querySelector("#password").value})});Object.assign(state,data)}catch(err){document.querySelector("#login-error").textContent=err.message;return}e.target.querySelector("#password").value="";showSignedInState();if(!state.user.must_change_password)await loadOrSay()});
 // H1: after signing out, reload the page so nothing the previous person saw (Inbox, requests, an open task,
 // loaded tasks) survives for the next person on this browser. The hash is dropped too.
 function signedOut(){state.user=state.csrf=null;location.replace(location.pathname)}
 document.querySelector("#logout").onclick=async()=>{await api("/api/logout",{method:"POST",body:"{}"});signedOut()};
 document.querySelector("#logout-all").onclick=async()=>{await api("/api/logout-all",{method:"POST",body:"{}"});signedOut()};
+async function changePasswordFromForm(form,errorElement,forced){
+  const values=Object.fromEntries(new FormData(form));
+  errorElement.textContent="";
+  if(values.new_password!==values.confirm_password){errorElement.textContent="The new passwords do not match.";return}
+  try{
+    const data=await api("/api/password/change",{method:"POST",body:JSON.stringify({current_password:values.current_password,new_password:values.new_password})});
+    state.user=data.user;form.reset();
+    if(forced){showApp();await loadOrSay()}
+    else{document.querySelector("#password-change-dialog").close();showToast("Password changed. Other signed-in sessions were signed out.")}
+  }catch(err){errorElement.textContent=err.message}
+}
+document.querySelector("#forced-password-form").addEventListener("submit",e=>{e.preventDefault();changePasswordFromForm(e.currentTarget,document.querySelector("#forced-password-error"),true)});
+document.querySelector("#forced-password-logout").onclick=async()=>{await api("/api/logout",{method:"POST",body:"{}"});signedOut()};
+document.querySelector("#change-password").onclick=()=>{document.querySelector("#user-menu").hidden=true;document.querySelector("#user-menu-btn").setAttribute("aria-expanded","false");document.querySelector("#password-change-error").textContent="";document.querySelector("#password-change-dialog").showModal()};
+document.querySelector("#password-change-cancel").onclick=()=>document.querySelector("#password-change-dialog").close();
+document.querySelector("#password-change-form").addEventListener("submit",e=>{e.preventDefault();changePasswordFromForm(e.currentTarget,document.querySelector("#password-change-error"),false)});
 document.querySelector("#close-project").onclick=()=>closeProject(document.querySelector("#project-filter").value);
 document.querySelector("#project-reopen").onclick=()=>openProjectAction("reopen",currentRoute().id);
 function openProjectAction(action,pid){
@@ -2480,7 +2498,7 @@ async function openPeople(){
 }
 
 // GTEYTG: every owner has role "owner"; only the primary owner may give or remove owner access.
-const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset",entity_active_changed:"Entity active state changed",entity_renamed:"Entity renamed",import_template_config_changed:"Import template settings changed"};
+const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset",password_changed:"Password changed",entity_active_changed:"Entity active state changed",entity_renamed:"Entity renamed",import_template_config_changed:"Import template settings changed"};
 // PDDS2D/3M2AYA: a password reset is either a server command or done in the app by an owner.
 const viaServerCommand=e=>(e.event_type==="primary_owner_transferred"||e.event_type==="password_reset")&&e.reason==="server command";
 const MIN_PASSWORD=8;
@@ -2522,14 +2540,14 @@ function renderPeople(users,memberships,ownerEvents){
     <h3>Settings history</h3><ul class="people-list">${settingsHistory}</ul>
     <h3>Blocked owner-access attempts</h3><ul class="people-list">${blockedHistory}</ul>
     <h3>Blocked imports without a project</h3><ul class="people-list">${blockedImports}</ul>
-    <form id="add-user-form"><h3>Add a user</h3>
+    <form id="add-user-form"><h3>Add a user</h3><p class="form-hint">The user must change this temporary password after signing in before Astra opens.</p>
       <label>Email<input name="email" type="email" required></label>
       <label>Display name<input name="display_name" required></label>
       <label>Temporary password (min ${MIN_PASSWORD} characters)<input name="password" type="password" minlength="${MIN_PASSWORD}" autocomplete="new-password" required></label>
       <label>Role<select name="role"><option value="member">Member</option><option value="chairman">Chairman</option></select></label>
       <div class="actions"><button value="add">Create user</button></div><div class="error" id="add-user-error"></div></form>
     <form id="reset-password-form"><h3>Reset a password</h3>
-      <p class="form-hint">For someone who has forgotten theirs. They are signed out everywhere else and sign in with the new password.</p>
+      <p class="form-hint">For someone who has forgotten theirs. Other sessions are signed out; after signing in with the temporary password, they must choose a new one before using Astra.</p>
       <label>User<select name="user_id" id="reset-password-user" required><option value="">Choose a user…</option>${resetOptions}</select></label>
       <div class="grid">
         <label>New password (min ${MIN_PASSWORD} characters)<input name="password" type="password" minlength="${MIN_PASSWORD}" autocomplete="new-password" required></label>
@@ -3006,7 +3024,7 @@ function buildImportedFields(task){
 
 // M3: only a failed /api/me means "signed out"; a failed first load says so and keeps the session.
 async function loadOrSay(){try{await load()}catch(err){showToast(`Astra could not load your work (${err.message}). Reload the page to try again.`)}}
-(async()=>{let data;try{data=await api("/api/me")}catch{showLogin();return}Object.assign(state,data);showApp();await loadOrSay()})();
+(async()=>{let data;try{data=await api("/api/me")}catch{showLogin();return}Object.assign(state,data);showSignedInState();if(!state.user.must_change_password)await loadOrSay()})();
 
 
 // JM7CFP: task-row drops express dates, relationships and display order explicitly.

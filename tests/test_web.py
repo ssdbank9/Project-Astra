@@ -59,7 +59,7 @@ class AstraWebTests(unittest.TestCase):
             os.environ["ASTRA_HOME"] = self.old_home
         self.temp.cleanup()
 
-    def request(self, method, path, body=None, *, cookie=None, csrf=None):
+    def request(self, method, path, body=None, *, cookie=None, csrf=None, complete_first_login=True):
         headers = {"Content-Type": "application/json"}
         if cookie:
             headers["Cookie"] = cookie
@@ -69,6 +69,13 @@ class AstraWebTests(unittest.TestCase):
         response = self.connection.getresponse()
         content_type = response.getheader("Content-Type", "")
         payload = json.loads(response.read()) if content_type.startswith("application/json") else None
+        if (complete_first_login and method == "POST" and path == "/api/login"
+                and response.status == 200 and payload["user"].get("must_change_password")):
+            # These legacy endpoint tests model a database account that already existed
+            # before v21. The dedicated A5 tests opt out and exercise the real forced flow.
+            self.server.service.db.execute(
+                "UPDATE users SET must_change_password=0 WHERE id=?", (payload["user"]["id"],)
+            )
         return response, payload
 
     def test_authenticated_project_task_gantt_data_workflow(self):
@@ -91,6 +98,56 @@ class AstraWebTests(unittest.TestCase):
         response, payload = self.request("POST", "/api/projects", {"name": "Forbidden"}, cookie=cookie)
         self.assertEqual(response.status, 403)
         self.assertIn("request token", payload["error"])
+
+    def test_forced_password_change_blocks_api_until_current_user_changes_password(self):
+        owner = self.server.service.get_user(
+            self.server.service.db.execute("SELECT id FROM users WHERE email='owner@example.org'").fetchone()[0]
+        )
+        member = self.server.service.create_user(
+            owner, "member@example.org", "Member", "temporary password"
+        )
+        self.assertTrue(member["must_change_password"])
+        response, login = self.request("POST", "/api/login", {
+            "email": "member@example.org", "password": "temporary password",
+        }, complete_first_login=False)
+        self.assertEqual(response.status, 200)
+        cookie = response.getheader("Set-Cookie").split(";", 1)[0]
+        csrf = login["csrf"]
+
+        response, me = self.request("GET", "/api/me", cookie=cookie)
+        self.assertEqual(response.status, 200)
+        self.assertTrue(me["user"]["must_change_password"])
+        response, denied = self.request("GET", "/api/projects", cookie=cookie)
+        self.assertEqual(response.status, 403)
+        self.assertIn("temporary password", denied["error"])
+        response, denied = self.request(
+            "POST", "/api/logout-all", {}, cookie=cookie, csrf=csrf
+        )
+        self.assertEqual(response.status, 403)
+
+        response, changed = self.request("POST", "/api/password/change", {
+            "current_password": "temporary password", "new_password": "permanent password",
+        }, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 200)
+        self.assertFalse(changed["user"]["must_change_password"])
+        response, _ = self.request("GET", "/api/projects", cookie=cookie)
+        self.assertEqual(response.status, 200)
+
+    def test_forced_password_session_can_sign_out_without_unlocking_api(self):
+        owner_id = self.server.service.db.execute(
+            "SELECT id FROM users WHERE email='owner@example.org'"
+        ).fetchone()[0]
+        owner = self.server.service.get_user(owner_id)
+        self.server.service.create_user(owner, "member@example.org", "Member", "temporary password")
+        response, login = self.request("POST", "/api/login", {
+            "email": "member@example.org", "password": "temporary password",
+        }, complete_first_login=False)
+        cookie = response.getheader("Set-Cookie").split(";", 1)[0]
+        response, _ = self.request(
+            "POST", "/api/logout", {}, cookie=cookie, csrf=login["csrf"]
+        )
+        self.assertEqual(response.status, 200)
+        self.assertIn("Max-Age=0", response.getheader("Set-Cookie"))
 
     def test_static_shell_loads_without_authentication(self):
         self.connection.request("GET", "/")
@@ -1315,7 +1372,8 @@ class AstraWebTests(unittest.TestCase):
         response, payload = self.request("POST", f"/api/users/{user_id}/password", {"password": "new pass 8"},
                                          cookie=owner_cookie, csrf=owner_csrf)
         self.assertEqual(response.status, 200)
-        self.assertNotIn("password", json.dumps(payload).replace("password_", ""))
+        self.assertNotIn("new pass 8", json.dumps(payload))
+        self.assertNotIn("password_hash", payload["user"])
         response, _ = self.request("GET", "/api/tasks", cookie=member_cookie)
         self.assertEqual(response.status, 403)  # the member's session was revoked
         response, _ = self.request("POST", "/api/login", {"email": "forgot@example.org", "password": "new pass 8"})
@@ -1327,6 +1385,13 @@ class AstraWebTests(unittest.TestCase):
         _, me = self.request("GET", "/api/me", cookie=owner_cookie)
         response, _ = self.request("POST", f"/api/users/{me['user']['id']}/password", {"password": "owner new 8"},
                                    cookie=owner_cookie, csrf=owner_csrf)
+        self.assertEqual(response.status, 200)
+        response, me = self.request("GET", "/api/me", cookie=owner_cookie)
+        self.assertEqual(response.status, 200)
+        self.assertTrue(me["user"]["must_change_password"])
+        response, _ = self.request("POST", "/api/password/change", {
+            "current_password": "owner new 8", "new_password": "owner permanent 8",
+        }, cookie=owner_cookie, csrf=owner_csrf)
         self.assertEqual(response.status, 200)
         response, _ = self.request("GET", "/api/tasks", cookie=owner_cookie)
         self.assertEqual(response.status, 200)
@@ -4721,6 +4786,24 @@ class AstraProjectHistoryUiTests(unittest.TestCase):
         self.assertIn("escapeHtml(b[k]||\"\u2014\")} \u2192 ${escapeHtml(a[k]||\"\u2014\")}", render)
         self.assertIn("escapeHtml(ev.reason)", render)
         self.assertIn("escapeHtml(who)", render)
+
+
+class ForcedPasswordChangeUiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.html = (STATIC / "index.html").read_text(encoding="utf-8")
+        cls.js = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    def test_password_dialogs_exist_before_app_script_initializes(self):
+        script = self.html.index('<script src="/static/app.js"></script>')
+        self.assertLess(self.html.index('id="forced-password-form"'), script)
+        self.assertLess(self.html.index('id="password-change-form"'), script)
+
+    def test_forced_session_uses_change_only_view_and_self_service_endpoint(self):
+        self.assertIn("function showForcedPasswordChange()", self.js)
+        self.assertIn("function showSignedInState()", self.js)
+        self.assertIn('api("/api/password/change"', self.js)
+        self.assertIn('id="change-password"', self.html)
 
 
 if __name__ == "__main__":

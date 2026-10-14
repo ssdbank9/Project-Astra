@@ -1389,6 +1389,7 @@ class TaskLockMigrationTests(unittest.TestCase):
         finally:
             connection.close()
 
+
     def test_v18_upgrades_to_the_fresh_schema(self):
         connection = self.at_v18()
         try:
@@ -1489,6 +1490,51 @@ class WipLimitMigrationTests(unittest.TestCase):
             self.assertIn("max_tasks", table_columns(connection, "wip_limits"))
         finally:
             connection.close()
+
+
+class ForcedPasswordChangeMigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "astra-v20.sqlite3"
+        self.connection = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(self.connection.close)
+        self.connection.row_factory = sqlite3.Row
+        self.connection.execute("CREATE TABLE users(id TEXT PRIMARY KEY, display_name TEXT NOT NULL)")
+        self.connection.executemany(
+            "INSERT INTO users(id,display_name) VALUES(?,?)",
+            [("existing-a", "Existing A"), ("existing-b", "Existing B")],
+        )
+        self.connection.execute("PRAGMA user_version=20")
+
+    def test_v21_preserves_legacy_users_and_defaults_the_force_flag_off(self):
+        db.migrate(self.connection)
+
+        self.assertEqual(self.connection.execute("PRAGMA user_version").fetchone()[0], 21)
+        self.assertEqual(
+            [tuple(row) for row in self.connection.execute(
+                "SELECT id,must_change_password FROM users ORDER BY id"
+            )],
+            [("existing-a", 0), ("existing-b", 0)],
+        )
+        self.connection.execute("INSERT INTO users(id,display_name) VALUES('new','New')")
+        self.assertEqual(self.connection.execute(
+            "SELECT must_change_password FROM users WHERE id='new'"
+        ).fetchone()[0], 0)
+
+    def test_v21_failure_rolls_back_and_can_be_retried(self):
+        before = full_catalog(self.connection)
+        self.connection.set_authorizer(
+            lambda action, *_: sqlite3.SQLITE_DENY
+            if action == sqlite3.SQLITE_ALTER_TABLE else sqlite3.SQLITE_OK
+        )
+        with self.assertRaises(sqlite3.DatabaseError):
+            db.migrate(self.connection)
+        self.connection.set_authorizer(None)
+        self.assertEqual(self.connection.execute("PRAGMA user_version").fetchone()[0], 20)
+        self.assertEqual(full_catalog(self.connection), before)
+        db.migrate(self.connection)
+        self.assertIn("must_change_password", table_columns(self.connection, "users"))
 
 
 if __name__ == "__main__":

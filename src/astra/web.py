@@ -265,6 +265,13 @@ class AstraHandler(BaseHTTPRequestHandler):
             if path == "/api/logout":
                 self._delete_session()
                 return self._json({"ok": True}, cookie=self._session_cookie("", 0))
+            if path == "/api/password/change":
+                raw = self._cookie_value(SESSION_COOKIE)
+                updated = self.service.change_own_password(
+                    user, payload.get("current_password"), payload.get("new_password"),
+                    keep_session=token_digest(raw) if raw else None,
+                )
+                return self._json({"user": updated})
             if path == "/api/logout-all":
                 revoked = self.service.revoke_user_sessions(user["id"])
                 return self._json({"ok": True, "revoked": revoked}, cookie=self._session_cookie("", 0))
@@ -668,14 +675,20 @@ class AstraHandler(BaseHTTPRequestHandler):
             raise Forbidden("Sign in required.")
         row = self.db.execute(
             """SELECT s.csrf_token,s.expires_at,u.id,u.email,u.display_name,u.global_role,u.active,u.created_at,
-                      u.is_primary_owner
+                      u.is_primary_owner,u.must_change_password
                FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?""",
             (token_digest(raw),),
         ).fetchone()
         if not row or not row["active"] or row["expires_at"] <= now_text():
             raise Forbidden("Session expired.")
         user = {key: row[key] for key in
-                ("id", "email", "display_name", "global_role", "active", "created_at", "is_primary_owner")}
+                ("id", "email", "display_name", "global_role", "active", "created_at", "is_primary_owner",
+                 "must_change_password")}
+        if user["must_change_password"] and not (
+            self.command == "GET" and urlparse(self.path).path == "/api/me"
+            or self.command == "POST" and urlparse(self.path).path in {"/api/logout", "/api/password/change"}
+        ):
+            raise Forbidden("Change your temporary password before using Astra.")
         return user, row["csrf_token"]
 
     def _delete_session(self):

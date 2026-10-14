@@ -14,12 +14,12 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import importer
-from .auth import hash_password, normalize_email
+from .auth import hash_password, normalize_email, verify_password
 from .db import V15_EXPECTED_REVISION_SQL, owner_request_intent_key, transaction
 
 
 ROLES = {"owner", "chairman", "member"}
-USER_COLUMNS = "id,email,display_name,global_role,active,created_at,is_primary_owner"
+USER_COLUMNS = "id,email,display_name,global_role,active,created_at,is_primary_owner,must_change_password"
 # Suggested-owner roles a template can carry (8B9NBH), in display order: the two
 # global roles, then the three project membership roles.
 TEMPLATE_ROLES = ("owner", "chairman", "manager", "member", "viewer")
@@ -505,11 +505,40 @@ class AstraService:
         with self._actor_transaction(actor):
             self._require_owner_now(actor)
             self.db.execute(
-                "INSERT INTO users(id,email,display_name,password_hash,global_role,active,created_at,created_by)"
-                " VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO users(id,email,display_name,password_hash,global_role,active,created_at,created_by,must_change_password)"
+                " VALUES(?,?,?,?,?,?,?,?,1)",
                 (user_id, email, display_name.strip(), password_hash, role, 1, now_text(), actor["id"]),
             )
         return self.get_user(user_id)
+
+    def change_own_password(self, actor: dict, current_password: str, new_password: str,
+                            keep_session: str | None = None) -> dict:
+        """Change the signed-in user's password atomically and revoke other sessions."""
+        if not isinstance(current_password, str) or not isinstance(new_password, str):
+            raise ValueError("Current and new passwords must be text.")
+        password_hash = hash_password(new_password)
+        with self._actor_transaction(actor):
+            row = self.db.execute(
+                "SELECT email,password_hash FROM users WHERE id=? AND active=1", (actor["id"],)
+            ).fetchone()
+            if not row:
+                raise Forbidden("Sign in required.")
+            if not verify_password(current_password, row["password_hash"]):
+                raise ValueError("Current password is incorrect.")
+            self.db.execute(
+                "UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?",
+                (password_hash, actor["id"]),
+            )
+            sessions_revoked = self.db.execute(
+                "DELETE FROM sessions WHERE user_id=? AND token_hash<>?",
+                (actor["id"], keep_session or ""),
+            ).rowcount
+            self.db.execute("DELETE FROM login_attempts WHERE email=? AND success=0", (row["email"],))
+            self._insert_user_event(
+                actor["id"], "password_changed", actor["id"], "in app",
+                {"via": "in app", "sessions_revoked": sessions_revoked},
+            )
+        return self.get_user(actor["id"])
 
     def list_users(self, actor: dict) -> list[dict]:
         if actor["global_role"] not in {"owner", "chairman"}:
@@ -745,7 +774,8 @@ class AstraService:
         the token hash of the actor's own session when they reset their own password), clear
         their failed sign-ins, audit a password_reset user event and notify the user, plus the
         other owners when the user is an owner. The password itself is never stored or logged."""
-        self.db.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash, user["id"]))
+        self.db.execute("UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?",
+                         (password_hash, user["id"]))
         sessions = self.db.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?",
                                    (user["id"], keep_session or "")).rowcount
         self.db.execute("DELETE FROM login_attempts WHERE email=? AND success=0", (user["email"],))

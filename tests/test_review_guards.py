@@ -339,7 +339,14 @@ class ReviewGuardHttpTests(unittest.TestCase):
     def login(self, email):
         r, b = self.request('POST', '/api/login', {'email': email, 'password': 'fixture password safe'})
         self.assertEqual(r.status, 200)
-        return r.getheader('Set-Cookie').split(';', 1)[0], b['csrf']
+        auth = (r.getheader('Set-Cookie').split(';', 1)[0], b['csrf'])
+        if b['user'].get('must_change_password'):
+            # These cases test review-guard routes for established users. A5's dedicated
+            # tests retain real new-account behavior instead of normalizing it here.
+            self.s.db.execute(
+                'UPDATE users SET must_change_password=0 WHERE id=?', (b['user']['id'],)
+            )
+        return auth
 
     def test_closed_template_refused_over_http(self):
         template = self.s.save_task_as_template(self.owner, self.task['id'], 'Template')

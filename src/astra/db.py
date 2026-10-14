@@ -8,7 +8,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 
 class SchemaMigrationRefused(RuntimeError):
@@ -828,6 +828,17 @@ def _migrate_v20(connection: sqlite3.Connection) -> None:
     """)
 
 
+def _migrate_v21(connection: sqlite3.Connection) -> None:
+    """v20 -> v21: mark owner-issued passwords for first-login replacement (JRNDC8).
+
+    Existing accounts keep working; only account creation and password reset set the flag.
+    """
+    _execute_statements(connection, """
+        ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0
+            CHECK (must_change_password IN (0,1));
+    """)
+
+
 # The ordered schema history: (version, step). migrate() runs every step whose version
 # is above the database's user_version, each in its own transaction with its bump.
 # Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
@@ -852,4 +863,5 @@ MIGRATION_STEPS = (
     (18, _migrate_v18),
     (19, _migrate_v19),
     (20, _migrate_v20),
+    (21, _migrate_v21),
 )
