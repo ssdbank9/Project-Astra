@@ -245,3 +245,12 @@ transition and deployment remain separate.
   project access determines visibility. Private drafts remain separate future
   scope. Supersede the conflicting private-Capture recommendation in the UX
   baseline; no permissions or existing data are changed by that choice.
+
+### 2026-10-14 — WMW428 accepted
+
+- Aly said "Ticket accepted" immediately after the WMW428 repair handoff and
+  published SHA `4d92bbddac8305b78e3ec26dde411219c57b230c` were reported.
+  Record acceptance of that bounded frontend repair scope; do not ask again.
+- The agent records the decision in a CLI note while preserving human.
+  Only Aly performs its board closure. No other ticket, whole-app launch,
+  hosting, account or deployment acceptance follows from this statement.

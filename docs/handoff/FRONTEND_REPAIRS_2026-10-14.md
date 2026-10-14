@@ -5,6 +5,13 @@ repaired and locally verified. This is a bounded repair receipt, not whole-app
 acceptance, a top-tier UX certification or permission to deploy. Aly alone
 accepts the work. Ticket **WMW428** records these repairs.
 
+**Owner acceptance:** Aly said "Ticket accepted" on October 14 after receiving
+the repair receipt and published SHA
+`4d92bbddac8305b78e3ec26dde411219c57b230c`. This accepts WMW428's bounded
+repair scope. Its chat acceptance is recorded through the CLI; the agent
+does not move it out of human. No repeat acceptance is needed. Broader app
+acceptance, hosting and deployment remain separate.
+
 ## Scope and decision
 
 - Starting commit: `9a509ed2ec0b48767f67e446803ce8b2afa58bfb`, branch
@@ -96,9 +103,10 @@ ticket or grant acceptance to earlier signoff work.
 
 ## Next action
 
-Review the supplied published SHA with INDEPENDENT_LLM_REVIEW_PROMPT.md. Aly
-may accept WMW428 after reviewing this bounded receipt. The agent may put it
-in human, but may not move it out or accept it. Deployment, account and
+Review the supplied published SHA with INDEPENDENT_LLM_REVIEW_PROMPT.md.
+WMW428's repair scope has Aly's chat acceptance recorded above. Its board
+closure remains Aly's action; the agent may not move it out of human.
+Deployment, account and
 credential decisions remain Aly's. Preserve the earlier review as a historical
 record; its original defect statements refer to its frozen pre-repair source.
 

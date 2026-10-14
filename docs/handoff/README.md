@@ -6,7 +6,8 @@ Read [the F1–F9 repair receipt](FRONTEND_REPAIRS_2026-10-14.md) first.
 The nine confirmed October 13 defects and related picker/token/navigation
 debt are repaired, with synthetic Chrome persistence checks, independent diff
 review and a fresh **849 tests OK (skipped=1)**. Aly chose direct project-task
-creation named **Add a task**. WMW428 awaits Aly's acceptance; no prior
+creation named **Add a task**. Aly accepted **WMW428** in chat on October 14
+("Ticket accepted"). Its board lane remains human until Aly moves it; no prior
 acceptance lane was closed by the agent. The board is not cleared.
 Current board: **88 tickets: 25 Done / 39 signoff / 10 human / 14 backlog**.
 Validation has no errors; 44 warnings and generated-note drift remain disclosed.
