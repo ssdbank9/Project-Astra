@@ -4,8 +4,9 @@
 template, not an executed or current-certified deployment. Follow the gate plan
 in [PRE_DEPLOYMENT_REVIEW_2026-10-13.md](PRE_DEPLOYMENT_REVIEW_2026-10-13.md).
 Refresh tools/vendor commands and validate complete configuration before use.
-Request inactivity timeouts and B1 local protections now exist; missing backup,
-version and first-login tools and hosted proxy controls remain separate gates.
+Request inactivity timeouts, B1 local protections, first-login password change,
+and local backup/restore commands now exist. The version command and hosted proxy
+controls remain separate gates.
 Use [current dated hosting limits](FREE_HOSTING_2026-10-13.md); only Aly may
 authorize staging/provisioning or real-user deployment.
 
@@ -22,10 +23,10 @@ Read this first:
 - Steps marked **[ALY]** need Aly personally. Steps marked **[AGENT]** can be
   prepared or run by the agent (an AI coding agent or a human developer) once
   Aly has given it SSH access.
-- Every `astra` command below matches `src/astra/__main__.py` at `0b90ceb`:
-  `init-owner`, `serve`, `transfer-primary`, `reset-password`. There is no
-  `astra backup` or `astra --version` yet; the runbook says where a stop-gap
-  is used until those are built (`NEXT_STEPS.md` B3 and C2).
+- The CLI currently provides `init-owner`, `serve`, `transfer-primary`,
+  `reset-password`, `backup` and `restore`; `astra --version` is still absent.
+  The backup/restore commands have local disposable-data tests, not live-host,
+  real-key or cloud proof. Refresh and verify every vendor command at deployment.
 - Operating-system, Caddy, DuckDNS, OCI and encryption commands are standard
   commands for those tools, but they were not run for this handoff. They are
   marked "verify" where the exact flags or menu names should be checked against
@@ -535,11 +536,13 @@ restore credentials; prove restore in both directions before go-live.
 
 ### 11.1 The backup script
 
-Until `astra backup` exists (`NEXT_STEPS.md` B3), use Python's standard library
-online backup API. This exact approach was tried on a scratch database for this
-handoff: the copy had schema v20 and `PRAGMA integrity_check` returned `ok`.
-Never copy `astra.sqlite3` with `cp` while Astra runs, because recent writes may
-still be in the `-wal` file.
+Use Astra's `backup` command, which calls SQLite's standard-library online backup
+API and verifies the standalone copy with `PRAGMA integrity_check`. It reads the
+live database without copying its `-wal` or `-shm` sidecars, creates a new file
+only, and refuses to overwrite an existing backup. The output is plain SQLite
+until the following `age` step succeeds; remove that plaintext staging file after
+encryption. Never copy `astra.sqlite3` with `cp` while Astra runs, because recent
+writes may still be in the `-wal` file.
 
 **[ALY]** Put the age public key on the VM:
 
@@ -557,26 +560,26 @@ umask 027
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 PLAIN=/srv/astra/backups/astra-$STAMP.sqlite3
 trap 'rm -f "$PLAIN"' EXIT
-/opt/astra/app/.venv/bin/python - "$PLAIN" <<'PY'
-import sqlite3, sys
-src = sqlite3.connect("file:/srv/astra/data/astra.sqlite3?mode=ro", uri=True)
-dst = sqlite3.connect(sys.argv[1])
-src.backup(dst)
-result = dst.execute("PRAGMA integrity_check").fetchone()[0]
-dst.close()
-src.close()
-if result != "ok":
-    raise SystemExit("integrity_check failed: " + result)
-PY
+test ! -e "$PLAIN.age"
+ASTRA_HOME=/srv/astra/data /opt/astra/app/.venv/bin/astra backup --to "$PLAIN"
 age -R /srv/astra/backup-recipient.txt -o "$PLAIN.age" "$PLAIN"
 rm -f "$PLAIN"
-find /srv/astra/backups -name 'astra-*.sqlite3.age' -mtime +14 -delete
 echo "backup written: $PLAIN.age"
 ```
 
+Do not add age-based deletion here. The approved retention is 7 daily, 4 weekly
+and 3 monthly backups; the sample script does not implement or verify that
+schedule. Keep this timer disabled until a separate retention job has been
+implemented and tested against disposable backup files.
+
 (`age -R` reads recipients from a file; verify the flag with `age --help`.)
 
-Run it nightly with a systemd timer. `/etc/systemd/system/astra-backup.service`:
+The units below are templates only. **Do not install or enable this timer yet.**
+The current script only writes one encrypted local copy; the approved off-box
+upload and tested 7/4/3 retention lifecycle are not implemented. Enabling it
+before those are ready can accumulate encrypted files indefinitely while giving
+no off-box recovery. Enable only after both controls are implemented and tested.
+`/etc/systemd/system/astra-backup.service`:
 
 ```ini
 [Unit]
@@ -608,16 +611,11 @@ Persistent=true
 WantedBy=timers.target
 ```
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now astra-backup.timer
-sudo systemctl start astra-backup.service
-journalctl -u astra-backup -n 20 --no-pager
-ls -l /srv/astra/backups
-```
-
-Verification: the journal shows "backup written", one `.age` file exists, and no
-plain `.sqlite3` file is left in `/srv/astra/backups`.
+After owner approval of the cloud access method and after both controls above
+pass disposable-file tests, install and enable the units. Until then, keep the
+timer disabled. Verification must confirm the journal shows a successful upload,
+the expected daily/weekly/monthly objects remain under the 7/4/3 policy, and no
+plain `.sqlite3` file remains in `/srv/astra/backups`.
 
 ### 11.2 Off-box copy to OCI Object Storage **[ALY for the bucket and access]**
 
@@ -663,14 +661,23 @@ age -d -i "$env:USERPROFILE\Documents\AstraKeys\astra-backup-key.txt" -o astra.s
 python -c "import sqlite3; c=sqlite3.connect('astra.sqlite3'); print(c.execute('PRAGMA integrity_check').fetchone()[0], c.execute('PRAGMA user_version').fetchone()[0])"
 ```
 
-It prints `ok 20` (or whatever schema the backup has).
+It prints `ok 21` (or the schema version contained in the backup).
+
+If Astra reports database corruption, stop Astra and preserve the damaged data
+directory for investigation. Do not run migrations, SQLite repair commands, or
+restore over that directory. Choose a prior encrypted backup, decrypt it on the
+owner's PC, verify `integrity_check`, and restore it to a new path using the
+steps below. Keep the original damaged directory and the pre-restore directory
+until the restored service and task data have been checked. This is a documented
+recovery procedure; no hosted corruption drill has been performed.
 
 **Restore onto the desktop (Oracle to desktop drill):**
 
 ```powershell
-$env:ASTRA_HOME = "$env:USERPROFILE\Documents\AstraRestoreTest"
-New-Item -ItemType Directory -Force $env:ASTRA_HOME
-Copy-Item astra.sqlite3 "$env:ASTRA_HOME\astra.sqlite3"
+$restoreHome = "$env:USERPROFILE\Documents\AstraRestoreTest"
+New-Item -ItemType Directory -Force $restoreHome
+.venv\Scripts\astra restore --from astra.sqlite3 --to "$restoreHome\astra.sqlite3"
+$env:ASTRA_HOME = $restoreHome
 .venv\Scripts\astra serve --host 127.0.0.1 --port 8765
 ```
 
@@ -683,14 +690,57 @@ scp -i "$env:USERPROFILE\.ssh\astra_oci" astra.sqlite3 ubuntu@<ip>:/tmp/astra-re
 ```
 
 ```bash
+set -eu
+RESTORE_HOME=/srv/astra/restore-staging-$(date -u +%Y%m%dT%H%M%SZ)
+OLD_HOME=/srv/astra/data.before-restore-$(date -u +%Y%m%dT%H%M%SZ)
+rollback() {
+  result=$?
+  trap - ERR
+  recovered_old=0
+  if [ -d "$OLD_HOME" ]; then
+    sudo systemctl stop astra || true
+    if [ -e /srv/astra/data ]; then
+      sudo mv /srv/astra/data "$RESTORE_HOME.failed" || true
+    fi
+    if [ ! -e /srv/astra/data ] && sudo mv "$OLD_HOME" /srv/astra/data; then
+      recovered_old=1
+    fi
+  else
+    recovered_old=1
+  fi
+  if [ "$recovered_old" -eq 1 ]; then
+    sudo systemctl start astra || true
+    curl -fsS http://127.0.0.1:8765/ >/dev/null || true
+  else
+    echo "CRITICAL: old data was not restored; leave Astra stopped and recover $OLD_HOME manually." >&2
+  fi
+  exit "$result"
+}
+trap rollback ERR
 sudo systemctl stop astra
-sudo mv /srv/astra/data /srv/astra/data.before-restore-$(date -u +%Y%m%dT%H%M%SZ)
+sudo install -d -o astra -g astra -m 700 "$RESTORE_HOME"
+sudo -u astra /opt/astra/app/.venv/bin/astra restore --from /tmp/astra-restore.sqlite3 --to "$RESTORE_HOME/astra.sqlite3"
+sudo -u astra env ASTRA_HOME="$RESTORE_HOME" /opt/astra/app/.venv/bin/python -c 'from astra.db import connect; c=connect(); print(c.execute("PRAGMA integrity_check").fetchone()[0], c.execute("PRAGMA user_version").fetchone()[0]); c.close()'
+sudo mv /srv/astra/data "$OLD_HOME"
 sudo install -d -o astra -g astra -m 700 /srv/astra/data
-sudo install -o astra -g astra -m 600 /tmp/astra-restore.sqlite3 /srv/astra/data/astra.sqlite3
+sudo install -o astra -g astra -m 600 "$RESTORE_HOME/astra.sqlite3" /srv/astra/data/astra.sqlite3
+sudo rm -f "$RESTORE_HOME/astra.sqlite3"
+sudo rmdir "$RESTORE_HOME"
 sudo rm -f /tmp/astra-restore.sqlite3
 sudo systemctl start astra
-curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8765/
+curl -fsS http://127.0.0.1:8765/ >/dev/null
+trap - ERR
 ```
+
+If any cutover or health-check command fails, the error trap makes a best-effort
+rollback. After the old directory has moved, it preserves the failed active
+directory as `$RESTORE_HOME.failed`, attempts to restore `$OLD_HOME`, and only
+restarts Astra when the old data directory is back in place. Before the old
+directory moves, the original data remains in place and Astra is restarted. A
+staging directory left by an earlier failure contains plaintext: keep its mode
+700, restrict access, and securely remove it only after recovery is confirmed.
+The shell procedure is documented but has not been executed against a hosted
+server; the rollback result remains unverified until a timed restore drill.
 
 - Do not copy an old `-wal` or `-shm` file next to a restored database.
 - A backup from an older schema is upgraded automatically on start.

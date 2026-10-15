@@ -5,7 +5,9 @@ import getpass
 import socket
 import sqlite3
 import sys
+from pathlib import Path
 
+from .backup import create_backup, restore_backup
 from .db import SchemaMigrationRefused, connect, database_path
 from .service import AstraService, Conflict, Forbidden
 from .web import serve
@@ -28,6 +30,19 @@ def main(argv=None):
     reset = commands.add_parser("reset-password", help="Set a new password for an active user")
     reset.add_argument("--email", required=True)
     reset.add_argument("--yes", action="store_true", help="Skip typing the email to confirm")
+    backup = commands.add_parser("backup", help="Write a verified, SQLite-consistent database snapshot")
+    backup.add_argument(
+        "--to", required=True, metavar="FILE",
+        help="New backup file; existing files are never replaced",
+    )
+    restore = commands.add_parser("restore", help="Restore a backup to a new database file")
+    restore.add_argument(
+        "--from", dest="source", required=True, metavar="FILE", help="Verified Astra backup"
+    )
+    restore.add_argument(
+        "--to", required=True, metavar="FILE",
+        help="New database file; existing files are never replaced",
+    )
     args = parser.parse_args(argv)
     try:
         _run(args)
@@ -127,6 +142,12 @@ def _run(args):
             print(f"Password reset for {user['email']}.")
         finally:
             db.close()
+    elif args.command == "backup":
+        destination = create_backup(database_path(), Path(args.to))
+        print(f"Backup written: {destination} (integrity_check: ok)")
+    elif args.command == "restore":
+        destination = restore_backup(Path(args.source), Path(args.to))
+        print(f"Database restored: {destination} (integrity_check: ok)")
     else:
         serve(args.host, args.port)
 

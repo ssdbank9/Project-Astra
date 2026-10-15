@@ -16,12 +16,16 @@ did not repeat it. Aly accepted A5 on 2026-10-15; JRNDC8 is Done. No live accoun
 or database was changed. Hosted readiness and deployment remain separate and
 unverified.
 
-Live Jaira snapshot on 2026-10-15: **92 tickets: 26 Done / 39 signoff / 12
-human / 15 backlog**. There is no ticket in an active agent build/review lane.
+Live Jaira snapshot on 2026-10-15: **92 tickets: 26 Done / 39 signoff / 13
+human / 13 backlog / 1 in-progress**. Aly authorized TRPV3J for Codex; local
+backup/restore CLI work is active. The CLI and operator guide do not prove
+encryption-key setup, OCI upload, retention, desktop copy or hosted restore drills.
 Backlog ticket 0RHNMG has the same title and core goal as accepted JRNDC8, but
-its context and criteria differ; whether it is a duplicate is unverified. Aly
-must reconcile it before it is closed or treated as separate work.
-The real-device acceptance check is still pending; see [the A7 checklist](REAL_DEVICE_ACCESSIBILITY_CHECKLIST_2026-10-15.md).
+its context and criteria differ. 0RHNMG is now in human review awaiting Aly's
+duplicate-versus-separate decision; its provenance is unverified. The
+real-device acceptance check is still pending; see [the A7 checklist](REAL_DEVICE_ACCESSIBILITY_CHECKLIST_2026-10-15.md).
+2FREQ9 and WMW428 have Aly's acceptance recorded in chat but remain in the
+human lane for Aly's board transition.
 
 ## Current independent-review guard repairs — 2026-10-14
 
@@ -51,7 +55,7 @@ Validation has no errors; 44 warnings and generated-note drift remain disclosed.
 
 Pin the published package SHA supplied with the independent-review prompt.
 The older app baseline and defect statements below are historical snapshots;
-schema 20/package 0.1.0 are unchanged. Physical-device, assistive-technology,
+schema 21 includes A5 and package 0.1.0 is unchanged. Physical-device, assistive-technology,
 whole-app usability and hosted launch gates remain separate and unverified.
 
 ## Critical built-work review — 2026-10-13

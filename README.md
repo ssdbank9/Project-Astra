@@ -442,6 +442,38 @@ python -m venv .venv
 The owner password is requested without echo. Application data defaults to
 `%LOCALAPPDATA%\AstraProjectTracker`; override it for testing with `ASTRA_HOME`.
 
+SQLite recovery commands operate on standalone files. `backup` uses SQLite's online
+backup API, so it includes committed WAL data without copying the live database or its
+sidecars. It verifies the snapshot and refuses to replace an existing file. `restore`
+validates a backup and writes it to a new database path; it never replaces the active
+database. Point `ASTRA_HOME` at the folder containing the restored `astra.sqlite3` only
+after the restore copy has been checked. These commands produce a plain SQLite file:
+encrypt it before keeping it on a server, in object storage, or on a desktop.
+
+```powershell
+$previousAstraHome = $env:ASTRA_HOME
+$backupTestDir = Join-Path $env:TEMP ("AstraBackupTest-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $backupTestDir
+$backupFile = Join-Path $backupTestDir 'astra-backup.sqlite3'
+$restoreHome = Join-Path $backupTestDir 'restore'
+.venv\Scripts\astra backup --to $backupFile
+.venv\Scripts\astra restore --from $backupFile --to (Join-Path $restoreHome 'astra.sqlite3')
+$env:ASTRA_HOME = $restoreHome
+.venv\Scripts\astra serve --host 127.0.0.1 --port 8765
+```
+
+This is a disposable local test only. After checking the restored data and stopping
+Astra, remove the plain backup and test database. Do not keep this unencrypted example
+in Documents, on a server, or in cloud storage. For any retained copy, use the approved
+encryption process. Keep the source backup unchanged until the restored database has
+reopened and its data has been checked. The real key, cloud upload, retention, and hosted
+restore drills still require owner setup and verification.
+
+```powershell
+$env:ASTRA_HOME = $previousAstraHome
+Remove-Item -LiteralPath $backupTestDir -Recurse -Force
+```
+
 Recovery commands for whoever runs the server (PDDS2D). Each first prints the database it
 will change and stops if that file does not exist (it never creates one; set `ASTRA_HOME`),
 then asks you to type the target's email to confirm (`--yes` skips that, for scripts); it

@@ -330,7 +330,7 @@ the Python version used (3.11 or newer); confirm the self-hosted Inter font
 licence file ships (`static/fonts/Inter-OFL.txt`); note that Node is used only
 by the tests. Re-run whenever a dependency is added.
 
-### B3. Backup and restore of SQLite (agent, ticket TRPV3J; Aly's policy is settled)
+### B3. Backup and restore of SQLite (TRPV3J local implementation; hosted proof remains open)
 
 Aly's policy (2026-09-20): nightly encrypted, SQLite-consistent backup to OCI
 Object Storage within the free allowance, plus an encrypted copy on Aly's
@@ -338,28 +338,28 @@ desktop; RPO 24 hours; RTO 4 hours; keep 7 daily, 4 weekly and 3 monthly; only
 Aly controls restore credentials; prove both restore directions (Oracle to
 desktop, desktop to a new Oracle VM) before go-live.
 
-Tasks:
+**Local CLI implementation (2026-10-15):** `astra backup --to <file>` now uses
+SQLite's online backup API from a read-only connection, validates the source and
+snapshot, and refuses an existing destination. `astra restore --from <file>
+--to <new-file>` validates a snapshot and restores it to a new database without
+replacing the active database. The runbook now uses these commands. Disposable
+tests cover a concurrent write, intact reopen, corrupt input refusal and
+preservation of existing files. This does not complete the go-live backup gate.
 
-1. Add an `astra backup --to <file>` command that uses SQLite's online backup
-   API (`sqlite3.Connection.backup` in the standard library) and then runs
-   `PRAGMA integrity_check` on the copy. This was tried on a scratch database in
-   this handoff and produced a copy at schema v20 with integrity "ok". Never
-   copy the live `.sqlite3` file with `cp`, because the WAL file may hold
-   recent writes.
-2. Add `astra restore --from <file>` or document a manual restore: stop the
-   service, move the old database aside, copy the backup in as
-   `astra.sqlite3`, start the service, and let migrations run if the backup is
-   older.
-3. Encryption: encrypt to Aly's public key (with `age`, or gpg if Aly
-   prefers, Q10) so the server can write backups but not read them. Aly keeps
-   the private key.
-4. Retention: date-stamped names plus Object Storage lifecycle rules, or a
-   pruning script (see `DEPLOYMENT_RUNBOOK.md` stage 11).
-5. Tests: backup of a database under concurrent writes; restore into a fresh
-   `ASTRA_HOME`; a restored older backup migrates forward.
-6. A restore drill, written down with times, in both directions.
+Still required before go-live:
 
-Done when: a restore from an encrypted off-host backup has been done and timed.
+1. Aly selects the encryption tool and OCI write path under Q10, creates and
+   controls the private key, bucket and access credentials, then verifies the
+   encrypted upload and 7 daily / 4 weekly / 3 monthly retention.
+2. Prove restore from an encrypted off-host backup to a desktop and to a new
+   Oracle VM; record the elapsed time for each and confirm the 4-hour RTO.
+3. Exercise an older-schema restore and migration on a disposable copy before
+   release. Never use the live database for these checks.
+
+The full phase gate is done only after the encrypted off-host restore drills have
+passed and been timed. The repository's local command tests alone do not prove
+the OCI destination, encryption key, retention, desktop copy, hosted schedule or
+either real restore direction.
 
 ### B4. Migration safety (agent)
 
