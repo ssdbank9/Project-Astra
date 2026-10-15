@@ -16,7 +16,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-15T12:42:24Z
+updated-at: 2026-10-15T12:42:30Z
 updated-by: Codex
 outcome-what: "Finished the evidence-based scope and eight-step plan; local implementation work is authorized, while staging and exposure remain separately gated."
 outcome-why: "The existing code already has several protections, so the work must target verified gaps and prove local readiness before any cloud action."
@@ -49,7 +49,7 @@ outcome-resolves: "Moves 6BXYJZ into implementation with local security, operato
 - [x] Reconcile the deployment runbook with the current app and approved decisions; verify vendor commands against official sources when needed and mark unexecuted steps clearly.
   proof: docs/handoff/DEPLOYMENT_RUNBOOK.md: DuckDNS secret handling, Caddy version/validation, HSTS sequence and Q22 gate; official vendor links; docs/handoff/OPEN_QUESTIONS.md: Q22
 - [x] Run focused security/regression checks, the full Windows suite, line-ending and private-file checks; obtain an independent review and fix confirmed findings.
-  proof: tests/run.py: Ran 904 tests in 988.453s, OK (skipped=1); byte scan found no CR; git diff --check clean; independent read-only review found no concrete defect
+  proof: tests/run.py: Ran 917 tests in 1005.884s, OK (skipped=1); independent read-only reviewer found no remaining confirmed defect
 - [x] Prepare the staged deployment checklist and identify remaining Aly-only values (OCI region, Ubuntu version, DuckDNS name, key/credentials); stop before account access, provisioning or network exposure until separately authorized.
   proof: docs/handoff/DEPLOYMENT_RUNBOOK.md: Stage 0 owner choices and stop-before-provisioning rule; docs/handoff/NEXT_STEPS.md: deployment stages and launch gates
 - [ ] After separate explicit staging authorization, deploy synthetic data only, verify HTTPS/Secure cookies, firewall, persistence, backup/restore and post-reboot recovery; report evidence and ask Aly for any later real-user launch decision.
