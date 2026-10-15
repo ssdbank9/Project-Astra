@@ -17,10 +17,14 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T10:11:03Z
+updated-at: 2026-10-15T10:12:33Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-49508
 claimed-at: 2026-10-15T09:41:41Z
+outcome-what: "Implemented safe SQLite online backup and new-path restore; added CLI commands, schema validation, migration-before-success, failure cleanup, regression tests, and operator recovery documentation."
+outcome-why: "The previous deployment plan used a scratch workaround and lacked a tested, safe restore path."
+outcome-resolves: "The DOD is supported by 11 focused backup/restore tests and the 902-test full suite; local recovery behavior is verified. Cloud encryption/upload, 7/4/3 automation, real restore drills, and hosted rollback remain unverified."
+executed-by: Codex
 ---
 
 # Backups and restore
