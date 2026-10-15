@@ -1,7 +1,7 @@
 ---
 id: 01M4XH9DAS9JW45YQPZPJRNDC8
 title: First-login and self-service password change
-status: review
+status: human
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-15T07:17:12Z
+updated-at: 2026-10-15T07:17:42Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
@@ -25,6 +25,7 @@ review-summary: "Schema v21 adds a must_change_password flag for App Owner-creat
 review-gaps: "No confirmed source defect. The independent reviewer did not repeat the Chrome actions; the browser evidence is from the implementer's isolated synthetic-data run. The browser used one active session per account, so multi-session revocation is covered by service and HTTP tests rather than a multi-session browser run. Hosted behavior remains unverified."
 review-verdict: "No confirmed defect in the implementation or test evidence reviewed. A5's local acceptance criteria are supported by the 891-test suite and isolated browser flows. Recommend Aly review the recorded evidence; hosted operation remains outside this verification."
 review-check: "1. Read docs/handoff/FIRST_LOGIN_PASSWORD_CHANGE_2026-10-14.md, especially Follow-up browser verification — 2026-10-15. 2. Run .venv\\\\Scripts\\\\python.exe tests\\\\run.py and confirm 891 tests, OK, skipped=1. 3. For UI reproduction, use a disposable database and follow the documented forced-change and voluntary-change Chrome flows; do not use live Astra data."
+question: "Please review A5 implementation and evidence: 891-test pass, isolated Chrome verification of both successful flows and invalid-route/input cases, independent implementation review, and the stated browser/hosting limitations."
 ---
 
 # First-login and self-service password change
