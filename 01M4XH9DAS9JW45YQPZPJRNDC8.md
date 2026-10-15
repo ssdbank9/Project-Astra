@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-15T07:01:14Z
+updated-at: 2026-10-15T07:08:16Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
@@ -48,7 +48,7 @@ outcome-resolves: "Begin implementing v21 flag, atomic password changes, HTTP re
   proof: src/astra/web.py:_require_user; tests/test_web.py forced password change cases
 - [x] Add accessible UI for forced first sign-in and voluntary self-change; test login, reload/session restoration and route bypass prevention.
   proof: src/astra/static/index.html; src/astra/static/app.js; tests/test_web.py UI checks; isolated Chrome smoke
-- [~] Run migration compatibility, service/HTTP/UI/full suites, guard-removal check and local browser on synthetic data; get independent source review and update handoff.
+- [x] Run migration compatibility, service/HTTP/UI/full suites, guard-removal check and local browser on synthetic data; get independent source review and update handoff.
 
 ## Progress
 - **2026-10-14 15:47 · Codex** — Planning found schema20. Add nullable-free INTEGER must_change_password NOT NULL DEFAULT 0 in schema21 so existing users and the initial owner remain unaffected. Set it for accounts created by an App Owner and all App Owner/server password resets. A5 explicitly says a reset password is temporary; never set the flag for an ordinary successful self-change. Enforce forced state server-side in _require_user, not only by hiding navigation. Allow GET /api/me, POST /api/password/change, POST /api/logout only while flagged; logout-all should be blocked because it invalidates the only forced-change session. Self-change verifies current password, writes password_changed audit without secrets, clears the flag and keeps this session while revoking all others.
