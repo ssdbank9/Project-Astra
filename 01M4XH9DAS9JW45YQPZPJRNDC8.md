@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-15T07:14:53Z
+updated-at: 2026-10-15T07:17:12Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
@@ -61,3 +61,4 @@ review-check: "1. Read docs/handoff/FIRST_LOGIN_PASSWORD_CHANGE_2026-10-14.md, e
 - **2026-10-14 18:49 · Codex** — Correction to the previous browser wording: Chrome showed the forced-change screen and the normal shell for an established synthetic account, but did not submit a password change. The successful transition is verified by service and HTTP tests only; the browser transition is unverified. Handoff receipt now states this accurately.
 - **2026-10-15 04:23 · Codex** — Independent review found no confirmed functional defect. Standards found ambiguous owner wording, now corrected in docs, the migration comment, and JRNDC8 frontmatter and checklist via the CLI. Final reviewer recheck remains. The browser smoke showed the forced-change screen and the established-user shell but did not submit a password change; the successful transition is covered by service and HTTP tests only. Keep the ticket definition of done open until browser behavior is verified or Aly accepts that evidence limit. Next: commit the terminology correction with this ticket, request reviewer recheck, then rerun the suite and complete the authorized branch handoff.
 - **2026-10-15 04:27 · Codex** — Standards recheck found an older progress note uses the phrase 'initial owner remains unaffected.' That historical note refers to the App Owner; current A5 handoff wording uses the qualified role name. The remaining NEXT_STEPS reference has now been corrected to 'App Owner.' Keep JRNDC8 in-progress: the completion criterion for a successful password-change transition in Chrome remains unverified.
+- **2026-10-15 07:17 · Codex** — 2026-10-15 · Codex — The successful password-change browser flows are now verified on isolated synthetic data. Chrome confirmed both the forced first-login flow and voluntary change flow, invalid-input refusals and protected-route gating; read-only DB checks showed one secret-free audit event and a retained active session for each account. Full suite rerun: 891 tests, OK (skipped=1). The 04:27 note predates this evidence and is historical. The reviewer did not repeat Chrome; hosted operation and multi-session browser behavior remain unverified, with the latter covered by service and HTTP tests. The older 'initial owner remains unaffected' phrase refers to the initial App Owner and is historical; current wording uses App Owner.
