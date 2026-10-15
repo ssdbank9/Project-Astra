@@ -16,7 +16,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-15T10:58:20Z
+updated-at: 2026-10-15T11:13:50Z
 updated-by: Codex
 outcome-what: "Finished the evidence-based scope and eight-step plan; local implementation work is authorized, while staging and exposure remain separately gated."
 outcome-why: "The existing code already has several protections, so the work must target verified gaps and prove local readiness before any cloud action."
@@ -42,8 +42,8 @@ outcome-resolves: "Moves 6BXYJZ into implementation with local security, operato
   proof: 6BXYJZ plan checklist records evidence reconciliation and authorization boundaries
 - [x] Inspect startup, HTTP security, reverse-proxy trust, cookie flags, logging, storage paths and operator files; record concrete deployment risks and affected tests.
   proof: 6BXYJZ plan checklist records source/config audit scope
-- [ ] Repair any confirmed local security or deploy-configuration gap without exposing the service; add targeted tests for each changed boundary and role.
-  proof: 6BXYJZ plan checklist records confirmed-gap repair and regression scope
+- [x] Repair any confirmed local security or deploy-configuration gap without exposing the service; add targeted tests for each changed boundary and role.
+  proof: src/astra/__main__.py: CLI rejects non-IPv4-loopback before _run; tests/test_core.py: test_serve_refuses_non_loopback_hosts_before_starting and test_serve_allows_the_documented_loopback_host
 - [ ] Prepare least-privilege, loopback-only Astra service and Caddy/TLS/logging/firewall configuration, persistent database path and secret-free operational instructions; verify templates locally.
   proof: 6BXYJZ plan checklist records loopback service and proxy prep
 - [ ] Reconcile the deployment runbook with the current app and approved decisions; verify vendor commands against official sources when needed and mark unexecuted steps clearly.
