@@ -1,7 +1,7 @@
 ---
 id: 01M4XH9DAS9JW45YQPZPJRNDC8
 title: First-login and self-service password change
-status: in-progress
+status: review
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,13 +14,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-15T07:10:52Z
+updated-at: 2026-10-15T07:11:31Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
-outcome-what: "Completed and verified App Owner-set first-login password changes and signed-in self-service changes; updated the A5 handoff with fresh suite and isolated Chrome evidence."
-outcome-why: A5 is a pre-invitation gate and must block protected access until temporary passwords are changed without changing live accounts.
-outcome-resolves: "All A5 acceptance criteria are met in service, HTTP, migration, UI and full-suite tests; isolated Chrome verified invalid inputs, direct-route gating and both successful change flows; independent review found no confirmed defect. Hosted behavior and multi-session browser behavior remain unverified; the latter is covered by service and HTTP tests."
+outcome-what: "Verified A5 through the full 891-test suite, isolated Chrome success and failure flows, and independent source review; refreshed the handoff and recorded proof."
+outcome-why: The first successful password-change browser transition and the full-suite rerun were the remaining A5 verification gaps.
+outcome-resolves: "A5 acceptance criteria now have test, browser and independent-review evidence; hosted use remains unverified."
 ---
 
 # First-login and self-service password change
