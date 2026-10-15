@@ -46,26 +46,46 @@ normal app; sign-out remains available before changing.
   `must_change_password` check made the dedicated HTTP test fail because the
   protected projects endpoint returned 200 instead of 403; after restoring
   the guard, that test passed (**1 test in 1.204s, OK**).
-- An isolated local Chrome smoke test on a temporary database showed the forced
-  screen for a synthetic new account, the self-service dialog, and the normal
-  app shell for an established synthetic account. The browser did not complete
-  a password change; the transition after a successful change is verified by
-  service and HTTP tests, but remains unverified in the browser. No real
-  account was used; the main Astra database and local server on port 8766 were
-  not changed.
+- The initial isolated local Chrome smoke test on a temporary database showed
+  the forced screen for a synthetic new account, the self-service dialog, and
+  the normal app shell for an established synthetic account. That initial run
+  did not submit a password change. The later successful forced and voluntary
+  browser flows are recorded in the 2026-10-15 follow-up below. No real account
+  was used; the main Astra database and local server on port 8766 were not
+  changed.
 
 ## Review and limits
 
-The independent Spec review found no confirmed functional defect. The Standards
-review found one terminology issue, now corrected; final reviewer recheck is
-pending. Successful password submission and the resulting transition in Chrome
-remain unverified, as the isolated smoke did not change a password. Aly's
-acceptance is pending. This evidence is for local source, tests and an isolated
-browser instance only. Hosted operation,
-real-user invitation, production recovery and deployment remain unverified and
-unauthorized by this change.
+The independent implementation review found no confirmed functional or security
+defect. The reviewer acknowledged the follow-up Chrome evidence as closing the
+browser gap, but did not independently repeat the browser actions. Aly's
+acceptance is pending. This evidence is for local source, tests and isolated
+synthetic data only. Hosted operation, real-user invitation, production recovery
+and deployment remain unverified and unauthorized by this change.
 
 The first full-suite attempt failed because legacy HTTP tests authenticated
 newly created test users without completing the new required step. Test helpers
 were corrected to model established fixture accounts; A5-specific tests retain
-the forced-change state. The rerun above is the passing full-suite receipt.
+the forced-change state. The initial passing rerun was **891 tests in 698.337s,
+OK (skipped=1)**. After the 2026-10-15 browser continuation, a fresh full run
+passed **891 tests in 644.691s, OK (skipped=1)**.
+
+## Follow-up browser verification — 2026-10-15
+
+Using Chrome against an isolated local server and disposable SQLite database,
+the forced-change form rejected mismatched and too-short passwords and a blank
+current-password field; a wrong current password was rejected without leaving
+the forced-change screen. The signed-in password dialog likewise rejected
+mismatched, too-short and wrong-current-password submissions. Direct navigation
+to `#/projects` while the synthetic member still required a change left the
+forced-change screen in place.
+
+The synthetic member then completed a forced change and reached the protected
+Projects page. A synthetic App Owner completed the voluntary change and saw the
+success notification. Read-only SQLite checks confirmed the new passwords
+verify, both forced-change flags are clear, each account has one
+`password_changed` event without the new password value, and each active session
+remains usable. The browser exercised one active session per account; revocation
+of other sessions is covered by service and HTTP tests, not a multi-session
+browser run. The disposable server was stopped. No live accounts, primary Astra
+database or production service were used or changed.

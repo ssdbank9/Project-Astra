@@ -134,17 +134,20 @@ Done when: the ticket's definition of done is met and reviewed.
 
 ### A5. Password change at first sign-in, and changing your own password (agent)
 
-**Implementation completed 2026-10-14; awaiting final reviewer recheck and
-Aly's acceptance.** See [A5 implementation and verification](FIRST_LOGIN_PASSWORD_CHANGE_2026-10-14.md).
+**Implementation, verification and independent implementation review completed
+2026-10-15; in Jaira human review, awaiting Aly's acceptance.** See [A5 implementation and verification](FIRST_LOGIN_PASSWORD_CHANGE_2026-10-14.md).
 Schema 21 adds `must_change_password` with default 0 for existing users; App Owner
 account creation and App Owner/server resets set it. HTTP authorization enforces a
 change-only state server-side. Successful change checks the current password,
 keeps the active session, revokes the user's other sessions, records a
 secret-free `user_events` event, and clears the flag. The UI supports both the
 forced first sign-in screen and the signed-in account dialog. The full suite
-passed **891 tests in 698.337s, OK (skipped=1)**. Local Chrome was checked with
-synthetic accounts and an isolated database. No live account/database changed;
-hosted behavior remains unverified.
+passed **891 tests in 644.691s, OK (skipped=1)**. Isolated Chrome verified
+invalid-input refusals, direct-route gating and both successful change flows;
+read-only checks confirmed secret-free audit events, cleared flags and active
+sessions for both synthetic accounts. Independent implementation review found
+no confirmed defect. No live account/database changed; hosted behavior remains
+unverified.
 
 The 2026-09-20 sharing plan lists "forced first-login password change" as a
 gate before invitations (`CODEX_HANDOFF_2026-09-20.md` section 15.3). Today

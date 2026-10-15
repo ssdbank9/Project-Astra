@@ -1,18 +1,21 @@
 # Astra handoff index
 
-## Current password-change gate — 2026-10-14
+## Current password-change gate — 2026-10-15
 
 Read [A5 implementation and verification](FIRST_LOGIN_PASSWORD_CHANGE_2026-10-14.md).
 App Owner-created and reset passwords require a change before protected app access;
 signed-in users can change their own password. Schema 21 defaults existing
-accounts to unchanged behavior. Full suite: **891 tests in 698.337s, OK
-(skipped=1)**. Focused HTTP/service/migration/UI checks and an isolated local
-Chrome smoke check passed. Independent Spec review found no confirmed
-functional defect; a terminology correction is awaiting reviewer recheck. The
-successful password-change transition remains unverified in Chrome, although
-service and HTTP tests pass. Aly's acceptance is pending. No live account or
-database was changed. Ticket JRNDC8 is in progress. Hosted
-readiness and deployment remain separate and unverified.
+accounts to unchanged behavior. The 2026-10-15 full suite passed: **891 tests in
+644.691s, OK (skipped=1)**. Isolated Chrome verified mismatch, too-short and
+wrong-current-password refusals, required-field blocking, direct-route gating,
+and successful forced and voluntary changes. Read-only checks confirmed one
+secret-free password-change event per synthetic account, cleared forced-change
+flags and retained active sessions. Independent implementation review passed
+with no confirmed defect; the reviewer acknowledged the browser evidence but
+did not repeat it. Aly's acceptance is pending. No live account or database was
+changed. Ticket JRNDC8 is in Jaira's human-review lane; Aly's review and
+acceptance remain pending. Hosted readiness and deployment remain separate and
+unverified.
 
 ## Current independent-review guard repairs — 2026-10-14
 
