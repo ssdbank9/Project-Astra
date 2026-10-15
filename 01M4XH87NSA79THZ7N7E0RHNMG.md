@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:16Z
-updated-at: 2026-10-15T09:25:47Z
+updated-at: 2026-10-15T09:49:49Z
 question: "Should 0RHNMG be archived as a duplicate of accepted JRNDC8, or kept as separate work for its broader 'owner-created/reset' wording? I recommend treating it as superseded; confirm whether any scope is missing first."
 outcome-what: "Compared the backlog item with accepted A5 ticket JRNDC8: same title and core behavior, created 39 seconds earlier, with slightly different owner wording."
 outcome-why: The repository contains two tickets for first-login and self-service password change; JRNDC8 is Done while 0RHNMG remains in backlog.
@@ -38,4 +38,4 @@ updated-by: Codex
 <Steps, in order — filled in by the pre-process step, or by you.>
 
 ## Progress
-
+- **2026-10-15 09:49 · Codex** — Comparison on 2026-10-15: 0RHNMG and accepted/done JRNDC8 have the same title and core first-login/self-service password-change goal. JRNDC8 implements App Owner-created and reset accounts; 0RHNMG uses broader owner-created/reset wording. The untracked ticket origin is unverified. Leave it in human review until Aly decides whether it is superseded or has separate scope.
