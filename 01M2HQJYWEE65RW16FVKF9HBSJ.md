@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T16:44:27Z
+updated-at: 2026-10-15T16:46:26Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
@@ -30,7 +30,7 @@ outcome-resolves: Creates a scoped plan for the daily summary without modifying 
 
 ## Definition of Done
 
-- [ ] Owner daily summary at a saved time in the owner timezone (default 09:00, owner-editable); only the owner enables other recipients; digest covers overdue/due-today/upcoming bands/reviews/checkpoints/next action; disabling the digest does not remove dashboard or event records; unit + HTTP tests; existing tests green.
+- [ ] App Owner-only daily in-app summary at a saved time in the App Owner timezone (default 09:00); first release has no external email, additional recipients, or escalation; digest covers overdue, due-today and upcoming bands, reviews, checkpoints and next action; disabling it does not remove dashboard or event records; service and HTTP tests pass with the existing suite.
 
 ## Options
 
