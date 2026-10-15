@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T10:09:23Z
+updated-at: 2026-10-15T10:09:36Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-49508
 claimed-at: 2026-10-15T09:41:41Z
@@ -46,7 +46,7 @@ claimed-at: 2026-10-15T09:41:41Z
   proof: tests/test_backup.py: eight focused cases cover consistency, corruption, overwrite, same-file and reopen/migration
 - [x] Update deployment and operator docs to use the CLI while retaining age encryption, 7/4/3 retention, and the explicit cloud/desktop restore gates.
   proof: README.md; docs/handoff/DEPLOYMENT_RUNBOOK.md stage 11; docs/handoff/NEXT_STEPS.md B3
-- [~] Run focused and full suites; get independent read-only review; record proven local results and keep cloud, real-key, live-data, and deployment outcomes unverified.
+- [x] Run focused and full suites; get independent read-only review; record proven local results and keep cloud, real-key, live-data, and deployment outcomes unverified.
 
 ## Progress
 - **2026-09-20 03:10 · Aly Jafferani** — Owner decision 2026-09-20: zero-dollar backup policy = nightly encrypted SQLite-consistent backup to OCI Object Storage within the free allowance plus encrypted desktop recovery copy; RPO 24 hours; target RTO 4 hours; retain 7 daily, 4 weekly and 3 monthly copies; Owner controls restore credentials; prove both restore directions before go-live.
