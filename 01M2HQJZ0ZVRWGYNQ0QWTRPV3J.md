@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T09:45:59Z
+updated-at: 2026-10-15T09:46:10Z
 updated-by: Codex
 claimed-by: X1CarbonPC-49508
 claimed-at: 2026-10-15T09:41:41Z
@@ -44,7 +44,8 @@ claimed-at: 2026-10-15T09:41:41Z
   proof: src/astra/backup.py:restore_backup; test_restore_command_reopens_a_valid_copy_at_a_new_target and test_restore_of_an_older_schema_reopens_after_migration
 - [x] Add public CLI tests for a consistent snapshot during writes, intact restore, corrupt backup refusal, overwrite refusal, and recovery after reopening.
   proof: tests/test_backup.py: eight focused cases cover consistency, corruption, overwrite, same-file and reopen/migration
-- [ ] Update deployment and operator docs to use the CLI while retaining age encryption, 7/4/3 retention, and the explicit cloud/desktop restore gates.
+- [x] Update deployment and operator docs to use the CLI while retaining age encryption, 7/4/3 retention, and the explicit cloud/desktop restore gates.
+  proof: README.md; docs/handoff/DEPLOYMENT_RUNBOOK.md stage 11; docs/handoff/NEXT_STEPS.md B3
 - [ ] Run focused and full suites; get independent read-only review; record proven local results and keep cloud, real-key, live-data, and deployment outcomes unverified.
 
 ## Progress
