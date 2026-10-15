@@ -14,13 +14,17 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-15T07:11:31Z
+updated-at: 2026-10-15T07:14:53Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
 outcome-what: "Verified A5 through the full 891-test suite, isolated Chrome success and failure flows, and independent source review; refreshed the handoff and recorded proof."
 outcome-why: The first successful password-change browser transition and the full-suite rerun were the remaining A5 verification gaps.
 outcome-resolves: "A5 acceptance criteria now have test, browser and independent-review evidence; hosted use remains unverified."
+review-summary: "Schema v21 adds a must_change_password flag for App Owner-created and reset accounts. Server authorization restricts forced-change sessions to the password-change, self-profile and sign-out routes. The accessible UI supports first-login and signed-in password changes; successful changes audit without secrets, retain the active session and revoke other sessions."
+review-gaps: "No confirmed source defect. The independent reviewer did not repeat the Chrome actions; the browser evidence is from the implementer's isolated synthetic-data run. The browser used one active session per account, so multi-session revocation is covered by service and HTTP tests rather than a multi-session browser run. Hosted behavior remains unverified."
+review-verdict: "No confirmed defect in the implementation or test evidence reviewed. A5's local acceptance criteria are supported by the 891-test suite and isolated browser flows. Recommend Aly review the recorded evidence; hosted operation remains outside this verification."
+review-check: "1. Read docs/handoff/FIRST_LOGIN_PASSWORD_CHANGE_2026-10-14.md, especially Follow-up browser verification — 2026-10-15. 2. Run .venv\\\\Scripts\\\\python.exe tests\\\\run.py and confirm 891 tests, OK, skipped=1. 3. For UI reproduction, use a disposable database and follow the documented forced-change and voluntary-change Chrome flows; do not use live Astra data."
 ---
 
 # First-login and self-service password change
