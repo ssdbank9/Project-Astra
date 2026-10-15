@@ -6,23 +6,211 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import threading
 import unittest
 from contextlib import contextmanager
+from wsgiref.util import setup_testing_defaults
+from wsgiref.validate import validator
 from unittest import mock
 from html.parser import HTMLParser
 from importlib.resources import files
 from pathlib import Path
 
-from astra.web import AstraHandler, AstraServer
+from astra.db import connect
+from astra.service import AstraService
+from astra.web import AstraHandler, AstraServer, create_wsgi_app
 
 from link_roots import allow_attachment_roots, link
 
 STATIC = Path(str(files("astra").joinpath("static")))
 REPO = Path(__file__).resolve().parents[1]
 HEX = r"#[0-9A-Fa-f]{6}"
+
+
+class AstraWsgiApplicationTests(unittest.TestCase):
+    """Exercise the hosted adapter through the public WSGI interface."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.old_home = os.environ.get("ASTRA_HOME")
+        self.old_secure = os.environ.pop("ASTRA_SECURE_COOKIES", None)
+        os.environ["ASTRA_HOME"] = self.temp.name
+        db = connect()
+        try:
+            AstraService(db).create_initial_owner(
+                "owner@example.org", "Owner", "correct horse battery"
+            )
+        finally:
+            db.close()
+        self.app = validator(create_wsgi_app())
+
+    def tearDown(self):
+        if self.old_home is None:
+            os.environ.pop("ASTRA_HOME", None)
+        else:
+            os.environ["ASTRA_HOME"] = self.old_home
+        if self.old_secure is not None:
+            os.environ["ASTRA_SECURE_COOKIES"] = self.old_secure
+        self.temp.cleanup()
+
+    def request(self, method, path, body=None, *, headers=None, remote_addr="127.0.0.1"):
+        body_bytes = body if isinstance(body, bytes) else (
+            json.dumps(body).encode("utf-8") if body is not None else b""
+        )
+        environ = {}
+        setup_testing_defaults(environ)
+        environ.update({
+            "REQUEST_METHOD": method,
+            "PATH_INFO": path,
+            "QUERY_STRING": "",
+            "REMOTE_ADDR": remote_addr,
+            "REMOTE_PORT": "43000",
+            "SERVER_PROTOCOL": "HTTP/1.1",
+            "HTTP_HOST": "astra.test",
+            "CONTENT_TYPE": "application/json",
+            "CONTENT_LENGTH": str(len(body_bytes)),
+            "wsgi.input": io.BytesIO(body_bytes),
+            "wsgi.errors": io.StringIO(),
+            "wsgi.multithread": True,
+        })
+        for name, value in (headers or {}).items():
+            key = "HTTP_" + name.upper().replace("-", "_")
+            if name.casefold() == "content-type":
+                key = "CONTENT_TYPE"
+            elif name.casefold() == "content-length":
+                key = "CONTENT_LENGTH"
+            environ[key] = value
+        captured = {}
+
+        def start_response(status, response_headers, exc_info=None):
+            captured["status"] = status
+            captured["headers"] = response_headers
+            return lambda data: None
+
+        result = self.app(environ, start_response)
+        try:
+            captured["body"] = b"".join(result)
+        finally:
+            close = getattr(result, "close", None)
+            if close:
+                close()
+        captured["headers"] = dict(captured["headers"])
+        return captured
+
+    def test_wsgi_login_and_session_keep_security_headers_and_cookie_policy(self):
+        response = self.request("POST", "/api/login", {
+            "email": "owner@example.org", "password": "correct horse battery",
+        })
+        self.assertEqual(response["status"], "200 OK")
+        self.assertEqual(response["headers"]["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response["headers"]["X-Frame-Options"], "DENY")
+        self.assertIn("frame-ancestors 'none'", response["headers"]["Content-Security-Policy"])
+        self.assertEqual(response["headers"]["Cache-Control"], "no-store")
+        self.assertIn("HttpOnly", response["headers"]["Set-Cookie"])
+        self.assertNotIn("Secure", response["headers"]["Set-Cookie"])
+
+        cookie = response["headers"]["Set-Cookie"].split(";", 1)[0]
+        current = self.request("GET", "/api/me", headers={"Cookie": cookie})
+        self.assertEqual(current["status"], "200 OK")
+        self.assertEqual(json.loads(current["body"])["user"]["email"], "owner@example.org")
+
+    def test_wsgi_login_uses_direct_peer_and_does_not_trust_forwarded_ip(self):
+        self.request(
+            "POST", "/api/login", {"email": "unknown@example.org", "password": "bad"},
+            headers={"X-Forwarded-For": "203.0.113.77"}, remote_addr="127.0.0.1",
+        )
+        db = connect()
+        try:
+            row = db.execute(
+                "SELECT ip FROM login_attempts ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            db.close()
+        self.assertEqual(row["ip"], "127.0.0.1")
+
+    def test_wsgi_login_applies_secure_cookie_setting(self):
+        os.environ["ASTRA_SECURE_COOKIES"] = "1"
+        try:
+            response = self.request("POST", "/api/login", {
+                "email": "owner@example.org", "password": "correct horse battery",
+            })
+        finally:
+            if self.old_secure is None:
+                os.environ.pop("ASTRA_SECURE_COOKIES", None)
+            else:
+                os.environ["ASTRA_SECURE_COOKIES"] = self.old_secure
+        self.assertIn("Secure", response["headers"]["Set-Cookie"])
+
+    def test_wsgi_unknown_route_has_a_hardened_no_store_error(self):
+        response = self.request("GET", "/missing")
+        self.assertEqual(response["status"], "404 Not Found")
+        self.assertEqual(response["headers"]["Cache-Control"], "no-store")
+        self.assertEqual(response["headers"]["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response["headers"]["X-Frame-Options"], "DENY")
+        self.assertNotIn("Connection", response["headers"])
+
+    def test_wsgi_startup_refuses_a_database_from_a_newer_schema(self):
+        from astra.db import SCHEMA_VERSION
+
+        path = Path(self.temp.name) / "too-new.sqlite3"
+        db = sqlite3.connect(path)
+        try:
+            db.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+        finally:
+            db.close()
+        with self.assertRaisesRegex(RuntimeError, "newer Astra version"):
+            create_wsgi_app(path)
+
+
+class AstraWaitressIntegrationTests(AstraWsgiApplicationTests):
+    """Run the same public HTTP contract through the selected hosted server."""
+
+    def setUp(self):
+        super().setUp()
+        from waitress import create_server
+
+        self.server = create_server(
+            self.app,
+            host="127.0.0.1",
+            port=0,
+            ident="Astra",
+            channel_timeout=30,
+            max_request_header_size=16_384,
+            max_request_body_size=6_000_000,
+            expose_tracebacks=False,
+        )
+        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.thread.start()
+        self.assertEqual(self.server.effective_host, "127.0.0.1")
+
+    def tearDown(self):
+        if getattr(self, "server", None) is not None:
+            self.server.close()
+            self.thread.join(timeout=5)
+        super().tearDown()
+
+    def request(self, method, path, body=None, *, headers=None, remote_addr="127.0.0.1"):
+        body_bytes = body if isinstance(body, bytes) else (
+            json.dumps(body).encode("utf-8") if body is not None else b""
+        )
+        request_headers = {"Content-Type": "application/json"}
+        request_headers.update(headers or {})
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.server.effective_port, timeout=5
+        )
+        try:
+            connection.request(method, path, body_bytes, request_headers)
+            response = connection.getresponse()
+            return {
+                "status": f"{response.status} {response.reason}",
+                "headers": dict(response.getheaders()),
+                "body": response.read(),
+            }
+        finally:
+            connection.close()
 
 
 def relative_luminance(colour):

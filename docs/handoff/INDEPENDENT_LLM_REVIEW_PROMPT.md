@@ -12,7 +12,8 @@ Treat existing claims and checked ticket boxes as evidence to test, not as proof
 Repository: https://github.com/ssdbank9/Project-Astra.git
 Working branch: codex/migration-safety-remediation
 Review-package SHA: USE THE EXACT SHA I SUPPLIED WITH THIS PROMPT.
-App-source target: the supplied review-package SHA, including October 14 repairs.
+App-source target: the supplied review-package SHA, including the October 14
+repairs and the October 15 hosted Waitress/WSGI implementation (schema 21).
 Historical pre-repair baseline: da1b3fd21ed0d4357669f0e727369fda02640672.
 
 The package includes REVIEW_GUARD_REPAIRS_2026-10-14.md,
@@ -76,6 +77,13 @@ submitted edits. Do not propose a freeze as though it were the accepted rule.
    response types and rejected requests for side effects.
    Review SQLite transactions, concurrent writes, idempotence, lease/revision
    conflicts, migrations/fault/retry and backup/restore/rollback feasibility.
+   Specifically challenge the selected hosted path: `astra serve --waitress`,
+   WSGI startup migration/fail-fast behavior, the IPv4-loopback CLI guard,
+   Waitress request/body/header/channel limits, WSGI hop-by-hop header filtering,
+   traceback handling, and the rule that Astra ignores forwarded client IPs
+   while Caddy records them. Check that a clean install includes Waitress and
+   that the runbook does not claim staging, HTTPS, firewall or reboot checks
+   that have not happened.
    Completion: reproducible findings or explicitly bounded proof, with affected roles.
 
 4. **Verify the defining workflows.** With disposable fixtures, test project/entity
@@ -97,9 +105,9 @@ submitted edits. Do not propose a freeze as though it were the accepted rule.
    .venv/bin/python tests/run.py on Linux/macOS; install editable package in the
    disposable environment if needed. Node must be on PATH. Run node --check
    src/astra/static/app.js and read-only jaira validate/list. Record Python/Node,
-   OS, exact command, test count, failures/errors/skips and duration. Prior receipt
-   is 881 in 830.547s, OK with one unavailable Windows symlink skip; obtain
-   your own result.
+   OS, exact command, test count, failures/errors/skips and duration. The latest
+   supplied Windows receipt is 917 tests in 1005.884s, OK (skipped=1); obtain
+   your own result and do not treat the single platform skip as verified.
    For critical guards, remove them only in memory or a disposable copy and
    demonstrate that the relevant regression fails; preserve reviewed source.
    Completion: actual receipts, not 'should pass'; list unavailable environments.

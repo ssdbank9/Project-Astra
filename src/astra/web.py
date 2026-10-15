@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
 import json
+import logging
 import mimetypes
 import os
+from email.message import Message
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
+from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .auth import dummy_password_hash, new_token, token_digest, verify_password
@@ -116,11 +121,8 @@ def _filter_slug(filters: dict | None) -> str:
     return segment
 
 
-class AstraHandler(BaseHTTPRequestHandler):
-    # Bound stalled header/body reads and writes; this is an inactivity limit,
-    # not a total request deadline. Proxy/concurrency protections remain separate.
-    timeout = 30
-    server_version = "Astra/0.1"
+class AstraRoutes:
+    """Route and response behavior shared by the development and WSGI adapters."""
 
     def do_GET(self):
         self.db = connect(self.server.db_path)
@@ -742,20 +744,26 @@ class AstraHandler(BaseHTTPRequestHandler):
     def end_headers(self):
         # Applies equally to normal serializers and BaseHTTPRequestHandler errors,
         # including unsupported methods and malformed requests before DB setup.
+        self._add_security_headers()
+        super().end_headers()
+
+    def _add_security_headers(self):
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('X-Frame-Options', 'DENY')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Content-Security-Policy', CONTENT_SECURITY_POLICY)
         if getattr(self, '_framework_error', False):
             self.send_header('Cache-Control', 'no-store')
-        super().end_headers()
 
     def send_error(self, code, message=None, explain=None):
         self._framework_error = True
         try:
-            super().send_error(code, message, explain)
+            return self._send_framework_error(code, message, explain)
         finally:
             self._framework_error = False
+
+    def _send_framework_error(self, code, message=None, explain=None):
+        raise NotImplementedError
 
     def _header_text(self, name: str) -> str:
         # Header values travel percent-encoded so non-ASCII filenames survive HTTP.
@@ -876,6 +884,18 @@ class AstraHandler(BaseHTTPRequestHandler):
         return self._json({"error": "Internal server error."}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
+class AstraHandler(AstraRoutes, BaseHTTPRequestHandler):
+    # Bound stalled header/body reads and writes for local development; this is
+    # an inactivity limit, not a total request deadline.
+    timeout = 30
+    server_version = "Astra/0.1"
+
+    def _send_framework_error(self, code, message=None, explain=None):
+        # AstraRoutes defines send_error as the adapter hook; bypass that mixin
+        # method here to invoke the development server's standard HTML error.
+        return BaseHTTPRequestHandler.send_error(self, code, message, explain)
+
+
 class AstraServer(ThreadingHTTPServer):
     def __init__(self, address):
         super().__init__(address, AstraHandler)
@@ -888,6 +908,143 @@ class AstraServer(ThreadingHTTPServer):
         # A failed bind raises inside __init__ before self.db exists.
         if getattr(self, "db", None) is not None:
             self.db.close()
+
+
+class _WSGIHandler(AstraRoutes):
+    """Provide the HTTP I/O methods expected by the shared route implementation."""
+
+    _hop_by_hop_headers = {
+        "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+        "te", "trailer", "transfer-encoding", "upgrade",
+    }
+
+    def send_response(self, code, message=None):
+        self._wsgi_status = int(code)
+        self._wsgi_headers = []
+
+    def send_header(self, keyword, value):
+        if not isinstance(keyword, str) or not isinstance(value, str):
+            raise TypeError("HTTP header names and values must be strings.")
+        if any(char in keyword or char in value for char in ("\r", "\n")):
+            raise ValueError("HTTP header names and values cannot contain newlines.")
+        # PEP 3333 prohibits WSGI applications from emitting hop-by-hop headers;
+        # the WSGI server owns connection management.
+        if keyword.casefold() in self._hop_by_hop_headers:
+            return
+        self._wsgi_headers.append((keyword, value))
+
+    def end_headers(self):
+        self._add_security_headers()
+        self._wsgi_headers_sent = True
+
+    def _send_framework_error(self, code, message=None, explain=None):
+        short, long = BaseHTTPRequestHandler.responses.get(int(code), ("???", "???"))
+        message = short if message is None else str(message)
+        explain = long if explain is None else str(explain)
+        body = (BaseHTTPRequestHandler.error_message_format % {
+            "code": int(code),
+            "message": html.escape(message, quote=False),
+            "explain": html.escape(explain, quote=False),
+        }).encode("utf-8", "replace")
+        self.send_response(code)
+        self.send_header("Content-Type", BaseHTTPRequestHandler.error_content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.close_connection = True
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def log_message(self, format_string, *args):
+        logging.getLogger("astra.http").info(format_string, *args)
+
+    def log_error(self, format_string, *args):
+        logging.getLogger("astra.http").error(format_string, *args)
+
+
+class AstraWSGIApplication:
+    """WSGI application shared by the hosted Waitress entry point and its tests."""
+
+    def __init__(self, db_path=None):
+        self.db_path = Path(db_path) if db_path is not None else database_path()
+        # Match AstraServer startup semantics: create/upgrade the database before
+        # the hosted listener begins accepting requests, and fail fast on refusal.
+        db = connect(self.db_path)
+        db.close()
+
+    def __call__(self, environ, start_response):
+        method = str(environ.get("REQUEST_METHOD", "GET")).upper()
+        path = str(environ.get("PATH_INFO", "/"))
+        query = str(environ.get("QUERY_STRING", ""))
+        if query:
+            path = f"{path}?{query}"
+
+        headers = Message()
+        for key, value in environ.items():
+            if key.startswith("HTTP_"):
+                headers.add_header(key[5:].replace("_", "-"), str(value))
+        for key, header in (("CONTENT_TYPE", "Content-Type"), ("CONTENT_LENGTH", "Content-Length")):
+            value = environ.get(key)
+            if value is not None and not headers.get_all(header):
+                headers.add_header(header, str(value))
+
+        handler = _WSGIHandler()
+        handler.command = method
+        handler.path = path
+        handler.request_version = str(environ.get("SERVER_PROTOCOL", "HTTP/1.1"))
+        handler.requestline = f"{method} {path} {handler.request_version}"
+        handler.client_address = (
+            str(environ.get("REMOTE_ADDR", "")),
+            int(environ.get("REMOTE_PORT", 0) or 0),
+        )
+        handler.close_connection = False
+        handler._framework_error = False
+        handler._wsgi_headers = []
+        handler._wsgi_headers_sent = False
+        handler._wsgi_status = int(HTTPStatus.INTERNAL_SERVER_ERROR)
+        handler.headers = headers
+        handler.rfile = environ.get("wsgi.input", io.BytesIO())
+        handler.wfile = io.BytesIO()
+        handler.server = SimpleNamespace(db_path=self.db_path)
+
+        dispatch = getattr(type(handler), f"do_{method}", None)
+        try:
+            if dispatch is None:
+                handler.send_error(HTTPStatus.NOT_IMPLEMENTED, f"Unsupported method ({method!r})")
+            else:
+                dispatch(handler)
+        except Exception as exc:
+            handler.log_error("Unhandled WSGI adapter error: %r", exc)
+            if handler._wsgi_headers_sent:
+                raise
+            handler._json({"error": "Internal server error."}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        status = HTTPStatus(handler._wsgi_status)
+        start_response(f"{status.value} {status.phrase}", handler._wsgi_headers)
+        return [handler.wfile.getvalue()]
+
+
+def create_wsgi_app(db_path=None):
+    """Return Astra's WSGI application; pass db_path only for controlled test instances."""
+    return AstraWSGIApplication(db_path)
+
+
+def serve_waitress(host: str, port: int):
+    """Run the hosted WSGI application with conservative Waitress limits."""
+    from waitress import serve as waitress_serve
+
+    application = create_wsgi_app()
+    print(f"Astra (Waitress) is running at http://{host}:{port}")
+    waitress_serve(
+        application,
+        host=host,
+        port=port,
+        ident="Astra",
+        channel_timeout=30,
+        max_request_header_size=16_384,
+        max_request_body_size=6_000_000,
+        expose_tracebacks=False,
+    )
 
 
 def serve(host: str, port: int):

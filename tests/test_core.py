@@ -3428,6 +3428,56 @@ class ServerCommandCliTests(unittest.TestCase):
                         stopped.exception.code)
         self.assertNotIn("database", stopped.exception.code)
 
+    def test_serve_refuses_non_loopback_hosts_before_starting(self):
+        for host in ("0.0.0.0", "192.0.2.10", "::"):
+            with self.subTest(host=host):
+                with patch.object(self.entry, "_run") as run:
+                    with self.assertRaises(SystemExit) as stopped:
+                        self.entry.main(["serve", "--host", host])
+                    self.assertEqual(
+                        stopped.exception.code,
+                        "Astra only listens on IPv4 loopback; place the approved reverse proxy in front of it.",
+                    )
+                    run.assert_not_called()
+
+    def test_serve_allows_the_documented_loopback_host(self):
+        with patch.object(self.entry, "_run") as run:
+            self.entry.main(["serve", "--host", "127.0.0.1"])
+        run.assert_called_once()
+
+    def test_serve_waitress_flag_selects_hosted_adapter(self):
+        with patch.object(self.entry, "serve_waitress") as hosted, \
+                patch.object(self.entry, "serve") as development:
+            self.entry._run(type("Args", (), {
+                "command": "serve", "waitress": True,
+                "host": "127.0.0.1", "port": 8765,
+            })())
+        hosted.assert_called_once_with("127.0.0.1", 8765)
+        development.assert_not_called()
+
+    def test_serve_accepts_waitress_selection(self):
+        with patch.object(self.entry, "_run") as run:
+            self.entry.main(["serve", "--waitress", "--host", "127.0.0.1"])
+        self.assertTrue(run.call_args.args[0].waitress)
+
+    def test_waitress_configuration_is_loopback_and_bounded(self):
+        from astra.web import serve_waitress
+
+        application = object()
+        with patch("astra.web.create_wsgi_app", return_value=application), \
+                patch("waitress.serve") as run_server, \
+                patch("sys.stdout", new_callable=io.StringIO):
+            serve_waitress("127.0.0.1", 8765)
+        self.assertIs(run_server.call_args.args[0], application)
+        self.assertEqual(run_server.call_args.kwargs["host"], "127.0.0.1")
+        self.assertEqual(run_server.call_args.kwargs["port"], 8765)
+        self.assertEqual(run_server.call_args.kwargs["channel_timeout"], 30)
+        self.assertEqual(run_server.call_args.kwargs["max_request_header_size"], 16_384)
+        self.assertEqual(run_server.call_args.kwargs["max_request_body_size"], 6_000_000)
+        self.assertEqual(run_server.call_args.kwargs["ident"], "Astra")
+        self.assertFalse(run_server.call_args.kwargs["expose_tracebacks"])
+        self.assertNotIn("trusted_proxy", run_server.call_args.kwargs)
+
     def test_database_errors_print_one_line(self):
         for error in (sqlite3.OperationalError("database is locked"), PermissionError("read-only folder")):
             with self.subTest(error=type(error).__name__):

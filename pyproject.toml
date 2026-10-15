@@ -9,8 +9,11 @@ description = "Private, owner-hosted project tracker with evidence-backed Gantt 
 requires-python = ">=3.11"
 # tzdata supplies the IANA timezone database on platforms (notably Windows) that
 # lack a system copy, so project-governing timezones resolve for due-date logic.
-# It is a data-only package; the application code itself remains dependency-free.
-dependencies = ["tzdata>=2024.1; platform_system == 'Windows'"]
+# Waitress provides the production WSGI server for hosted deployments.
+dependencies = [
+    "tzdata>=2024.1; platform_system == 'Windows'",
+    "waitress>=3.0.2,<4",
+]
 
 [project.scripts]
 astra = "astra.__main__:main"

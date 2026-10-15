@@ -287,9 +287,10 @@ pilot unless Aly says otherwise.
 migration safety, performance at realistic sizes, accessibility, error
 handling and logging.
 
-**Out.** New features. A production WSGI or ASGI server is out unless the
-hardening review decides the standard library server cannot be made safe
-enough behind Caddy (Q22).
+**Out.** New product features. Q22 now selects Waitress for hosted use and keeps
+the built-in server for local development. The WSGI adapter, real Waitress
+listener, loopback binding, response headers and request limits must pass local
+verification before staging; the decision alone does not make hosting ready.
 
 ### B1. Security review (agent, independent reviewer)
 
@@ -307,14 +308,13 @@ app, not just a diff:
 - Output: CSP and headers on every response type, including errors and
   downloads. `_download` and `_csv` set `nosniff` and `no-store` but not the
   CSP or `X-Frame-Options`; check whether that matters.
-- Server: `ThreadingHTTPServer` has no request timeout. Add a socket timeout on
-  the handler (a class attribute `timeout` on the request handler is the usual
-  way; verify) so a slow client cannot hold a thread forever.
-- Proxy: decide how the app should see the real client address behind Caddy.
-  Today `login_attempts.ip` will always be `127.0.0.1`. Either read
-  `X-Forwarded-For` only when the peer is `127.0.0.1`, and take the rightmost
-  entry (the one Caddy appended), never the leftmost; or accept that Caddy's
-  access log is the record of client addresses.
+- Server: the local `ThreadingHTTPServer` has a 30-second socket inactivity
+  timeout. Hosted use selects Waitress with a 30-second channel timeout and
+  explicit header/body size limits. This needs the integration tests and full
+  suite to remain green before staging.
+- Proxy: Astra intentionally does not trust `X-Forwarded-For`. Behind Caddy,
+  `login_attempts.ip` records the direct peer (`127.0.0.1`); Caddy's access log
+  is the record of real client addresses.
 - Rate limiting: the app has none by Aly's choice. Plan it at the proxy
   (phase D, 6BXYJZ).
 - Secrets: the app has none today (no API keys); keep it that way.
@@ -496,13 +496,13 @@ guardrails.
 
 | Need | Today | Task if missing |
 | --- | --- | --- |
-| Bind to loopback only | `astra serve --host 127.0.0.1 --port 8765` | none |
+| Bind to loopback only | CLI accepts only IPv4 loopback for either adapter; production command is `astra serve --waitress --host 127.0.0.1 --port 8765` | Regression tests reject wildcard, public and IPv6 binds before startup; Waitress integration test confirms the loopback listener |
 | Secure cookie over HTTPS | `ASTRA_SECURE_COOKIES=1` | none |
 | CSRF protection | `X-CSRF-Token` header plus `SameSite=Strict` cookie | none |
 | Data folder | `ASTRA_HOME` | none; always set it on Linux |
 | Real client IP behind a proxy | Not supported; the app sees `127.0.0.1` | B1 decision; Caddy logs the real IP |
 | Rate limiting of sign-in | Not supported by design | Caddy or fail2ban (D6) |
-| Request timeouts | Not set | B1 |
+| Request timeouts | 30-second local socket timeout; Waitress channel timeout 30 seconds | Full suite and hosted integration checks |
 | Health check | No endpoint; `GET /` returns 200 without sign-in | Optional `/healthz` later |
 | `HEAD` requests | Not handled (the standard library answers 501) | Use `GET` in monitors |
 | Backup | No command | B3 |
@@ -537,7 +537,7 @@ D5. Python and the app: `python3-venv`; clone the repository at the release tag
 into `/opt/astra/app`; a venv; `pip install .`; `astra --help` works.
 
 D6. systemd: a unit that runs
-`/opt/astra/app/.venv/bin/astra serve --host 127.0.0.1 --port 8765` as `astra`
+`/opt/astra/app/.venv/bin/astra serve --waitress --host 127.0.0.1 --port 8765` as `astra`
 with `ASTRA_HOME=/srv/astra/data`, `ASTRA_SECURE_COOKIES=1` and
 `PYTHONUNBUFFERED=1` (so the start line reaches the journal),
 `Restart=on-failure`, and sandboxing (`NoNewPrivileges`, `ProtectSystem=strict`,

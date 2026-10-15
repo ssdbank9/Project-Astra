@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import ipaddress
 import socket
 import sqlite3
 import sys
@@ -10,7 +11,7 @@ from pathlib import Path
 from .backup import create_backup, restore_backup
 from .db import SchemaMigrationRefused, connect, database_path
 from .service import AstraService, Conflict, Forbidden
-from .web import serve
+from .web import serve, serve_waitress
 
 
 def main(argv=None):
@@ -19,9 +20,10 @@ def main(argv=None):
     init = commands.add_parser("init-owner", help="Create the one initial owner account")
     init.add_argument("--email", required=True)
     init.add_argument("--name", default="App Owner")
-    run = commands.add_parser("serve", help="Run the private Astra hub")
-    run.add_argument("--host", default="127.0.0.1")
+    run = commands.add_parser("serve", help="Run Astra locally or with the hosted Waitress server")
+    run.add_argument("--host", default="127.0.0.1", help="IPv4 loopback address only (default: 127.0.0.1)")
     run.add_argument("--port", default=8765, type=int)
+    run.add_argument("--waitress", action="store_true", help="Use Waitress for the hosted WSGI application")
     # PDDS2D: recovery commands for whoever operates the server. Passwords are read only
     # from the terminal (getpass), never from arguments or the environment.
     transfer = commands.add_parser("transfer-primary", help="Make an active secondary owner the primary owner")
@@ -44,6 +46,15 @@ def main(argv=None):
         help="New database file; existing files are never replaced",
     )
     args = parser.parse_args(argv)
+    if args.command == "serve":
+        try:
+            host_address = ipaddress.ip_address(args.host)
+        except ValueError:
+            host_address = None
+        if not isinstance(host_address, ipaddress.IPv4Address) or not host_address.is_loopback:
+            raise SystemExit(
+                "Astra only listens on IPv4 loopback; place the approved reverse proxy in front of it."
+            )
     try:
         _run(args)
     except SchemaMigrationRefused as exc:
@@ -148,6 +159,8 @@ def _run(args):
     elif args.command == "restore":
         destination = restore_backup(Path(args.source), Path(args.to))
         print(f"Database restored: {destination} (integrity_check: ok)")
+    elif args.command == "serve" and args.waitress:
+        serve_waitress(args.host, args.port)
     else:
         serve(args.host, args.port)
 

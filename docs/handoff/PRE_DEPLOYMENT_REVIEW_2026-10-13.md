@@ -1,5 +1,29 @@
 # Astra pre-deployment plan and review handoff — 2026-10-13
 
+## Status update — 2026-10-15
+
+This section supersedes the dated source/test status in the original October 13
+snapshot below; the original board audit and phase plan remain context, not a
+current release-readiness claim.
+
+- Aly selected Waitress for hosted use and kept Python's built-in server for
+  local development. The hosted command is `astra serve --waitress`, using the
+  WSGI adapter on IPv4 loopback behind Caddy. Astra ignores forwarded IP
+  headers; Caddy's access log records the public client address.
+- Local implementation and runbook fixes include startup-time database
+  migration/refusal, Waitress request limits, WSGI header handling, secure
+  dependency installation and refreshed deployment instructions.
+- Current Windows full suite: **917 tests in 1005.884s, OK (skipped=1)**.
+  An independent read-only review of this server/deployment diff found no
+  remaining confirmed code defect.
+- Caddy is not installed in this workspace, so `caddy validate` is
+  **unverified**. Cloud provisioning, HTTPS/Secure-cookie operation, firewall,
+  persistence after reboot, and hosted backup/restore are also unverified.
+  Aly has not authorized staging or network exposure.
+- The live board snapshot recorded in the handoff index on October 15 is 92
+  tickets: 26 Done, 39 signoff, 13 human, 13 backlog and 1 in-progress.
+  The review prompt is prepared, but other LLM reviews have not yet been run.
+
 ## Decision and scope
 
 **Go for independent review and local preparation. No-go for deployment or real-user invitations.**

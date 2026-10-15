@@ -186,12 +186,28 @@ five matter most, because they block phase A work or the server move.
   you as the person responsible, lists what is stored and for how long, and says
   how to ask for removal.
 
-### Q22. Keep Python's built-in web server for the pilot?
+### Q22. Which HTTP server should Astra use in production? **Decided 2026-10-15**
 
-- **Today:** `astra serve` uses `ThreadingHTTPServer`, meant for local use.
-- **Recommended default:** keep it behind Caddy for the pilot, bound to
-  `127.0.0.1`, after adding request timeouts in phase B. Revisit if the pilot
-  grows. This keeps Astra free of dependencies.
+- **Aly's decision:** use Waitress for hosted Astra through a WSGI adapter; keep
+  `ThreadingHTTPServer` for local development. Waitress binds only to IPv4
+  loopback behind Caddy. Astra does not trust forwarded client-address headers;
+  Caddy's access log records real client addresses.
+- **Evidence:** Python's official `http.server` documentation says it is not
+  recommended for production and only implements basic security checks:
+  <https://docs.python.org/3/library/http.server.html>. Waitress describes
+  itself as a production-quality, pure-Python WSGI server that runs on Unix and
+  Windows: <https://docs.pylonsproject.org/projects/waitress/en/stable/>.
+- **Implementation:** the hosted command is `astra serve --waitress`. The
+  existing `astra serve` development command remains unchanged. Local checks
+  cover the IPv4-loopback guard, traceback suppression, request-size and
+  inactivity limits, WSGI behavior, startup migration refusal and an actual
+  Waitress listener. The full suite passed 917 tests (one platform skip).
+- **Still unverified:** Caddy binary validation, cloud provisioning, HTTPS,
+  firewall behavior, reboot persistence and hosted backup/restore. None has
+  been performed; Q22 does not authorize staging.
+- **Still open:** this decision does not authorize staging, provisioning,
+  public network exposure, or production use. Those require the other recorded
+  owner choices and separate staging authorization.
 
 ### Q25. Keep the repository public once the site is live?
 

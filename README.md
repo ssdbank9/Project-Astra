@@ -432,6 +432,10 @@ perform AI matching. Those capabilities will be added behind the same access bou
 
 ## Run locally
 
+This command starts Astra's local development server. Hosted deployments use
+the Waitress WSGI server behind Caddy; see the deployment runbook. Do not expose
+the local server directly to the internet.
+
 ```powershell
 python -m venv .venv
 .venv\Scripts\python -m pip install -e .

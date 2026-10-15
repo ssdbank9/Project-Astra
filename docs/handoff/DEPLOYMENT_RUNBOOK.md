@@ -54,6 +54,8 @@ Checklist:
   have the exact commit SHA to deploy.
 - [ ] Aly has chosen the DuckDNS name, the OCI home region, the Ubuntu version
   and the backup approach (`OPEN_QUESTIONS.md` Q7 and Q10).
+- [x] Q22: Aly selected Waitress for hosted use, with the built-in server kept
+  for local development. Use the `--waitress` production entry point below.
 
 **[ALY]** Create an SSH key on the Windows PC (PowerShell; OpenSSH ships with
 Windows 10 and 11; verify):
@@ -253,15 +255,15 @@ sudo git clone https://github.com/ssdbank9/Project-Astra.git /opt/astra/app
 cd /opt/astra/app
 sudo git checkout <tag>
 sudo python3 -m venv /opt/astra/app/.venv
-sudo /opt/astra/app/.venv/bin/python -m pip install --no-deps /opt/astra/app
+sudo /opt/astra/app/.venv/bin/python -m pip install /opt/astra/app
 ```
 
 Before a tag exists, check out the exact commit SHA Aly approved instead of
 `<tag>`. Never deploy a moving branch head.
 
-`--no-deps` is safe because Astra has no runtime dependencies on Linux
-(`tzdata` is Windows-only). The build step still downloads `setuptools` into an
-isolated build environment.
+This installs Astra and its declared runtime dependencies, including Waitress
+for the hosted WSGI server. On Linux, `tzdata` is Windows-only. The build step
+may download `setuptools` into an isolated build environment.
 
 Verification:
 
@@ -328,7 +330,7 @@ Environment=ASTRA_HOME=/srv/astra/data
 Environment=ASTRA_SECURE_COOKIES=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/astra/app/.venv/bin/astra serve --host 127.0.0.1 --port 8765
+ExecStart=/opt/astra/app/.venv/bin/astra serve --waitress --host 127.0.0.1 --port 8765
 Restart=on-failure
 RestartSec=5
 UMask=0077
@@ -345,14 +347,18 @@ WantedBy=multi-user.target
 Why each setting matters:
 
 - `--host 127.0.0.1` keeps Astra off the public interface. Only Caddy talks to
-  it. The README says never to expose the development server directly.
+  it. The CLI refuses non-loopback addresses before starting. The app remains
+  behind Caddy; never expose its development server directly.
+- `--waitress` selects Astra's WSGI application and Waitress server. The CLI
+  rejects non-loopback addresses before startup. Keep this process behind
+  Caddy; do not expose port 8765 publicly.
 - `ASTRA_SECURE_COOKIES=1` marks the session cookie `Secure`, which is required
   behind HTTPS.
 - `ASTRA_ATTACHMENT_ROOTS` is deliberately not set. Attachment links point at
   files on the server's own disk, which users cannot reach, so they stay off
   until hosted uploads (MXY7BG) exist.
-- Migrations run automatically when the server starts (`AstraServer` opens the
-  database through `connect()`, which calls `migrate()`).
+- The WSGI application opens and migrates the database before Waitress starts
+  listening. A refused or failed migration prevents the service from starting.
 
 Start it:
 
@@ -385,21 +391,35 @@ Rollback: `sudo systemctl disable --now astra`.
 **[ALY]** Sign in at duckdns.org, create `<name>`, point it at `<ip>`, and copy
 the account token. Treat the token like a password.
 
-**[AGENT]** Keep the IP current with a small root-only script. The update URL
-format below is the one DuckDNS documents on its install page (verify there):
+**[AGENT]** Keep the IP current with a small root-only script. DuckDNS's API
+requires the account token in the HTTPS query string. Keep that URL in a
+root-only curl config file rather than passing it as a command-line argument;
+command-line arguments can be visible in process listings.
 
 ```bash
 sudo install -d -m 700 /root/duckdns
-sudo sh -c 'umask 077; cat > /root/duckdns/token'
+sudo install -m 600 /dev/null /root/duckdns/update.conf
+sudoedit /root/duckdns/update.conf
 ```
 
-Aly pastes the token, presses Enter, then Ctrl+D. Then create
-`/root/duckdns/update.sh` (mode 700, owner root):
+Put these lines in `update.conf`, replacing both placeholders. The file must
+remain owned by root and mode 600:
+
+```text
+url = "https://www.duckdns.org/update?domains=<name>&token=<token>&ip="
+output = "/root/duckdns/last.txt"
+```
+
+Create `/root/duckdns/update.sh` (mode 700, owner root):
+
+```bash
+sudoedit /root/duckdns/update.sh
+```
 
 ```sh
 #!/bin/sh
-TOKEN=$(cat /root/duckdns/token)
-curl -fsS -o /root/duckdns/last.txt "https://www.duckdns.org/update?domains=<name>&token=${TOKEN}&ip="
+set -eu
+/usr/bin/curl --disable --fail --silent --show-error --config /root/duckdns/update.conf
 ```
 
 Run it every 5 minutes from root's crontab:
@@ -417,8 +437,11 @@ sudo cat /root/duckdns/last.txt
 getent hosts <name>.duckdns.org
 ```
 
-`last.txt` says `OK`, and the name resolves to `<ip>`. The token never appears in
-the repository, in shell history (it was pasted into `cat`) or in any log file.
+`last.txt` says `OK`, and the name resolves to `<ip>`. The token is sent to
+DuckDNS over HTTPS as its API requires. It is stored in the root-only config
+file and does not appear in the curl process arguments, shell command history,
+Astra logs or Caddy access logs. DuckDNS's own retention is outside Astra's
+control and is unverified.
 
 Rollback: remove the cron line with `sudo crontab -e` and delete
 `/root/duckdns`.
@@ -427,9 +450,13 @@ Rollback: remove the cron line with `sudo crontab -e` and delete
 
 ## Stage 9 — Caddy for HTTPS **[AGENT]**
 
-Install Caddy from its official Debian/Ubuntu packages, following
-https://caddyserver.com/docs/install (the 2026-09-20 handoff cites the Caddy
-reverse-proxy and automatic-HTTPS docs). Do not use a third-party script.
+Install Caddy from its official Debian/Ubuntu stable packages, following
+https://caddyserver.com/docs/install. Do not use a third-party script. This
+Caddyfile uses the `request_body` directive, which current Caddy documentation
+marks experimental and lists as available from Caddy 2.10.0. Check `caddy
+version` and require 2.10.0 or newer; do not remove the body limit to make an
+older installation accept the file. Validate the complete configuration with
+`caddy validate` before reloading the service.
 
 Replace `/etc/caddy/Caddyfile` with:
 
@@ -439,7 +466,14 @@ Replace `/etc/caddy/Caddyfile` with:
 	request_body {
 		max_size 6MB
 	}
-	header Strict-Transport-Security "max-age=31536000"
+	# Enable only after HTTPS and certificate renewal checks pass.
+	# header Strict-Transport-Security "max-age=31536000"
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+	}
 	reverse_proxy 127.0.0.1:8765
 	log {
 		output file /var/log/caddy/astra-access.log
@@ -451,9 +485,13 @@ Replace `/etc/caddy/Caddyfile` with:
 - `max_size 6MB` sits just above Astra's own 5 MB import limit, so Astra gives
   the friendly "The file is larger than 5 MB." message.
 - The access log is the only place real client addresses are recorded, because
-  Astra sees every request as coming from `127.0.0.1`.
-- Start without the HSTS header if you want an easy way back to HTTP during a
-  trial; add it once HTTPS is confirmed.
+  Waitress sees every request as coming from `127.0.0.1`. Astra and Waitress do
+  not trust forwarded client-address headers.
+- Caddy applies the security headers to both upstream replies and proxy errors;
+  the WSGI application applies the same headers to its own responses.
+- For initial staging certificate checks, leave the HSTS line commented out.
+  After HTTPS and renewal checks pass, enable it and reload Caddy. A browser
+  remembers HSTS for the configured year, so use HTTPS thereafter.
 
 ```bash
 sudo caddy validate --config /etc/caddy/Caddyfile
