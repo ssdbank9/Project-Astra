@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-15T07:46:21Z
-updated-at: 2026-10-15T07:52:30Z
+updated-at: 2026-10-15T07:52:35Z
 updated-by: Codex
 outcome-what: "The checklist should cover one quick path per target environment, capture visible failure evidence, and leave unavailable environments unverified."
 outcome-why: "Aly must be able to complete the planned checks in about 20 minutes without extra setup or a technical test script."
@@ -40,7 +40,7 @@ claimed-at: 2026-10-15T07:49:11Z
 
 - [x] Read the current A7 requirements and verify the relevant page names and approved task wording in the app and handoff.
   proof: docs/handoff/NEXT_STEPS.md:A7; src/astra/static/index.html:Home, Add a task; src/astra/static/app.js:Board and Move to labels
-- [ ] Design a timed 20-minute pass/fail checklist for mobile, tablet drag, NVDA and desktop 200% zoom, with explicit evidence and unavailable-device fields.
+- [~] Design a timed 20-minute pass/fail checklist for mobile, tablet drag, NVDA and desktop 200% zoom, with explicit evidence and unavailable-device fields.
 - [ ] Write the owner-facing checklist in docs/handoff and link it from the current handoff index and A7.
 - [ ] Review the steps for plain language, feasible timing, accessibility evidence limits and consistency; then move the finished checklist to Aly for execution.
 
