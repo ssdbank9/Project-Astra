@@ -135,7 +135,7 @@ Done when: the ticket's definition of done is met and reviewed.
 ### A5. Password change at first sign-in, and changing your own password (agent)
 
 **Implementation, verification and independent implementation review completed
-2026-10-15; in Jaira human review, awaiting Aly's acceptance.** See [A5 implementation and verification](FIRST_LOGIN_PASSWORD_CHANGE_2026-10-14.md).
+2026-10-15; Aly accepted A5 and JRNDC8 is Done.** See [A5 implementation and verification](FIRST_LOGIN_PASSWORD_CHANGE_2026-10-14.md).
 Schema 21 adds `must_change_password` with default 0 for existing users; App Owner
 account creation and App Owner/server resets set it. HTTP authorization enforces a
 change-only state server-side. Successful change checks the current password,
@@ -179,13 +179,13 @@ password is changed, and a member can change their own password.
 
 ### A7. Real device and screen-reader checks (Aly, with the agent's checklist)
 
-The agent writes a 20-minute checklist; Aly runs it:
+Use [the 20-minute real-device and accessibility checklist](REAL_DEVICE_ACCESSIBILITY_CHECKLIST_2026-10-15.md).
+It covers the timeline task-row drag flow (not dragging task bars), **Move to**,
+**Add a task**, NVDA and 200% zoom. Aly runs it in a non-sensitive demo project:
 
-- one Android phone in Chrome and one iPhone in Safari if available: sign in,
-  open Home, open a task, use "Move to" on the Board, add a task with Capture;
-- one tablet: a long press drag on the Board;
-- Windows with NVDA (free): sign in, reach the Board, open a task, hear the
-  page title announced on each screen;
+- Android phone in Chrome; iPhone Safari if available;
+- tablet: long-press and move a task row on the project timeline;
+- Windows with NVDA: navigate Home, Board and a task;
 - desktop browser zoom at 200%.
 
 The agent fixes what the run finds, one ticket per problem.

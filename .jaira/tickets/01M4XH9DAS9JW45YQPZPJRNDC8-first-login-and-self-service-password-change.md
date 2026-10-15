@@ -1,10 +1,10 @@
 ---
 id: 01M4XH9DAS9JW45YQPZPJRNDC8
 title: First-login and self-service password change
-status: human
+status: done
 ready: true
 creator: Codex
-assignee: Codex
+assignee: Aly Jafferani
 goal: "Require users with App Owner-set temporary or reset passwords to choose a new password before using Astra, and let signed-in users change their own password safely."
 context: "Astra accepts accounts created by an App Owner and passwords reset by an App Owner or server administrator, but does not require users to replace temporary passwords at first sign-in. The handoff gate is docs/handoff/NEXT_STEPS.md A5. Implement a user flag for App Owner-created and reset passwords, a change-only session state until changed, and self-service change after verifying the current password. Preserve the 8-character minimum and the recorded no-lockout rule. Audit changes in user_events and revoke other sessions while retaining the active session. No account, credential, deployment or live database work is authorized."
 definition-of-done: "Service, HTTP and browser checks prove accounts created by or passwords reset by an App Owner are forced to change before protected app access; an authenticated user changes their own password only after the correct current password; minimum length remains 8; user_events records the change without storing either password; all other sessions are revoked while the active session remains usable; malformed and wrong-current-password requests do not alter hashes or sessions; existing no-lockout sign-in behavior remains; migration, rollback and old-schema cases pass; independent review and full suite pass."
@@ -14,13 +14,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-15T07:19:38Z
-updated-by: Codex
+updated-at: 2026-10-15T07:36:17Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
-outcome-what: "Verified A5 through the full 891-test suite, isolated Chrome success and failure flows, and independent source review; refreshed the handoff and recorded proof."
-outcome-why: The first successful password-change browser transition and the full-suite rerun were the remaining A5 verification gaps.
-outcome-resolves: "A5 acceptance criteria now have test, browser and independent-review evidence; hosted use remains unverified."
+outcome-what: "Aly accepted A5 after reviewing the test and browser evidence."
+outcome-why: The first-login and self-service password-change work meets its acceptance criteria.
+outcome-resolves: "Accepted by Aly; hosting and deployment remain unverified."
 review-summary: "Schema v21 adds a must_change_password flag for App Owner-created and reset accounts. Server authorization restricts forced-change sessions to the password-change, self-profile and sign-out routes. The accessible UI supports first-login and signed-in password changes; successful changes audit without secrets, retain the active session and revoke other sessions."
 review-gaps: "No confirmed source defect. The independent reviewer did not repeat the Chrome actions; the browser evidence is from the implementer's isolated synthetic-data run. The browser used one active session per account, so multi-session revocation is covered by service and HTTP tests rather than a multi-session browser run. Hosted behavior remains unverified."
 review-verdict: "No confirmed defect in the implementation or test evidence reviewed. A5's local acceptance criteria are supported by the 891-test suite and isolated browser flows. Recommend Aly review the recorded evidence; hosted operation remains outside this verification."

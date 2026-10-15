@@ -12,10 +12,16 @@ and successful forced and voluntary changes. Read-only checks confirmed one
 secret-free password-change event per synthetic account, cleared forced-change
 flags and retained active sessions. Independent implementation review passed
 with no confirmed defect; the reviewer acknowledged the browser evidence but
-did not repeat it. Aly's acceptance is pending. No live account or database was
-changed. Ticket JRNDC8 is in Jaira's human-review lane; Aly's review and
-acceptance remain pending. Hosted readiness and deployment remain separate and
+did not repeat it. Aly accepted A5 on 2026-10-15; JRNDC8 is Done. No live account
+or database was changed. Hosted readiness and deployment remain separate and
 unverified.
+
+Live Jaira snapshot on 2026-10-15: **92 tickets: 26 Done / 39 signoff / 12
+human / 15 backlog**. There is no ticket in an active agent build/review lane.
+Backlog ticket 0RHNMG has the same title and core goal as accepted JRNDC8, but
+its context and criteria differ; whether it is a duplicate is unverified. Aly
+must reconcile it before it is closed or treated as separate work.
+The real-device acceptance check is still pending; see [the A7 checklist](REAL_DEVICE_ACCESSIBILITY_CHECKLIST_2026-10-15.md).
 
 ## Current independent-review guard repairs — 2026-10-14
 
