@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJZ0ZVRWGYNQ0QWTRPV3J
 title: Backups and restore
-status: todo
+status: in-progress
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T09:31:57Z
+updated-at: 2026-10-15T09:32:45Z
 updated-by: Codex
 ---
 
