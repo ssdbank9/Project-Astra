@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJZ6KSPH67PP6746BXYJZ
 title: Production security and deployment
-status: todo
+status: pre-process
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -16,11 +16,11 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-15T10:39:06Z
+updated-at: 2026-10-15T10:40:02Z
 updated-by: Codex
-outcome-what: "Completed the required problem/option review and recorded a clear goal and recommendation."
-outcome-why: "The ticket has enough context to define the local preparation and owner-controlled deployment gates."
-outcome-resolves: "Scope is to prepare for the selected Oracle-hosted deployment while leaving hosting values, staging approval, and public launch decisions with Aly."
+outcome-what: "Converted the approved deployment direction and verified local controls into a staged plan with a clear stop before staging."
+outcome-why: "Local source preparation can proceed, while region, hostname and any hosting action remain App Owner-controlled."
+outcome-resolves: "The ticket now has an ordered plan covering local security review, configuration/tests, independent review and an authorization-gated staging/reboot/restore verification."
 ---
 
 # Production security and deployment
