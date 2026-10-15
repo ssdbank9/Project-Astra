@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T17:28:42Z
+updated-at: 2026-10-15T17:30:16Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
@@ -27,7 +27,7 @@ outcome-resolves: Provides an implementation-ready plan for the owner-only in-ap
 
 ## Definition of Done
 
-- [ ] App Owner-only daily in-app summary at a saved time in the App Owner's timezone (default 09:00, editable); no external email, additional recipients, or escalation in the first release; digest covers overdue, due-today and upcoming bands, reviews, checkpoints and next action; disabling it does not remove dashboard or event records; service and HTTP tests pass with the existing suite.
+- [ ] App Owner-only daily in-app summary at an Owner-selected local time (default 09:00) and IANA time zone; no external email, additional recipients, or escalation in the first release; covers overdue, due-today and upcoming bands, reviews, open checkpoints due soon or overdue, and next actions; disabling it does not remove dashboard or event records; service, HTTP, browser and existing-suite tests pass.
 
 ## Options
 
