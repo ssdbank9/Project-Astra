@@ -16,7 +16,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-15T11:14:08Z
+updated-at: 2026-10-15T11:14:17Z
 updated-by: Codex
 outcome-what: "Finished the evidence-based scope and eight-step plan; local implementation work is authorized, while staging and exposure remain separately gated."
 outcome-why: "The existing code already has several protections, so the work must target verified gaps and prove local readiness before any cloud action."
@@ -50,8 +50,8 @@ outcome-resolves: "Moves 6BXYJZ into implementation with local security, operato
   proof: docs/handoff/DEPLOYMENT_RUNBOOK.md: DuckDNS secret handling, Caddy version/validation, HSTS sequence and Q22 gate; official vendor links; docs/handoff/OPEN_QUESTIONS.md: Q22
 - [x] Run focused security/regression checks, the full Windows suite, line-ending and private-file checks; obtain an independent review and fix confirmed findings.
   proof: tests/run.py: Ran 904 tests in 988.453s, OK (skipped=1); byte scan found no CR; git diff --check clean; independent read-only review found no concrete defect
-- [ ] Prepare the staged deployment checklist and identify remaining Aly-only values (OCI region, Ubuntu version, DuckDNS name, key/credentials); stop before account access, provisioning or network exposure until separately authorized.
-  proof: 6BXYJZ plan checklist records Aly-controlled values and hard stop
+- [x] Prepare the staged deployment checklist and identify remaining Aly-only values (OCI region, Ubuntu version, DuckDNS name, key/credentials); stop before account access, provisioning or network exposure until separately authorized.
+  proof: docs/handoff/DEPLOYMENT_RUNBOOK.md: Stage 0 owner choices and stop-before-provisioning rule; docs/handoff/NEXT_STEPS.md: deployment stages and launch gates
 - [ ] After separate explicit staging authorization, deploy synthetic data only, verify HTTPS/Secure cookies, firewall, persistence, backup/restore and post-reboot recovery; report evidence and ask Aly for any later real-user launch decision.
   proof: 6BXYJZ plan checklist records separately authorized synthetic staging and reboot/restore verification
 
