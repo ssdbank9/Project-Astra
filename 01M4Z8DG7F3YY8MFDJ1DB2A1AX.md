@@ -1,7 +1,7 @@
 ---
 id: 01M4Z8DG7F3YY8MFDJ1DB2A1AX
 title: Run Astra real-device and accessibility acceptance
-status: backlog
+status: todo
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -14,8 +14,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-15T07:46:21Z
-updated-at: 2026-10-15T07:48:17Z
-updated-by: Aly Jafferani
+updated-at: 2026-10-15T07:48:59Z
+updated-by: Codex
 outcome-what: "Specified the owner-run 20-minute real-device and accessibility checklist with its target environments, flows and evidence limits."
 outcome-why: "The handoff requires Aly to run final mobile, tablet, screen-reader and zoom checks, but no checklist existed."
 outcome-resolves: Checklist scope and acceptance criteria are ready for the implementation lane.
