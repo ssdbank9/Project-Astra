@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJYWEE65RW16FVKF9HBSJ
 title: Daily summary and notification policy
-status: todo
+status: pre-process
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -17,13 +17,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T16:40:27Z
+updated-at: 2026-10-15T16:44:27Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
-outcome-what: The in-app summary and delivery policy decisions are recorded; Aly authorized Codex to take over the ticket.
-outcome-why: The feature can now proceed through planning without any cloud changes.
-outcome-resolves: Moves the specified daily in-app summary into the implementation queue.
+outcome-what: Recorded an implementation plan for the owner-only in-app daily summary and its test/review gates.
+outcome-why: The policy choices are present in the decisions log; code design and delivery reliability need to be resolved before implementation.
+outcome-resolves: Creates a scoped plan for the daily summary without modifying cloud infrastructure.
 ---
 
 # Daily summary and notification policy
