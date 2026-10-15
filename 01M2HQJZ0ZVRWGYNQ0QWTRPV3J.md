@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJZ0ZVRWGYNQ0QWTRPV3J
 title: Backups and restore
-status: in-progress
+status: signoff
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -17,13 +17,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T10:14:10Z
-updated-by: Aly Jafferani
+updated-at: 2026-10-15T10:26:21Z
+updated-by: Codex
 claimed-by: X1CarbonPC-49508
 claimed-at: 2026-10-15T09:41:41Z
-outcome-what: "Implemented safe SQLite online backup and new-path restore; added CLI commands, schema validation, migration-before-success, failure cleanup, regression tests, and operator recovery documentation."
-outcome-why: "The previous deployment plan used a scratch workaround and lacked a tested, safe restore path."
-outcome-resolves: "The DOD is supported by 11 focused backup/restore tests and the 902-test full suite; local recovery behavior is verified. Cloud encryption/upload, 7/4/3 automation, real restore drills, and hosted rollback remain unverified."
+outcome-what: "Independent reviews found the local backup/restore change meets the ticket criteria with no blocking defect."
+outcome-why: "The new-path restore is tested and the operator procedure covers corrupt data and rollback."
+outcome-resolves: "Local definition of done is evidenced by 11 focused tests, 902 full-suite passes (one unavailable-symlink skip), and independent read-only review. Hosted backup controls and drills remain unverified."
 executed-by: Codex
 review-summary: "The CLI creates verified standalone SQLite snapshots from a read-only source and restores only to a new exclusive path. Restore refuses corrupt, incomplete-current-schema, and newer-schema files, migrates supported older schemas before success, and removes partial output on failure. Local tests and operator documentation cover recovery and rollback."
 review-gaps: "OCI keys, encrypted off-site and desktop copies, 7/4/3 retention automation, actual desktop/server restore drills, and hosted rollback have not been executed. The runbook keeps the backup timer disabled until upload and retention controls are implemented and tested; these deployment outcomes remain unverified."
