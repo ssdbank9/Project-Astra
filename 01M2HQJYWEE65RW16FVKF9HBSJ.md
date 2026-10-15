@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T16:47:12Z
+updated-at: 2026-10-15T16:51:37Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
@@ -53,3 +53,4 @@ outcome-resolves: Creates a scoped plan for the daily summary without modifying 
 - **2026-09-19 06:14 · Aly Jafferani** — HANDOFF 2026-09-19 (Claude->Codex): DO NOT START YET - gated on the App Owner section-15 decisions (notification channel, additional recipients, external email delivery, escalation rules, scheduler/host). Builds on Z24KVH (in-app inbox, done). See astra_project_tracker/CODEX_HANDOFF_2026-09-19.md sec 6.
 - **2026-09-20 03:10 · Aly Jafferani** — Owner decision 2026-09-20 resolves the policy gate: in-app digest at 09:00 in the Owner timezone, Owner only. External email, additional recipients and escalation are off for the initial release.
 - **2026-10-15 16:47 · Codex** — I took over F9HBSJ after Aly's approval, reconciled the first-release policy with DECISIONS_LOG.md, and aligned the DoD to owner-only in-app delivery (no email, extra recipients or escalation). Existing inbox storage and listing are in service.py:list_notifications and db.py's notifications table. The delivery trigger is still a design choice: an Astra-owned single-process clock loop with once-per-owner/local-day dedupe and startup catch-up avoids cloud or OS scheduler setup; a server-stop means today's digest is produced on restart after the saved time. Proposed test seams are the public AstraService digest/settings methods with a controlled clock, then authenticated Owner-only HTTP settings/inbox and browser rendering. I have not written tests or source yet; awaiting Aly's confirmation of this delivery behavior and test seams per the TDD workflow.
+- **2026-10-15 16:51 · Codex** — Aly clarified on 2026-10-15 that a per-minute trigger is too much for the free plan and selected the free option. Use Astra's own scheduler thread, sleeping until the next saved Owner-local delivery time, rather than polling every minute or adding Cloudflare/OCI job services. Because the app time is editable, a settings change must wake/recalculate the scheduler; a unique per-owner local-day digest key must prevent duplicates across restarts or multiple starts. At startup, check whether today's saved time has passed and create the digest once if so. Test the public AstraService digest/settings methods with a controlled clock, the local command against disposable SQLite, and the Owner-only authenticated HTTP/settings/inbox and browser flow. No cloud, account, or deployment changes are part of this ticket.
