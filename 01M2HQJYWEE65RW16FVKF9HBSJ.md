@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T17:55:43Z
+updated-at: 2026-10-15T17:56:38Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
@@ -58,3 +58,4 @@ outcome-resolves: Provides an implementation-ready plan for the owner-only in-ap
 - **2026-10-15 17:28 · Codex** — F9HBSJ implementation now includes a primary-owner-controlled daily summary time and IANA time zone. The scheduler sleeps until that local due time, checks once at process start for restart catch-up, and stores a unique owner/date snapshot with its Inbox notice. No cloud job is needed. Independent review caught the fixed-zone gap and a settings-history label gap; both are corrected. Review also showed v21/v22 backup tests hard-coded schema numbers and the v20 fixture retained v22 tables; update those fixtures alongside schema migrations. Focused service and HTTP/UI tests pass; the full suite is running after those corrections. Browser check uses only the disposable AstraDailyDigestBrowserCheck database.
 - **2026-10-15 17:35 · Codex** — Correction: jaira dod rewrites the visible Definition of Done checklist but leaves the separate frontmatter definition-of-done field used in lane prompts. A follow-up jaira set was needed to synchronize both representations; verify both the rendered ticket and --for-lane JSON after changing acceptance criteria.
 - **2026-10-15 17:36 · Codex** — Aly's 2026-10-15 decision: when primary App Owner is transferred, the new primary inherits the saved daily summary schedule and time zone. Treat these as app-level Owner settings, not separate personal preferences; covered by the owner-transfer regression test.
+- **2026-10-15 17:56 · Codex** — 2026-10-15 final verification: the owner-selected time and IANA time zone are persisted as app-level settings; a new primary Owner inherits them. The full suite passed 927 tests in 767.731s (one skipped). A synthetic Chrome session saved America/Chicago and opened the daily Inbox item. Independent read-only review found no new correctness or acceptance issue. The first full run caught a stale Waitress test double; the test now supplies a disposable database path and asserts scheduler start/stop. The current README records the local receipt. No cloud, hosting, deployment or external notification work occurred.
