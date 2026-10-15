@@ -6,10 +6,7 @@ ready: true
 creator: Aly Jafferani
 assignee: Codex
 goal: Deliver an owner daily digest and configurable notification policy on top of the existing in-app inbox.
-context: |-
-  Astra tracker, section 11 gap "Daily summary: Missing". The durable in-app inbox exists (ticket Z24KVH); this adds the scheduled digest + policy on top.
-  Section 7: default 09:00 owner tz, owner-only recipient control, automatic outbound email and escalation OFF by default.
-  GATED on section 15 decisions: notification channel, any additional recipients, external email delivery, escalation rules, and a scheduler/host choice. Do not start until the owner supplies these. Related: Z24KVH (in-app inbox).
+context: "Astra tracker, section 11 gap Daily summary: Missing. The durable in-app inbox exists (ticket Z24KVH); this adds an owner-only daily digest on top of it. The accepted policy is in-app at 09:00 in the Owner timezone, with no email, extra recipients or escalation for the first release (docs/handoff/DECISIONS_LOG.md). Aly approved Codex taking the ticket and selected the free app-hosted scheduler on 2026-10-15, rejecting minute-by-minute polling. Implement an Astra scheduler that sleeps until the next saved Owner-local delivery time, deduplicates by Owner-local date and catches up after restart. Test public service methods with a controlled clock, the local command on disposable SQLite, and the authenticated Owner-only HTTP/browser flow. No cloud, account, hosting or deployment changes are in scope."
 definition-of-done: "Owner daily summary at a saved time in the owner timezone (default 09:00, owner-editable); only the owner enables other recipients; digest covers overdue/due-today/upcoming bands/reviews/checkpoints/next action; disabling the digest does not remove dashboard or event records; unit + HTTP tests; existing tests green."
 tags:
   - astra
@@ -17,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T16:53:10Z
+updated-at: 2026-10-15T16:54:56Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
