@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-15T04:23:00Z
+updated-at: 2026-10-15T04:27:23Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
@@ -55,3 +55,4 @@ outcome-resolves: "Begin implementing v21 flag, atomic password changes, HTTP re
 - **2026-10-14 18:46 · Codex** — The first full suite exposed 71 failures and 11 errors because unrelated HTTP tests logged in newly created users and then attempted protected APIs without changing the temporary password. The dedicated A5 cases were correct; only legacy fixtures needed to model established accounts. After updating those disposable fixtures, 30 focused tests passed and the full 891-test suite passed with one skip. Isolated Chrome exposed and verified the fix for password dialog markup appearing after app.js, which stopped initialization. Next: complete handoff, local fixed-point commit, independent Standards and Spec review; then leave the ticket awaiting Aly.
 - **2026-10-14 18:49 · Codex** — Correction to the previous browser wording: Chrome showed the forced-change screen and the normal shell for an established synthetic account, but did not submit a password change. The successful transition is verified by service and HTTP tests only; the browser transition is unverified. Handoff receipt now states this accurately.
 - **2026-10-15 04:23 · Codex** — Independent review found no confirmed functional defect. Standards found ambiguous owner wording, now corrected in docs, the migration comment, and JRNDC8 frontmatter and checklist via the CLI. Final reviewer recheck remains. The browser smoke showed the forced-change screen and the established-user shell but did not submit a password change; the successful transition is covered by service and HTTP tests only. Keep the ticket definition of done open until browser behavior is verified or Aly accepts that evidence limit. Next: commit the terminology correction with this ticket, request reviewer recheck, then rerun the suite and complete the authorized branch handoff.
+- **2026-10-15 04:27 · Codex** — Standards recheck found an older progress note uses the phrase 'initial owner remains unaffected.' That historical note refers to the App Owner; current A5 handoff wording uses the qualified role name. The remaining NEXT_STEPS reference has now been corrected to 'App Owner.' Keep JRNDC8 in-progress: the completion criterion for a successful password-change transition in Chrome remains unverified.
