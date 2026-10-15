@@ -16,7 +16,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-15T10:38:56Z
+updated-at: 2026-10-15T10:39:06Z
 updated-by: Codex
 outcome-what: "Completed the required problem/option review and recorded a clear goal and recommendation."
 outcome-why: "The ticket has enough context to define the local preparation and owner-controlled deployment gates."
@@ -37,6 +37,15 @@ outcome-resolves: "Scope is to prepare for the selected Oracle-hosted deployment
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
+
+- [ ] Reconcile the selected Oracle Always Free, DuckDNS and Caddy design with all existing hardening, backup, release and open-decision evidence; separate proven local controls from unverified hosted controls.
+- [ ] Inspect startup, HTTP security, reverse-proxy trust, cookie flags, logging, storage paths and operator files; record concrete deployment risks and affected tests.
+- [ ] Repair any confirmed local security or deploy-configuration gap without exposing the service; add targeted tests for each changed boundary and role.
+- [ ] Prepare least-privilege, loopback-only Astra service and Caddy/TLS/logging/firewall configuration, persistent database path and secret-free operational instructions; verify templates locally.
+- [ ] Reconcile the deployment runbook with the current app and approved decisions; verify vendor commands against official sources when needed and mark unexecuted steps clearly.
+- [ ] Run focused security/regression checks, the full Windows suite, line-ending and private-file checks; obtain an independent review and fix confirmed findings.
+- [ ] Prepare the staged deployment checklist and identify remaining Aly-only values (OCI region, Ubuntu version, DuckDNS name, key/credentials); stop before account access, provisioning or network exposure until separately authorized.
+- [ ] After separate explicit staging authorization, deploy synthetic data only, verify HTTPS/Secure cookies, firewall, persistence, backup/restore and post-reboot recovery; report evidence and ask Aly for any later real-user launch decision.
 
 ## Progress
 - **2026-09-20 03:11 · Aly Jafferani** — Owner decision 2026-09-20: selected deployment is zero-dollar Oracle Always Free VM plus free DuckDNS hostname plus Caddy HTTPS. Users install no Tailscale and sign in with individual Astra accounts. No paid resource or silent upgrade is permitted.
