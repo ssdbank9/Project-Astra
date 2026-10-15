@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T16:53:04Z
+updated-at: 2026-10-15T16:53:10Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
@@ -45,7 +45,8 @@ outcome-resolves: Creates a scoped plan for the daily summary without modifying 
   proof: docs/handoff/DECISIONS_LOG.md:44-46; src/astra/service.py:list_notifications; src/astra/db.py:notifications migration
 - [x] Choose a reliable, idempotent delivery trigger that works with the single-process app and recovers after downtime without an external email service.
   proof: Aly's 2026-10-15 decision: no per-minute checks; use the free app-hosted scheduler.
-- [ ] Define the digest's overdue, due-today, upcoming, reviews, checkpoints and next-action content using existing task and review data.
+- [x] Define the digest's overdue, due-today, upcoming, reviews, checkpoints and next-action content using existing task and review data.
+  proof: Existing list_tasks computes due_state/days_to_due per project timezone; export_tasks supports 7/30-day bands; _next_action derives task next action; task_submissions holds submitted reviews; task_checkpoints has checkpoint_date/resolved.
 - [ ] Implement App Owner-only digest settings and a daily in-app summary while preserving the underlying notifications and activity records.
 - [ ] Add service and HTTP authorization/content/idempotency tests plus browser verification of the setting and inbox presentation.
 - [ ] Run focused and full suites, review the diff independently, update handoff evidence, and move the ticket to human review.
