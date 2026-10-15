@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T17:56:38Z
+updated-at: 2026-10-15T17:58:41Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
@@ -47,7 +47,7 @@ outcome-resolves: Provides an implementation-ready plan for the owner-only in-ap
   proof: Existing list_tasks computes due_state/days_to_due per project timezone; export_tasks supports 7/30-day bands; _next_action derives task next action; task_submissions holds submitted reviews; task_checkpoints has checkpoint_date/resolved.
 - [x] Implement App Owner-only digest settings and a daily in-app summary while preserving the underlying notifications and activity records.
 - [x] Add service and HTTP authorization/content/idempotency tests plus browser verification of the setting and inbox presentation.
-- [ ] Run focused and full suites, review the diff independently, update handoff evidence, and move the ticket to human review.
+- [x] Run focused and full suites, review the diff independently, update handoff evidence, and move the ticket to human review.
 
 ## Progress
 - **2026-09-19 06:14 · Aly Jafferani** — HANDOFF 2026-09-19 (Claude->Codex): DO NOT START YET - gated on the App Owner section-15 decisions (notification channel, additional recipients, external email delivery, escalation rules, scheduler/host). Builds on Z24KVH (in-app inbox, done). See astra_project_tracker/CODEX_HANDOFF_2026-09-19.md sec 6.
