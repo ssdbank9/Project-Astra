@@ -16,7 +16,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-15T11:13:50Z
+updated-at: 2026-10-15T11:13:59Z
 updated-by: Codex
 outcome-what: "Finished the evidence-based scope and eight-step plan; local implementation work is authorized, while staging and exposure remain separately gated."
 outcome-why: "The existing code already has several protections, so the work must target verified gaps and prove local readiness before any cloud action."
@@ -46,8 +46,8 @@ outcome-resolves: "Moves 6BXYJZ into implementation with local security, operato
   proof: src/astra/__main__.py: CLI rejects non-IPv4-loopback before _run; tests/test_core.py: test_serve_refuses_non_loopback_hosts_before_starting and test_serve_allows_the_documented_loopback_host
 - [ ] Prepare least-privilege, loopback-only Astra service and Caddy/TLS/logging/firewall configuration, persistent database path and secret-free operational instructions; verify templates locally.
   proof: 6BXYJZ plan checklist records loopback service and proxy prep
-- [ ] Reconcile the deployment runbook with the current app and approved decisions; verify vendor commands against official sources when needed and mark unexecuted steps clearly.
-  proof: 6BXYJZ plan checklist records runbook refresh and source verification
+- [x] Reconcile the deployment runbook with the current app and approved decisions; verify vendor commands against official sources when needed and mark unexecuted steps clearly.
+  proof: docs/handoff/DEPLOYMENT_RUNBOOK.md: DuckDNS secret handling, Caddy version/validation, HSTS sequence and Q22 gate; official vendor links; docs/handoff/OPEN_QUESTIONS.md: Q22
 - [ ] Run focused security/regression checks, the full Windows suite, line-ending and private-file checks; obtain an independent review and fix confirmed findings.
   proof: 6BXYJZ plan checklist records focused/full tests and independent review
 - [ ] Prepare the staged deployment checklist and identify remaining Aly-only values (OCI region, Ubuntu version, DuckDNS name, key/credentials); stop before account access, provisioning or network exposure until separately authorized.
