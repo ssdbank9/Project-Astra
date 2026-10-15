@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-15T07:46:21Z
-updated-at: 2026-10-15T07:54:59Z
+updated-at: 2026-10-15T07:55:05Z
 updated-by: Codex
 outcome-what: "The checklist should cover one quick path per target environment, capture visible failure evidence, and leave unavailable environments unverified."
 outcome-why: "Aly must be able to complete the planned checks in about 20 minutes without extra setup or a technical test script."
@@ -42,7 +42,7 @@ claimed-at: 2026-10-15T07:49:11Z
   proof: docs/handoff/NEXT_STEPS.md:A7; src/astra/static/index.html:Home, Add a task; src/astra/static/app.js:Board and Move to labels
 - [x] Design a timed 20-minute pass/fail checklist for mobile, tablet drag, NVDA and desktop 200% zoom, with explicit evidence and unavailable-device fields.
   proof: Checklist timeboxes sum to 20 minutes including optional iPhone; 17 without it. See docs/handoff/REAL_DEVICE_ACCESSIBILITY_CHECKLIST_2026-10-15.md.
-- [ ] Write the owner-facing checklist in docs/handoff and link it from the current handoff index and A7.
+- [~] Write the owner-facing checklist in docs/handoff and link it from the current handoff index and A7.
 - [ ] Review the steps for plain language, feasible timing, accessibility evidence limits and consistency; then move the finished checklist to Aly for execution.
 
 ## Progress
