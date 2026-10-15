@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T10:09:36Z
+updated-at: 2026-10-15T10:10:49Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-49508
 claimed-at: 2026-10-15T09:41:41Z
@@ -27,7 +27,8 @@ claimed-at: 2026-10-15T09:41:41Z
 
 ## Definition of Done
 
-- [ ] A documented, scripted backup (consistent snapshot, not a live WAL copy) and a demonstrated restore from it; restore verified to reopen with data intact; procedure covers corruption recovery; no live archive touched; test/verification recorded.
+- [x] A documented, scripted backup (consistent snapshot, not a live WAL copy) and a demonstrated restore from it; restore verified to reopen with data intact; procedure covers corruption recovery; no live archive touched; test/verification recorded.
+  proof: src/astra/backup.py; tests.test_backup.BackupCliTests (11 tests); docs/handoff/DEPLOYMENT_RUNBOOK.md stage 11.4 documents corruption recovery and rollback; full suite 902 tests, OK (1 skipped)
 
 ## Options
 
