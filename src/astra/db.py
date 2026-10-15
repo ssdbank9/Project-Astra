@@ -829,7 +829,7 @@ def _migrate_v20(connection: sqlite3.Connection) -> None:
 
 
 def _migrate_v21(connection: sqlite3.Connection) -> None:
-    """v20 -> v21: mark owner-issued passwords for first-login replacement (JRNDC8).
+    """v20 -> v21: mark App Owner-issued passwords for first-login replacement (JRNDC8).
 
     Existing accounts keep working; only account creation and password reset set the flag.
     """

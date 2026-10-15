@@ -3,12 +3,15 @@
 ## Current password-change gate — 2026-10-14
 
 Read [A5 implementation and verification](FIRST_LOGIN_PASSWORD_CHANGE_2026-10-14.md).
-Owner-created and reset passwords require a change before protected app access;
+App Owner-created and reset passwords require a change before protected app access;
 signed-in users can change their own password. Schema 21 defaults existing
 accounts to unchanged behavior. Full suite: **891 tests in 698.337s, OK
 (skipped=1)**. Focused HTTP/service/migration/UI checks and an isolated local
-Chrome smoke check passed. Independent review and Aly's acceptance are pending;
-no live account or database was changed. Ticket JRNDC8 is in progress. Hosted
+Chrome smoke check passed. Independent Spec review found no confirmed
+functional defect; a terminology correction is awaiting reviewer recheck. The
+successful password-change transition remains unverified in Chrome, although
+service and HTTP tests pass. Aly's acceptance is pending. No live account or
+database was changed. Ticket JRNDC8 is in progress. Hosted
 readiness and deployment remain separate and unverified.
 
 ## Current independent-review guard repairs — 2026-10-14

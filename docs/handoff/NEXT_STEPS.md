@@ -134,10 +134,10 @@ Done when: the ticket's definition of done is met and reviewed.
 
 ### A5. Password change at first sign-in, and changing your own password (agent)
 
-**Implementation completed 2026-10-14; awaiting independent review and Aly's
-acceptance.** See [A5 implementation and verification](FIRST_LOGIN_PASSWORD_CHANGE_2026-10-14.md).
-Schema 21 adds `must_change_password` with default 0 for existing users; owner
-account creation and owner/server resets set it. HTTP authorization enforces a
+**Implementation completed 2026-10-14; awaiting final reviewer recheck and
+Aly's acceptance.** See [A5 implementation and verification](FIRST_LOGIN_PASSWORD_CHANGE_2026-10-14.md).
+Schema 21 adds `must_change_password` with default 0 for existing users; App Owner
+account creation and App Owner/server resets set it. HTTP authorization enforces a
 change-only state server-side. Successful change checks the current password,
 keeps the active session, revokes the user's other sessions, records a
 secret-free `user_events` event, and clears the flag. The UI supports both the
@@ -150,7 +150,7 @@ The 2026-09-20 sharing plan lists "forced first-login password change" as a
 gate before invitations (`CODEX_HANDOFF_2026-09-20.md` section 15.3). Today
 only owners can set passwords, and nobody is asked to change a temporary one.
 
-Tasks: a flag on users set when an owner creates the account or resets the
+Tasks: a flag on users set when the App Owner creates the account or resets the
 password; after sign-in, a user with the flag sees only a "choose a new
 password" screen until they change it; any signed-in user can change their own
 password by typing the current one; keep the 8-character minimum; audit in

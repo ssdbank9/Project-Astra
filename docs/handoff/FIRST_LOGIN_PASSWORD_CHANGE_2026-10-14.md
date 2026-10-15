@@ -31,7 +31,7 @@ normal app; sign-out remains available before changing.
   0`; migration compatibility and failure rollback are covered by
   `ForcedPasswordChangeMigrationTests` in `tests/test_db.py`.
 - Service behavior is covered in `tests/test_password_change.py`, including
-  owner-created/reset accounts, password verification, audit redaction, session
+  App Owner-created/reset accounts, password verification, audit redaction, session
   retention/revocation and refusal without mutation.
 - HTTP behavior is covered in `tests/test_web.py`: protected routes and
   logout-all are refused until change; current-user read, change and sign-out
@@ -56,8 +56,12 @@ normal app; sign-out remains available before changing.
 
 ## Review and limits
 
-Independent diff review and Aly's acceptance are pending. This evidence is for
-local source, tests and an isolated browser instance only. Hosted operation,
+The independent Spec review found no confirmed functional defect. The Standards
+review found one terminology issue, now corrected; final reviewer recheck is
+pending. Successful password submission and the resulting transition in Chrome
+remain unverified, as the isolated smoke did not change a password. Aly's
+acceptance is pending. This evidence is for local source, tests and an isolated
+browser instance only. Hosted operation,
 real-user invitation, production recovery and deployment remain unverified and
 unauthorized by this change.
 
