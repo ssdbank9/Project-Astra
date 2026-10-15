@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T09:41:41Z
+updated-at: 2026-10-15T09:45:18Z
 updated-by: Codex
 claimed-by: X1CarbonPC-49508
 claimed-at: 2026-10-15T09:41:41Z
@@ -38,7 +38,8 @@ claimed-at: 2026-10-15T09:41:41Z
 
 <Steps, in order — filled in by the pre-process step, or by you.>
 
-- [ ] Implement astra backup using SQLite online backup from a read-only source; refuse overwrite/same-file targets, verify integrity, and remove incomplete outputs.
+- [x] Implement astra backup using SQLite online backup from a read-only source; refuse overwrite/same-file targets, verify integrity, and remove incomplete outputs.
+  proof: src/astra/backup.py:create_backup; tests.test_backup.BackupCliTests.test_backup_command_writes_an_integral_sqlite_snapshot
 - [ ] Implement safe restore to a new target database only; validate before publishing, preserve the existing destination, and verify reopening/migration in disposable ASTRA_HOME.
 - [ ] Add public CLI tests for a consistent snapshot during writes, intact restore, corrupt backup refusal, overwrite refusal, and recovery after reopening.
 - [ ] Update deployment and operator docs to use the CLI while retaining age encryption, 7/4/3 retention, and the explicit cloud/desktop restore gates.
