@@ -16,7 +16,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-15T10:41:18Z
+updated-at: 2026-10-15T10:41:28Z
 updated-by: Codex
 outcome-what: "Converted the approved deployment direction and verified local controls into a staged plan with a clear stop before staging."
 outcome-why: "Local source preparation can proceed, while region, hostname and any hosting action remain App Owner-controlled."
@@ -48,7 +48,8 @@ outcome-resolves: "The ticket now has an ordered plan covering local security re
   proof: 6BXYJZ plan checklist records loopback service and proxy prep
 - [x] Reconcile the deployment runbook with the current app and approved decisions; verify vendor commands against official sources when needed and mark unexecuted steps clearly.
   proof: 6BXYJZ plan checklist records runbook refresh and source verification
-- [ ] Run focused security/regression checks, the full Windows suite, line-ending and private-file checks; obtain an independent review and fix confirmed findings.
+- [x] Run focused security/regression checks, the full Windows suite, line-ending and private-file checks; obtain an independent review and fix confirmed findings.
+  proof: 6BXYJZ plan checklist records focused/full tests and independent review
 - [ ] Prepare the staged deployment checklist and identify remaining Aly-only values (OCI region, Ubuntu version, DuckDNS name, key/credentials); stop before account access, provisioning or network exposure until separately authorized.
 - [ ] After separate explicit staging authorization, deploy synthetic data only, verify HTTPS/Secure cookies, firewall, persistence, backup/restore and post-reboot recovery; report evidence and ask Aly for any later real-user launch decision.
 
