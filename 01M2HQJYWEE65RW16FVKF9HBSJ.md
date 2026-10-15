@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T16:40:04Z
+updated-at: 2026-10-15T16:40:27Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
@@ -40,6 +40,13 @@ outcome-resolves: Moves the specified daily in-app summary into the implementati
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
+
+- [ ] Reconcile the existing inbox, global Owner role and accepted notification policy with the code; confirm the saved time and timezone contract.
+- [ ] Choose a reliable, idempotent delivery trigger that works with the single-process app and recovers after downtime without an external email service.
+- [ ] Define the digest's overdue, due-today, upcoming, reviews, checkpoints and next-action content using existing task and review data.
+- [ ] Implement App Owner-only digest settings and a daily in-app summary while preserving the underlying notifications and activity records.
+- [ ] Add service and HTTP authorization/content/idempotency tests plus browser verification of the setting and inbox presentation.
+- [ ] Run focused and full suites, review the diff independently, update handoff evidence, and move the ticket to human review.
 
 ## Progress
 - **2026-09-19 06:14 · Aly Jafferani** — HANDOFF 2026-09-19 (Claude->Codex): DO NOT START YET - gated on the App Owner section-15 decisions (notification channel, additional recipients, external email delivery, escalation rules, scheduler/host). Builds on Z24KVH (in-app inbox, done). See astra_project_tracker/CODEX_HANDOFF_2026-09-19.md sec 6.
