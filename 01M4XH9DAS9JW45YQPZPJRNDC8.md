@@ -1,7 +1,7 @@
 ---
 id: 01M4XH9DAS9JW45YQPZPJRNDC8
 title: First-login and self-service password change
-status: human
+status: done
 ready: true
 creator: Codex
 assignee: Codex
@@ -14,8 +14,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-15T07:19:38Z
-updated-by: Codex
+updated-at: 2026-10-15T07:33:50Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
 outcome-what: "Verified A5 through the full 891-test suite, isolated Chrome success and failure flows, and independent source review; refreshed the handoff and recorded proof."
