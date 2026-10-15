@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-15T07:46:21Z
-updated-at: 2026-10-15T07:58:47Z
+updated-at: 2026-10-15T07:59:02Z
 updated-by: Codex
 outcome-what: "Wrote the 20-minute owner-run real-device and accessibility checklist, linked it from the live handoff, and passed independent review."
 outcome-why: "Aly needs a safe, bounded manual acceptance run for mobile, timeline movement, NVDA and desktop zoom."
@@ -27,7 +27,8 @@ claimed-at: 2026-10-15T07:49:11Z
 
 ## Definition of Done
 
-- [ ] Add a plain-language checklist under docs/handoff that fits the planned 20-minute session; names the required devices/apps and exact Astra flows; includes pass/fail observations and a place to record unavailable devices; preserves the approved Add a task wording; does not claim WCAG conformance; independent read-only review and documentation checks pass; transition ticket to human for Aly to run.
+- [x] Add a plain-language checklist under docs/handoff that fits the planned 20-minute session; names the required devices/apps and exact Astra flows; includes pass/fail observations and a place to record unavailable devices; preserves the approved Add a task wording; does not claim WCAG conformance; independent read-only review and documentation checks pass; transition ticket to human for Aly to run.
+  proof: docs/handoff/REAL_DEVICE_ACCESSIBILITY_CHECKLIST_2026-10-15.md; linked in docs/handoff/README.md and NEXT_STEPS.md A7; independent read-only review PASS; git diff --check PASS
 
 ## Options
 
