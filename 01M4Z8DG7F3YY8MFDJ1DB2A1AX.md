@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-15T07:46:21Z
-updated-at: 2026-10-15T07:58:31Z
+updated-at: 2026-10-15T07:58:47Z
 updated-by: Codex
 outcome-what: "Wrote the 20-minute owner-run real-device and accessibility checklist, linked it from the live handoff, and passed independent review."
 outcome-why: "Aly needs a safe, bounded manual acceptance run for mobile, timeline movement, NVDA and desktop zoom."
