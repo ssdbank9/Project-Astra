@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T16:46:26Z
+updated-at: 2026-10-15T16:46:39Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
@@ -41,7 +41,8 @@ outcome-resolves: Creates a scoped plan for the daily summary without modifying 
 
 <Steps, in order — filled in by the pre-process step, or by you.>
 
-- [ ] Reconcile the existing inbox, global Owner role and accepted notification policy with the code; confirm the saved time and timezone contract.
+- [x] Reconcile the existing inbox, global Owner role and accepted notification policy with the code; confirm the saved time and timezone contract.
+  proof: docs/handoff/DECISIONS_LOG.md:44-46; src/astra/service.py:list_notifications; src/astra/db.py:notifications migration
 - [ ] Choose a reliable, idempotent delivery trigger that works with the single-process app and recovers after downtime without an external email service.
 - [ ] Define the digest's overdue, due-today, upcoming, reviews, checkpoints and next-action content using existing task and review data.
 - [ ] Implement App Owner-only digest settings and a daily in-app summary while preserving the underlying notifications and activity records.
