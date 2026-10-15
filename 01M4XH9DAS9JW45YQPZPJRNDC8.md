@@ -14,13 +14,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-14T15:42:55Z
-updated-at: 2026-10-15T07:08:31Z
+updated-at: 2026-10-15T07:10:52Z
 updated-by: Codex
 claimed-by: X1CarbonPC-39188
 claimed-at: 2026-10-14T15:44:36Z
-outcome-what: "Mapped App Owner create/reset, session validation, API route gating, frontend login/resume and the schema20 migration chain; recorded the v21 compatibility plan."
-outcome-why: The A5 gate needs server-enforced forced-change access and must preserve existing accounts and no-lockout behavior.
-outcome-resolves: "Begin implementing v21 flag, atomic password changes, HTTP restrictions and accessible UI in vertical slices."
+outcome-what: "Completed and verified App Owner-set first-login password changes and signed-in self-service changes; updated the A5 handoff with fresh suite and isolated Chrome evidence."
+outcome-why: A5 is a pre-invitation gate and must block protected access until temporary passwords are changed without changing live accounts.
+outcome-resolves: "All A5 acceptance criteria are met in service, HTTP, migration, UI and full-suite tests; isolated Chrome verified invalid inputs, direct-route gating and both successful change flows; independent review found no confirmed defect. Hosted behavior and multi-session browser behavior remain unverified; the latter is covered by service and HTTP tests."
 ---
 
 # First-login and self-service password change
