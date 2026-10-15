@@ -1,7 +1,7 @@
 ---
 id: 01M4Z8DG7F3YY8MFDJ1DB2A1AX
 title: Run Astra real-device and accessibility acceptance
-status: pre-process
+status: in-progress
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -14,11 +14,11 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-15T07:46:21Z
-updated-at: 2026-10-15T07:58:19Z
+updated-at: 2026-10-15T07:58:31Z
 updated-by: Codex
-outcome-what: "The checklist should cover one quick path per target environment, capture visible failure evidence, and leave unavailable environments unverified."
-outcome-why: "Aly must be able to complete the planned checks in about 20 minutes without extra setup or a technical test script."
-outcome-resolves: A bounded implementation plan can now be recorded before writing the checklist.
+outcome-what: "Wrote the 20-minute owner-run real-device and accessibility checklist, linked it from the live handoff, and passed independent review."
+outcome-why: "Aly needs a safe, bounded manual acceptance run for mobile, timeline movement, NVDA and desktop zoom."
+outcome-resolves: The checklist is ready for Aly to execute; device results remain unverified until she reports them.
 claimed-by: X1CarbonPC-46496
 claimed-at: 2026-10-15T07:49:11Z
 ---
