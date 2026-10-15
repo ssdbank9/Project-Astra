@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJYWEE65RW16FVKF9HBSJ
 title: Daily summary and notification policy
-status: pre-process
+status: in-progress
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -14,13 +14,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T16:55:05Z
+updated-at: 2026-10-15T16:55:20Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
-outcome-what: Recorded an implementation plan for the owner-only in-app daily summary and its test/review gates.
-outcome-why: The policy choices are present in the decisions log; code design and delivery reliability need to be resolved before implementation.
-outcome-resolves: Creates a scoped plan for the daily summary without modifying cloud infrastructure.
+outcome-what: "Resolved the accepted notification policy, selected a no-extra-service sleeping scheduler with daily idempotency and restart catch-up, defined digest sections, and recorded the test seams."
+outcome-why: "Aly selected the free app-hosted option and rejected a per-minute trigger; the ticket's old scheduler gate is resolved."
+outcome-resolves: Provides an implementation-ready plan for the owner-only in-app digest without cloud work.
 ---
 
 # Daily summary and notification policy
