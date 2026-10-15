@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJZ6KSPH67PP6746BXYJZ
 title: Production security and deployment
-status: backlog
+status: brainstorm
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -16,11 +16,11 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-15T10:35:15Z
+updated-at: 2026-10-15T10:36:43Z
 updated-by: Codex
-outcome-what: Aly approved Codex takeover of production security and deployment planning.
-outcome-why: "Prepare the deployment plan and close local security gates while keeping network exposure and deployment gated on Aly's explicit authorization."
-outcome-resolves: Codex may define and verify the local pre-deployment work; hosting and any public exposure remain unverified and unauthorized.
+outcome-what: "Inspected the deployment ticket, owner hosting decisions, runbook, open questions and current server security controls; recorded verified gaps and options."
+outcome-why: "The ticket's Oracle deployment direction was already chosen, but the runbook remains unexecuted and key host values and staging authorization remain open."
+outcome-resolves: "Recommend the previously selected Oracle Always Free, DuckDNS and Caddy path after local hardening and release gates; no staging, provisioning or network exposure is authorized."
 ---
 
 # Production security and deployment
