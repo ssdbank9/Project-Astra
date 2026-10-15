@@ -7,14 +7,14 @@ creator: Aly Jafferani
 assignee: Codex
 goal: Deliver an owner daily digest and configurable notification policy on top of the existing in-app inbox.
 context: "Astra tracker, section 11 gap Daily summary: Missing. The durable in-app inbox exists (ticket Z24KVH); this adds an owner-only daily digest on top of it. The accepted policy is in-app at 09:00 in the Owner timezone, with no email, extra recipients or escalation for the first release (docs/handoff/DECISIONS_LOG.md). Aly approved Codex taking the ticket and selected the free app-hosted scheduler on 2026-10-15, rejecting minute-by-minute polling. Implement an Astra scheduler that sleeps until the next saved Owner-local delivery time, deduplicates by Owner-local date and catches up after restart. Test public service methods with a controlled clock, the local command on disposable SQLite, and the authenticated Owner-only HTTP/browser flow. No cloud, account, hosting or deployment changes are in scope."
-definition-of-done: "Owner daily summary at a saved time in the owner timezone (default 09:00, owner-editable); only the owner enables other recipients; digest covers overdue/due-today/upcoming bands/reviews/checkpoints/next action; disabling the digest does not remove dashboard or event records; unit + HTTP tests; existing tests green."
+definition-of-done: "App Owner-only daily in-app summary at an Owner-selected local time (default 09:00) and IANA time zone; no external email, additional recipients, or escalation in the first release; covers overdue, due-today and upcoming bands, reviews, open checkpoints due soon or overdue, and next actions; disabling it does not remove dashboard or event records; service, HTTP, browser and existing-suite tests pass."
 tags:
   - astra
 blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T17:30:16Z
+updated-at: 2026-10-15T17:33:48Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
