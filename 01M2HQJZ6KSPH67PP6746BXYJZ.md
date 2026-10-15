@@ -16,7 +16,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-15T10:42:59Z
+updated-at: 2026-10-15T10:43:25Z
 updated-by: Codex
 outcome-what: "Converted the approved deployment direction and verified local controls into a staged plan with a clear stop before staging."
 outcome-why: "Local source preparation can proceed, while region, hostname and any hosting action remain App Owner-controlled."
@@ -42,7 +42,7 @@ outcome-resolves: "The ticket now has an ordered plan covering local security re
   proof: 6BXYJZ plan checklist records evidence reconciliation and authorization boundaries
 - [x] Inspect startup, HTTP security, reverse-proxy trust, cookie flags, logging, storage paths and operator files; record concrete deployment risks and affected tests.
   proof: 6BXYJZ plan checklist records source/config audit scope
-- [x] Repair any confirmed local security or deploy-configuration gap without exposing the service; add targeted tests for each changed boundary and role.
+- [ ] Repair any confirmed local security or deploy-configuration gap without exposing the service; add targeted tests for each changed boundary and role.
   proof: 6BXYJZ plan checklist records confirmed-gap repair and regression scope
 - [x] Prepare least-privilege, loopback-only Astra service and Caddy/TLS/logging/firewall configuration, persistent database path and secret-free operational instructions; verify templates locally.
   proof: 6BXYJZ plan checklist records loopback service and proxy prep
