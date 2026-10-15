@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJYWEE65RW16FVKF9HBSJ
 title: Daily summary and notification policy
-status: in-progress
+status: human
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -14,13 +14,14 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T17:58:41Z
+updated-at: 2026-10-15T18:00:29Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
-outcome-what: "Resolved the accepted notification policy, selected a no-extra-service sleeping scheduler with daily idempotency and restart catch-up, defined digest sections, and recorded the test seams."
-outcome-why: "Aly selected the free app-hosted option and rejected a per-minute trigger; the ticket's old scheduler gate is resolved."
-outcome-resolves: Provides an implementation-ready plan for the owner-only in-app digest without cloud work.
+outcome-what: "Implemented the primary Owner daily in-app summary, configurable local time and IANA zone, no-polling scheduler and Owner-transfer inheritance; added migration, settings, HTTP, browser and scheduler coverage."
+outcome-why: "Astra needed a free in-app daily digest that honors the agreed Owner-only policy and works without an external scheduler."
+outcome-resolves: 927-test full suite passes; disposable Chrome verified settings and Inbox; independent review found no app-code issues. No cloud or hosting changes.
+question: "Please review and accept the daily summary implementation, including schedule inheritance after primary Owner transfer, or return it with any needed changes."
 ---
 
 # Daily summary and notification policy
