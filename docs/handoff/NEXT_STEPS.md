@@ -148,7 +148,8 @@ hosted behavior remains unverified.
 
 The 2026-09-20 sharing plan lists "forced first-login password change" as a
 gate before invitations (`CODEX_HANDOFF_2026-09-20.md` section 15.3). Today
-only owners can set passwords, and nobody is asked to change a temporary one.
+only the App Owner can set passwords, and nobody is asked to change a
+temporary one.
 
 Tasks: a flag on users set when the App Owner creates the account or resets the
 password; after sign-in, a user with the flag sees only a "choose a new
