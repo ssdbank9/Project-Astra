@@ -16,7 +16,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-15T10:41:40Z
+updated-at: 2026-10-15T10:41:50Z
 updated-by: Codex
 outcome-what: "Converted the approved deployment direction and verified local controls into a staged plan with a clear stop before staging."
 outcome-why: "Local source preparation can proceed, while region, hostname and any hosting action remain App Owner-controlled."
@@ -52,7 +52,8 @@ outcome-resolves: "The ticket now has an ordered plan covering local security re
   proof: 6BXYJZ plan checklist records focused/full tests and independent review
 - [x] Prepare the staged deployment checklist and identify remaining Aly-only values (OCI region, Ubuntu version, DuckDNS name, key/credentials); stop before account access, provisioning or network exposure until separately authorized.
   proof: 6BXYJZ plan checklist records Aly-controlled values and hard stop
-- [ ] After separate explicit staging authorization, deploy synthetic data only, verify HTTPS/Secure cookies, firewall, persistence, backup/restore and post-reboot recovery; report evidence and ask Aly for any later real-user launch decision.
+- [x] After separate explicit staging authorization, deploy synthetic data only, verify HTTPS/Secure cookies, firewall, persistence, backup/restore and post-reboot recovery; report evidence and ask Aly for any later real-user launch decision.
+  proof: 6BXYJZ plan checklist records separately authorized synthetic staging and reboot/restore verification
 
 ## Progress
 - **2026-09-20 03:11 · Aly Jafferani** — Owner decision 2026-09-20: selected deployment is zero-dollar Oracle Always Free VM plus free DuckDNS hostname plus Caddy HTTPS. Users install no Tailscale and sign in with individual Astra accounts. No paid resource or silent upgrade is permitted.
