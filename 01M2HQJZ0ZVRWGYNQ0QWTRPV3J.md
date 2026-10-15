@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T09:33:45Z
+updated-at: 2026-10-15T09:34:21Z
 updated-by: Codex
 ---
 
@@ -35,6 +35,12 @@ updated-by: Codex
 ## Plan
 
 <Steps, in order — filled in by the pre-process step, or by you.>
+
+- [ ] Implement astra backup using SQLite online backup from a read-only source; refuse overwrite/same-file targets, verify integrity, and remove incomplete outputs.
+- [ ] Implement safe restore to a new target database only; validate before publishing, preserve the existing destination, and verify reopening/migration in disposable ASTRA_HOME.
+- [ ] Add public CLI tests for a consistent snapshot during writes, intact restore, corrupt backup refusal, overwrite refusal, and recovery after reopening.
+- [ ] Update deployment and operator docs to use the CLI while retaining age encryption, 7/4/3 retention, and the explicit cloud/desktop restore gates.
+- [ ] Run focused and full suites; get independent read-only review; record proven local results and keep cloud, real-key, live-data, and deployment outcomes unverified.
 
 ## Progress
 - **2026-09-20 03:10 · Aly Jafferani** — Owner decision 2026-09-20: zero-dollar backup policy = nightly encrypted SQLite-consistent backup to OCI Object Storage within the free allowance plus encrypted desktop recovery copy; RPO 24 hours; target RTO 4 hours; retain 7 daily, 4 weekly and 3 monthly copies; Owner controls restore credentials; prove both restore directions before go-live.
