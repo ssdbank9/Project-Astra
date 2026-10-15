@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T17:35:27Z
+updated-at: 2026-10-15T17:36:27Z
 updated-by: Codex
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
@@ -56,3 +56,4 @@ outcome-resolves: Provides an implementation-ready plan for the owner-only in-ap
 - **2026-10-15 16:53 · Codex** — Digest content plan: use the existing Owner-wide task list and each project's own date timezone. Group open tasks as overdue, due today, due in 1-7 days, and due in 8-30 days, matching the existing portfolio filters; include submitted tasks awaiting acceptance, unresolved checkpoints due within the next 7 days, and the stored/derived next action for each listed task. Show a concise count-first digest with task/project labels and a link to the relevant task. Do not alter task/event records when the digest is disabled. The first release has no Chairman or member recipients, outbound email, or escalation per DECISIONS_LOG.md.
 - **2026-10-15 17:28 · Codex** — F9HBSJ implementation now includes a primary-owner-controlled daily summary time and IANA time zone. The scheduler sleeps until that local due time, checks once at process start for restart catch-up, and stores a unique owner/date snapshot with its Inbox notice. No cloud job is needed. Independent review caught the fixed-zone gap and a settings-history label gap; both are corrected. Review also showed v21/v22 backup tests hard-coded schema numbers and the v20 fixture retained v22 tables; update those fixtures alongside schema migrations. Focused service and HTTP/UI tests pass; the full suite is running after those corrections. Browser check uses only the disposable AstraDailyDigestBrowserCheck database.
 - **2026-10-15 17:35 · Codex** — Correction: jaira dod rewrites the visible Definition of Done checklist but leaves the separate frontmatter definition-of-done field used in lane prompts. A follow-up jaira set was needed to synchronize both representations; verify both the rendered ticket and --for-lane JSON after changing acceptance criteria.
+- **2026-10-15 17:36 · Codex** — Aly's 2026-10-15 decision: when primary App Owner is transferred, the new primary inherits the saved daily summary schedule and time zone. Treat these as app-level Owner settings, not separate personal preferences; covered by the owner-transfer regression test.
