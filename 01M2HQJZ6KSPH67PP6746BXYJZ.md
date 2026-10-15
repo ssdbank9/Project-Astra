@@ -16,7 +16,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-15T10:34:49Z
+updated-at: 2026-10-15T10:35:15Z
 updated-by: Codex
 outcome-what: Aly approved Codex takeover of production security and deployment planning.
 outcome-why: "Prepare the deployment plan and close local security gates while keeping network exposure and deployment gated on Aly's explicit authorization."
@@ -40,3 +40,4 @@ outcome-resolves: Codex may define and verify the local pre-deployment work; hos
 
 ## Progress
 - **2026-09-20 03:11 · Aly Jafferani** — Owner decision 2026-09-20: selected deployment is zero-dollar Oracle Always Free VM plus free DuckDNS hostname plus Caddy HTTPS. Users install no Tailscale and sign in with individual Astra accounts. No paid resource or silent upgrade is permitted.
+- **2026-10-15 10:35 · Codex** — Repository review: the 2026-09-20 owner decision already selects an Oracle Always Free VM, DuckDNS, Caddy HTTPS and individual Astra accounts, with no paid resource or silent upgrade. The deployment runbook is a historical, unexecuted template. Q7 still leaves the OCI home region, Ubuntu version and DuckDNS name to Aly; staging/provisioning and real-user deployment require separate explicit authorization. Source shows the server defaults to 127.0.0.1, ASTRA_SECURE_COOKIES adds Secure to the session cookie, and the handler already sets CSP, X-Frame-Options and Referrer-Policy; these code facts do not prove a hardened live proxy, host firewall, storage permissions, provider availability, reboot recovery or restore drill. Options: (1) follow the selected Oracle/DuckDNS/Caddy path after local hardening, release and recovery evidence, retaining the zero-cost limit; (2) choose another host or managed identity/storage, which changes Aly's recorded decision and may introduce cost/migration work; (3) remain local, safest operationally but does not meet hosted multi-user goal. Recommendation: option 1, but treat this ticket as gated preparation until Aly chooses remaining host values and explicitly authorizes staging. No code, accounts, credentials, provisioning or network exposure are included in this step.
