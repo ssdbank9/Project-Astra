@@ -1510,7 +1510,7 @@ class ForcedPasswordChangeMigrationTests(unittest.TestCase):
     def test_v21_preserves_legacy_users_and_defaults_the_force_flag_off(self):
         db.migrate(self.connection)
 
-        self.assertEqual(self.connection.execute("PRAGMA user_version").fetchone()[0], 21)
+        self.assertEqual(self.connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
         self.assertEqual(
             [tuple(row) for row in self.connection.execute(
                 "SELECT id,must_change_password FROM users ORDER BY id"

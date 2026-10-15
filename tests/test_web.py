@@ -1496,6 +1496,40 @@ class AstraWebTests(unittest.TestCase):
         _, inbox2 = self.request("GET", "/api/notifications", cookie=cookie)
         self.assertEqual(inbox2["unread"], 0)
 
+    def test_daily_digest_settings_and_saved_summary_are_primary_owner_only(self):
+        cookie, csrf = self._owner_session()
+        response, settings = self.request("GET", "/api/daily-digest/settings", cookie=cookie)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(settings["settings"]["delivery_time"], "09:00")
+        self.assertEqual(settings["settings"]["timezone"], "Asia/Karachi")
+        response, saved = self.request("POST", "/api/daily-digest/settings", {
+            "enabled": True, "delivery_time": "10:30", "timezone": "America/Chicago",
+        }, cookie=cookie, csrf=csrf)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(saved["settings"]["delivery_time"], "10:30")
+        self.assertEqual(saved["settings"]["timezone"], "America/Chicago")
+
+        _, me = self.request("GET", "/api/me", cookie=cookie)
+        owner = me["user"]
+        secondary = self.server.service.create_user(
+            owner, "secondary@example.org", "Secondary", "secondary password safe", "member",
+        )
+        self.server.service.grant_secondary_owner(
+            owner, secondary["id"], "Permission boundary test"
+        )
+        response, secondary_login = self.request(
+            "POST", "/api/login", {"email": "secondary@example.org", "password": "secondary password safe"}
+        )
+        secondary_cookie = response.getheader("Set-Cookie").split(";", 1)[0]
+        response, _ = self.request("GET", "/api/daily-digest/settings", cookie=secondary_cookie)
+        self.assertEqual(response.status, 403)
+        response, _ = self.request("POST", "/api/daily-digest/settings", {
+            "enabled": False, "delivery_time": "09:00", "timezone": "Asia/Karachi",
+        }, cookie=secondary_cookie, csrf=secondary_login["csrf"])
+        self.assertEqual(response.status, 403)
+        response, _ = self.request("GET", "/api/daily-digest?date=2026-10-15", cookie=secondary_cookie)
+        self.assertEqual(response.status, 403)
+
     def test_repeated_failures_never_lock_anyone_out(self):
         # 3M2AYA (Aly, Slack ts 1790279102.044719): just say the password is incorrect.
         for _ in range(21):
@@ -3219,6 +3253,9 @@ if(mode==="work"){
   location.hash="#/inbox?tab=all";a.renderInbox(N,R);out.ownerAll=inbox();
   location.hash="#/inbox?tab=unread";a.renderInbox(N,R);out.ownerUnread=inbox();
   location.hash="#/inbox";a.renderInbox([],[]);out.ownerEmpty=inbox();
+  a.state.dailyDigest={date:"2026-09-25",timezone:"Asia/Karachi",sections:{overdue:[{id:U1,project_id:U1,project_name:"P",title:"Late <script>",due_date:"2026-09-24",next_action:"Call supplier"}],today:[],next_7_days:[],next_30_days:[],reviews:[],checkpoints:[],next_actions:[]}};
+  a.renderInbox([{id:"d1",kind:"daily_digest",digest_date:"2026-09-25",summary:"Daily project summary",created_at:new Date().toISOString()}],[]);
+  out.dailyDigest=inbox();
   process.stdout.write(JSON.stringify(out));return;
 }
 if(mode!=="main"){
@@ -4065,6 +4102,16 @@ class AstraMyWorkInboxTests(unittest.TestCase):
         self.assertIn('aria-current="page">Unread', self.out["memberNeeds"])  # Needs action is for Owners only
         self.assertIn('aria-current="page">All', self.out["memberAllRead"])
         self.assertIn('id="read-all" class="quiet" disabled>', self.out["memberAllRead"])
+
+    def test_daily_digest_notification_opens_an_escaped_count_first_summary(self):
+        html = self.out["dailyDigest"]
+        self.assertIn('data-digest-date="2026-09-25">View summary</button>', html)
+        self.assertIn('<h2 id="daily-digest-title">Daily project summary</h2>', html)
+        self.assertIn("Asia/Karachi", html)
+        self.assertIn("Late &lt;script&gt;", html)
+        self.assertNotIn("Late <script>", html)
+        self.assertIn("Call supplier", html)
+        self.assertIn("Due in 1–7 days", html)
 
     def test_inbox_puts_owner_requests_first(self):
         html = self.out["ownerDefault"]

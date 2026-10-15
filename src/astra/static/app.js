@@ -1,4 +1,4 @@
-const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality"};
+const state={user:null,csrf:null,projects:[],tasks:[],entities:[],unread:0,sort:"criticality",dailyDigest:null,dailyDigestError:""};
 async function api(path,options={}){options.headers={"Content-Type":"application/json",...(state.csrf?{"X-CSRF-Token":state.csrf}:{}),...(options.headers||{})};const response=await fetch(path,options);const data=await response.json();if(!response.ok){const err=new Error(data.lock&&data.error?data.error.replace(/at \d{2}:\d{2}:\d{2} UTC/,`at ${lockTime(data.lock)}`):data.error||"Request failed");err.status=response.status;err.confirm=data.confirm;err.impact=data.impact;err.lock=data.lock;throw err}return data}
 function clearFeedback(element){if(!element)return;element.classList.remove("message-info","message-success");element.textContent=""}
 function showLogin(){document.querySelector("#login").hidden=false;document.querySelector("#password-required").hidden=true;document.querySelector("#app").hidden=true}
@@ -1458,7 +1458,7 @@ document.querySelector("#keys-btn").addEventListener("click",()=>document.queryS
 document.querySelector("#login-form").addEventListener("submit",async e=>{e.preventDefault();try{const data=await api("/api/login",{method:"POST",body:JSON.stringify({email:e.target.querySelector("#email").value,password:e.target.querySelector("#password").value})});Object.assign(state,data)}catch(err){document.querySelector("#login-error").textContent=err.message;return}e.target.querySelector("#password").value="";showSignedInState();if(!state.user.must_change_password)await loadOrSay()});
 // H1: after signing out, reload the page so nothing the previous person saw (Inbox, requests, an open task,
 // loaded tasks) survives for the next person on this browser. The hash is dropped too.
-function signedOut(){state.user=state.csrf=null;location.replace(location.pathname)}
+function signedOut(){state.user=state.csrf=null;state.dailyDigest=null;state.dailyDigestDate=null;state.dailyDigestError="";location.replace(location.pathname)}
 document.querySelector("#logout").onclick=async()=>{await api("/api/logout",{method:"POST",body:"{}"});signedOut()};
 document.querySelector("#logout-all").onclick=async()=>{await api("/api/logout-all",{method:"POST",body:"{}"});signedOut()};
 async function changePasswordFromForm(form,errorElement,forced){
@@ -1739,7 +1739,7 @@ function noteDay(iso){
 }
 function noteRow(n){
   const unread=!n.read_at,when=new Date(n.created_at).toLocaleString([], {day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
-  const open=n.task_id?`<button type="button" class="link" data-detail="${escapeHtml(n.task_id)}"${unread?` data-read-on-open="${escapeHtml(n.id)}"`:""}>Open task</button>`:"";
+  const open=n.kind==="daily_digest"&&n.digest_date?`<button type="button" class="link" data-digest-date="${escapeHtml(n.digest_date)}">View summary</button>`:n.task_id?`<button type="button" class="link" data-detail="${escapeHtml(n.task_id)}"${unread?` data-read-on-open="${escapeHtml(n.id)}"`:""}>Open task</button>`:"";
   const mark=unread?`<button type="button" class="link" data-read="${escapeHtml(n.id)}">Mark read</button>`:"";
   return `<li class="note-row${unread?" unread":""}"><span class="note-dot" aria-hidden="true"></span><div class="note-main"><p class="note-summary">${unread?'<span class="sr-only">Unread: </span>':""}${escapeHtml(n.summary)}</p>
     <p class="note-meta">${n.task_title&&!String(n.summary||"").includes(n.task_title)?`${escapeHtml(n.task_title)} · `:""}<time datetime="${escapeHtml(n.created_at)}">${escapeHtml(when)}</time></p></div><div class="note-actions">${open}${mark}</div></li>`;
@@ -1747,6 +1747,27 @@ function noteRow(n){
 function noteList(items){
   const days=["Today","Yesterday","Earlier"].map(label=>[label,items.filter(n=>noteDay(n.created_at)===label)]).filter(([,rows])=>rows.length);
   return days.map(([label,rows])=>`<h3 class="note-day">${label}</h3><ul class="note-list">${rows.map(noteRow).join("")}</ul>`).join("");
+}
+function digestTaskList(items,label){
+  const shown=(items||[]).slice(0,5);
+  if(!shown.length)return `<p class="digest-empty">None ${label}.</p>`;
+  return `<ul class="digest-items">${shown.map(item=>`<li><strong>${escapeHtml(item.title||item.task_title||"Task")}</strong><span>${escapeHtml(item.project_name||"")}${item.due_date?` · due ${escapeHtml(item.due_date)}`:""}${item.checkpoint_date?` · checkpoint ${escapeHtml(item.checkpoint_date)}`:""}</span>${item.next_action&&item.next_action!=="None"?`<small>Next: ${escapeHtml(item.next_action)}</small>`:""}<a href="#/project/${encodeURIComponent(item.project_id)}/list?task=${encodeURIComponent(item.id||item.task_id)}">Open task</a></li>`).join("")}</ul>${items.length>shown.length?`<p class="fine">Showing ${shown.length} of ${items.length} tasks.</p>`:""}`;
+}
+function digestSection(title,items,label){return `<section class="digest-section"><h3>${escapeHtml(title)} <span class="count">${(items||[]).length}</span></h3>${digestTaskList(items,label)}</section>`}
+function dailyDigestPanel(){
+  if(state.dailyDigestError)return `<section class="daily-digest-panel"><p class="error" role="alert">${escapeHtml(state.dailyDigestError)}</p><button type="button" class="quiet" id="digest-close">Close summary</button></section>`;
+  const digest=state.dailyDigest;if(!digest)return "";
+  const s=digest.sections||{};
+  return `<section class="daily-digest-panel" aria-labelledby="daily-digest-title"><div class="digest-head"><div><h2 id="daily-digest-title">Daily project summary</h2><p class="fine">${escapeHtml(digest.date)} · ${escapeHtml(digest.timezone||"")}</p></div><button type="button" class="quiet" id="digest-close">Close summary</button></div>
+    ${digestSection("Overdue",s.overdue,"are overdue")}${digestSection("Due today",s.today,"due today")}${digestSection("Due in 1–7 days",s.next_7_days,"coming up")}${digestSection("Due in 8–30 days",s.next_30_days,"scheduled")}${digestSection("Awaiting review",s.reviews,"awaiting review")}
+    <section class="digest-section"><h3>Open checkpoints due soon or overdue <span class="count">${(s.checkpoints||[]).length}</span></h3>${(s.checkpoints||[]).length?`<ul class="digest-items">${s.checkpoints.slice(0,5).map(item=>`<li><strong>${escapeHtml(item.task_title)}</strong><span>${escapeHtml(item.project_name)} · ${escapeHtml(item.checkpoint_date)}${item.reason?` · ${escapeHtml(item.reason)}`:""}</span><a href="#/project/${encodeURIComponent(item.project_id)}/list?task=${encodeURIComponent(item.task_id)}">Open task</a></li>`).join("")}</ul>${s.checkpoints.length>5?`<p class="fine">Showing 5 of ${s.checkpoints.length} checkpoints.</p>`:""}`:'<p class="digest-empty">No open checkpoints are overdue or due in the next 7 days.</p>'}</section>
+    ${digestSection("Next actions",s.next_actions,"open")}</section>`;
+}
+async function openDailyDigest(digestDate){
+  state.dailyDigest=null;state.dailyDigestError="";state.dailyDigestDate=digestDate;
+  try{const {digest}=await api(`/api/daily-digest?date=${encodeURIComponent(digestDate)}`);state.dailyDigest=digest}
+  catch(err){state.dailyDigestError=`The summary could not be opened. ${err.message}`}
+  renderInbox(state.notifications||[],state.ownerRequests||[]);
 }
 function requestRow(r){
   return `<li class="unread owner-request"><strong>${escapeHtml(requestTitle(r))}</strong>${requestDetail(r)}
@@ -1763,11 +1784,13 @@ function renderInbox(items,requests=[]){
     :tab==="unread"?(unread.length?noteList(unread):empty("You are all caught up","Nothing unread. <a href=\"#/inbox?tab=all\">See all notifications</a>."))
     :(owner?requestBlock:"")+(items.length?`<section class="inbox-section">${owner&&requests.length?"<h2>Notifications</h2>":""}${noteList(items)}</section>`:empty("No notifications yet","Assignments, reviews and changes to your tasks appear here."));
   document.querySelector("#inbox-body").innerHTML=`<div class="inbox-bar"><nav class="tabs" aria-label="Inbox views">${tabs}</nav><button type="button" id="read-all" class="quiet"${unread.length?"":" disabled"}>Mark all read</button></div>
-    <div class="error" id="inbox-error" role="alert" tabindex="-1"></div>${content}`;
+    <div class="error" id="inbox-error" role="alert" tabindex="-1"></div>${dailyDigestPanel()}${content}`;
   document.querySelector("#read-all").addEventListener("click",markAllRead);
   document.querySelectorAll("#inbox-body [data-read]").forEach(b=>b.addEventListener("click",()=>markRead(b.dataset.read)));
   document.querySelectorAll("#inbox-body [data-request-decision]").forEach(b=>b.addEventListener("click",()=>decideOwnerRequest(b.dataset.requestId,b.dataset.requestDecision)));
   document.querySelectorAll("#inbox-body [data-detail]").forEach(b=>b.addEventListener("click",()=>{openDetail(b.dataset.detail);if(b.dataset.readOnOpen)markRead(b.dataset.readOnOpen)}));
+  document.querySelectorAll("#inbox-body [data-digest-date]").forEach(b=>b.addEventListener("click",()=>openDailyDigest(b.dataset.digestDate)));
+  document.querySelector("#digest-close")?.addEventListener("click",()=>{state.dailyDigest=null;state.dailyDigestError="";state.dailyDigestDate=null;renderInbox(state.notifications||[],state.ownerRequests||[])});
 }
 // 0D9Q3X: the Owner decides from the inbox, so each request says what it would change and why.
 const REQUEST_LABELS={update_task_status:"Status change",accept_submission:"Accept submission",request_changes:"Request changes",reopen_task:"Reopen task",set_on_hold:"Put on hold",approve_schedule_proposal:"Approve schedule change",reject_schedule_proposal:"Reject schedule change",close_project:"Close project"};
@@ -2496,14 +2519,39 @@ async function openPeople(){
     const d=document.querySelector("#people-dialog");if(!d.open)d.showModal();
   }catch(err){document.querySelector("#people-body").innerHTML=`<p class="error">${escapeHtml(err.message)}</p>`}
 }
+async function loadDailyDigestSettings(){
+  const form=document.querySelector("#daily-digest-settings-form");if(!form)return;
+  const error=document.querySelector("#daily-digest-settings-error"),status=document.querySelector("#daily-digest-settings-status");
+  try{
+    const {settings}=await api("/api/daily-digest/settings");
+    if(!form.isConnected)return;
+    form.elements.enabled.checked=!!settings.enabled;form.elements.delivery_time.value=settings.delivery_time||"09:00";
+    form.elements.timezone.value=settings.timezone||"Asia/Karachi";
+    status.textContent=settings.updated_at?`Last saved ${new Date(settings.updated_at).toLocaleString()}.`:"Daily summary is on by default at 09:00.";
+    error.textContent="";
+  }catch(err){error.textContent=`Settings could not be loaded. ${err.message}`}
+  form.addEventListener("submit",saveDailyDigestSettings);
+}
+async function saveDailyDigestSettings(event){
+  event.preventDefault();
+  const form=event.currentTarget,error=document.querySelector("#daily-digest-settings-error"),status=document.querySelector("#daily-digest-settings-status");
+  error.textContent="";status.textContent="Saving…";
+  try{
+    const {settings}=await api("/api/daily-digest/settings",{method:"POST",body:JSON.stringify({enabled:form.elements.enabled.checked,delivery_time:form.elements.delivery_time.value,timezone:form.elements.timezone.value})});
+    form.elements.enabled.checked=!!settings.enabled;form.elements.delivery_time.value=settings.delivery_time;form.elements.timezone.value=settings.timezone;
+    status.textContent=`Saved. The summary is ${settings.enabled?"on":"off"} for ${settings.delivery_time} ${settings.timezone}.`;
+  }catch(err){status.textContent="";error.textContent=`Settings were not saved. ${err.message}`}
+}
 
 // GTEYTG: every owner has role "owner"; only the primary owner may give or remove owner access.
-const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset",password_changed:"Password changed",entity_active_changed:"Entity active state changed",entity_renamed:"Entity renamed",import_template_config_changed:"Import template settings changed"};
+const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset",password_changed:"Password changed",entity_active_changed:"Entity active state changed",entity_renamed:"Entity renamed",import_template_config_changed:"Import template settings changed",daily_digest_settings_changed:"Daily summary settings changed"};
 // PDDS2D/3M2AYA: a password reset is either a server command or done in the app by an owner.
 const viaServerCommand=e=>(e.event_type==="primary_owner_transferred"||e.event_type==="password_reset")&&e.reason==="server command";
 const MIN_PASSWORD=8;
 function renderPeople(users,memberships,ownerEvents){
   const primary=!!state.user.is_primary_owner;
+  const timeZones=[...new Set(["Asia/Karachi","UTC",...(Intl.supportedValuesOf?Intl.supportedValuesOf("timeZone"):[])])].sort();
+  const digestTimeZoneOptions=timeZones.map(zone=>`<option value="${escapeHtml(zone)}"></option>`).join("");
   const rows=users.map(u=>{
     const isOwner=u.global_role==="owner",id=escapeHtml(u.id);
     const role=isOwner?`<span class="badge" data-level="${u.is_primary_owner?"ok":"info"}">${u.is_primary_owner?"Primary owner":"Secondary owner"}</span>`:escapeHtml(u.global_role);
@@ -2519,7 +2567,7 @@ function renderPeople(users,memberships,ownerEvents){
   };
   const ownerEventRow=e=>{let change="";if(e.detail_json){const d=safeParse(e.detail_json),b=d.before,a=d.after;if(b&&a)change=` · ${escapeHtml(JSON.stringify(b))} → ${escapeHtml(JSON.stringify(a))}`;}return `<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(ownerEventLabel(e))}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`}${viaServerCommand(e)?" via server command":` by ${escapeHtml(e.actor_name)}`}${e.reason&&!viaServerCommand(e)?` · ${escapeHtml(e.reason)}`:""}${change}</li>`};
   const blocked=e=>e.event_type==="owner_change_blocked"||e.event_type==="import_blocked";
-  const settingEvents=new Set(["entity_active_changed","entity_renamed","import_template_config_changed"]);
+  const settingEvents=new Set(["entity_active_changed","entity_renamed","import_template_config_changed","daily_digest_settings_changed"]);
   const ownerHistory=(ownerEvents||[]).filter(e=>!blocked(e)&&!settingEvents.has(e.event_type)).slice(0,20).map(ownerEventRow).join("")||"<li>No owner access changes yet.</li>";
   const settingsHistory=(ownerEvents||[]).filter(e=>settingEvents.has(e.event_type)).slice(0,20).map(ownerEventRow).join("")||"<li>No app setting changes yet.</li>";
   const blockedList=type=>(ownerEvents||[]).filter(e=>e.event_type===type).slice(0,10).map(ownerEventRow).join("")||"<li>None.</li>";
@@ -2534,7 +2582,8 @@ function renderPeople(users,memberships,ownerEvents){
   const filingProjectOptions=state.projects.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("");
   document.querySelector("#people-body").innerHTML=`
     <h2>People &amp; access</h2>
-    <nav class="admin-sections" aria-label="Administration sections">${[["users","People"],["access","Project access"],["entities","Entities"],["calendar","Calendars"],["history","History"]].map(([id,label])=>`<button type="button" class="quiet" data-admin-section="${id}">${label}</button>`).join("")}<button type="button" class="quiet" id="admin-templates">Templates</button><button type="button" class="quiet" id="admin-results">Final results</button></nav>
+    <nav class="admin-sections" aria-label="Administration sections">${[["users","People"],["access","Project access"],["entities","Entities"],["calendar","Calendars"],["history","History"],...(primary?[["digest","Daily summary"]]:[])].map(([id,label])=>`<button type="button" class="quiet" data-admin-section="${id}">${label}</button>`).join("")}<button type="button" class="quiet" id="admin-templates">Templates</button><button type="button" class="quiet" id="admin-results">Final results</button></nav>
+    ${primary?`<section class="daily-digest-settings" aria-labelledby="admin-digest"><h3 id="admin-digest" tabindex="-1">Daily summary</h3><p class="fine">Astra adds one private in-app summary to your Inbox each day. It never emails anyone or adds other recipients.</p><form id="daily-digest-settings-form"><label class="checkbox"><input name="enabled" type="checkbox"> Send me the daily summary</label><label>Delivery time<input name="delivery_time" type="time" required></label><label>Your time zone<input name="timezone" list="daily-digest-timezones" placeholder="Start typing a city or time zone" required></label><datalist id="daily-digest-timezones">${digestTimeZoneOptions}</datalist><p class="fine">Choose your local time zone, such as Asia/Karachi or America/Chicago.</p><div class="error" id="daily-digest-settings-error" role="alert"></div><p id="daily-digest-settings-status" class="form-hint" role="status"></p><div class="actions"><button>Save summary settings</button></div></form></section>`:""}
     <h3 id="admin-users" tabindex="-1">Users</h3><ul class="people-list">${rows}</ul>
     <h3 id="admin-history" tabindex="-1">Owner access history</h3><ul class="people-list">${ownerHistory}</ul>
     <h3>Settings history</h3><ul class="people-list">${settingsHistory}</ul>
@@ -2598,6 +2647,7 @@ function renderPeople(users,memberships,ownerEvents){
   document.querySelector("#filing-form").addEventListener("submit",submitFiling);
   document.querySelector("#calendar-project").addEventListener("change",e=>renderCalendar(e.target.value));
   document.querySelector("#calendar-form").addEventListener("submit",e=>e.preventDefault());
+  if(primary)loadDailyDigestSettings();
 }
 
 async function renderCalendar(projectId){

@@ -1,5 +1,20 @@
 # Astra handoff index
 
+## Daily in-app summary — 2026-10-15
+
+F9HBSJ now implements a primary-Owner-controlled daily Inbox summary with an
+editable local delivery time and IANA time zone (default 09:00 Asia/Karachi).
+The single-process scheduler sleeps until the next due time, deduplicates by
+Owner-local date and catches up after restart; it does not poll every minute or
+use a cloud job. A new primary Owner inherits the saved schedule. The summary
+groups overdue, due-today and upcoming tasks, submitted reviews, open
+checkpoints due soon or overdue, and next actions. The disposable Chrome check
+verified saving the time zone and opening the linked Inbox summary. The full
+suite passed **927 tests in 767.731s, OK (skipped=1)**; the independent read-only
+diff review found no new issue. F9HBSJ is awaiting Aly's acceptance in the human
+lane. This is local application evidence only; hosting and deployment remain
+unverified.
+
 ## Current password-change gate — 2026-10-15
 
 Read [A5 implementation and verification](FIRST_LOGIN_PASSWORD_CHANGE_2026-10-14.md).

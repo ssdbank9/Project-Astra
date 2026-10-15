@@ -5446,8 +5446,211 @@ class AstraService:
             summary += (f" · {subject}" if subject else "") + f" · by {who['display_name'] if who else actor_id}"
         self._notify_owners(actor_id, event_id, task_id, kind, summary)
 
+    # --- App Owner daily digest (F9HBSJ) ---
+
+    def _daily_digest_owner(self, actor: dict) -> dict:
+        row = row_dict(self.db.execute(
+            "SELECT id,email,display_name,global_role,active,is_primary_owner FROM users WHERE id=?",
+            (actor.get("id"),),
+        ).fetchone())
+        if not row or not row["active"] or row["global_role"] != "owner" or not row["is_primary_owner"]:
+            raise Forbidden("Only the active primary owner can manage the daily summary.")
+        return row
+
+    def get_daily_digest_settings(self, actor: dict) -> dict:
+        self._daily_digest_owner(actor)
+        row = row_dict(self.db.execute(
+            "SELECT s.*,u.display_name updated_by_name FROM daily_digest_settings s "
+            "LEFT JOIN users u ON u.id=s.updated_by WHERE s.id=1"
+        ).fetchone())
+        if not row:
+            return {
+                "enabled": True, "delivery_time": "09:00", "timezone": self.DEFAULT_TIMEZONE,
+                "updated_at": None, "updated_by_name": None,
+            }
+        row["enabled"] = bool(row["enabled"])
+        return row
+
+    def update_daily_digest_settings(self, actor: dict, *, enabled: bool, delivery_time: str, timezone_name: str) -> dict:
+        if type(enabled) is not bool:
+            raise ValueError("Choose whether the daily summary is on or off.")
+        delivery_time = str(delivery_time or "").strip()
+        if not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", delivery_time):
+            raise ValueError("Choose a valid time in 24-hour format.")
+        timezone_name = str(timezone_name or "").strip()
+        try:
+            ZoneInfo(timezone_name)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError("Choose a valid time zone from the list.") from None
+        with transaction(self.db):
+            current = self._daily_digest_owner(actor)
+            before = self.get_daily_digest_settings(current)
+            stamp = now_text()
+            self.db.execute(
+                "INSERT INTO daily_digest_settings(id,enabled,delivery_time,timezone,updated_by,updated_at) "
+                "VALUES(1,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled, "
+                "delivery_time=excluded.delivery_time, timezone=excluded.timezone, "
+                "updated_by=excluded.updated_by, updated_at=excluded.updated_at",
+                (int(enabled), delivery_time, timezone_name, current["id"], stamp),
+            )
+            self._insert_user_event(
+                current["id"], "daily_digest_settings_changed", current["id"], None,
+                {"before": {"enabled": before["enabled"], "delivery_time": before["delivery_time"],
+                             "timezone": before["timezone"]},
+                 "after": {"enabled": enabled, "delivery_time": delivery_time, "timezone": timezone_name}},
+            )
+        return self.get_daily_digest_settings(actor)
+
+    def _build_daily_digest(self, actor: dict, digest_date: str, now: datetime) -> dict:
+        owner = self._daily_digest_owner(actor)
+        settings = self.get_daily_digest_settings(owner)
+        digest_day = date.fromisoformat(digest_date)
+        task_sections = {key: [] for key in ("overdue", "today", "next_7_days", "next_30_days", "reviews")}
+        open_tasks = []
+        task_ids = set()
+        for task in self.list_tasks(owner, sort="due_date"):
+            if task["status"] in {"completed", "cancelled", "abandoned"}:
+                continue
+            task_ids.add(task["id"])
+            project_zone = task.get("project_timezone") or self.DEFAULT_TIMEZONE
+            try:
+                local_day = now.astimezone(ZoneInfo(project_zone)).date()
+            except (ZoneInfoNotFoundError, ValueError):
+                local_day = digest_day
+            due = date.fromisoformat(task["due_date"]) if task.get("due_date") else None
+            days = (due - local_day).days if due else None
+            item = {
+                "id": task["id"], "project_id": task["project_id"], "project_name": task["project_name"],
+                "title": task["title"], "status": task["status"], "due_date": task.get("due_date"),
+                "owner_name": task.get("owner_name"), "next_action": task.get("next_action") or "None",
+                "days_to_due": days,
+            }
+            open_tasks.append(item)
+            if days is not None:
+                if days < 0:
+                    task_sections["overdue"].append(item)
+                elif days == 0:
+                    task_sections["today"].append(item)
+                elif days <= 7:
+                    task_sections["next_7_days"].append(item)
+                elif days <= 30:
+                    task_sections["next_30_days"].append(item)
+            if task["status"] == "submitted":
+                task_sections["reviews"].append(item)
+
+        checkpoints = []
+        rows = self.db.execute(
+            "SELECT c.id,c.task_id,c.checkpoint_date,c.reason,c.owner_user_id,t.title task_title, "
+            "t.project_id,p.name project_name,p.timezone project_timezone,u.display_name owner_name "
+            "FROM task_checkpoints c JOIN tasks t ON t.id=c.task_id JOIN projects p ON p.id=t.project_id "
+            "LEFT JOIN users u ON u.id=c.owner_user_id WHERE c.resolved=0 "
+            "ORDER BY c.checkpoint_date,c.id"
+        ).fetchall()
+        for row in rows:
+            if row["task_id"] not in task_ids:
+                continue
+            project_zone = row["project_timezone"] or self.DEFAULT_TIMEZONE
+            try:
+                local_day = now.astimezone(ZoneInfo(project_zone)).date()
+            except (ZoneInfoNotFoundError, ValueError):
+                local_day = digest_day
+            days = (date.fromisoformat(row["checkpoint_date"]) - local_day).days
+            if days <= 7:
+                checkpoints.append({
+                    "id": row["id"], "task_id": row["task_id"], "task_title": row["task_title"],
+                    "project_id": row["project_id"], "project_name": row["project_name"],
+                    "checkpoint_date": row["checkpoint_date"], "reason": row["reason"],
+                    "owner_name": row["owner_name"], "days_to_checkpoint": days,
+                })
+        order = lambda item: (item["due_date"] is None, item["due_date"] or "9999-12-31",
+                              item["title"].casefold(), item["id"])
+        open_tasks.sort(key=order)
+        for items in task_sections.values():
+            items.sort(key=order)
+        sections = {**task_sections, "checkpoints": checkpoints, "next_actions": open_tasks[:10]}
+        counts = {key: len(items) for key, items in sections.items()}
+        return {
+            "date": digest_date, "timezone": settings["timezone"],
+            "generated_at": now.astimezone(timezone.utc).isoformat(), "counts": counts, "sections": sections,
+        }
+
+    def build_daily_digest(self, actor: dict, digest_date: str | None = None, now: datetime | None = None) -> dict:
+        owner = self._daily_digest_owner(actor)
+        instant = now or datetime.now(timezone.utc)
+        if instant.tzinfo is None:
+            raise ValueError("Digest clock must include a timezone.")
+        settings = self.get_daily_digest_settings(owner)
+        day = digest_date or instant.astimezone(ZoneInfo(settings["timezone"])).date().isoformat()
+        date.fromisoformat(day)
+        return self._build_daily_digest(owner, day, instant)
+
+    def get_daily_digest(self, actor: dict, digest_date: str) -> dict:
+        owner = self._daily_digest_owner(actor)
+        date.fromisoformat(digest_date)
+        row = row_dict(self.db.execute(
+            "SELECT payload_json FROM daily_digest_runs WHERE user_id=? AND digest_date=?",
+            (owner["id"], digest_date),
+        ).fetchone())
+        if not row:
+            raise KeyError("Daily summary not found.")
+        return json.loads(row["payload_json"])
+
+    def run_due_daily_digests(self, now: datetime | None = None) -> dict:
+        instant = now or datetime.now(timezone.utc)
+        if instant.tzinfo is None:
+            raise ValueError("Digest clock must include a timezone.")
+        instant = instant.astimezone(timezone.utc)
+        with transaction(self.db):
+            settings_row = row_dict(self.db.execute(
+                "SELECT * FROM daily_digest_settings WHERE id=1"
+            ).fetchone())
+            settings = settings_row or {
+                "enabled": 1, "delivery_time": "09:00", "timezone": self.DEFAULT_TIMEZONE,
+            }
+            if not settings["enabled"]:
+                return {"created": 0, "date": None, "reason": "disabled"}
+            owner = row_dict(self.db.execute(
+                "SELECT id,email,display_name,global_role,active,is_primary_owner FROM users "
+                "WHERE is_primary_owner=1 AND global_role='owner' AND active=1"
+            ).fetchone())
+            if not owner:
+                return {"created": 0, "date": None, "reason": "no_active_owner"}
+            local_now = instant.astimezone(ZoneInfo(settings["timezone"]))
+            digest_date = local_now.date().isoformat()
+            if local_now.strftime("%H:%M") < settings["delivery_time"]:
+                return {"created": 0, "date": digest_date, "reason": "not_due"}
+            existing = self.db.execute(
+                "SELECT 1 FROM daily_digest_runs WHERE user_id=? AND digest_date=?", (owner["id"], digest_date)
+            ).fetchone()
+            if existing:
+                return {"created": 0, "date": digest_date, "reason": "already_sent"}
+            digest = self._build_daily_digest(owner, digest_date, instant)
+            counts = digest["counts"]
+            summary = (
+                f"Daily project summary · {counts['overdue']} overdue · {counts['today']} due today · "
+                f"{counts['next_7_days'] + counts['next_30_days']} upcoming · {counts['reviews']} for review · "
+                f"{counts['checkpoints']} checkpoints"
+            )
+            notification_id = new_id()
+            generated_at = instant.isoformat()
+            event_id = f"daily_digest:{digest_date}"
+            self.db.execute(
+                "INSERT INTO notifications(id,user_id,event_id,task_id,kind,summary,created_at,actor_user_id) "
+                "VALUES(?,?,?,NULL,'daily_digest',?,?,NULL)",
+                (notification_id, owner["id"], event_id, summary, generated_at),
+            )
+            self.db.execute(
+                "INSERT INTO daily_digest_runs(id,user_id,digest_date,generated_at,payload_json,notification_id) "
+                "VALUES(?,?,?,?,?,?)",
+                (new_id(), owner["id"], digest_date, generated_at,
+                 json.dumps(digest, ensure_ascii=False, sort_keys=True), notification_id),
+            )
+        return {"created": 1, "date": digest_date, "reason": "sent"}
+
     def list_notifications(self, actor: dict, unread_only: bool = False) -> list[dict]:
-        query = ("SELECT n.*, t.title task_title FROM notifications n LEFT JOIN tasks t ON t.id=n.task_id"
+        query = ("SELECT n.*, t.title task_title,d.digest_date FROM notifications n "
+                 "LEFT JOIN tasks t ON t.id=n.task_id "
+                 "LEFT JOIN daily_digest_runs d ON d.notification_id=n.id"
                  " WHERE n.user_id=?")
         if unread_only:
             query += " AND n.read_at IS NULL"

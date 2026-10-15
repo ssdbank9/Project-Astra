@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from astra.db import connect, database_path
+from astra.db import SCHEMA_VERSION, connect, database_path
 from astra.service import AstraService
 
 
@@ -130,7 +130,7 @@ class BackupCliTests(unittest.TestCase):
         self.run_cli(["backup", "--to", str(newer)])
         connection = sqlite3.connect(newer)
         try:
-            connection.execute("PRAGMA user_version=22")
+            connection.execute(f"PRAGMA user_version={SCHEMA_VERSION + 1}")
         finally:
             connection.close()
         destination = Path(self.temp.name) / "future-recovery" / "astra.sqlite3"
@@ -148,7 +148,7 @@ class BackupCliTests(unittest.TestCase):
         connection = sqlite3.connect(incomplete)
         try:
             connection.execute("CREATE TABLE users (id TEXT PRIMARY KEY)")
-            connection.execute("PRAGMA user_version=21")
+            connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         finally:
             connection.close()
         destination = Path(self.temp.name) / "incomplete-recovery" / "astra.sqlite3"
@@ -191,6 +191,8 @@ class BackupCliTests(unittest.TestCase):
         shutil.copy2(database_path(), older)
         old_db = sqlite3.connect(older)
         try:
+            old_db.execute("DROP TABLE daily_digest_runs")
+            old_db.execute("DROP TABLE daily_digest_settings")
             old_db.execute("ALTER TABLE users DROP COLUMN must_change_password")
             old_db.execute("PRAGMA user_version=20")
         finally:
@@ -201,7 +203,7 @@ class BackupCliTests(unittest.TestCase):
 
         restored = connect(restored_path)
         try:
-            self.assertEqual(restored.execute("PRAGMA user_version").fetchone()[0], 21)
+            self.assertEqual(restored.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
             self.assertEqual(
                 tuple(restored.execute(
                     "SELECT email, must_change_password FROM users"

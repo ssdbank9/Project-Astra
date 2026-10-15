@@ -3462,9 +3462,11 @@ class ServerCommandCliTests(unittest.TestCase):
 
     def test_waitress_configuration_is_loopback_and_bounded(self):
         from astra.web import serve_waitress
+        from types import SimpleNamespace
 
-        application = object()
+        application = SimpleNamespace(db_path=":memory:")
         with patch("astra.web.create_wsgi_app", return_value=application), \
+                patch("astra.web.DailyDigestScheduler") as scheduler, \
                 patch("waitress.serve") as run_server, \
                 patch("sys.stdout", new_callable=io.StringIO):
             serve_waitress("127.0.0.1", 8765)
@@ -3477,6 +3479,9 @@ class ServerCommandCliTests(unittest.TestCase):
         self.assertEqual(run_server.call_args.kwargs["ident"], "Astra")
         self.assertFalse(run_server.call_args.kwargs["expose_tracebacks"])
         self.assertNotIn("trusted_proxy", run_server.call_args.kwargs)
+        scheduler.assert_called_once_with(":memory:")
+        scheduler.return_value.start.assert_called_once_with()
+        scheduler.return_value.stop.assert_called_once_with()
 
     def test_database_errors_print_one_line(self):
         for error in (sqlite3.OperationalError("database is locked"), PermissionError("read-only folder")):

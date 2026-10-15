@@ -2,6 +2,24 @@
 
 Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 
+## ASTRA-20261015-02 - Continued cloud checks after app-development direction
+
+- Date / project: 2026-10-15; Project-Astra continuation.
+- Category / status: Communication misunderstanding; corrected.
+- Evidence / impact: After Aly said “move ahead,” I continued Oracle-region and account checks. Aly clarified “move with the app not cloud.” This diverted one response from the requested application work; no cloud resource or app source was changed.
+- Cause: I over-weighted the preceding hosting discussion instead of treating Aly's latest direction as the active scope.
+- Correction / prevention: Re-anchored to Astra app work, checked current app tickets and the previously requested entity rename. Before each follow-up, prioritize Aly's latest explicit scope over adjacent historical context.
+- Verification: Entity rename is implemented and in sign-off (16JJ96). The daily summary is not implemented; its policy decisions are recorded. Aly subsequently approved the F9HBSJ takeover, which was recorded through jaira.
+
+## ASTRA-20261015-03 - Sandbox denied repository metadata and temporary-folder reads
+
+- Date / project: 2026-10-15; Project-Astra F9HBSJ planning.
+- Category / status: Environment and search-scope errors; recovered.
+- Evidence / impact: `git pull --ff-only` could not write `.git/FETCH_HEAD` in the sandbox; the approved elevated retry succeeded and reported already up to date. Initial `jaira` ticket-lock writes were denied under the user's `.jaira` state directory; approved elevated CLI writes succeeded with `JAIRA_USER=Codex` verified first. A broad `rg --files` also traversed access-restricted root `tmp*` folders and printed access-denied errors; required repository sources were still found.
+- Cause: Sandbox write restrictions affect repository metadata and per-user jaira locks; workspace-level file enumeration included unrelated temporary directories.
+- Correction / prevention: Request approved elevation for Git metadata and jaira operations when denied; verify `jaira whoami` and explicitly use Codex identity for each write. Restrict searches to `src`, `tests`, `docs` and `.jaira` rather than enumerating the repository root.
+- Verification: Working branch is `codex/migration-safety-remediation`, up to date at `04653da`; F9HBSJ is assigned and claimed by Codex and planning lane transitions succeeded. No cloud operation occurred.
+
 ## ASTRA-20261015-01 - Waitress integration and runbook checks caught three misses
 
 - Date / project: 2026-10-15; Project-Astra 6BXYJZ hosted-server preparation.
@@ -709,3 +727,12 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 - Cause: I assumed the machine default identity was Codex instead of verifying `jaira whoami` before the first mutation.
 - Correction / prevention: Before every Jaira write, explicitly set `JAIRA_USER=Codex` for that invocation and verify the resulting actor. Never set it to Aly. Do not rewrite ticket history to conceal the original attribution. This task also introduced carriage returns in two changed Markdown files; a byte-level LF check caught them and both were normalized. Check actual bytes, not only `git diff --check`, before handoff.
 - Verification / recurrence: Later ticket updates identify Codex; the original attribution discrepancy is preserved and disclosed. Verify identity before the next Jaira write.
+
+## ASTRA-20261015-F9HBSJ - migration version test fixtures lagged behind schema
+
+- Date / project: 2026-10-15; Project Astra daily summary ticket F9HBSJ.
+- Category / status: Test-maintenance omission; corrected locally.
+- Evidence / impact: Raising Astra's database schema from 21 to 22 caused backup tests to keep hard-coded current/future version assertions. The version-20 restore fixture copied the current v22 database, then lowered only `user_version`, so v22's digest tables collided with migration 22. The first full-suite run and focused database checks exposed these failures; they were not application restore defects.
+- Cause: Schema migrations added new tables but the corresponding tests did not derive current/future versions from `SCHEMA_VERSION` or remove newer tables from historical fixtures. The first full run also exposed that the Waitress startup test used a bare `object()` even though startup now attaches a scheduler and needs a database path; a direct module test command omitted the repository's test discovery path and failed to import `link_roots`.
+- Correction / prevention: Use the schema constant for current/future-version assertions. When simulating a historical version from a fresh database, remove every table introduced after that version as well as columns introduced later. Add a migration review step that checks migrations and test fixture construction together. Update the Waitress fixture to expose a disposable database path and assert scheduler start/stop; invoke that test through unittest discovery so helper imports resolve. The first Jaira human-lane dry run omitted the required `--question` and was refused without writing; include a concrete App Owner review question when moving work to `human`.
+- Verification / recurrence: Backup tests and the 50 database tests passed after correction. The isolated Waitress startup test passed through discovery. The full suite passed **927 tests in 767.731s, OK (skipped=1)**. The personal canonical mistakes log remains outside this workspace and was not updated here.

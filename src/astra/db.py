@@ -8,7 +8,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 
 class SchemaMigrationRefused(RuntimeError):
@@ -839,6 +839,30 @@ def _migrate_v21(connection: sqlite3.Connection) -> None:
     """)
 
 
+def _migrate_v22(connection: sqlite3.Connection) -> None:
+    """v21 -> v22: saved Owner digest policy and idempotent daily snapshots (F9HBSJ)."""
+    _execute_statements(connection, """
+        CREATE TABLE daily_digest_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+            delivery_time TEXT NOT NULL DEFAULT '09:00',
+            timezone TEXT NOT NULL DEFAULT 'Asia/Karachi',
+            updated_by TEXT NOT NULL REFERENCES users(id),
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE daily_digest_runs (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            digest_date TEXT NOT NULL,
+            generated_at TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            notification_id TEXT NOT NULL UNIQUE REFERENCES notifications(id) ON DELETE CASCADE,
+            UNIQUE (user_id, digest_date)
+        );
+        CREATE INDEX idx_daily_digest_runs_user ON daily_digest_runs(user_id, digest_date);
+    """)
+
+
 # The ordered schema history: (version, step). migrate() runs every step whose version
 # is above the database's user_version, each in its own transaction with its bump.
 # Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
@@ -864,4 +888,5 @@ MIGRATION_STEPS = (
     (19, _migrate_v19),
     (20, _migrate_v20),
     (21, _migrate_v21),
+    (22, _migrate_v22),
 )

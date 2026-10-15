@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .auth import dummy_password_hash, new_token, token_digest, verify_password
+from .daily_digest import DailyDigestScheduler
 from .db import connect, database_path
 from .importer import FORMULA_PREFIXES, ImportConflict, ImportTooLarge
 from .service import AstraService, Conflict, Forbidden, NeedsConfirmation, TaskLocked, now_text
@@ -192,6 +193,15 @@ class AstraRoutes:
                     "notifications": self.service.list_notifications(user, unread_only),
                     "unread": self.service.unread_notification_count(user),
                 })
+            if path == "/api/daily-digest/settings":
+                user, _ = self._require_user()
+                return self._json({"settings": self.service.get_daily_digest_settings(user)})
+            if path == "/api/daily-digest":
+                user, _ = self._require_user()
+                digest_date = parse_qs(urlparse(self.path).query).get("date", [""])[0]
+                if not digest_date:
+                    raise ValueError("date is required.")
+                return self._json({"digest": self.service.get_daily_digest(user, digest_date)})
             if path == "/api/owner-action-requests":
                 user, _ = self._require_user()
                 status = parse_qs(urlparse(self.path).query).get("status", ["pending"])[0] or None
@@ -274,6 +284,15 @@ class AstraRoutes:
                     keep_session=token_digest(raw) if raw else None,
                 )
                 return self._json({"user": updated})
+            if path == "/api/daily-digest/settings":
+                settings = self.service.update_daily_digest_settings(
+                    user, enabled=payload.get("enabled"), delivery_time=payload.get("delivery_time", ""),
+                    timezone_name=payload.get("timezone", "")
+                )
+                scheduler = getattr(self.server, "daily_digest_scheduler", None)
+                if scheduler:
+                    scheduler.wake()
+                return self._json({"settings": settings})
             if path == "/api/logout-all":
                 revoked = self.service.revoke_user_sessions(user["id"])
                 return self._json({"ok": True, "revoked": revoked}, cookie=self._session_cookie("", 0))
@@ -902,6 +921,7 @@ class AstraServer(ThreadingHTTPServer):
         self.db_path = database_path()
         self.db = connect(self.db_path)
         self.service = AstraService(self.db)
+        self.daily_digest_scheduler = None
 
     def server_close(self):
         super().server_close()
@@ -967,6 +987,7 @@ class AstraWSGIApplication:
 
     def __init__(self, db_path=None):
         self.db_path = Path(db_path) if db_path is not None else database_path()
+        self.daily_digest_scheduler = None
         # Match AstraServer startup semantics: create/upgrade the database before
         # the hosted listener begins accepting requests, and fail fast on refusal.
         db = connect(self.db_path)
@@ -1005,7 +1026,9 @@ class AstraWSGIApplication:
         handler.headers = headers
         handler.rfile = environ.get("wsgi.input", io.BytesIO())
         handler.wfile = io.BytesIO()
-        handler.server = SimpleNamespace(db_path=self.db_path)
+        handler.server = SimpleNamespace(
+            db_path=self.db_path, daily_digest_scheduler=self.daily_digest_scheduler
+        )
 
         dispatch = getattr(type(handler), f"do_{method}", None)
         try:
@@ -1034,25 +1057,33 @@ def serve_waitress(host: str, port: int):
     from waitress import serve as waitress_serve
 
     application = create_wsgi_app()
+    application.daily_digest_scheduler = DailyDigestScheduler(application.db_path)
+    application.daily_digest_scheduler.start()
     print(f"Astra (Waitress) is running at http://{host}:{port}")
-    waitress_serve(
-        application,
-        host=host,
-        port=port,
-        ident="Astra",
-        channel_timeout=30,
-        max_request_header_size=16_384,
-        max_request_body_size=6_000_000,
-        expose_tracebacks=False,
-    )
+    try:
+        waitress_serve(
+            application,
+            host=host,
+            port=port,
+            ident="Astra",
+            channel_timeout=30,
+            max_request_header_size=16_384,
+            max_request_body_size=6_000_000,
+            expose_tracebacks=False,
+        )
+    finally:
+        application.daily_digest_scheduler.stop()
 
 
 def serve(host: str, port: int):
     server = AstraServer((host, port))
+    server.daily_digest_scheduler = DailyDigestScheduler(server.db_path)
+    server.daily_digest_scheduler.start()
     print(f"Astra is running at http://{host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        server.daily_digest_scheduler.stop()
         server.server_close()

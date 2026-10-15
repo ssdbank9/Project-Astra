@@ -45,6 +45,7 @@ def main(argv=None):
         "--to", required=True, metavar="FILE",
         help="New database file; existing files are never replaced",
     )
+    commands.add_parser("digest", help="Create today's App Owner summary if it is enabled and due")
     args = parser.parse_args(argv)
     if args.command == "serve":
         try:
@@ -159,6 +160,13 @@ def _run(args):
     elif args.command == "restore":
         destination = restore_backup(Path(args.source), Path(args.to))
         print(f"Database restored: {destination} (integrity_check: ok)")
+    elif args.command == "digest":
+        db = _existing_database()
+        try:
+            result = AstraService(db).run_due_daily_digests()
+            print(f"Daily summary: {result['reason']}" + (f" ({result['date']})" if result.get("date") else ""))
+        finally:
+            db.close()
     elif args.command == "serve" and args.waitress:
         serve_waitress(args.host, args.port)
     else:
