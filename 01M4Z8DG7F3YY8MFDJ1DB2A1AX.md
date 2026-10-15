@@ -1,7 +1,7 @@
 ---
 id: 01M4Z8DG7F3YY8MFDJ1DB2A1AX
 title: Run Astra real-device and accessibility acceptance
-status: todo
+status: pre-process
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-15T07:46:21Z
-updated-at: 2026-10-15T07:50:38Z
+updated-at: 2026-10-15T07:50:51Z
 updated-by: Codex
 outcome-what: "The checklist should cover one quick path per target environment, capture visible failure evidence, and leave unavailable environments unverified."
 outcome-why: "Aly must be able to complete the planned checks in about 20 minutes without extra setup or a technical test script."
