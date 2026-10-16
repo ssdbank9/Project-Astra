@@ -23,13 +23,14 @@ related:
 follows: 01M2HQJYWEE65RW16FVKF9HBSJ
 commits: []
 created-at: 2026-10-16T11:01:43Z
-updated-at: 2026-10-16T11:31:53Z
+updated-at: 2026-10-16T11:32:28Z
 updated-by: Claude
 claimed-by: X1CarbonPC-41964
 claimed-at: 2026-10-16T11:02:05Z
 outcome-what: "Digest test passes a fixed timezone-aware now (2026-10-15 09:00 Karachi). Waitress tests stop the asyncore loop from its own thread via a trigger thunk, shut down the task dispatcher, join this server's workers and assert they exited; setUp cleans up if it fails after create_server."
 outcome-why: "The digest test failed on every day but 2026-10-15, and the Waitress tests leaked 4 worker threads per test and could close a socket under select() (WinError 10038)."
 outcome-resolves: "Date-independent digest test verified with a frozen clock at two other dates; no waitress-* threads left after 50 runs; guard fails when dispatcher shutdown is removed; full suite 963 OK (skipped=1); no app code changed."
+review-summary: "Test-only. tests/test_daily_digest.py passes now=2026-10-15T04:00Z to build_daily_digest, so the buckets no longer follow the real clock. tests/test_web.py AstraWaitressIntegrationTests: setUp records only the waitress-* workers create_server started; stop_server closes all sockets on the loop thread (trigger thunk running wasyncore.close_all), joins the run thread, calls task_dispatcher.shutdown(), joins the workers and asserts all exited; setUp stops the server if it fails after creation."
 ---
 
 # Fix stale digest test clock and Waitress test thread leak
