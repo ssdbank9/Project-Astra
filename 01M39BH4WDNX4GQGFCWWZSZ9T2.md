@@ -22,7 +22,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-24T09:21:46Z
-updated-at: 2026-10-16T11:04:40Z
+updated-at: 2026-10-16T11:04:50Z
 updated-by: Claude
 claimed-by: vm-684
 claimed-at: 2026-09-24T09:22:00Z
@@ -45,7 +45,7 @@ review-check: "git diff 0f1eefc -- src README.md tests .jaira && git diff --chec
 
 - [x] Service test: a viewer and a member without manage rights get only project_schedule_changed, project_closed and project_reopened from project_events
   proof: tests/test_core.py:1886 test_project_history_non_managers_see_only_schedule_changes_and_closure (chairman, viewer, member subtests)
-- [x] Service test: the App Owner and a project manager still see every event kind; a non-member still gets Forbidden
+- [x] Service test: the App Owner, the Chairman (K62ZAP) and a project manager still see every event kind; a non-member still gets Forbidden
   proof: tests/test_core.py:1886 same test: owner and manager subtests assert all 8 kinds; outsider assertRaises(Forbidden)
 - [x] HTTP test: GET /api/projects/{id}/events returns the filtered list to a viewer, the full list to owner and manager, and 403 to a non-member
   proof: tests/test_web.py:1276 test_project_history_kinds_are_limited_for_non_managers_over_http (chairman/viewer/member filtered, owner/manager full, outsider 403)
