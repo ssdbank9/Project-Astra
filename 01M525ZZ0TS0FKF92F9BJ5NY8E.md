@@ -1,7 +1,7 @@
 ---
 id: 01M525ZZ0TS0FKF92F9BJ5NY8E
 title: Fix stale digest test clock and Waitress test thread leak
-status: in-progress
+status: review
 ready: true
 creator: Claude
 assignee: Claude
@@ -23,10 +23,13 @@ related:
 follows: 01M2HQJYWEE65RW16FVKF9HBSJ
 commits: []
 created-at: 2026-10-16T11:01:43Z
-updated-at: 2026-10-16T11:31:42Z
+updated-at: 2026-10-16T11:31:53Z
 updated-by: Claude
 claimed-by: X1CarbonPC-41964
 claimed-at: 2026-10-16T11:02:05Z
+outcome-what: "Digest test passes a fixed timezone-aware now (2026-10-15 09:00 Karachi). Waitress tests stop the asyncore loop from its own thread via a trigger thunk, shut down the task dispatcher, join this server's workers and assert they exited; setUp cleans up if it fails after create_server."
+outcome-why: "The digest test failed on every day but 2026-10-15, and the Waitress tests leaked 4 worker threads per test and could close a socket under select() (WinError 10038)."
+outcome-resolves: "Date-independent digest test verified with a frozen clock at two other dates; no waitress-* threads left after 50 runs; guard fails when dispatcher shutdown is removed; full suite 963 OK (skipped=1); no app code changed."
 ---
 
 # Fix stale digest test clock and Waitress test thread leak
