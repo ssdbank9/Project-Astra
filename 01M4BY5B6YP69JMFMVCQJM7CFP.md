@@ -13,8 +13,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T19:41:33Z
-updated-at: 2026-10-09T18:39:14Z
-updated-by: Codex
+updated-at: 2026-10-16T11:05:38Z
+updated-by: Claude
 claimed-by: X1CarbonPC-32528
 claimed-at: 2026-10-07T19:44:46Z
 outcome-what: Project-bound Excel workplans and governed timeline task-row moves implemented; whitespace reference regression repaired.
@@ -28,7 +28,8 @@ outcome-resolves: Owner acceptance recorded. Full suite 765 OK skipped1; focused
   proof: src/astra/workplan_excel.py; tests/test_owner_excel_timeline.py OwnerExcelTests; private isolated sample239/replay239
 - [x] Add governed task-row date/relation/order drops using atomic service validation and existing scheduling authority; refresh critical path.
   proof: src/astra/service.py timeline_drop; tests/test_owner_excel_timeline.py TimelineTaskDropTests; critical path and reorder persistence regressions
-- [ ] Exercise parser/service/HTTP roles and guard-removal regressions, isolated browser scenarios and independent review; run full suite and scoped LF-safe push.
+- [x] Exercise parser/service/HTTP roles and guard-removal regressions, isolated browser scenarios and independent review; run full suite and scoped LF-safe push.
+  proof: tests/test_owner_excel_timeline.py (OwnerExcelTests, TimelineTaskDropTests, TimelineTaskHttpTests, TimelineOrderUiTests) and tests/test_workplan.py; role/HTTP matrix in TimelineTaskHttpTests.test_http_csrf_role_matrix_and_download; independent static review and full suite 765 OK in docs/handoff/JM7CFP_VERIFICATION_2026-10-09.md; re-run 2026-10-16: focused batch 4 210 tests OK
 
 ## Definition of Done
 
