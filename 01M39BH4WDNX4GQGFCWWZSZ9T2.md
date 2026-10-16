@@ -22,7 +22,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-24T09:21:46Z
-updated-at: 2026-10-16T11:04:50Z
+updated-at: 2026-10-16T11:04:59Z
 updated-by: Claude
 claimed-by: vm-684
 claimed-at: 2026-09-24T09:22:00Z
@@ -47,7 +47,7 @@ review-check: "git diff 0f1eefc -- src README.md tests .jaira && git diff --chec
   proof: tests/test_core.py:1886 test_project_history_non_managers_see_only_schedule_changes_and_closure (chairman, viewer, member subtests)
 - [x] Service test: the App Owner, the Chairman (K62ZAP) and a project manager still see every event kind; a non-member still gets Forbidden
   proof: tests/test_core.py:1886 same test: owner and manager subtests assert all 8 kinds; outsider assertRaises(Forbidden)
-- [x] HTTP test: GET /api/projects/{id}/events returns the filtered list to a viewer, the full list to owner and manager, and 403 to a non-member
+- [x] HTTP test: GET /api/projects/{id}/events returns the filtered list to a viewer, the full list to owner, Chairman and manager, and 403 to a non-member
   proof: tests/test_web.py:1276 test_project_history_kinds_are_limited_for_non_managers_over_http (chairman/viewer/member filtered, owner/manager full, outsider 403)
 - [x] Tests failed before the fix for the right reason; output saved to scratchpad/ZSZ9T2-failing-before.txt
   proof: /tmp/claude-0/-workspace/6ce9994f-b952-5e8c-b3bf-df4d83545f57/scratchpad/ZSZ9T2-failing-before.txt: START_SHA 0f1eefc6 src + new tests, FAILED (failures=6): chairman/viewer/member subtests of both tests got import_committed/protected_action_* rows; owner/manager passed
