@@ -23,7 +23,7 @@ related:
 follows: 01M2HQJYWEE65RW16FVKF9HBSJ
 commits: []
 created-at: 2026-10-16T11:01:43Z
-updated-at: 2026-10-16T11:11:31Z
+updated-at: 2026-10-16T11:31:42Z
 updated-by: Claude
 claimed-by: X1CarbonPC-41964
 claimed-at: 2026-10-16T11:02:05Z
@@ -33,7 +33,8 @@ claimed-at: 2026-10-16T11:02:05Z
 
 ## Definition of Done
 
-- [ ] The digest test passes regardless of the current date, verified by freezing the clock at another date; repeated runs of AstraWaitressIntegrationTests leave no waitress-* threads and tearDown asserts the run thread and workers exited; the full suite passes; no application code changed.
+- [x] The digest test passes regardless of the current date, verified by freezing the clock at another date; repeated runs of AstraWaitressIntegrationTests leave no waitress-* threads and tearDown asserts the run thread and workers exited; the full suite passes; no application code changed.
+  proof: tests/test_daily_digest.py:70 passes with astra.service.datetime frozen at 2027-03-01 and 2025-01-01 (HEAD version fails both); tests/test_web.py AstraWaitressIntegrationTests.stop_server asserts loop+workers exited, 10x class = 50 OK with 0 waitress threads; full suite Ran 963 tests OK (skipped=1); only tests/ changed
 
 ## Options
 
