@@ -23,7 +23,7 @@ related:
 follows: 01M2HQJYWEE65RW16FVKF9HBSJ
 commits: []
 created-at: 2026-10-16T11:01:43Z
-updated-at: 2026-10-16T11:32:38Z
+updated-at: 2026-10-16T11:32:46Z
 updated-by: Claude
 claimed-by: X1CarbonPC-41964
 claimed-at: 2026-10-16T11:02:05Z
@@ -32,6 +32,7 @@ outcome-why: "The digest test failed on every day but 2026-10-15, and the Waitre
 outcome-resolves: "Date-independent digest test verified with a frozen clock at two other dates; no waitress-* threads left after 50 runs; guard fails when dispatcher shutdown is removed; full suite 963 OK (skipped=1); no app code changed."
 review-summary: "Test-only. tests/test_daily_digest.py passes now=2026-10-15T04:00Z to build_daily_digest, so the buckets no longer follow the real clock. tests/test_web.py AstraWaitressIntegrationTests: setUp records only the waitress-* workers create_server started; stop_server closes all sockets on the loop thread (trigger thunk running wasyncore.close_all), joins the run thread, calls task_dispatcher.shutdown(), joins the workers and asserts all exited; setUp stops the server if it fails after creation."
 review-gaps: "none blocking. Uses private server._map (no public map on TcpWSGIServer, Waitress pinned 3.0.2). Open product question for Aly: should public build_daily_digest derive now from digest_date or refuse a mismatch? Today it labels with digest_date but buckets against now; only this test passes digest_date."
+review-verdict: "Independent read-only review (separate subagent) found no defects; its two low findings (generic worker-name match, setUp-failure leak) were fixed before commit 8b2554f. DoD met."
 ---
 
 # Fix stale digest test clock and Waitress test thread leak
