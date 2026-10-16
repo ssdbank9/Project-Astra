@@ -1,0 +1,48 @@
+---
+id: 01M4X50QEM016880V708MJ5Q35
+title: Repair closed-project and stale-actor authorization gaps
+status: human
+ready: true
+creator: Codex
+assignee: Codex
+goal: Prevent closed-project task/template/dependency writes and revoked actor snapshot writes; align reopen authority with dated owner decisions; preserve ordinary submitted edits as Aly selected.
+context: "Claude review at5669903 and disposable service probes reproduce template tasks and dependencies written to closed projects, and stale secondary-owner project closure and submission after revocation. Code also allows Chairman reopen despite the dated Z72D79 active-App-Owner decision. Aly says fix these and explicitly keeps ordinary edits allowed during review. Repair service write guards and affected HTTP/UI behavior without deploying or altering real data or prior acceptance lanes."
+definition-of-done: "Service and HTTP regressions prove role/status changes before writes refuse with no partial data; template/dependency closed checks are under lock; primary/secondary Owners reopen but Chairman does not; ordinary submitted edits remain allowed; guard-removal regressions, focused/full suite and independent diff review pass; browser UI and dated handoff/decision proof; ticket reaches human for Aly acceptance."
+tags:
+  - astra
+blocked-by: []
+related: []
+commits: []
+created-at: 2026-10-14T12:08:27Z
+updated-at: 2026-10-14T13:30:05Z
+updated-by: Codex
+claimed-by: X1CarbonPC-42144
+claimed-at: 2026-10-14T13:29:26Z
+outcome-what: "Locked current authority, open-project template/dependency guards, Owner-only reopen and atomic audited board movement; dated handoff and regressions."
+outcome-why: Confirmed review defects allowed stale or closed-project writes; owner decision retains ordinary submitted edits.
+outcome-resolves: "Focused/full/guard-removal tests, independent review and synthetic Chrome evidence pass; Aly alone accepts."
+question: Please accept MJ5Q35 after reviewing the published repair receipt.
+---
+
+# Repair closed-project and stale-actor authorization gaps
+
+## Definition of Done
+
+- [x] Service and HTTP regressions prove role/status changes before writes refuse with no partial data; template/dependency closed checks are under lock; primary/secondary Owners reopen but Chairman does not; ordinary submitted edits remain allowed; guard-removal regressions, focused/full suite and independent diff review pass; browser UI and dated handoff/decision proof; ticket reaches human for Aly acceptance.
+  proof: tests/test_review_guards.py; full881 OK(skip1); six guard removals; independent PASS; Chrome synthetic reopen; docs/handoff/REVIEW_GUARD_REPAIRS_2026-10-14.md. Human transition and scoped normal publication follow; Aly acceptance remains separate.
+
+## Options
+
+- [ ] brainstorm
+- [ ] planning
+
+## Plan
+
+<Steps, in order — filled in by the pre-process step, or by you.>
+
+- [x] Add failing actual-service and HTTP regressions for closed projects, changed actors and Owner-only reopen while preserving submitted ordinary edits.
+- [x] Implement write-lock actor checks and closed-project guards, reconcile UI and decisions, preserve blocked-attempt auditing.
+- [x] Verify guard removal, roles, browser, focused/full suite and independent review; publish handoff and await Aly acceptance.
+
+## Progress
+- **2026-10-14 13:29 · Codex** — Independent source/delta review PASS. Full881 in830.547s OK(skip1), focused32 in54.087s OK, DB48 in12.729s OK, six guard removals detected. Chrome synthetic Owner/Chairman controls and reasoned reopen recorded. Submitted ordinary edits explicitly remain allowed. Historical schema and board audit/atomicity corrections retained. Package staged publication follows; no acceptance, real data or deployment inferred.

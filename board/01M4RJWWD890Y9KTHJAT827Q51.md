@@ -1,7 +1,7 @@
 ---
 id: 01M4RJWWD890Y9KTHJAT827Q51
 title: Expose linked scheduling in the phone schedule table
-status: human
+status: done
 ready: true
 creator: Codex
 assignee: Codex
@@ -15,20 +15,20 @@ related:
   - 01M4QZYS1YYTM0PNEG1NSXAWHN
 commits: []
 created-at: 2026-10-12T17:34:49Z
-updated-at: 2026-10-12T18:39:49Z
-updated-by: Codex
-question: 827Q51 functional repair is published for owner review; actual 200 percent browser zoom remains unverified. No laptop action requested while Aly is away.
+updated-at: 2026-10-13T06:32:35Z
+updated-by: Aly Jafferani
+question: "Aly accepted 827Q51 and its remaining actual 200 percent browser zoom check passed on 2026-10-13. Definition of done is complete; only Aly may move it out of human. Physical-device, screen-reader and hosted checks remain separate."
 outcome-what: "Added one eligible Move task action per table task/step, shared the linked preview handler and captured filtered table order."
 outcome-why: Small screens and List views omitted controls; the new table entry point exposed a Gantt-only order snapshot.
-outcome-resolves: "Responsive save/cancel/reload, hidden-parent ordering, four focused tests, full 790-test suite and independent review pass. Actual browser zoom is unverified; combined DOD stays unticked."
+outcome-resolves: "Responsive table movement and filtered ordering are verified, including native Chrome 200 percent zoom, keyboard preview/cancel/apply/reload, deadline control and restored zoom. Independent review and full-suite receipts pass. Published functional repair is already accepted by Aly; broader launch gates remain separate."
 ---
 
 # Expose linked scheduling in the phone schedule table
 
 ## Definition of Done
 
-- [ ] Regression fails before fix and passes after; eligible task and subtask table rows expose one accessible Move task action; forbidden/closed project controls hidden; clicks reach the same linked preview; browser checks at 390px, 320px, desktop List and zoom plus cancel/save/reload pass; full suite and independent review pass; scoped handoff and publication recorded.
-  proof: docs/handoff/TABLE_SCHEDULING_2026-10-12.md:7: focused four tests and independent review pass; final Ran 790 tests in 602.540s OK skipped1; responsive/table save/reload passes. Actual 200 percent browser zoom remains unverified, so criterion is not ticked.
+- [x] Regression fails before fix and passes after; eligible task and subtask table rows expose one accessible Move task action; forbidden/closed project controls hidden; clicks reach the same linked preview; browser checks at 390px, 320px, desktop List and zoom plus cancel/save/reload pass; full suite and independent review pass; scoped handoff and publication recorded.
+  proof: TABLE_SCHEDULING_2026-10-12.md; actual Chrome native200 percent on2026-10-13, screenshot827Q51-native-200-preview.png; width1251/DPR1.5 to625/DPR3 and restored; keyboard preview/checkbox/cancel/apply/reload and Timeline table pass; prior focused4/full790 and subsequent797 OK skipped1; independent screenshot/handoff review passes; published implementation2c514cdf.
 
 ## Options
 
@@ -43,8 +43,10 @@ outcome-resolves: "Responsive save/cancel/reload, hidden-parent ordering, four f
   proof: tests/test_timeline_table_actions.py:34; pre-fix two failures; same owner browser zero table controls versus four Gantt controls.
 - [x] Add eligible task/subtask table actions and share the existing accessible movement handler.
   proof: src/astra/static/app.js:306; shared renderer/helper/handler and table order capture; focused four tests OK, independent review passes.
-- [ ] Verify small widths, desktop List, zoom and keyboard preview/save/cancel/reload; run full suite and independent review.
+- [x] Verify small widths, desktop List, zoom and keyboard preview/save/cancel/reload; run full suite and independent review.
+  proof: Original responsive/List checks and actual Chrome200 zoom complete; independent verification; full-suite receipts in handoff.
 
 ## Progress
 - **2026-10-12 18:19 · Codex** — Same-account controls confirmed missing in 390px and desktop List. Actual-function regressions failed before fix, then passed; independent review caught filtered-table order omission, now corrected and regression-proven. Actual Chrome small-width keyboard save/cancel/reload and filtered-parent Above pass. Actual 200 percent zoom is unverified: shortcuts did not alter width/DPR; reduced viewport is separate evidence. Final full suite rerun includes third regression; earlier 789-test run OK skipped1 is not the final receipt.
 - **2026-10-12 18:39 · Codex** — Aly Jafferani accepted 827Q51 in this conversation: Accepted. Acceptance covers the published functional repair at 2c514cdf31a7adf5b0fd14d106c12c29359718a5 with the disclosed limitation. Actual 200 percent browser zoom and physical-device checks remain unverified; combined DOD stays unticked. Agent leaves the human lane unchanged under AGENTS.md. No deployment authorized.
+- **2026-10-13 06:24 · Codex** — Actual Chrome 200 percent zoom verified on 2026-10-13 using native Windows controls, not viewport emulation. Toolbar showed200; DOM changed width1251/DPR1.5 to width625/DPR3, restored100 and original metrics. Keyboard Move task, deadline checkbox, Cancel, linked date Apply/reload and Timeline automatic table with four controls pass on disposable fixture. Build15-17, Open19-21, Inspect22-23 persisted; project finish23 and agreed deadline16, unchanged owners. After dependency preview also passes and cancels. Proof: Temp/827Q51-native-200-preview.png. Physical-device and hosted checks remain unverified; prior Aly acceptance remains recorded.
