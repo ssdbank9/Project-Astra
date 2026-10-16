@@ -34,3 +34,8 @@ tmp_ui_accept/
 Thumbs.db
 .idea/
 .vscode/
+
+# Other tools' personal notes and private owner files (this repository is public)
+.commandcode/
+/Rupani_Academy_USA_Gantt_Chart.xlsx
+/Astra UX_ what monday.com, Trello and Asana teach us.pdf

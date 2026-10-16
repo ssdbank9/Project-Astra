@@ -736,3 +736,33 @@ Canonical target: `C:\Users\Aly Jafferani\.codex\mistakes.md`
 - Cause: Schema migrations added new tables but the corresponding tests did not derive current/future versions from `SCHEMA_VERSION` or remove newer tables from historical fixtures. The first full run also exposed that the Waitress startup test used a bare `object()` even though startup now attaches a scheduler and needs a database path; a direct module test command omitted the repository's test discovery path and failed to import `link_roots`.
 - Correction / prevention: Use the schema constant for current/future-version assertions. When simulating a historical version from a fresh database, remove every table introduced after that version as well as columns introduced later. Add a migration review step that checks migrations and test fixture construction together. Update the Waitress fixture to expose a disposable database path and assert scheduler start/stop; invoke that test through unittest discovery so helper imports resolve. The first Jaira human-lane dry run omitted the required `--question` and was refused without writing; include a concrete App Owner review question when moving work to `human`.
 - Verification / recurrence: Backup tests and the 50 database tests passed after correction. The isolated Waitress startup test passed through discovery. The full suite passed **927 tests in 767.731s, OK (skipped=1)**. The personal canonical mistakes log remains outside this workspace and was not updated here.
+
+## ASTRA-20261016-DC-BOARD-REVIEW - Desktop Commander read-only query errors
+
+- Date / project: 2026-10-16; Project Astra signoff audit via Desktop Commander.
+- Category / status: Read-only command construction errors; corrected, no board writes occurred.
+- Evidence / impact: The first `jaira validate --json` ran from Desktop Commander's default installation directory and returned `no .jaira directory found`; a second PowerShell aggregation used unsupported `Select-Object -Join` syntax and exited with an error. Neither command changed the board or repository.
+- Cause: The remote shell starts outside the Astra checkout, and PowerShell's array join operator is `-join`, not a `Select-Object` parameter.
+- Correction / prevention: Explicitly `Set-Location` to the canonical checkout before Jaira reads. Build joined summaries with `@(... | ForEach-Object handle) -join ','`. Check the remote process result before reporting.
+- Verification / recurrence: Corrected Desktop Commander reads report 92 tickets, 40 signoff, 39/40 completed DoD and 39/40 review verdicts; `jaira validate --json` reports 92 checked, no errors and 44 warnings. The warnings include existing dependency metadata and generated AGENTS/CLAUDE note drift; exact warning tally verified. No ticket state changed.
+
+
+### ASTRA-20261016-03 - Full regression review findings
+
+- Date/project: 2026-10-16; Project Astra, 40-ticket signoff regression review.
+- Category/status: One stale-clock test fixture is confirmed; application defect is not confirmed. A separate Waitress test-shutdown thread exception was observed and remains unverified as reproducible.
+- Evidence/impact: Desktop Commander ran the full suite at HEAD 66a0c0e8c57f35d1a123e3483b5ae508802030b9: 927 tests, 1 failure, exit 1. The failure is tests/test_daily_digest.py::test_digest_groups_dates_reviews_checkpoints_and_next_actions, which supplies digest_date=2026-10-15 but omits now. service.py uses datetime.now(UTC) for classification, and the run date is 2026-10-16, so the Oct 15 item is correctly classified as overdue relative to the actual clock. The production scheduler passes one controlled instant to both classification and digest date. Separately, test_wsgi_login_and_session_keep_security_headers_and_cookie_policy reported ok while its Waitress server thread logged Windows WinError 10038 during shutdown.
+- Cause: The digest test mixes a historical display date with the live classification clock. The Waitress test shuts down a server loop while its socket is being selected; this run alone does not establish a production failure.
+- Correction/prevention: Freeze the test clock or pass a matching timezone-aware now value when building a historical digest; separately rerun the isolated Waitress integration test and assert clean thread shutdown. Do not change application behavior based only on the stale fixture.
+- Verification: The digest test fails alone with the same extra task and the source confirms the clock mismatch. The complete suite still has one failure until the fixture is corrected. No code, ticket lane, database or user record was changed. Hosted/browser/physical-device acceptance remains unverified.
+- Resolution (2026-10-16): fixed in commit 8b2554f (the digest test now passes a matching timezone-aware `now`; the Waitress tests shut down the loop and worker threads). The full suite on the final tree ran 963 tests OK (857.654s, exit 0) and the commits are pushed at 4d0239b. WinError 10038 did not reproduce in 50 repeated runs. Canonical entries ASTRA-20261016-05 and -06 record the follow-up.
+
+
+### ASTRA-20261016-04 - Jaira JSON uses status rather than lane
+
+- Date/project: 2026-10-16; Project Astra signoff audit.
+- Category/status: Incorrect read-only field assumption; corrected before reporting, no board writes.
+- Evidence/impact: A PowerShell aggregate filtered jaira list --json on a nonexistent lane property and temporarily returned signoff=0. Inspection of the ticket JSON property names showed that the current lane is stored in status. The corrected query returned 40 signoff tickets, with JM7CFP the one missing formal DoD and review verdict fields.
+- Cause: Assumed list JSON used the same lane property as the per-ticket show output.
+- Correction/prevention: Inspect JSON property names before aggregating; use status for list JSON, then cross-check a sample ticket with jaira show. No status or ticket content was changed by either query.
+- Verification: Corrected aggregate returned 40 signoff; JM7CFP status=signoff, dod_complete=false, review verdict blank. Other 39 have completed DoD and review verdicts.
