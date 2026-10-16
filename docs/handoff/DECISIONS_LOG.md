@@ -124,6 +124,7 @@ Sources:
 | Decision | Source | Rule |
 | --- | --- | --- |
 | JM7CFP accepted: project-bound Excel workplans and task-row timeline scheduling | Aly's direct message in the continuation chat: "Approved JM7CFP" | Record owner acceptance and publish the scoped working-branch change. Retain browser/desktop Excel checks as unverified. The ticket may enter signoff; AGENTS.md reserves leaving that lane for a human. Deployment and live-data operations keep their separate approval gates. |
+| Keep the reviewer_added/reviewer_removed audit events that X07XV4 added on 2026-09-25, although the 2026-09-22 decision said no record or notice for reviewer, approver and collaborator changes (line 91) | Aly's answer in the 2026-10-16 review-fix chat ("Keep them") | The events stay in the task history; no notice is sent. Line 91 still holds for approver and collaborator changes. JM7CFP's blank review block stays blank (Aly, same chat); push of the local commits waits for Aly's word. |
 
 ### Standing preferences (memory note `astra-aly-preferences`)
 

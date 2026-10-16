@@ -19,10 +19,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T04:52:13Z
-updated-at: 2026-09-20T03:10:14Z
+updated-at: 2026-10-16T11:06:51Z
 claimed-by: X1CarbonPC-13392
 claimed-at: 2026-09-15T05:04:15Z
-updated-by: Aly Jafferani
+updated-by: Claude
 outcome-what: "Durable in-app owner notifications: notifications table (idempotent per event), owner notified of others' task changes, header bell + inbox dialog with mark-read / mark-all-read; 3 new tests (58 total)."
 outcome-why: "Section 7/11: durable event notifications were Missing; task_events were audit-only with no owner inbox."
 question: "Accept, or send back? Confirm the scope call: owner is NOT self-notified of their own actions (keeps the pilot inbox meaningful), and this is in-app only with outbound email deferred to the section 15 decisions."
@@ -61,3 +61,4 @@ review-check: "Read db.py (v4 migration), service.py _event/_notify_owner/list_n
 - **2026-09-15 18:32 · Aly Jafferani** — OWNER ACCEPTED (2026-09-15): no self-notify of owner's own actions; in-app only (outbound email deferred to section 15). Proceeding to model review.
 - **2026-09-19 06:14 · Aly Jafferani** — HANDOFF 2026-09-19 (Claude->Codex): see astra_project_tracker/CODEX_HANDOFF_2026-09-19.md. PARKED in signoff - waiting on the App Owner. Verdict: pass-with-notes. Owner question: confirm owner is NOT self-notified of own actions; in-app only, outbound email deferred to section 15. (Idempotency guard is defensive-only, not a bug.)
 - **2026-09-20 03:10 · Aly Jafferani** — Owner decision 2026-09-20: do not self-notify the Owner for the Owner's own successful actions; preserve them in audit. Notify the Owner of every blocked or unauthorized attempt by another user. Initial delivery remains in-app only.
+- **2026-10-16 11:06 · Claude** — Review 2026-10-16 (Claude): the review text says a single global owner; the code now notifies every active owner except the actor (GTEYTG), with self-notice kinds (KBWY86). Missing before this date: a replay test for idempotency and a newest-first ordering test; both are being added in tests/test_signoff_gaps.py.

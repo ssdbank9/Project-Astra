@@ -30,11 +30,18 @@ Part of groups steps; Plan separates alternatives and Shared work.
 
 Move task is the draggable task-row control. A date drop previews scheduling
 with the existing duration, or asks for a finish date for an undated task.
-Above/Below reorders siblings without changing dates or dependencies.
-After this task explicitly adds a dependency. Run concurrently removes the
-direct predecessor link to the target, if present, and refuses any remaining
-dependency chain. Relationship/date changes apply atomically. Keyboard/touch
-use the same review dialog and service actions.
+Since SXAWHN (2026-10-12) every Move task action opens one linked-schedule
+review, served by `/api/tasks/{id}/timeline-schedule-preview` and
+`/timeline-schedule`; see
+[AUTOMATIC_TIMELINE_SCHEDULING_2026-10-12.md](AUTOMATIC_TIMELINE_SCHEDULING_2026-10-12.md).
+Above adds moved task -> target, Below/After adds target -> moved task (each
+removes a direct reverse link) and affected successors move with the new link;
+Above/Below also update sibling display order. Run concurrently removes the
+direct link in either direction and aligns the moved task's start with the
+target, and any remaining dependency chain is refused. Relationship and date
+changes apply atomically. Keyboard and touch use the same review dialog and
+service actions. The earlier `/timeline-drop` API remains only for old callers;
+the UI no longer calls it.
 
 Existing project-management authority, closed-project checks, task leases,
 revision checks, protected date rules and impact confirmation remain enforced

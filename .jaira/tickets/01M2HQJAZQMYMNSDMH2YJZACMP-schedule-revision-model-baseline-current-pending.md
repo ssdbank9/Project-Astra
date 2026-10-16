@@ -17,10 +17,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:22Z
-updated-at: 2026-09-20T03:10:23Z
+updated-at: 2026-10-16T11:07:01Z
 claimed-by: X1CarbonPC-37068
 claimed-at: 2026-09-15T07:51:20Z
-updated-by: Aly Jafferani
+updated-by: Claude
 outcome-what: "Baseline/current/pending schedule model: immutable baseline captured on first schedule; propose/approve/reject schedule proposals with reason + audit (schedule_revised); dependents shown-not-moved (impacted_successors); Schedule section in task detail; 4 new tests (66 total)."
 outcome-why: "Section 6/11 required preserving original baseline, current plan, and pending proposals separately with change history; none existed."
 question: "Accept, or send back? Two calls: (1) direct date edits via the normal edit form still change 'current' immediately (with a reason) — the propose/approve flow is the governed alternative, not the only path. OK, or should ALL date changes be forced through propose/approve? (2) baseline is captured once and never editable — intended?"
@@ -59,3 +59,4 @@ review-check: "Read _ensure_baseline, _impacted_successors, propose/approve/reje
 - **2026-09-15 18:32 · Aly Jafferani** — OWNER ACCEPTED (2026-09-15): direct date edits still change current immediately (with reason); propose/approve is the governed alternative; baseline captured once and immutable. Proceeding to model review.
 - **2026-09-19 06:14 · Aly Jafferani** — HANDOFF 2026-09-19 (Claude->Codex): see astra_project_tracker/CODEX_HANDOFF_2026-09-19.md. PARKED in signoff - waiting on the App Owner. Verdict: pass. Owner question: OK that direct date edits still change current immediately (propose/approve is the governed alternative)? Baseline captured once, never editable - intended?
 - **2026-09-20 03:10 · Aly Jafferani** — Owner confirmation recorded 2026-09-20: ordinary authorized date edits may update current dates immediately with reason and audit; protected-impact changes require Owner approval. Baseline is captured once and never silently edited.
+- **2026-10-16 11:07 · Claude** — Review 2026-10-16 (Claude): approve/reject of a schedule proposal is now owner-only and a manager call becomes an owner request (test_manager_schedule_decision_is_an_owner_request); the original review wording about manager approval is stale. The schedule_revised event contents (old, new, actor, reason) are being asserted in tests/test_signoff_gaps.py.

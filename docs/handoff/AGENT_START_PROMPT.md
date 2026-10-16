@@ -26,7 +26,7 @@ person who makes decisions. Work only from GitHub, never from an old local copy.
 - Head: the head you pull. The pack was written at `0b90ceb`; the commits
   made since are listed in `HANDOFF_2026-09-26.md` section 1, "Since the pack
   was written". Tell me the head you pulled in the preflight.
-- Schema v20; the full suite is `Ran 680 tests`, `OK` (676 at `0b90ceb`)
+- Schema v22; the full suite is `Ran 963 tests`, `OK` (verified 2026-10-16 after commit `8b2554f`; it was 680 at the original pack and grows with every ticket)
 - My Windows checkout: `C:\Users\Aly Jafferani\Documents\ChatGPT\Project-Astra`.
   Never use `...\ChatGPT\New project`; it is an old, unrelated repository.
 
@@ -109,11 +109,12 @@ node --check src\astra\static\app.js
 jaira validate --json
 ```
 
-Expect `Ran 680 tests` and `OK` (about 6 to 11 minutes). Node must be
+Expect `Ran 963 tests` and `OK` (about 14 to 20 minutes on Aly's laptop on 2026-10-16; the count only grows). Node must be
 installed, or the UI driver tests are skipped. Then list the board by lane
 with `jaira next --per-lane --json`, or from the ticket files' `status:`
-lines. Expect 34 in signoff, 4 in human, 1 in todo, 15 in backlog and 15 in
-done, unless I have accepted or sent back tickets since.
+lines. Live snapshot on 2026-10-16: 93 tickets, 41 in signoff, 14 in human,
+11 in backlog, 26 in done and 1 in progress, unless I have accepted or sent
+back tickets since.
 
 ## 4. Your first task
 

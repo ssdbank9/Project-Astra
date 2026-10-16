@@ -30,7 +30,7 @@ related:
   - 01M3ADCB413BRFJTKCEXZ72D79
 commits: []
 created-at: 2026-09-24T19:12:08Z
-updated-at: 2026-09-24T19:37:38Z
+updated-at: 2026-10-16T11:49:34Z
 updated-by: Claude
 claimed-by: vm-593
 claimed-at: 2026-09-24T19:12:09Z
@@ -71,3 +71,4 @@ review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; 
 ## Progress
 - **2026-09-24 19:18 · Claude** — Choices (Claude, 2026-09-24): notices use the event kind (project_closed / project_schedule_changed) with task_id NULL; the inbox renders the summary as-is, so app.js needs no change. Summaries: 'project closed[ with N open task(s)]: <project>[ (approving a close request)] · by <actor>' and 'project dates changed: <project> · start A → B, target C → D · by <actor>' (only changed fields; 'none' for a cleared date). Project dates are set only by set_project_schedule: import sets dates only when it creates a project (and never changes an existing project's dates), template apply likewise creates, so neither is a 'change'. No new audit rows, no schema change, no close guard (Aly: secondary owners keep the primary's right to close).
 - **2026-09-24 19:37 · Claude** — Review 7 recorded (approve-with-follow-ups, no defects). Gaps 1-3 pinned by a test in 106aea5 (not re-reviewed); gaps 4-7 are info.
+- **2026-10-16 11:49 · Claude** — Aly decided 2026-10-16 (review-fix chat): the reviewer_added/removed audit events from X07XV4 stay; this ticket's no-record decision for reviewer changes is superseded for that one event kind. Recorded in docs/handoff/DECISIONS_LOG.md.
