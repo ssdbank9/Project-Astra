@@ -1,7 +1,7 @@
 ---
 id: 01M525ZZ0TS0FKF92F9BJ5NY8E
 title: Fix stale digest test clock and Waitress test thread leak
-status: todo
+status: in-progress
 ready: true
 creator: Claude
 assignee: Claude
@@ -23,7 +23,7 @@ related:
 follows: 01M2HQJYWEE65RW16FVKF9HBSJ
 commits: []
 created-at: 2026-10-16T11:01:43Z
-updated-at: 2026-10-16T11:02:27Z
+updated-at: 2026-10-16T11:02:42Z
 updated-by: Claude
 claimed-by: X1CarbonPC-41964
 claimed-at: 2026-10-16T11:02:05Z
