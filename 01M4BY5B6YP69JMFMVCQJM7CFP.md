@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T19:41:33Z
-updated-at: 2026-10-16T11:05:38Z
+updated-at: 2026-10-16T11:05:47Z
 updated-by: Claude
 claimed-by: X1CarbonPC-32528
 claimed-at: 2026-10-07T19:44:46Z
@@ -33,7 +33,8 @@ outcome-resolves: Owner acceptance recorded. Full suite 765 OK skipped1; focused
 
 ## Definition of Done
 
-- [ ] Readable XLSX with managed IDs and owner/task dropdowns; project/entity identity verified on preview and commit; explicit concurrent/after relationships resolve unambiguously and conflicts reported; task-row date and relationship drops preserve duration and use server authorization/revision/cycle checks; critical path recalculates and vertical ordering persists; service HTTP and UI checks plus independent review recorded; full suite before push with LF hygiene and owner signoff only.
+- [x] Readable XLSX with managed IDs and owner/task dropdowns; project/entity identity verified on preview and commit; explicit concurrent/after relationships resolve unambiguously and conflicts reported; task-row date and relationship drops preserve duration and use server authorization/revision/cycle checks; critical path recalculates and vertical ordering persists; service HTTP and UI checks plus independent review recorded; full suite before push with LF hygiene and owner signoff only.
+  proof: Re-checked 2026-10-16 at 66a0c0e: OwnerExcelTests (managed IDs, hidden project/entity marker, named relationships, ambiguity and concurrent checks), test_project_entity_binding_rechecked_on_commit, TimelineTaskDropTests/TimelineTaskHttpTests (authorization, revision, lease, cycle, rollback; 6 roles + CSRF), critical-path and order-persistence tests all pass. Owner and task dropdowns: source only (workplan_excel.py:63-67) plus native Excel check 2026-10-11 (docs/handoff). Browser dragging is not proven for the original timeline-drop path, which SXAWHN superseded (UI now uses timeline-schedule). Owner approval: DECISIONS_LOG.md:126.
 
 ## Options
 
