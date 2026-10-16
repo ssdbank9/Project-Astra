@@ -67,7 +67,10 @@ class DailyDigestServiceTests(unittest.TestCase):
         held = self.task(project, "Checkpoint task", "2026-10-31", status="in_progress")
         self.service.set_on_hold(self.owner, held["id"], "Waiting for approval", "2026-10-18", self.owner["id"])
 
-        digest = self.service.build_daily_digest(self.owner, digest_date="2026-10-15")
+        digest = self.service.build_daily_digest(
+            self.owner, digest_date="2026-10-15",
+            now=datetime(2026, 10, 15, 4, 0, tzinfo=timezone.utc),  # 09:00 in Asia/Karachi
+        )
         self.assertEqual(digest["date"], "2026-10-15")
         self.assertEqual({item["id"] for item in digest["sections"]["overdue"]}, {overdue["id"]})
         self.assertEqual({item["id"] for item in digest["sections"]["today"]}, {today["id"]})

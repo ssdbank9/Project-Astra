@@ -172,6 +172,7 @@ class AstraWaitressIntegrationTests(AstraWsgiApplicationTests):
         super().setUp()
         from waitress import create_server
 
+        before = set(threading.enumerate())
         self.server = create_server(
             self.app,
             host="127.0.0.1",
@@ -182,15 +183,42 @@ class AstraWaitressIntegrationTests(AstraWsgiApplicationTests):
             max_request_body_size=6_000_000,
             expose_tracebacks=False,
         )
+        # Only this server's task workers, not ones another test may have left.
+        self.workers = [
+            t for t in set(threading.enumerate()) - before if t.name.startswith("waitress-")
+        ]
         self.thread = threading.Thread(target=self.server.run, daemon=True)
-        self.thread.start()
-        self.assertEqual(self.server.effective_host, "127.0.0.1")
+        try:
+            self.thread.start()
+            self.assertEqual(self.server.effective_host, "127.0.0.1")
+        except BaseException:
+            # unittest skips tearDown when setUp fails.
+            self.stop_server()
+            super().tearDown()
+            raise
+
+    def stop_server(self):
+        from waitress import wasyncore
+
+        server = self.server
+        if self.thread.is_alive():
+            # Close every socket from inside the loop thread, so select() never
+            # sees a closed socket; the emptied map then ends server.run().
+            server.trigger.pull_trigger(lambda: wasyncore.close_all(server._map))
+            self.thread.join(timeout=5)
+        else:
+            server.close()
+        server.task_dispatcher.shutdown()
+        for worker in self.workers:
+            worker.join(timeout=5)
+        self.assertFalse(self.thread.is_alive(), "Waitress loop thread did not exit")
+        self.assertEqual([t.name for t in self.workers if t.is_alive()], [])
 
     def tearDown(self):
-        if getattr(self, "server", None) is not None:
-            self.server.close()
-            self.thread.join(timeout=5)
-        super().tearDown()
+        try:
+            self.stop_server()
+        finally:
+            super().tearDown()
 
     def request(self, method, path, body=None, *, headers=None, remote_addr="127.0.0.1"):
         body_bytes = body if isinstance(body, bytes) else (
