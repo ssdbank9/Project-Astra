@@ -32,7 +32,7 @@ related:
   - 01M3CEHBP9XNTK0SG1Q8XV92JJ
 commits: []
 created-at: 2026-09-26T01:45:51Z
-updated-at: 2026-09-26T05:38:15Z
+updated-at: 2026-10-16T12:57:03Z
 updated-by: Claude
 claimed-by: vm-1352
 claimed-at: 2026-09-26T01:45:58Z
@@ -75,3 +75,4 @@ review-check: "1. Repo root: .venv/bin/python tests/run.py (Windows: .venv\\Scri
 - **2026-09-26 04:20 · Claude** — Review 13a fixes (approve with follow-ups; 0 High, 1 Medium, 2 Low). M1: a collaborator may submit, so add_task_reviewer and the importer's Collaborators column refuse the Chairman as a collaborator and a viewer as a collaborator on a top-level task (E_COLLABORATOR_CHAIRMAN / E_COLLABORATOR_VIEWER); reviewer and approver stay open (call 3). Older collaborator rows stay: _may_submit ignores them, list_task_reviewers marks them not_allowed, and the task carries needs_new_collaborator (chip 'Collaborator not allowed', same Home tile renamed 'Needs reassigning', risk=reassign). Templates carry no collaborators and bulk has no collaborator action, so nothing to change there. A viewer collaborator also blocks set_parent(None), for the same reason as a viewer assignee. L1: the panel hides the parent, criticality, proposal, dependency, reviewer and Edit forms and the template link when can_edit_ordinary is false, and Submit when permissions.can_submit is false (new). bulkScope admits an assign-only user on the List tab only. L1b (older bug): _validate_task_update treats '' dates as None before the change check, and the panel sends null for empty dates. L2: tests for an explicit unassign and the Chairman collaborator submit.
 - **2026-09-26 04:22 · Claude** — Follow-up (coordinator, from Aly's rule that the Chairman never receives work): _may_submit returns False for a chairman-role user before any other check, so a legacy Chairman assignee cannot submit; the task stays flagged needs_new_assignee and permissions.can_submit hides Submit. Test: test_assignment ExistingAssignmentsTests.test_the_chairman_never_submits_even_as_a_legacy_assignee.
 - **2026-09-26 05:37 · Claude** — Review 13b fixes: buildSchedule(task,closed,{canPropose:!ro}) - the proposal form needs edit rights, while a pending proposal's Approve/Request controls follow can_decide_protected or can_request_protected only (so a designated approver keeps 'Request Owner approval'; the Chairman and viewers still see 'Owner decision required'). Driver cases added: an approver panel, and a collaborator-only flagged task in the Home tile and matchesRisk.
+- **2026-10-16 12:57 · Claude** — 2026-10-16: new tests assert the Chairman's bulk Assign over HTTP and that can_manage_project stays False for the Chairman (tests/test_signoff_gaps_http.py and tests/test_signoff_gaps.py). Plan is empty (0/0); not changed.

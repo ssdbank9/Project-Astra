@@ -132,3 +132,60 @@ class FrontendCancelCoverageTests(unittest.TestCase):
             self.assertTrue(cancels, form_id + ' has no Cancel button')
             for tag in cancels:
                 self.assertIn('formnovalidate', tag, form_id)
+
+
+class FrontendTouchTargetTests(unittest.TestCase):
+    """A bulk-select box has an aria-label but no <label> around it, so the touch block's 44px
+    label target never reached it. A real 375px browser measured 18x18; WCAG 2.5.8 needs 24x24."""
+
+    @staticmethod
+    def rules(css):
+        """Return [(selector list, {property: value})] for the flat rules of a stylesheet fragment."""
+        css = re.sub(r'/\*.*?\*/', '', css, flags=re.S)
+        out = []
+        for selector, body in re.findall(r'([^{}]+)\{([^{}]*)\}', css):
+            props = dict((k.strip(), v.strip()) for k, v in
+                         (decl.split(':', 1) for decl in body.split(';') if ':' in decl))
+            out.append((' '.join(selector.split()), props))
+        return out
+
+    @classmethod
+    def touch_rules(cls):
+        css = (STATIC / 'style.css').read_text(encoding='utf-8')
+        start = css.index('@media (max-width: 1023px) {\n  .avatar, .panel-close')
+        depth, i = 0, css.index('{', start)
+        for j in range(i, len(css)):
+            depth += (css[j] == '{') - (css[j] == '}')
+            if depth == 0:
+                return cls.rules(css[i + 1:j])
+        raise AssertionError('touch media block is not closed')
+
+    @staticmethod
+    def specificity(selector):
+        ids = len(re.findall(r'#[\w-]+', selector))
+        classes = len(re.findall(r'\.[\w-]+|\[[^\]]*\]', selector))
+        elements = len(re.findall(r'(?:^|[\s>+~])[a-zA-Z][\w-]*', selector))
+        return (ids, classes, elements)
+
+    def rule_for(self, wanted):
+        for selector_list, props in self.touch_rules():
+            if wanted in [s.strip() for s in selector_list.split(',')]:
+                return props
+        self.fail('no touch rule for ' + wanted)
+
+    def test_every_bulk_select_box_is_24px_at_touch_widths(self):
+        for wanted in ('.sched-table .pick input.bulk-pick', '.board-card .bulk-pick'):
+            with self.subTest(selector=wanted):
+                props = self.rule_for(wanted)
+                self.assertEqual((props.get('width'), props.get('height')), ('24px', '24px'))
+
+    def test_the_list_and_timeline_box_rule_outweighs_the_18px_table_rule(self):
+        css = (STATIC / 'style.css').read_text(encoding='utf-8')
+        base = dict(self.rules(css))
+        self.assertEqual(base['.sched-table .pick input'].get('width'), '18px')  # the rule to outweigh
+        self.assertGreater(self.specificity('.sched-table .pick input.bulk-pick'),
+                           self.specificity('.sched-table .pick input'))
+
+    def test_the_card_title_leaves_room_for_the_larger_box(self):
+        props = self.rule_for('.board-card:has(.bulk-pick) .card-title')
+        self.assertEqual(props.get('padding-right'), '36px')  # 10px right + 24px box + 2px gap

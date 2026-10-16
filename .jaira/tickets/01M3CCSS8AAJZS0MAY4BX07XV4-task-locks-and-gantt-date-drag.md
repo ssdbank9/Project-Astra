@@ -28,7 +28,7 @@ related:
   - 01M3C0MZ2TASFSNYRN1E3C1Z74
 commits: []
 created-at: 2026-09-25T13:41:41Z
-updated-at: 2026-10-16T11:49:28Z
+updated-at: 2026-10-16T12:56:51Z
 updated-by: Claude
 claimed-by: vm-32647
 claimed-at: 2026-09-25T13:41:59Z
@@ -83,3 +83,4 @@ review-check: "1. Repo root: .venv/bin/python tests/run.py (Windows: .venv\\Scri
 - **2026-09-25 15:40 · Claude** — Review 12b fix set (not yet committed): the gaps noted earlier are closed. Reviewer add and remove now write reviewer_added and reviewer_removed events, which are lock-guarded and shown only to managers. add_task_dependency and remove_task_dependency check the predecessor's lease. reorder_board checks every id. A renew needs a live lease. Gantt Undo relies on move_kind='gantt'. The date-impact confirm now runs in update_task on every path. DoD item 1 has been reworded to match.
 - **2026-09-25 17:27 · Claude** — Re-review 12d L1: reopen_task (revised due date) and approve_schedule_proposal now run _date_impact_gate inside their transaction, with confirmed (also on /reopen, /schedule-proposals/<id>/approve, the board's reopen drop and the owner-request decision). The Gantt passes its own impact reading down to update_task (known_impact), so a drag loads the project once. The 15:40 note's 'not yet committed' work landed in 34eeca1.
 - **2026-10-16 11:49 · Claude** — Aly decided 2026-10-16 (review-fix chat): keep the reviewer_added/reviewer_removed audit events; recorded in docs/handoff/DECISIONS_LOG.md. This settles the conflict with the 2026-09-22 no-reviewer-audit note.
+- **2026-10-16 12:56 · Claude** — Proof line numbers refreshed 2026-10-16 at HEAD d381d66: acquire_task_lock service.py:3298, force_unlock_task :3345, _schedule_impact :3367, reschedule_task :3619; app.js takeLease :1017, wireEditLease :1061. Correction: the outcome says invalid Gantt dates are audited as gantt_move_blocked; only permission refusals are audited, validation errors are not. New HTTP test asserts the 409 carries holder_name and expires_at.

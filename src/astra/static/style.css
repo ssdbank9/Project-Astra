@@ -862,6 +862,10 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   :is(input, select, textarea, #search-box) { font-size: 16px; }
   label:has(> input[type="checkbox"]) { min-height: 44px; align-items: center; }
   input[type="checkbox"] { flex: none; width: 22px; height: 22px; }  /* the 44px target is its label */
+  /* A bulk-select box has an aria-label but no <label> around it, so it gets no 44px label target: give the box
+     itself the 24px WCAG 2.5.8 minimum (it was 18px) and room beside the card title for the larger box. */
+  .sched-table .pick input.bulk-pick, .board-card .bulk-pick { width: 24px; height: 24px; }
+  .board-card:has(.bulk-pick) .card-title { padding-right: 36px; }
   .skip-link:focus { display: inline-flex; min-height: 44px; align-items: center; }
   #detail-body { padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
   #detail-full { display: none; }  /* the panel already fills the screen here */
