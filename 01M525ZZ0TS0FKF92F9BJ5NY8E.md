@@ -23,7 +23,8 @@ related:
 follows: 01M2HQJYWEE65RW16FVKF9HBSJ
 commits: []
 created-at: 2026-10-16T11:01:43Z
-updated-at: 2026-10-16T11:01:43Z
+updated-at: 2026-10-16T11:01:58Z
+updated-by: Claude
 ---
 
 # Fix stale digest test clock and Waitress test thread leak
