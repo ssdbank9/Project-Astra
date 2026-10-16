@@ -1,7 +1,7 @@
 ---
 id: 01M525ZZ0TS0FKF92F9BJ5NY8E
 title: Fix stale digest test clock and Waitress test thread leak
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -23,13 +23,18 @@ related:
 follows: 01M2HQJYWEE65RW16FVKF9HBSJ
 commits: []
 created-at: 2026-10-16T11:01:43Z
-updated-at: 2026-10-16T11:31:53Z
+updated-at: 2026-10-16T11:33:08Z
 updated-by: Claude
 claimed-by: X1CarbonPC-41964
 claimed-at: 2026-10-16T11:02:05Z
 outcome-what: "Digest test passes a fixed timezone-aware now (2026-10-15 09:00 Karachi). Waitress tests stop the asyncore loop from its own thread via a trigger thunk, shut down the task dispatcher, join this server's workers and assert they exited; setUp cleans up if it fails after create_server."
 outcome-why: "The digest test failed on every day but 2026-10-15, and the Waitress tests leaked 4 worker threads per test and could close a socket under select() (WinError 10038)."
 outcome-resolves: "Date-independent digest test verified with a frozen clock at two other dates; no waitress-* threads left after 50 runs; guard fails when dispatcher shutdown is removed; full suite 963 OK (skipped=1); no app code changed."
+review-summary: "Test-only. tests/test_daily_digest.py passes now=2026-10-15T04:00Z to build_daily_digest, so the buckets no longer follow the real clock. tests/test_web.py AstraWaitressIntegrationTests: setUp records only the waitress-* workers create_server started; stop_server closes all sockets on the loop thread (trigger thunk running wasyncore.close_all), joins the run thread, calls task_dispatcher.shutdown(), joins the workers and asserts all exited; setUp stops the server if it fails after creation."
+review-gaps: "none blocking. Uses private server._map (no public map on TcpWSGIServer, Waitress pinned 3.0.2). Open product question for Aly: should public build_daily_digest derive now from digest_date or refuse a mismatch? Today it labels with digest_date but buckets against now; only this test passes digest_date."
+review-verdict: "Independent read-only review (separate subagent) found no defects; its two low findings (generic worker-name match, setUp-failure leak) were fixed before commit 8b2554f. DoD met."
+review-check: "1. In the repo run: .venv\\Scripts\\python.exe tests\\run.py — expect Ran 963 tests, OK (skipped=1) (count includes other uncommitted test files on disk).  2. Run only the digest test on any date: set PYTHONPATH=src;tests then .venv\\Scripts\\python.exe -m unittest test_daily_digest — all pass even though today is not 2026-10-15.  3. Run test_web.AstraWaitressIntegrationTests several times — each tearDown asserts the Waitress loop thread and its 4 waitress-N workers exited, so a leak shows as a failure."
+question: "Please accept the test-only fix, and decide whether build_daily_digest should derive now from digest_date (or refuse a mismatch) — no app change was made."
 ---
 
 # Fix stale digest test clock and Waitress test thread leak
