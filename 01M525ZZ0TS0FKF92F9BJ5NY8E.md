@@ -23,7 +23,7 @@ related:
 follows: 01M2HQJYWEE65RW16FVKF9HBSJ
 commits: []
 created-at: 2026-10-16T11:01:43Z
-updated-at: 2026-10-16T11:06:16Z
+updated-at: 2026-10-16T11:11:31Z
 updated-by: Claude
 claimed-by: X1CarbonPC-41964
 claimed-at: 2026-10-16T11:02:05Z
@@ -46,3 +46,4 @@ claimed-at: 2026-10-16T11:02:05Z
 
 ## Progress
 - **2026-10-16 11:06 · Claude** — Waitress shutdown: server.run() is wasyncore.loop over server._map and exits when the map is empty. tearDown now runs wasyncore.close_all(server._map) as a trigger thunk on the loop thread, so no socket is closed under select() (the WinError 10038 theory), then task_dispatcher.shutdown() and joins waitress-* workers. Probe: 10x the class = 50 tests OK, 0 waitress threads left, 1 thread total. Old tearDown never called task_dispatcher.shutdown, so workers stayed blocked on queue_cv forever.
+- **2026-10-16 11:11 · Claude** — Applied independent review (general-purpose subagent, no edits): workers are now snapshotted in setUp as only the threads create_server started; setUp failure after create_server now stops the server and runs base tearDown, since unittest skips tearDown then. Proof: digest test passes with astra.service.datetime frozen at 2027-03-01 and 2025-01-01; HEAD version fails at both. Waitress: 10x class = 50 OK, 0 waitress threads, 1 thread total; with ThreadedTaskDispatcher.shutdown stubbed out, all 5 tests fail on the leftover-worker assertion. Not done: Aly's call on whether build_daily_digest should derive now from digest_date.
