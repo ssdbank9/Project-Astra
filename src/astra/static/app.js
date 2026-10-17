@@ -158,7 +158,146 @@ function projectSchedule(p,selected=""){
   const all=Object.values(forecasts),starts=all.map(f=>f.start_date).filter(Boolean).sort(),finishes=all.map(f=>f.finish_date).filter(Boolean).sort();
   return {start_date:starts[0]||null,finish_date:finishes.at(-1)||null,undated_count:all.some(f=>f.undated_count)?1:0};
 }
-function renderGantt(tasks){
+// Zoom, as Asana and monday offer it: a fixed pixels-per-day scale, so a long plan scrolls sideways
+// under a two-tier header (month over week, or quarter over month) instead of being squeezed into
+// the window. Fit keeps the whole plan in view; the others keep every label readable.
+const GANTT_ZOOMS=["fit","week","month","quarter"],ZOOM_PPD={week:22,month:6,quarter:2};
+function ganttCssPx(name){try{return parseInt(getComputedStyle(document.querySelector("#gantt")).getPropertyValue(name))||470}catch(e){return 470}}
+function ganttSidePx(){return ganttCssPx("--side-total")}   // the width of the name and meta columns together: where the timeline starts
+function ganttPinPx(){return ganttCssPx("--pin-total")}     // the part of it that stays pinned while the chart scrolls
+function ganttZoomChoice(){const z=storage.get("astra.gantt.zoom","auto");return GANTT_ZOOMS.includes(z)?z:"auto"}
+function ganttScale(days,avail){
+  days=Math.max(1,days);avail=Math.max(1,avail);
+  const fit=avail/days,choice=ganttZoomChoice();
+  const zoom=choice==="auto"?(fit>=4?"fit":"month"):choice;
+  const px=zoom==="fit"?avail:Math.max(avail,Math.round(ZOOM_PPD[zoom]*days));
+  return {zoom,choice,px,ppd:px/days,avail,scroll:px>avail+1};
+}
+const MONTH_SHORT=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],DOW_LETTER="SMTWTFS";
+function ganttAxis(lo,hi,span,sc){
+  if(!Number.isFinite(lo)||!Number.isFinite(hi)||!(hi>lo))return "";   // a bad date must not turn the month loops into an endless one
+  const D=86400000,ppd=sc.ppd,out=[],pct=d=>(d-lo)/span*100;
+  const tick=(tier,from,to,label,cls="")=>{const x=pct(from),w=pct(to)-x;if(w<=0)return;out.push(`<span class="axis-tick tier-${tier}${cls?" "+cls:""}" data-x="${x}" data-w="${w}">${label}</span>`)};
+  const first=new Date(lo);
+  if(ppd>=2.5){   // top tier: months
+    for(let y=first.getUTCFullYear(),m=first.getUTCMonth();;m++){
+      const ms=Date.UTC(y,m,1),me=Date.UTC(y,m+1,1);if(ms>hi)break;
+      const from=Math.max(ms,lo),to=Math.min(me,hi),px=(to-from)/D*ppd,d=new Date(ms);
+      const name=MONTH_SHORT[d.getUTCMonth()],label=px>=64?`<b>${name}</b> ${d.getUTCFullYear()}`:(px>=22?`<b>${name}</b>`:"");
+      tick(1,from,to,label);
+    }
+  }else{          // zoomed far out: quarters on top
+    for(let y=first.getUTCFullYear(),q=Math.floor(first.getUTCMonth()/3);;q++){
+      const qs=Date.UTC(y,q*3,1),qe=Date.UTC(y,q*3+3,1);if(qs>hi)break;
+      const from=Math.max(qs,lo),to=Math.min(qe,hi),px=(to-from)/D*ppd,d=new Date(qs);
+      const n=Math.floor(d.getUTCMonth()/3)+1,label=px>=70?`<b>Q${n}</b> ${d.getUTCFullYear()}`:(px>=22?`<b>Q${n}</b>`:"");
+      tick(1,from,to,label);
+    }
+  }
+  if(ppd>=16){    // bottom tier: every day
+    for(let t=Math.floor(lo/D)*D;t<=hi;t+=D){const d=new Date(t),dow=d.getUTCDay();tick(2,Math.max(t,lo),Math.min(t+D,hi),`<b>${d.getUTCDate()}</b>${ppd>=20?`<i>${DOW_LETTER[dow]}</i>`:""}`,dow===0||dow===6?"weekend":"")}
+  }else if(ppd>=3){   // every Monday
+    let t=Math.floor(lo/D)*D;while(new Date(t).getUTCDay()!==1)t+=D;
+    for(;t<=hi;t+=7*D){const to=Math.min(t+7*D,hi);tick(2,Math.max(t,lo),to,(to-Math.max(t,lo))/D*ppd>=14?`<b>${new Date(t).getUTCDate()}</b>`:"")}
+  }else if(ppd>=0.8){ // month initials under the quarters
+    for(let y=first.getUTCFullYear(),m=first.getUTCMonth();;m++){
+      const ms=Date.UTC(y,m,1),me=Date.UTC(y,m+1,1);if(ms>hi)break;
+      const from=Math.max(ms,lo),to=Math.min(me,hi);tick(2,from,to,(to-from)/D*ppd>=24?MONTH_SHORT[new Date(ms).getUTCMonth()]:"");
+    }
+  }
+  return out.join("");
+}
+// Week gridlines line up with the Monday ticks; below 3 px a day they would only be noise.
+function applyGanttScale(el,sc,lo,todayPct){
+  const D=86400000;
+  if(sc.scroll)el.style.setProperty("--tl-w",`${sc.px}px`);else el.style.removeProperty("--tl-w");
+  const grid=sc.ppd>=3;el.classList.toggle("no-grid",!grid);
+  if(grid){let t=Math.floor(lo/D)*D;while(new Date(t).getUTCDay()!==1)t+=D;
+    el.style.setProperty("--grid-px",`${7*sc.ppd}px`);el.style.setProperty("--grid-off",`${(t-lo)/D*sc.ppd}px`)}
+  el.dataset.todayPx=todayPct==null?"":String(Math.round(todayPct/100*sc.px));
+  document.querySelectorAll("[data-zoom]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.zoom===sc.zoom)));
+}
+function ganttScrollToToday(smooth){
+  const el=document.querySelector("#gantt"),x=el.dataset.todayPx;
+  if(x===""||x==null){if(smooth)showToast("Today is outside this timeline.");el.scrollLeft=0;return}
+  const left=Math.max(0,+x-(el.clientWidth-ganttPinPx())*.25);
+  const calm=typeof matchMedia==="function"&&matchMedia("(prefers-reduced-motion: reduce)").matches;   // script scrolling ignores the CSS setting
+  if(smooth&&el.scrollTo)el.scrollTo({left,behavior:calm?"auto":"smooth"});else el.scrollLeft=left;
+}
+// The chart's range. Inside one project it starts on that project's first day (the earliest of its agreed start,
+// its scheduled start and every task date) and runs to its last, so moving a start date moves the chart's start with
+// it. On the dashboard, with several projects, it starts on the first day of the earliest month and ends with the
+// latest month. The end is exclusive, so the last day's bar fits; a range is never shorter than two weeks.
+function ganttRange(vals,single){
+  const D=86400000;
+  vals=vals.filter(Number.isFinite);   // an unreadable date is ignored, not allowed to poison the range
+  if(!vals.length){const t=Date.parse(ganttToday());return {start:t,end:t+30*D}}
+  const lo=Math.min(...vals),hi=Math.max(...vals);
+  if(single)return {start:lo,end:Math.max(hi+D,lo+14*D)};
+  const a=new Date(lo),b=new Date(hi);
+  return {start:Date.UTC(a.getUTCFullYear(),a.getUTCMonth(),1),end:Date.UTC(b.getUTCFullYear(),b.getUTCMonth()+1,1)};
+}
+// Dependency arrows, as Asana and monday draw them: one elbow line from the right edge of a prerequisite's bar to the
+// left edge of the task that waits for it, drawn only when both bars are on screen (a collapsed workstream shows its
+// steps as chips, and those get arrows too). Links between two bars in the same row are skipped, and links on the
+// critical path are drawn in the critical colour. The layer sits under the pinned columns and the header.
+function ganttDepPairs(tasks){
+  const seen=new Set(),out=[],byId=new Map(tasks.map(t=>[t.id,t]));
+  for(const t of tasks)for(const p of t.predecessors||[]){
+    const key=`${p.task_id}>${t.id}`;if(seen.has(key))continue;seen.add(key);
+    const from=byId.get(p.task_id);
+    out.push({from:p.task_id,to:t.id,blocking:!!p.blocking,critical:!!(from&&from.is_critical_path&&t.is_critical_path)});
+  }
+  return out;
+}
+function ganttDepPath(x1,y1,x2,y2){
+  const r=6,f=n=>Math.round(n*10)/10;
+  if(Math.abs(y2-y1)<1)return `M${f(x1)} ${f(y1)}H${f(x2)}`;
+  if(x2-x1>=2*r+4)return `M${f(x1)} ${f(y1)}H${f(x1+r)}V${f(y2)}H${f(x2)}`;   // room to drop beside the prerequisite
+  const ym=(y1+y2)/2;                                                       // successor starts right after it: step around
+  return `M${f(x1)} ${f(y1)}H${f(x1+r)}V${f(ym)}H${f(x2-r)}V${f(y2)}H${f(x2)}`;
+}
+function ganttDepMarkup(pairs,measure,width,height){
+  const paths=[];
+  for(const pair of pairs){
+    const a=measure(pair.from),b=measure(pair.to);
+    if(!a||!b||a.row===b.row)continue;
+    const x1=a.right,y1=(a.top+a.bottom)/2,x2=b.left,y2=(b.top+b.bottom)/2;
+    if(![x1,y1,x2,y2].every(Number.isFinite))continue;
+    const cls=pair.critical?"dep-line critical":"dep-line";
+    paths.push(`<path class="${cls}" d="${ganttDepPath(x1,y1,x2,y2)}" marker-end="url(#${pair.critical?"dep-arrow-critical":"dep-arrow"})" data-from="${escapeHtml(pair.from)}" data-to="${escapeHtml(pair.to)}"/>`);
+  }
+  if(!paths.length)return "";
+  const head=id=>`<marker id="${id}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" class="dep-head${id.endsWith("critical")?" critical":""}"/></marker>`;
+  return `<svg class="dep-layer" width="${Math.ceil(width)}" height="${Math.ceil(height)}" aria-hidden="true" focusable="false"><defs>${head("dep-arrow")}${head("dep-arrow-critical")}</defs>${paths.join("")}</svg>`;
+}
+// Measures the visible bar of a task relative to the chart's scrolling content. A step row's own bar wins over the
+// chip the same step shows inside its parent's track.
+function ganttMeasurer(el){
+  const box=el.getBoundingClientRect(),dx=el.scrollLeft||0,dy=el.scrollTop||0,cache=new Map();
+  const ox=box.left+(el.clientLeft||0),oy=box.top+(el.clientTop||0);   // the layer sits inside the chart's border, not on it
+  return id=>{
+    if(cache.has(id))return cache.get(id);
+    const nodes=[...el.querySelectorAll(`[data-detail="${CSS.escape(id)}"]`)].filter(n=>n.closest&&n.closest(".timeline")&&!n.closest(".step-more-list")&&n.offsetParent!==null);
+    const node=nodes.find(n=>n.closest(".step-row"))||nodes[0];
+    let out=null;
+    if(node){const r=node.getBoundingClientRect();out={left:r.left-ox+dx,right:r.right-ox+dx,top:r.top-oy+dy,bottom:r.bottom-oy+dy,row:node.closest(".gantt-row")}}
+    cache.set(id,out);return out;
+  };
+}
+function drawGanttDependencies(){
+  const el=document.querySelector("#gantt");
+  el.querySelectorAll(".dep-layer").forEach(n=>n.remove());
+  if(el.hidden||storage.get("astra.gantt.deps",true)===false)return;
+  const markup=ganttDepMarkup(ganttDepPairs(ganttShown),ganttMeasurer(el),el.scrollWidth,el.scrollHeight);
+  if(markup)el.insertAdjacentHTML("beforeend",markup);
+}
+let ganttShown=[],depTimer=0;
+// A timer, not requestAnimationFrame: a background tab never runs that, and measuring forces the layout it needs anyway.
+function scheduleGanttDependencies(){clearTimeout(depTimer);depTimer=setTimeout(drawGanttDependencies,0)}
+if(typeof document!=="undefined"&&document.fonts&&document.fonts.ready)document.fonts.ready.then(scheduleGanttDependencies);   // row heights settle once the font arrives
+function renderGantt(tasks,retried=false){
+  const allTasks=tasks;
   const planSelect=document.querySelector("#gantt-plan");
   const previous=planSelect.value;
   const names=[...new Set(tasks.map(t=>t.plan_option||"Shared"))].sort();
@@ -173,6 +312,8 @@ function renderGantt(tasks){
   const showTable=currentView()==="table";
   document.querySelector("#view-table").checked=showTable;
   el.hidden=showTable;tableEl.hidden=!showTable;
+  document.querySelector("#gantt-zoom").hidden=showTable;
+  const depBox=document.querySelector("#gantt-deps"),depLabel=depBox.closest("label");depBox.checked=storage.get("astra.gantt.deps",true)!==false;if(depLabel)depLabel.hidden=showTable;
   renderBands(tasks);
   const groups=groupSteps(tasks);
   document.querySelector("#step-legend").hidden=!groups.hasSteps;
@@ -180,6 +321,7 @@ function renderGantt(tasks){
   if(showTable){renderScheduleTable(groups,tableEl);el.innerHTML="";return}
   tableEl.innerHTML="";
   const {top,childrenOf,stepIndex,visible}=groups;
+  ganttShown=tasks;
   const dated=tasks.filter(t=>t.start_date||t.due_date);
   // 5WZ4A8: project start/target markers for each project shown in the view.
   const projIds=[...new Set(tasks.map(t=>t.project_id))];
@@ -196,25 +338,26 @@ function renderGantt(tasks){
     if(schedule.finish_date)projMarkers.push({date:Date.parse(schedule.finish_date),kind:"scheduled-finish",label:label(!planSelect.value&&multiple?"Latest plan finish":"Scheduled finish")});
   }
   const dateVals=[...dated.map(t=>Date.parse(t.start_date||t.due_date)),...dated.map(t=>Date.parse(t.due_date||t.start_date)),...projMarkers.map(m=>m.date)];
-  let min=dateVals.length?new Date(Math.min(...dateVals)):new Date();
-  let max=dateVals.length?new Date(Math.max(...dateVals)):new Date(min.getTime()+86400000*30);
-  min.setDate(min.getDate()-3);max.setDate(max.getDate()+3);
+  // The rule follows the page, not the number of projects: a project page starts on the project's first day,
+  // the dashboard (portfolio) on the first day of the earliest month, even when only one project exists.
+  const range=ganttRange(dateVals,currentRoute().name==="project");
+  const min=new Date(range.start),max=new Date(range.end);
   const span=Math.max(1,max-min);el.dataset.span=String(span);el.dataset.start=String(min.getTime());
   const pct=d=>(d-min)/span*100;
+  const usedWidth=+el.clientWidth||1180;
+  const sc=ganttScale(span/86400000,Math.max(700,usedWidth-ganttSidePx()));el.dataset.scale=sc.zoom;
   const inRange=x=>x>=0&&x<=100;
-  const markerFlags=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-flag ${m.kind}" data-x="${x}">${escapeHtml(m.label)}</span>`:""}).join("");
+  const edge=x=>x<4?" edge-l":(x>96?" edge-r":"");   // a flag at either end of the chart is anchored to that end, not centred on it
+  const markerFlags=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-flag ${m.kind}${edge(x)}" data-x="${x}">${escapeHtml(m.label)}</span>`:""}).join("");
   const markerLines=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-line ${m.kind}" data-x="${x}"></span>`:""}).join("");
-  // weekly calendar ticks
   // Task dates parse as UTC midnight, so ticks and the today line are in UTC too; today is the server's.
-  const ticks=[];const t0=new Date(min);t0.setUTCHours(0,0,0,0);
-  for(let t=t0.getTime();t<=max.getTime();t+=7*86400000)ticks.push(new Date(t));
   const todayPct=pct(Date.parse(ganttToday()));const showToday=todayPct>=0&&todayPct<=100;
-  const axis=ticks.map(d=>`<span class="axis-tick" data-x="${pct(d)}"><b>${d.getUTCDate()}</b> ${escapeHtml(d.toLocaleDateString(undefined,{month:"short",timeZone:"UTC"}))}</span>`).join("");
-  const todayFlag=showToday?`<span class="today-flag" data-x="${todayPct}">Today</span>`:"";
-  const header=`<div class="gantt-row gantt-head"><div class="task-name gantt-head-cap">Project / task</div><div class="task-meta gantt-head-cap">Owner · due · next action</div><div class="timeline axis">${axis}${markerLines}${markerFlags}${todayFlag}</div></div>`;
+  const axis=ganttAxis(min.getTime(),max.getTime(),span,sc);
+  const todayFlag=showToday?`<span class="today-flag${edge(todayPct)}" data-x="${todayPct}">Today</span>`:"";
+  const header=`<div class="gantt-row gantt-head"><div class="task-name gantt-head-cap">Project / task</div><div class="task-meta gantt-head-cap">Owner · due · next action</div><div class="timeline axis two-tier">${axis}${markerLines}${markerFlags}${todayFlag}</div></div>`;
   const todayLine=showToday?`<span class="today-line" data-x="${todayPct}"></span>`:"";
   // Pixel estimate of the timeline column (grid: 260px name, 210px meta, rest timeline).
-  const tlw=Math.max(700,(+el.clientWidth||1180)-470);
+  const tlw=sc.px;   // the timeline column's real width, which decides what each step can show
   const stepButton=(k,g)=>{
     const m=stepIndex.get(k.id);const closed=CLOSED_STATUSES.includes(k.status);
     const cls=["step",`step-c${stepHue(m.idx)}`,m.idx>STEP_HUES?"wrap":"",g.lane?"lane-2":"",closed?"done":"",k.status==="on_hold"?"hold":"",k.is_critical_path?"crit":"",g.solo?"solo":""].filter(Boolean).join(" ");
@@ -286,6 +429,11 @@ function renderGantt(tasks){
         bar=`<div class="bar track ${cls}${tall?" lanes-2":""}${expanded?" is-expanded":""}" role="group" tabindex="0" data-detail="${id}"${drag} ${tipAttrs(t,null,kids.length,overruns)} data-x="${left}" data-w="${width}">${extBefore}${extAfter}${segs}${more}${grips}</div>${place===" in-meta"?"":moreList}`;
       }
       else if(isStep){bar=stepButton(t,{lane:0,px:width/100*tlw,x:left,w:Math.min(100-left,width),solo:true})}
+      else if(t.is_milestone){
+        // A milestone is a point in time: a diamond on its due date with its name beside it, as Asana and monday draw it.
+        const x=pct(Date.parse(t.due_date||t.start_date))+43200000/span*100;
+        const drag=canDragBar(t)?` data-drag="${id}"`:"",side=x>92?" edge-r":"";   // near the chart's end the name goes to the left of the diamond
+        bar=`<button type="button" class="bar milestone ${cls}" data-detail="${id}"${drag} ${tipAttrs(t,null,0)} data-x="${x}"><span class="sr-only">Milestone: ${escapeHtml(t.title)}</span></button><span class="ms-label${side}" data-x="${x}" aria-hidden="true">${escapeHtml(t.title)}</span>`}
       else{const drag=canDragBar(t)&&!isStep?` data-drag="${id}"`:"";
         // Review 12b L8: a bar narrower than about 24px has no grips, so its middle still moves it.
         bar=`<button type="button" class="bar plain ${cls}" data-detail="${id}"${drag} ${tipAttrs(t,null,0)} data-x="${left}" data-w="${width}"><span class="bar-label">${escapeHtml(t.title)}</span>${drag&&width/100*tlw>=24?GRIPS:""}</button>`}
@@ -305,7 +453,14 @@ function renderGantt(tasks){
   };
   el.innerHTML=header+top.map(t=>row(t,0)).join("");
   applyGeometry(el);
+  // A vertical scrollbar that came with the rows narrows the chart: measure once more so the scale matches the screen.
+  if(!retried&&Math.abs((+el.clientWidth||usedWidth)-usedWidth)>1)return renderGantt(allTasks,true);
+  applyGanttScale(el,sc,min.getTime(),showToday?todayPct:null);
+  const scrollKey=`${sc.zoom}|${projIds.join(",")}`;   // open at the start on a new zoom or project, never on a refresh after a drag
+  if(el.dataset.scrollKey!==scrollKey){el.dataset.scrollKey=scrollKey;el.scrollLeft=0}
   restoreFocus(el,focusKey);
+  drawGanttDependencies();
+  scheduleGanttDependencies();
 }
 function canMoveTimelineTask(t){const p=(state.projects||[]).find(x=>x.id===t.project_id);return !!(p&&p.status!=="closed"&&canMoveOnBoard(t.project_id)&&!CLOSED_STATUSES.includes(t.status))}
 function timelineMoveButton(t,draggable=false){return canMoveTimelineTask(t)?`<button type="button" class="quiet task-row-handle"${draggable?' draggable="true"':""} data-task-move="${escapeHtml(t.id)}" aria-label="Move task ${escapeHtml(t.title)}">Move task</button>`:""}
@@ -348,6 +503,7 @@ function toggleSteps(id){
   btn.closest(".gantt-row")?.querySelector(".track")?.classList.toggle("is-expanded",open);
   const n=rows.querySelectorAll(":scope > .gantt-row").length;
   announce(open?`Steps expanded, ${n} row${n===1?"":"s"}`:"Steps collapsed");
+  scheduleGanttDependencies();
 }
 function toggleMore(btn){const list=document.getElementById(btn.getAttribute("aria-controls"));if(!list)return;const open=list.hidden;closeMoreLists();if(open){list.hidden=false;btn.setAttribute("aria-expanded","true");hideTip()}}
 (function wireGantt(){
@@ -385,6 +541,9 @@ function toggleMore(btn){const list=document.getElementById(btn.getAttribute("ar
   document.addEventListener("click",e=>{if(!e.target.closest(".step-more,.step-more-list"))closeMoreLists()});
   window.addEventListener("scroll",()=>{if(tipFor)placeTip(tipFor)},true);
   document.querySelector("#view-table").onchange=e=>{storage.set("astra.gantt.view",e.target.checked?"table":"chart");render()};
+  document.querySelector("#gantt-zoom").addEventListener("click",e=>{const b=e.target.closest("[data-zoom]");if(!b)return;storage.set("astra.gantt.zoom",b.dataset.zoom);refreshGantt()});
+  document.querySelector("#gantt-today").onclick=()=>ganttScrollToToday(true);
+  document.querySelector("#gantt-deps").onchange=e=>{storage.set("astra.gantt.deps",e.target.checked);drawGanttDependencies()};
   if(phoneMQ.addEventListener)phoneMQ.addEventListener("change",()=>{if(state.user)refreshGantt()});
   let resizeTimer;window.addEventListener("resize",()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(state.user)refreshGantt()},150)});
 })();

@@ -36,7 +36,7 @@ globalThis.localStorage={getItem:k=>ls.has(k)?ls.get(k):null,setItem(k,v){ls.set
 function el(id,init){
   const cls=new Set(),listeners={},attrs={};
   const t={_id:id,_l:listeners,_attrs:attrs,_v:0,innerHTML:"",textContent:"",value:"",checked:false,hidden:false,open:false,disabled:false,
-    isConnected:true,style:{},dataset:{},clientWidth:1180,...(init||{}),
+    isConnected:true,style:{setProperty(){},removeProperty(){}},dataset:{},clientWidth:1180,...(init||{}),
     setAttribute(k,v){attrs[k]=String(v)},getAttribute(k){return k in attrs?attrs[k]:null},removeAttribute(k){delete attrs[k]},hasAttribute(k){return k in attrs},
     addEventListener(k,f){(listeners[k]=listeners[k]||[]).push(f)},
     classList:{add:(...c)=>c.forEach(x=>cls.add(x)),remove:(...c)=>c.forEach(x=>cls.delete(x)),toggle:(c,on)=>{if(on===undefined?!cls.has(c):on)cls.add(c);else cls.delete(c)},contains:c=>cls.has(c)},
@@ -304,6 +304,10 @@ globalThis.runProbe=async function(input,H){
 '''
 
 
+# These tests read steps at the fit-to-window scale (about 1.9 px a day); the zoomed scales are tested in test_gantt_zoom.py.
+FIT_ZOOM = {'astra.gantt.zoom': '"fit"'}
+
+
 def run_probe(probe, payload=None, static=None):
     """Run app.js (the module's STATIC, read at call time) through DRIVER with one probe; returns its JSON."""
     static = Path(static if static is not None else STATIC)
@@ -379,12 +383,12 @@ class GanttExpandAndOverflowTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.first = run_probe(GANTT_PROBE, {'click': ['p1', 'p2', 'p1']})
+        cls.first = run_probe(GANTT_PROBE, {'click': ['p1', 'p2', 'p1'], 'storage': FIT_ZOOM})
         writes = cls.first['steps'][-1]['writes']
         # A reload: a new page load that starts from what the first run saved.
-        cls.reload = run_probe(GANTT_PROBE, {'storage': dict(writes[-1:])})
-        cls.phone = run_probe(GANTT_PROBE, {'phone': True})
-        cls.phone_chart = run_probe(GANTT_PROBE, {'phone': True, 'storage': {'astra.gantt.view': '"chart"'}})
+        cls.reload = run_probe(GANTT_PROBE, {'storage': {**FIT_ZOOM, **dict(writes[-1:])}})
+        cls.phone = run_probe(GANTT_PROBE, {'phone': True, 'storage': FIT_ZOOM})
+        cls.phone_chart = run_probe(GANTT_PROBE, {'phone': True, 'storage': {**FIT_ZOOM, 'astra.gantt.view': '"chart"'}})
 
     def test_steps_start_collapsed_when_nothing_was_remembered(self):
         self.assertEqual((self.first['initial']['p1'], self.first['initial']['p2']), (True, True))

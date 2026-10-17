@@ -277,7 +277,7 @@ body.board-dragging, body.board-dragging * { cursor: grabbing; user-select: none
 .lock-banner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: var(--space-2) 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--amber); border-radius: var(--radius-sm); background: var(--chip-amber-bg); color: var(--ink); font-size: var(--fs-small); }
 .lock-banner span { flex: 1 1 220px; }
 .bar[data-drag] { cursor: grab; touch-action: pan-y; }
-.bar-grip { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+.bar-grip { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 3; }  /* above a lane-2 step (z-index 1), which would otherwise cover the grip on a wide bar */
 .bar-grip.start { left: 0; }
 .bar-grip.end { right: 0; }
 .bar[data-drag]:hover .bar-grip, .bar.is-dragging .bar-grip { background: var(--palette-8); }
@@ -448,12 +448,13 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-strong); border-bottom-widt
 .band.scheduled { border-left-color: var(--blue); }
 .band.undated { border-left-color: var(--gray); }
 .next-action { color: var(--teal); font-weight: 600; }
-#gantt { overflow: auto; border-top: 1px solid var(--palette-9); }
-.gantt-row { display: grid; grid-template-columns: 260px 210px minmax(700px, 1fr); min-height: 48px; border-bottom: 1px solid var(--line-2); align-items: center; }
+#gantt { position: relative; overflow: auto; scrollbar-gutter: stable; border-top: 1px solid var(--palette-9); max-height: calc(100vh - 150px); min-height: 280px; }  /* its own scroll area, so the date header and the task columns stay pinned in both directions */
+#gantt { --side-1: 260px; --side-2: 210px; --side-total: 470px; --pin-total: 470px; }
+.gantt-row { display: grid; grid-template-columns: var(--side-1) var(--side-2) var(--tl-w, minmax(700px, 1fr)); min-width: max-content; min-height: 48px; border-bottom: 1px solid var(--line-2); align-items: center; }
 .task-name { padding: 8px; font-weight: 650; }
 .task-meta { position: relative; color: var(--muted); font-size: .82rem; padding: 8px; }
 .task-meta .blocked-text { color: var(--purple); font-weight: 700; }
-.timeline { position: relative; height: 38px; background-image: linear-gradient(to right, var(--line-2) 1px, var(--transparent) 1px); background-size: calc(100% / 12) 100%; }
+.timeline { position: relative; height: 38px; background-image: linear-gradient(to right, var(--line-2) 1px, var(--transparent) 1px); background-size: var(--grid-px, calc(100% / 12)) 100%; background-position: var(--grid-off, 0) 0; }
 .timeline.tall { height: 58px; }
 .bar { position: absolute; top: 8px; height: 22px; border-radius: 5px; min-width: 8px; color: var(--surface); font-size: .72rem; padding: 2px 6px; overflow: hidden; white-space: nowrap; }
 .bar.today { background: var(--amber); color: var(--ink); }
@@ -470,7 +471,7 @@ button.bar.plain { display: flex; align-items: center; margin: 0; border: 0; fon
 .legend i.proj-start-key { background: var(--palette-11); }
 .legend i.proj-target-key { background: var(--red); }
 .cp-text { color: var(--chip-red); font-weight: 700; }
-.gantt-head { position: sticky; top: 0; z-index: 3; background: var(--palette-6); min-height: 44px; border-bottom: 2px solid var(--palette-12); }
+.gantt-head { position: sticky; top: 0; z-index: 7; background: var(--palette-6); min-height: 72px; border-bottom: 2px solid var(--palette-12); }  /* 72px: a flag row above the two header tiers */
 .gantt-head-cap { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .gantt-head .timeline { background: var(--palette-13); height: 44px; }
 .axis { position: relative; }
@@ -838,7 +839,8 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   .bands { grid-template-columns: repeat(3, 1fr); }
   .toolbar { gap: 10px 12px; padding: 12px; }
   .toolbar label { flex: 1 1 140px; min-width: 0; }
-  .gantt-row { grid-template-columns: 200px 170px minmax(600px, 1fr); }
+  #gantt { --side-1: 200px; --side-2: 170px; --side-total: 370px; --pin-total: 200px; }
+  .gantt-row { grid-template-columns: var(--side-1) var(--side-2) var(--tl-w, minmax(600px, 1fr)); }
   .step-legend, .view-controls .legend { font-size: .76rem; }
   .sched-table { font-size: .78rem; }
   .sched-table th, .sched-table td { padding: 8px 6px; }
@@ -907,3 +909,48 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .error.message-info { color: var(--muted); }
 
 .admin-sections { position: sticky; top: -26px; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; background: var(--surface); }
+
+/* Zoomable Gantt (Asana and monday style). The timeline column is a fixed width when zoomed, so the chart scrolls
+   sideways while the task name and meta columns stay put; the header has two tiers (month over week, or quarter
+   over month) and a flag row above them for the project markers and Today. */
+#gantt .gantt-row > .task-name, #gantt .gantt-row > .task-meta { position: sticky; z-index: 4; background: var(--surface); }
+#gantt .gantt-row > .task-name { left: 0; }
+#gantt .gantt-row > .task-meta { left: var(--side-1); border-right: 1px solid var(--line-2); }
+#gantt .step-rows .gantt-row > .task-name, #gantt .step-rows .gantt-row > .task-meta { background: var(--palette-40); }
+#gantt .gantt-row:not(.gantt-head):hover > .task-name, #gantt .gantt-row:not(.gantt-head):hover > .task-meta { background: var(--surface-2); }
+#gantt .gantt-head > .gantt-head-cap { background: var(--palette-6); z-index: 8; }
+#gantt.no-grid .timeline { background-image: none; }
+.gantt-head .timeline { height: 72px; }
+.axis-tick.tier-1 { top: 24px; bottom: auto; height: 24px; overflow: hidden; color: var(--ink); border-left: 1px solid var(--palette-12); border-bottom: 1px solid var(--line-2); }
+.axis-tick.tier-2 { top: 48px; bottom: 0; overflow: hidden; padding-left: 3px; border-left: 1px solid var(--line-2); flex-direction: column; align-items: flex-start; justify-content: center; line-height: 1.05; }
+.axis-tick.tier-2 b { margin-right: 0; }
+.axis-tick.tier-2 i { font-style: normal; font-size: 9px; }
+.axis-tick.tier-2.weekend { background: var(--surface-2); }
+.gantt-head .proj-flag { top: 2px; }
+.gantt-head .today-flag { z-index: 3; }   /* in the flag row above the tiers, so it never covers a date */
+.zoom-group { display: inline-flex; border: 1px solid var(--palette-9); border-radius: 8px; overflow: hidden; }
+.zoom-btn { border: 0; border-right: 1px solid var(--palette-9); border-radius: 0; background: var(--surface); color: var(--ink); padding: 6px 12px; font: inherit; font-size: .82rem; cursor: pointer; min-height: 32px; }
+.zoom-btn:last-child { border-right: 0; }
+.zoom-btn[aria-pressed="true"] { background: var(--teal); color: var(--palette-6); font-weight: 700; }
+.zoom-btn.today-btn { font-weight: 650; }
+.bar.milestone { top: 50%; left: 0; width: 16px; height: 16px; min-width: 16px; padding: 0; border: 0; border-radius: 3px; transform: translate(-50%, -50%) rotate(45deg); overflow: visible; cursor: pointer; }
+.bar.milestone.closed { background: var(--gray); }
+.ms-label { position: absolute; top: 50%; transform: translateY(-50%); margin-left: 14px; font-size: .72rem; font-weight: 650; color: var(--ink); white-space: nowrap; pointer-events: none; }
+
+/* Below about 1100px two pinned columns would leave almost no room for the timeline, so only the task name stays pinned
+   (the meta column scrolls away with the chart). */
+@media (max-width: 1100px) {
+  #gantt .gantt-row > .task-meta { position: relative; left: auto; z-index: auto; border-right: 0; background: transparent; }
+  #gantt .step-rows .gantt-row > .task-meta { background: transparent; }
+}
+@media (min-width: 761px) and (max-width: 1100px) {   /* only the name column is pinned here; phones keep their own 200px from the 760px block above */
+  #gantt { --pin-total: 260px; }
+}
+.proj-flag.edge-l, .today-flag.edge-l { transform: none; }
+.proj-flag.edge-r, .today-flag.edge-r { transform: translateX(-100%); }
+.dep-layer { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 2; overflow: visible; }  /* under the pinned columns (4) and the header (7) */
+.dep-line { fill: none; stroke: var(--gray); stroke-width: 1.5; }
+.dep-line.critical { stroke: var(--crit); stroke-width: 2; }
+.dep-head { fill: var(--gray); }
+.dep-head.critical { fill: var(--crit); }
+.ms-label.edge-r { transform: translate(-100%, -50%); margin-left: -14px; }

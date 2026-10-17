@@ -2869,7 +2869,7 @@ if(process.env.FAKE_NOW){const RealDate=Date,NOW=RealDate.parse(process.env.FAKE
 const store={},docListeners={};
 function el(id){
   const cls=new Set(),listeners={};
-  const t={_id:id,innerHTML:"",textContent:"",value:"",checked:false,hidden:false,open:false,style:{},dataset:{},_attrs:{},isConnected:true,
+  const t={_id:id,innerHTML:"",textContent:"",value:"",checked:false,hidden:false,open:false,style:{setProperty(){},removeProperty(){}},dataset:{},_attrs:{},isConnected:true,
     setAttribute(k,v){t._attrs[k]=String(v)},getAttribute(k){return t._attrs[k]??null},removeAttribute(k){delete t._attrs[k]},hasAttribute(k){return k in t._attrs},
     addEventListener(k,f){(listeners[k]=listeners[k]||[]).push(f)},dispatchEvent(e){(listeners[e.type]||[]).forEach(f=>f(e));return true},
     classList:{add:(...c)=>c.forEach(x=>cls.add(x)),remove:(...c)=>c.forEach(x=>cls.delete(x)),toggle:(c,on)=>{if(on===undefined?!cls.has(c):on)cls.add(c);else cls.delete(c)},contains:c=>cls.has(c)},
@@ -4275,7 +4275,7 @@ const src=fs.readFileSync(process.argv[2],"utf8");
 const cases=JSON.parse(fs.readFileSync(0,"utf8"));
 const store={};
 function el(key){
-  const t={innerHTML:"",textContent:"",value:"",style:{},dataset:{},options:[],open:false};
+  const t={innerHTML:"",textContent:"",value:"",style:{setProperty(){},removeProperty(){}},dataset:{},options:[],open:false};
   return new Proxy(t,{get(o,k){
     if(k===Symbol.toPrimitive)return()=>"";
     if(k in o)return o[k];
@@ -4357,7 +4357,7 @@ const scenarios=JSON.parse(fs.readFileSync(0,"utf8"));
 const store={};let dyn={},nodes={};
 const camel=s=>s.replace(/-([a-z])/g,(_,c)=>c.toUpperCase());
 function el(init){
-  const t={innerHTML:"",textContent:"",value:"",style:{},dataset:{},options:[],open:false,hidden:false,_l:{},...(init||{})};
+  const t={innerHTML:"",textContent:"",value:"",style:{setProperty(){},removeProperty(){}},dataset:{},options:[],open:false,hidden:false,_l:{},...(init||{})};
   t.addEventListener=(k,f)=>{(t._l[k]=t._l[k]||[]).push(f)};
   t.classList={add(){},remove(){},toggle(){},contains(){return false}};
   t.querySelector=s=>document.querySelector(s);t.querySelectorAll=s=>document.querySelectorAll(s);
@@ -4963,7 +4963,7 @@ const fs=require("fs");
 const src=fs.readFileSync(process.argv[2],"utf8");
 const store={};globalThis.__anchors=[];
 function el(init){
-  const t={innerHTML:"",textContent:"",value:"",style:{},dataset:{},open:false,hidden:false,_l:{},...(init||{})};
+  const t={innerHTML:"",textContent:"",value:"",style:{setProperty(){},removeProperty(){}},dataset:{},open:false,hidden:false,_l:{},...(init||{})};
   t.addEventListener=(k,f)=>{(t._l[k]=t._l[k]||[]).push(f)};
   t.classList={add(){},remove(){},toggle(){},contains(){return false}};
   t.showModal=()=>{t.open=true};t.close=()=>{t.open=false};

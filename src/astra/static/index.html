@@ -125,6 +125,14 @@
         <div class="view-controls">
           <div class="legend"><span class="key"><i class="overdue"></i>Overdue</span> <span class="key"><i class="soon"></i>Due in 7 days</span> <span class="key"><i class="scheduled"></i>Scheduled</span> <span class="key"><i class="blocked"></i>Blocked</span> <span class="key"><i class="undated"></i>Undated</span> <span class="key"><i class="critical"></i>Critical path</span> <span class="key"><i class="proj-start-key"></i>Project start</span> <span class="key"><i class="proj-target-key"></i>Project target</span></div>
           <label class="inline view-toggle"><input type="checkbox" id="view-table"> Schedule table</label>
+          <label class="inline dep-toggle"><input type="checkbox" id="gantt-deps" checked> Dependencies</label>
+          <div class="zoom-group" id="gantt-zoom" role="group" aria-label="Timeline zoom">
+            <button type="button" class="zoom-btn" data-zoom="fit" aria-pressed="true">Fit</button>
+            <button type="button" class="zoom-btn" data-zoom="week" aria-pressed="false">Weeks</button>
+            <button type="button" class="zoom-btn" data-zoom="month" aria-pressed="false">Months</button>
+            <button type="button" class="zoom-btn" data-zoom="quarter" aria-pressed="false">Quarters</button>
+            <button type="button" class="zoom-btn today-btn" id="gantt-today">Today</button>
+          </div>
           <label>Plan<select id="gantt-plan"><option value="">All plans</option></select></label>
         </div>
         <div id="bands" class="bands"></div>
