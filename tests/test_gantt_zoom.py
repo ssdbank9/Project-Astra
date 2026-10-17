@@ -315,6 +315,15 @@ class GanttZoomCssTests(unittest.TestCase):
         self.assertRegex(self.css, r'#gantt \.gantt-row > \.task-name, #gantt \.gantt-row > \.task-meta \{[^}]*position: sticky')
         self.assertRegex(self.css, r'#gantt \.gantt-row > \.task-meta \{[^}]*left: var\(--side-1\)')
 
+    def test_the_pinned_cells_cover_the_full_row_height_so_nothing_shows_through_above_or_below_the_text(self):
+        # align-items: center on the row made each pinned cell only as tall as its text; bars and arrows showed in the gaps.
+        rule = re.search(r'#gantt \.gantt-row > \.task-name, #gantt \.gantt-row > \.task-meta \{([^}]*)\}', self.css).group(1)
+        self.assertIn('align-self: stretch', rule)
+        self.assertIn('background: var(--surface)', rule)
+        head = re.search(r'#gantt \.gantt-head > \.gantt-head-cap \{([^}]*)\}', self.css).group(1)
+        self.assertIn('display: flex', head)       # stretched header cells keep their label centred
+        self.assertIn('align-items: center', head)
+
     def test_a_resize_grip_sits_above_a_lane_2_step_so_a_wide_bar_can_still_be_resized(self):
         grip = int(re.search(r'\.bar-grip \{[^}]*z-index: (\d+)', self.css).group(1))
         step = int(re.search(r'\.bar\.track\.lanes-2 \.step\.lane-2 \{[^}]*z-index: (\d+)', self.css).group(1))
@@ -338,8 +347,8 @@ class GanttZoomCssTests(unittest.TestCase):
     def test_the_phone_layout_narrows_the_sticky_columns_through_the_variables(self):
         self.assertRegex(self.css, r'#gantt \{ --side-1: 200px; --side-2: 170px; --side-total: 370px; --pin-total: 200px; \}')
 
-    def test_the_label_of_an_end_of_chart_milestone_is_flipped_to_the_left(self):
-        self.assertRegex(self.css, r'\.ms-label\.edge-r \{[^}]*translate\(-100%, -50%\)')
+    def test_the_label_of_an_end_of_chart_milestone_sits_left_of_and_above_the_diamond_clear_of_the_arrow(self):
+        self.assertRegex(self.css, r'\.ms-label\.edge-r \{[^}]*translate\(-100%, calc\(-50% - 14px\)\)')
 
     def test_the_chart_keeps_room_for_its_scrollbar_so_the_width_does_not_change_with_the_rows(self):
         self.assertRegex(self.css, r'#gantt \{ position: relative; overflow: auto; scrollbar-gutter: stable;')

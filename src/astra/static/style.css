@@ -913,12 +913,12 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 /* Zoomable Gantt (Asana and monday style). The timeline column is a fixed width when zoomed, so the chart scrolls
    sideways while the task name and meta columns stay put; the header has two tiers (month over week, or quarter
    over month) and a flag row above them for the project markers and Today. */
-#gantt .gantt-row > .task-name, #gantt .gantt-row > .task-meta { position: sticky; z-index: 4; background: var(--surface); }
+#gantt .gantt-row > .task-name, #gantt .gantt-row > .task-meta { position: sticky; z-index: 4; background: var(--surface); align-self: stretch; align-content: center; }   /* the full row height, or bars and arrows show through above and below the text */
 #gantt .gantt-row > .task-name { left: 0; }
 #gantt .gantt-row > .task-meta { left: var(--side-1); border-right: 1px solid var(--line-2); }
 #gantt .step-rows .gantt-row > .task-name, #gantt .step-rows .gantt-row > .task-meta { background: var(--palette-40); }
 #gantt .gantt-row:not(.gantt-head):hover > .task-name, #gantt .gantt-row:not(.gantt-head):hover > .task-meta { background: var(--surface-2); }
-#gantt .gantt-head > .gantt-head-cap { background: var(--palette-6); z-index: 8; }
+#gantt .gantt-head > .gantt-head-cap { background: var(--palette-6); z-index: 8; display: flex; align-items: center; }   /* stretched, so the date ticks cannot show behind them */
 #gantt.no-grid .timeline { background-image: none; }
 .gantt-head .timeline { height: 72px; }
 .axis-tick.tier-1 { top: 24px; bottom: auto; height: 24px; overflow: hidden; color: var(--ink); border-left: 1px solid var(--palette-12); border-bottom: 1px solid var(--line-2); }
@@ -953,4 +953,4 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .dep-line.critical { stroke: var(--crit); stroke-width: 2; }
 .dep-head { fill: var(--gray); }
 .dep-head.critical { fill: var(--crit); }
-.ms-label.edge-r { transform: translate(-100%, -50%); margin-left: -14px; }
+.ms-label.edge-r { transform: translate(-100%, calc(-50% - 14px)); margin-left: 8px; }   /* above the diamond: the incoming arrow runs along its left side */
