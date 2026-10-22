@@ -19,13 +19,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T04:52:13Z
-updated-at: 2026-10-22T14:31:05Z
+updated-at: 2026-10-22T14:31:09Z
 claimed-by: X1CarbonPC-13392
 claimed-at: 2026-09-15T05:04:15Z
 updated-by: Claude
 outcome-what: "Durable in-app owner notifications: notifications table (idempotent per event), owner notified of others' task changes, header bell + inbox dialog with mark-read / mark-all-read; 3 new tests (58 total)."
 outcome-why: "Section 7/11: durable event notifications were Missing; task_events were audit-only with no owner inbox."
-question: "Accept, or send back? Confirm the scope call: owner is NOT self-notified of their own actions (keeps the pilot inbox meaningful), and this is in-app only with outbound email deferred to the section 15 decisions."
+question: "Ready to accept per the 2026-10-22 consensus (accepted as built; later decisions notify the acting owner of blocked attempts and attachment events (KBWY86, 6G89SJ); email stays off). Only Aly's board move to done remains."
 outcome-resolves: "DoD met: durable per-change record for the owner, in-app inbox with read/unread, read is non-destructive and not approval, idempotent, in-app only, unit+HTTP tests, existing tests green."
 review-summary: "Durable owner-only in-app notification inbox. db v4 creates notifications with UNIQUE(user_id,event_id) + per-user/created_at index; read_at defaults NULL. Every task change funnels through _event(), which calls _notify_owner(): looks up the single global owner, returns early if no owner or owner==actor (owner never self-notified; audit still records the action), else INSERT OR IGNORE keyed on the fresh event_id. Reads (list_notifications, unread_notification_count) filter WHERE user_id=actor; mark_notification_read raises Forbidden on a foreign row and only sets read_at (never deletes, never touches task state, no-op if already read); mark_all is user-scoped. web exposes GET /api/notifications, POST .../{id}/read, POST .../read-all behind _require_user. app.js: header bell + unread badge + inbox dialog. All mutating paths route through _event. Meets the accepted DoD."
 review-gaps: "Nothing material. (1) Idempotency is real but under-tested: event_id is freshly generated per _event and never reused, so the UNIQUE+INSERT OR IGNORE guard is defensive-only and never fires in normal operation; the '...idempotently' test asserts one-change->one-row but does not inject a duplicate event_id to exercise a true replay/retry. (2) Notifications target only the single global owner; schema enforces exactly one owner, so no multi-owner/leakage concern; non-owners see an empty inbox. No recipient-isolation, self-notify, mark-read-mutation, or duplication bug found."
