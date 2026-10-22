@@ -1,7 +1,7 @@
 ---
 id: 01M4BY5B6YP69JMFMVCQJM7CFP
 title: Simple project-bound Excel workplans and task-row timeline scheduling
-status: signoff
+status: done
 ready: true
 creator: Codex
 assignee: Codex
@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T19:41:33Z
-updated-at: 2026-10-22T14:58:05Z
+updated-at: 2026-10-22T15:10:30Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-32528
 claimed-at: 2026-10-07T19:44:46Z
