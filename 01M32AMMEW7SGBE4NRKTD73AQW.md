@@ -1,7 +1,7 @@
 ---
 id: 01M32AMMEW7SGBE4NRKTD73AQW
 title: "Gantt: visible colour-coded task steps with hover and click detail"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -27,7 +27,7 @@ commits:
   - b5ddafa
   - ad0549b6db535518705b2dd1817b701a21a5a546
 created-at: 2026-09-21T15:51:31Z
-updated-at: 2026-10-22T14:55:16Z
+updated-at: 2026-10-22T15:07:12Z
 updated-by: Aly Jafferani
 claimed-by: vm-13959
 claimed-at: 2026-09-21T16:27:02Z
