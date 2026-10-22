@@ -21,7 +21,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-24T11:10:01Z
-updated-at: 2026-10-22T14:33:42Z
+updated-at: 2026-10-22T14:33:48Z
 updated-by: Claude
 claimed-by: vm-26532
 claimed-at: 2026-09-24T11:12:14Z
@@ -38,6 +38,7 @@ review-gaps: |-
   - Product note for Aly: a template task with the 'owner' role now goes to whichever owner applies the template.
 review-verdict: Approve — independent reviewer
 review-check: "Copy the tree (git ls-files | tar) to a scratch dir; PYTHONPATH=src run tests.test_core.SecondaryOwnerTests tests.test_db.PrimaryOwnerMigrationTests tests.test_web.AstraWebTests.test_secondary_owner_routes_enforce_primary_control_over_http (22 OK); run the exploit files scratchpad/gte-authz-exploit-tests.py and -r2.py; node --check src/astra/static/app.js; full tests/run.py (396 OK); git diff --check."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Secondary owners: primary owner can grant and remove full Owner access
