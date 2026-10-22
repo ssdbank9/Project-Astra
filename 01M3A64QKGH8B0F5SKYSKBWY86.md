@@ -1,7 +1,7 @@
 ---
 id: 01M3A64QKGH8B0F5SKYSKBWY86
 title: "Blocked-attempt notices: notify the acting owner for Item 2 events and cap repeats per person"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -28,7 +28,7 @@ related:
   - 01M2HPH35W0MHCMKGRQ9Z24KVH
 commits: []
 created-at: 2026-09-24T17:06:51Z
-updated-at: 2026-10-22T14:55:48Z
+updated-at: 2026-10-22T15:07:52Z
 updated-by: Aly Jafferani
 claimed-by: vm-6361
 claimed-at: 2026-09-24T17:07:27Z
