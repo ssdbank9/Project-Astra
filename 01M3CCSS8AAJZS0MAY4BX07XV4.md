@@ -28,7 +28,7 @@ related:
   - 01M3C0MZ2TASFSNYRN1E3C1Z74
 commits: []
 created-at: 2026-09-25T13:41:41Z
-updated-at: 2026-10-22T14:35:49Z
+updated-at: 2026-10-22T14:35:54Z
 updated-by: Claude
 claimed-by: vm-32647
 claimed-at: 2026-09-25T13:41:59Z
@@ -39,6 +39,7 @@ review-summary: "Reviews 12b, 12d and 12e (2026-09-25) of 34eeca1, 55ddf3c and 8
 review-gaps: "Left for later: three revert experiments no test catches (review 12e L1): dropping the board-source-status check in undo_move, dropping the per-row revision check inside _write_bulk, and showing members the bulk checkboxes. Not tried on a real touch device (tablet long press, Playwright emulation only), no screen-reader run, and no live refresh (lock chips, banners and Inbox gate lines show the last load; the server rechecks at write and decision time). Review 12c I3: bulk assign, like the panel, accepts the chairman and project viewers; ask Aly whether viewers should be assignable. The Blocked WIP exemption: a card that enters Blocked because of a dependency is not refused, so a Blocked limit can be exceeded by an added link or a reopened predecessor. A manager's accept request on a waiting task is filed and the owner is asked at decision time (not refused at filing). An owner's own board Undo passes the dependency override itself (12d I1); the importer and templates bypass the WIP and dependency gates (owner-only, 12d I2)."
 review-verdict: "approve with follow-ups: reviews 12a, 12b, 12c and re-review 12d each approved with follow-ups (no High); every finding fixed in 55ddf3cba30d4ce1cfe34603f25413aa9f32eb0a and 89e92295337e0edf7016e1fb1b2a85aeb0cae825; review 12e of 89e9229 approves (0 High, 0 Medium, 1 Low: three uncaught revert experiments, left as follow-ups); Ran 639 tests, OK"
 review-check: "1. Repo root: .venv/bin/python tests/run.py (Windows: .venv\\Scripts\\python.exe tests\\run.py); expect 'Ran 639 tests' and 'OK'. 2. Sign in as a manager in one browser and open a task's Edit form, then type in the title. 3. Sign in as the owner in a second browser (private window) and drag the same card on the Board: it snaps back with 'is in use. <manager> is changing this task … until <local time>'. 4. Open that task as the owner: an amber banner names the holder; press Force unlock and give a reason: the manager is told. 5. Open the project's Timeline and drag a bar a few days right: the tip shows the new dates and a toast offers Undo. 6. Drag a bar's right end past the project target: 'Confirm the new dates' lists the consequence; confirm, and task History shows schedule_impact_confirmed. 7. Reopen a completed task with a due date past the target: the same confirm appears."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Task locks and Gantt date drag
