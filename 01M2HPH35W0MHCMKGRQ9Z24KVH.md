@@ -19,7 +19,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T04:52:13Z
-updated-at: 2026-10-16T11:06:51Z
+updated-at: 2026-10-22T14:31:05Z
 claimed-by: X1CarbonPC-13392
 claimed-at: 2026-09-15T05:04:15Z
 updated-by: Claude
@@ -62,3 +62,4 @@ review-check: "Read db.py (v4 migration), service.py _event/_notify_owner/list_n
 - **2026-09-19 06:14 · Aly Jafferani** — HANDOFF 2026-09-19 (Claude->Codex): see astra_project_tracker/CODEX_HANDOFF_2026-09-19.md. PARKED in signoff - waiting on the App Owner. Verdict: pass-with-notes. Owner question: confirm owner is NOT self-notified of own actions; in-app only, outbound email deferred to section 15. (Idempotency guard is defensive-only, not a bug.)
 - **2026-09-20 03:10 · Aly Jafferani** — Owner decision 2026-09-20: do not self-notify the Owner for the Owner's own successful actions; preserve them in audit. Notify the Owner of every blocked or unauthorized attempt by another user. Initial delivery remains in-app only.
 - **2026-10-16 11:06 · Claude** — Review 2026-10-16 (Claude): the review text says a single global owner; the code now notifies every active owner except the actor (GTEYTG), with self-notice kinds (KBWY86). Missing before this date: a replay test for idempotency and a newest-first ordering test; both are being added in tests/test_signoff_gaps.py.
+- **2026-10-22 14:31 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. Answer: accepted as built; later decisions notify the acting owner of blocked attempts and attachment events (KBWY86, 6G89SJ); email stays off.
