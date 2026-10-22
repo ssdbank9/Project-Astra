@@ -1,7 +1,7 @@
 ---
 id: 01M3CAJRFH9J4RJFVMSZJN1QYG
 title: Board drag and drop with Move to and 15-second Undo
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -26,7 +26,7 @@ related:
   - 01M3C0MZ2TASFSNYRN1E3C1Z74
 commits: []
 created-at: 2026-09-25T13:02:54Z
-updated-at: 2026-10-22T14:56:54Z
+updated-at: 2026-10-22T15:09:13Z
 updated-by: Aly Jafferani
 claimed-by: vm-1562
 claimed-at: 2026-09-25T13:03:12Z
