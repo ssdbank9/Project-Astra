@@ -1,7 +1,7 @@
 ---
 id: 01M3BDCQSRG5SDAJY6J54T4DEA
 title: "Gate 2 slice 1: design foundation (tokens, self-hosted Inter, focus rings, no inline styles, no sideways scroll)"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -27,7 +27,7 @@ related:
   - 01M2WNN5PQXBBCD0XTZGJQY55P
 commits: []
 created-at: 2026-09-25T04:32:48Z
-updated-at: 2026-10-22T14:56:08Z
+updated-at: 2026-10-22T15:08:17Z
 updated-by: Aly Jafferani
 claimed-by: vm-2127
 claimed-at: 2026-09-25T04:32:57Z
