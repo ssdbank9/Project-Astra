@@ -1,7 +1,7 @@
 ---
 id: 01M2HV23PQE4NJB06K8CAYW0QC
 title: Calendar Gantt + critical path
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Claude
@@ -18,7 +18,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T06:11:25Z
-updated-at: 2026-10-22T14:54:30Z
+updated-at: 2026-10-22T15:06:31Z
 updated-by: Aly Jafferani
 outcome-what: "Independent review approved the test-only CPM rework"
 outcome-why: "4 new tests close the gaps the earlier review found; service.py unchanged; full suite green"
