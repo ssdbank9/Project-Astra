@@ -23,8 +23,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T02:24:50Z
-updated-at: 2026-10-04T08:14:30Z
-updated-by: Codex
+updated-at: 2026-10-22T14:36:30Z
+updated-by: Claude
 claimed-by: X1CarbonPC-26304
 claimed-at: 2026-10-04T02:26:57Z
 outcome-what: Closed unsuccessful SQLite setup; ordered fixture cleanup; decoded all Node capture sites as UTF-8; resolved expected missing-database paths; added four regressions and A0 evidence.
@@ -68,3 +68,4 @@ review-check: "1. In the Project-Astra checkout run .venv\\Scripts\\python.exe t
 
 ## Progress
 - **2026-10-04 04:03 · Codex** — The focused test command needs tests/ on sys.path because test_core/test_web import link_roots directly; plain module-qualified unittest import is not the documented discovery setup. The corrected focused loop reproduced all three A0 symptoms. New closure and cp1252 Node regressions went red before the fix, then focused20 tests passed. Fixture cleanup uses unittest LIFO callbacks so later secondary connections close before the initial connection and temporary directory, including setup failures. New ticket creation is ref-only in this CLI; jaira pull materializes it for the code commit. Planning must be ticked in Options before entering pre-process. Full suite is running with PYTHONUTF8 unset and utf8_mode=0; no product feature repairs included.
+- **2026-10-22 14:36 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.
