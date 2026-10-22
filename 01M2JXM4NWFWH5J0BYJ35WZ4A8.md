@@ -23,11 +23,11 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T16:15:27Z
-updated-at: 2026-10-22T14:32:40Z
+updated-at: 2026-10-22T14:32:45Z
 claimed-by: vm-21109
 claimed-at: 2026-09-24T06:15:34Z
 updated-by: Claude
-question: "Confirm: is project schedule editing in the People/admin config panel the right home, and is config + audit-log enough for now — or do you want project start/target to also show as markers on the Gantt/timeline (a follow-up)?"
+question: "Ready to accept per the 2026-10-22 consensus (the config panel stays the home for project schedule dates; Gantt start/target markers are an optional follow-up). Only Aly's board move to done remains."
 outcome-what: "Rework after review send-back: added GET /api/projects/{id}/events (reuses service.project_events, gated by can_view_project) and a Project history dialog (toolbar button when one project is selected) that lists project events newest first, rendering schedule changes as Start/Target old -> new with actor and reason; moved the old-date read inside the write transaction in set_project_schedule; added 6 tests (3 core, 1 HTTP, 2 static UI) and tightened test_project_schedule_over_http to read the audit row back; README documents the feature."
 outcome-why: "Review verdict 'send back' (gaps 1-4): nothing failed if the authorization check was deleted or before/after swapped, the HTTP test never read the audit row, and no user could see a project date change. Gap 5 (stale 'before' under concurrent edits) was cheap to close. Aly approved reassignment and the fix (Slack ts 1790228901.999149)."
 outcome-resolves: "DoD 1: editable dates, reason required, one project_events row with actor/before/after/reason (pinned by test_project_schedule_audit_row_records_actor_before_after_and_reason), history visible via GET /api/projects/{id}/events and the Project history dialog, task date log cited and tested. DoD 2: auth + audit-content tests at service and HTTP level; fault injection (guard removed, before/after swapped) now fails them. DoD 3: members incl. viewers read history (200), non-members 403; before/after screenshots taken on 127.0.0.1. Full suite 357 OK, node --check, compileall, git diff --check clean."
