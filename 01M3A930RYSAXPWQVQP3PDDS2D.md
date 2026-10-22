@@ -28,7 +28,7 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T17:58:21Z
-updated-at: 2026-10-22T14:34:03Z
+updated-at: 2026-10-22T14:34:08Z
 updated-by: Claude
 claimed-by: vm-13753
 claimed-at: 2026-09-24T17:58:31Z
@@ -39,6 +39,7 @@ review-summary: "Independent reviews 6 (228b49e) and 6b (d5b86e6), 2026-09-24. N
 review-gaps: "Still open, all LOW: (1) the CLI's broad catch of ValueError/KeyError/Conflict/Forbidden also wraps serve and init-owner, so a programming error raising those at startup shows one line instead of a traceback. (2) grant/revoke keep the stale-dict _is_primary_owner pre-check before validation; harmless because the in-transaction check decides, and it leaks nothing beyond what an owner sees. (3) Not PDDS2D: task-level actions against the primary owner (handoff option 4) and the per-email sign-in throttle locking out the primary (option 5) are separate open asks. Closed: review 6 gaps 1-5 and 7 (d5b86e6); review 6b gaps 1-3 and 5 (400a5d9: serve bind errors print 'Could not start the server on host:port', server_close guards a failed bind, terminal test asserts no getpass and no 'Database:' line, ticket reset-notice wording, README wrap). Commit 400a5d9 passed the full suite (Ran 438 tests, OK) but was not re-reviewed."
 review-verdict: "approve-with-follow-ups (independent reviews 6 and 6b, 2026-09-24). Transfer and reset are atomic, audited and refuse cleanly; the concurrency guards and the in-transaction primary check are pinned by tests that fail when reverted. Remaining items are the low follow-ups in review-gaps."
 review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 438 tests' and 'OK'. 2. Without ASTRA_HOME pointing at a real database: .venv\\Scripts\\astra reset-password --email you@example.org; it prints the path and 'No Astra database at ...; set ASTRA_HOME.' and creates nothing. 3. With a real database and a secondary owner D: .venv\\Scripts\\astra transfer-primary --to D's email; type a wrong email: 'Confirmation did not match; nothing was changed.'; run again and type it correctly: 'Primary owner is now ...'. 4. Sign in as the old primary: signed out; as D: People screen shows 'Primary owner transferred: D via server command' and D can make someone a secondary owner. 5. .venv\\Scripts\\astra reset-password --email a member's email; type the email, then a 12+ character password twice; that member can sign in with it and their old sessions are gone. 6. Run astra serve on a port already in use: one line 'Could not start the server on ...', no traceback."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Server command to transfer the primary owner and reset a password
