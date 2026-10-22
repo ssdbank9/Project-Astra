@@ -27,8 +27,8 @@ related:
   - 01M3BSY3W3FH34MF87RACR121Z
 commits: []
 created-at: 2026-09-25T14:12:02Z
-updated-at: 2026-10-22T14:36:05Z
-updated-by: Claude
+updated-at: 2026-10-22T14:57:07Z
+updated-by: Aly Jafferani
 claimed-by: vm-26940
 claimed-at: 2026-09-25T14:12:18Z
 outcome-what: "Owners and the project's managers tick tasks on a project's Board or List (Shift-click range, Space and Shift+Arrow in the list) and change status (Draft/Ready/In progress), assignee or due dates in bulk. A preview names every blocked task and any schedule consequences. Apply is all-or-nothing: bulk leases on every task first, then one transaction holding the writes, per-task task_updated events and one bulk_change project event with one owner notice. There is a 15 s bulk Undo. Owners set optional WIP limits per open column (wip_limits, schema v20; wip_limit_changed). Board moves and bulk status changes over a limit are refused with the reason, and owners may override after a confirm (wip_limit_override). Column heads show n / limit. update_task's write body became _apply_task_update so bulk can share it."
