@@ -22,7 +22,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-24T09:21:46Z
-updated-at: 2026-10-16T11:06:33Z
+updated-at: 2026-10-22T14:33:22Z
 updated-by: Claude
 claimed-by: vm-684
 claimed-at: 2026-09-24T09:22:00Z
@@ -81,3 +81,4 @@ review-check: "git diff 0f1eefc -- src README.md tests .jaira && git diff --chec
 - **2026-09-24 09:49 · Claude** — Chairman decided: Aly confirmed in Slack on 2026-09-24 09:45 UTC (thread 1790160392.461299, message ts 1790243107.569629, 'yes chairman can get filtered history') that a Chairman who is not a manager of the project gets the filtered history (only project_schedule_changed and project_closed). No code change was needed: can_manage_project already returns False for a Chairman without a manager membership. Now pinned by a 'chairman' subtest in test_project_history_non_managers_see_only_schedule_changes_and_closure (tests/test_core.py) and test_project_history_kinds_are_limited_for_non_managers_over_http (tests/test_web.py). Ported from worktree /workspace/wt-new into the main clone; the single-use _seed_every_project_event_kind helper and ALL_PROJECT_EVENT_KINDS class constant were inlined into the one test that used them. Failing-before (START_SHA 0f1eefc6 src + new tests): FAILED (failures=6), the chairman/viewer/member subtests of both tests.
 - **2026-09-24 10:38 · Claude** — Chairman rule changed after this ticket: Aly decided in Slack on 2026-09-24 10:26 UTC (thread 1790160392.461299, ts 1790245584.314119, 'Yes Chairman should full project history as well along with the owner') that the Chairman sees FULL project history. That replaces the filtered-Chairman rule recorded here (ts 1790243107.569629). Implemented in K62ZAP, which also updates this ticket's Chairman subtests to expect full history. Note only; this ticket stays in signoff.
 - **2026-10-16 11:06 · Claude** — Review 2026-10-16 (Claude): DoD 1-3 reworded to match shipped behaviour: project_reopened is in the non-manager allow-list (Z72D79) and the Chairman now sees full history (K62ZAP). Proof text for DoD 1 and 3 still lists the Chairman as filtered; that is superseded. The failing-before logs and screenshots live in old /tmp scratchpads and are not in the repo (historical only). A regression test for project_reopened visible to non-managers is being added in tests/test_signoff_gaps.py. Aly: please confirm.
+- **2026-10-22 14:33 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.
