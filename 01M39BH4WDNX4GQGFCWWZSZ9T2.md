@@ -22,8 +22,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-24T09:21:46Z
-updated-at: 2026-10-22T14:33:27Z
-updated-by: Claude
+updated-at: 2026-10-22T14:55:29Z
+updated-by: Aly Jafferani
 claimed-by: vm-684
 claimed-at: 2026-09-24T09:22:00Z
 outcome-what: "AstraService.project_events filters rows with an allow-list (NON_MANAGER_PROJECT_EVENT_KINDS = project_schedule_changed, project_closed) when can_manage_project is false; service + HTTP tests cover chairman, viewer, member (filtered), owner, manager (all kinds) and outsider (403); README and an app.js comment document it"
