@@ -30,8 +30,8 @@ related:
   - 01M3BVD71SMNH4E0M2CRFKVHH8
 commits: []
 created-at: 2026-09-25T10:09:20Z
-updated-at: 2026-10-22T14:35:32Z
-updated-by: Claude
+updated-at: 2026-10-22T14:56:48Z
+updated-by: Aly Jafferani
 claimed-by: vm-14196
 claimed-at: 2026-09-25T10:09:31Z
 outcome-what: "Phone/tablet and accessibility pass across every Gate 2 route (one touch-width CSS block: 44px targets, 16px fields, safe-area room, wrapping titles and People rows; sign-in main landmark; legend keys kept whole; Gantt project flag and brand contrast), plus the leftovers: Open full page hidden on touch widths, owner lanes by user id, Gantt today line and portfolio As of from the server's today, an SVG favicon, a visible Portfolio Gantt button on Home"
