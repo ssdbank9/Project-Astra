@@ -15,11 +15,11 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T13:57:04Z
-updated-at: 2026-10-22T14:32:29Z
+updated-at: 2026-10-22T14:32:35Z
 claimed-by: vm-17792
 claimed-at: 2026-09-24T06:09:32Z
 updated-by: Claude
-question: "One call to confirm: an accepted submission is auto-added to the repository (acceptance = a final result), and can be unmarked afterward by a task manager. Is auto-on-accept what you want, or should EVERY final result be an explicit manual mark? Also: attachments must be marked by hand (not auto) — confirm that's right."
+question: "Ready to accept per the 2026-10-22 consensus (already settled 2026-09-15: every final result is a manual mark; acceptance records nothing). Only Aly's board move to done remains."
 outcome-what: "Recorded the round-2 independent review (approve) and fixed the stale frontmatter DoD text."
 outcome-why: "Rework e94a1a6 closed the round-1 gaps; the reviewer approved with low findings only."
 outcome-resolves: "Review lane for CS93C6; frontmatter definition-of-done now matches DoD 1."
