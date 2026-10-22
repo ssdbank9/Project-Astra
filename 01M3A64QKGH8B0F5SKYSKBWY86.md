@@ -28,8 +28,8 @@ related:
   - 01M2HPH35W0MHCMKGRQ9Z24KVH
 commits: []
 created-at: 2026-09-24T17:06:51Z
-updated-at: 2026-10-22T14:33:58Z
-updated-by: Claude
+updated-at: 2026-10-22T14:55:48Z
+updated-by: Aly Jafferani
 claimed-by: vm-6361
 claimed-at: 2026-09-24T17:07:27Z
 outcome-what: "Owner notices: attachment_removal_blocked, final_result_unmarked and attachment_removed also reach the owner who acted, naming task, item and actor. Schema v17 adds notifications.actor_user_id (nullable, no backfill) and idx_notifications_actor; every notice stores its actor. Blocked-attempt notices are capped per recipient and actor per rolling 10 minutes in two buckets of 5: owner_change_blocked alone, and the other blocked kinds pooled across kinds and targets; the notice that reaches a cap says further attempts of that kind are in history only for now; the audit row is always written. owner_change_blocked no longer skips the audit row for same-key repeats. A blocked import with no target project is audited as a user_events import_blocked row about the actor; list_user_events and the People screen list blocked owner changes and blocked imports separately."
