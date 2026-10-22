@@ -28,7 +28,7 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T17:58:21Z
-updated-at: 2026-10-16T11:06:42Z
+updated-at: 2026-10-22T14:34:03Z
 updated-by: Claude
 claimed-by: vm-13753
 claimed-at: 2026-09-24T17:58:31Z
@@ -75,3 +75,4 @@ review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; 
 - **2026-09-24 18:23 · Claude** — Review 6 (approve-with-follow-ups) fixed in the next commit: recovery commands print the database first and refuse a missing file without creating one; transfer guards (both rowcount checks, check inside the write lock) pinned by tests that fail when reverted; grant/revoke and owner-target user changes re-check the actor is still the active primary inside the write transaction (stale old-primary actor now Forbidden and audited); reset-password needs an interactive terminal; sqlite OperationalError and OSError print one line (exit 1). Follow-up, not done (review 6 gap 6): the CLI's broad catch of ValueError/KeyError also wraps serve and init-owner, so a programming error raising those at startup shows one line instead of a traceback.
 - **2026-09-24 18:37 · Claude** — Reviews 6 and 6b recorded (approve-with-follow-ups). Open lows: broad except around serve/init-owner; stale-dict pre-check in grant/revoke (harmless); options 4 and 5 are separate asks. Commit 400a5d9 passed the full suite (438 OK) but was not re-reviewed.
 - **2026-10-16 11:06 · Claude** — Review 2026-10-16 (Claude): DoD 1 said a 12+ character password. The shipped minimum is 8 (auth.py:11, 3M2AYA, DECISIONS_LOG.md:95) and reset-password now also forces a change at next sign-in (A5). Criterion reworded to match; tests already assert 8. Exit code 2 (argparse usage error) had no test; one is being added in tests/test_signoff_gaps.py. Aly: please confirm.
+- **2026-10-22 14:34 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.
