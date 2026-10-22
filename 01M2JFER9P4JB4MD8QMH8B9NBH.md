@@ -1,7 +1,7 @@
 ---
 id: 01M2JFER9P4JB4MD8QMH8B9NBH
 title: "Project & task templates"
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Claude
@@ -15,7 +15,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T12:07:50Z
-updated-at: 2026-10-22T14:54:37Z
+updated-at: 2026-10-22T15:06:37Z
 updated-by: Aly Jafferani
 claimed-by: vm-13559
 claimed-at: 2026-09-24T06:05:57Z
