@@ -1,7 +1,7 @@
 ---
 id: 01M2HPGPQVKM6W59NTM99R7A87
 title: Parent/subtask hierarchy and roll-up
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Aly Jafferani
@@ -19,7 +19,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T04:52:00Z
-updated-at: 2026-10-22T14:53:51Z
+updated-at: 2026-10-22T15:05:42Z
 claimed-by: X1CarbonPC-46912
 claimed-at: 2026-09-15T05:00:40Z
 updated-by: Aly Jafferani
