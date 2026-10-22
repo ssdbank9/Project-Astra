@@ -1,7 +1,7 @@
 ---
 id: 01M3BF5Z67ZKA6JJG020DR3PKR
 title: "Gate 2 slice 3: docked task side panel with its own link"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -25,7 +25,7 @@ related:
   - 01M3BE0B99E7TFPEA6MAPZTYC9
 commits: []
 created-at: 2026-09-25T05:04:03Z
-updated-at: 2026-10-22T14:56:21Z
+updated-at: 2026-10-22T15:08:32Z
 updated-by: Aly Jafferani
 claimed-by: vm-9335
 claimed-at: 2026-09-25T05:04:22Z
