@@ -18,8 +18,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T06:11:25Z
-updated-at: 2026-10-22T14:32:01Z
-updated-by: Claude
+updated-at: 2026-10-22T14:54:30Z
+updated-by: Aly Jafferani
 outcome-what: "Independent review approved the test-only CPM rework"
 outcome-why: "4 new tests close the gaps the earlier review found; service.py unchanged; full suite green"
 question: "Ready to accept per the 2026-10-22 consensus (already settled: full critical path (2026-09-15); dependency arrows shipped in 8fa1ae3). Only Aly's board move to done remains."
