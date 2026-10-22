@@ -15,11 +15,11 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T12:07:50Z
-updated-at: 2026-10-22T14:32:06Z
+updated-at: 2026-10-22T14:32:13Z
 updated-by: Claude
 claimed-by: vm-13559
 claimed-at: 2026-09-24T06:05:57Z
-question: "Three design calls to confirm: (1) Templates do NOT carry task OWNERS — every task instantiates unassigned (people change each cycle). Asana optionally copies assignees; want unassigned (current) or a suggested owner carried? (2) Attachment LINKS are carried into templates, so a templated task points at the SAME file path (good for a standard checklist, not for last cycle's output) — keep, or drop attachments from templates? (3) Task-template instantiation currently asks for the target project/parent via prompts (rough); fine for the pilot until the UX shell lands, or want a picker now?"
+question: "Ready to accept per the 2026-10-22 consensus (already settled 2026-09-15: role-based suggested owner, attachment links carried, current picker kept; one shared member role (Slack 2026-09-24)). Only Aly's board move to done remains."
 outcome-what: "Independent review approved the role-based template rework; review fields recorded."
 outcome-why: "Review lane requires a second-model judgement before a person signs off."
 outcome-resolves: "Review verdict Approve with six low findings recorded in review-gaps; one needs Aly's decision (member-role collapse)."
