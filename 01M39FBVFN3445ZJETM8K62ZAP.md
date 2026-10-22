@@ -22,7 +22,7 @@ related:
   - 01M39BH4WDNX4GQGFCWWZSZ9T2
 commits: []
 created-at: 2026-09-24T10:28:47Z
-updated-at: 2026-10-22T14:33:32Z
+updated-at: 2026-10-22T14:33:37Z
 updated-by: Claude
 claimed-by: vm-13562
 claimed-at: 2026-09-24T10:30:59Z
@@ -37,6 +37,7 @@ review-gaps: |-
   - Round 1 send-back (missing cross-project own-row test; free-form table/key) fixed in round 2.
 review-verdict: Approve — independent reviewer
 review-check: "Copy the tree (git ls-files | tar) to a scratch dir; run the 6 focused tests (the 2 K62ZAP tests, 2 ZSZ9T2 tests, test_project_history_readable_by_members_not_outsiders, test_project_schedule_and_history_authorization_over_http) with PYTHONPATH=src: OK; node --check src/astra/static/app.js; drop the parentheses around (e.event_type IN (...) OR e.actor_user_id=?) in _history_rows and rerun: FAILED (failures=4); git diff --check."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Full history for Owner and Chairman; hide approval details from other non-managers' task history
