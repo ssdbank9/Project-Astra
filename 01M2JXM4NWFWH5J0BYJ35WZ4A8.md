@@ -1,7 +1,7 @@
 ---
 id: 01M2JXM4NWFWH5J0BYJ35WZ4A8
 title: Project schedule dates with change history
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Claude
@@ -23,7 +23,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T16:15:27Z
-updated-at: 2026-10-22T14:55:02Z
+updated-at: 2026-10-22T15:06:59Z
 claimed-by: vm-21109
 claimed-at: 2026-09-24T06:15:34Z
 updated-by: Aly Jafferani
