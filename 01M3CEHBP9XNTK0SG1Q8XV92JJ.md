@@ -1,7 +1,7 @@
 ---
 id: 01M3CEHBP9XNTK0SG1Q8XV92JJ
 title: Bulk select and WIP limits
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -27,7 +27,7 @@ related:
   - 01M3BSY3W3FH34MF87RACR121Z
 commits: []
 created-at: 2026-09-25T14:12:02Z
-updated-at: 2026-10-22T14:57:07Z
+updated-at: 2026-10-22T15:09:26Z
 updated-by: Aly Jafferani
 claimed-by: vm-26940
 claimed-at: 2026-09-25T14:12:18Z
