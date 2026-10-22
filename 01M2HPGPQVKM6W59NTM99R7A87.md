@@ -19,10 +19,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T04:52:00Z
-updated-at: 2026-10-22T14:30:59Z
+updated-at: 2026-10-22T14:53:51Z
 claimed-by: X1CarbonPC-46912
 claimed-at: 2026-09-15T05:00:40Z
-updated-by: Claude
+updated-by: Aly Jafferani
 outcome-what: set_parent with cycle prevention; subtask roll-up (completed/total) in task_detail shown separately from declared progress; parent picker in create + change-parent in detail; clickable subtasks; 3 new tests (55 total).
 outcome-why: "Section 6/11: parent/subtask was Partial — no UI, no roll-up, no cycle policy."
 question: "Ready to accept per the 2026-10-22 consensus (roll-up counts direct children only; a child counts as completed when it is accepted). Only Aly's board move to done remains."
