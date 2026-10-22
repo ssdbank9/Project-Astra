@@ -26,8 +26,8 @@ related:
   - 01M3C0MZ2TASFSNYRN1E3C1Z74
 commits: []
 created-at: 2026-09-25T13:02:54Z
-updated-at: 2026-10-22T14:35:42Z
-updated-by: Claude
+updated-at: 2026-10-22T14:56:54Z
+updated-by: Aly Jafferani
 claimed-by: vm-1562
 claimed-at: 2026-09-25T13:03:12Z
 outcome-what: "The project board is now movable by owners and the project's managers. Drag within a column to reorder it (tasks.board_rank, schema v18). Drag across columns to change status through today's server rules (Blocked = hold dialog, Submitted/Accepted confirm, Closed and reopen ask for reasons, a manager's protected drops file Owner requests). Waiting-on-predecessor cards cannot go forward, and only an owner may override (dependency_override). Refusals are audited as board_move_blocked. Every card has a Move to menu for the keyboard and phones. Ordinary moves and reorders show a 15-second Undo, which is a new audited change. Also: Aly's 2026-09-25 decision lets a project manager put work on hold directly."
