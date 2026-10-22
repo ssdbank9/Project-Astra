@@ -28,7 +28,7 @@ related:
   - 01M2HPH35W0MHCMKGRQ9Z24KVH
 commits: []
 created-at: 2026-09-24T17:06:51Z
-updated-at: 2026-10-22T14:33:53Z
+updated-at: 2026-10-22T14:33:58Z
 updated-by: Claude
 claimed-by: vm-6361
 claimed-at: 2026-09-24T17:07:27Z
@@ -39,6 +39,7 @@ review-summary: "Independent reviews 5 (e9d52af+37f0122) and 5b (de130d3), 2026-
 review-gaps: "Still open, all LOW: (1) the cap is soft under concurrency: COUNT and INSERT are not atomic under ThreadingHTTPServer, overshoot at most concurrent requests minus 1, and the cap line can land on a notice other than the 5th in that race. (2) Audit growth has no rate limit: every scripted owner-change attempt and no-project import preview adds a user_events row; rate-limit at the HTTP layer for the hosted deployment. (3) CLAUDE_HANDOFF_2026-09-24.md's v16 bullet still reads as current until the v17 bullet below it. (4) No HTTP or People-screen render test for the two blocked lists or the import_blocked label. Closed by later commits: review 5 gaps 1, 2, 3a-d, 4, 7, 8 (de130d3); review 5b gaps 1-4 (aa98547: DoD and outcome text now describe two buckets, cap line names its bucket and drops 'next 10 minutes' with a ' · ' break, window-edge test margins 30 s, owner-change bucket cap line asserted, handoff and CLAUDE.md say 421 tests). The aa98547 polish was verified by the full suite (Ran 421 tests, OK) but not re-reviewed."
 review-verdict: "approve-with-follow-ups (independent reviews 5 and 5b, 2026-09-24). The self-notice, the two cap buckets with their cap line, and the per-type history limits are correct and each is pinned by a test that fails when the fix is reverted. Remaining items are the four low follow-ups in review-gaps."
 review-check: "1. Windows, repo root, branch codex/migration-safety-remediation: run .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 421 tests' and 'OK'. 2. Start Astra on an existing database; it upgrades to schema 17 without error. 3. As a project viewer, click Remove on an attachment 6 times within 10 minutes; the owner's inbox shows 5 'attachment removal blocked' notices, the 5th ending 'Further blocked attempts of this kind by <viewer> are recorded in history only for now.'; the task history shows 6 blocked rows. 4. As a secondary owner, try to deactivate another owner; the primary still gets a 'blocked ... attempt' notice even after step 3-style flooding by the same person. 5. With a single owner, mark an attachment as a final result and click Remove; the owner gets a notice naming the task, the attachment and 'by <owner>'. Unmark, then Remove; two more notices arrive. 6. As a chairman, try an import without choosing a project; People screen shows it under 'Blocked imports without a project', separate from 'Blocked owner-access attempts'."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Blocked-attempt notices: notify the acting owner for Item 2 events and cap repeats per person
