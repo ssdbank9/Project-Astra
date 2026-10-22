@@ -1,7 +1,7 @@
 ---
 id: 01M3BSY3W3FH34MF87RACR121Z
 title: "Gate 2 slice 5: project page with Overview, List, Board, Timeline and Activity tabs"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -26,7 +26,7 @@ related:
   - 01M3BS57ZY3F4GP2D6K1VPYGY5
 commits: []
 created-at: 2026-09-25T08:12:00Z
-updated-at: 2026-10-22T14:56:34Z
+updated-at: 2026-10-22T15:08:48Z
 updated-by: Aly Jafferani
 claimed-by: vm-4417
 claimed-at: 2026-09-25T08:12:20Z
