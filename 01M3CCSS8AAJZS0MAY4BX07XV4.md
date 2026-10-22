@@ -1,7 +1,7 @@
 ---
 id: 01M3CCSS8AAJZS0MAY4BX07XV4
 title: Task locks and Gantt date drag
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -28,7 +28,7 @@ related:
   - 01M3C0MZ2TASFSNYRN1E3C1Z74
 commits: []
 created-at: 2026-09-25T13:41:41Z
-updated-at: 2026-10-22T14:57:00Z
+updated-at: 2026-10-22T15:09:20Z
 updated-by: Aly Jafferani
 claimed-by: vm-32647
 claimed-at: 2026-09-25T13:41:59Z
