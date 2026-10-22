@@ -22,7 +22,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-24T09:21:46Z
-updated-at: 2026-10-22T14:33:22Z
+updated-at: 2026-10-22T14:33:27Z
 updated-by: Claude
 claimed-by: vm-684
 claimed-at: 2026-09-24T09:22:00Z
@@ -37,6 +37,7 @@ review-gaps: |-
   - Info: protected_action_requested has no label in PROJECT_EVENT_LABELS (pre-existing).
 review-verdict: Approve — independent reviewer
 review-check: "git diff 0f1eefc -- src README.md tests .jaira && git diff --check; grep -n project_events src/astra/*.py; run the two focused tests; node --check src/astra/static/app.js; mutations: disable the can_manage_project branch, exempt chairman, filter everyone, ignore manager role, drop the get_project gate, widen the allow-list: each fails the focused tests."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Limit Project history event kinds for non-managers
