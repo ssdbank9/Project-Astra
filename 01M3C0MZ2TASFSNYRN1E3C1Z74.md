@@ -1,7 +1,7 @@
 ---
 id: 01M3C0MZ2TASFSNYRN1E3C1Z74
 title: "Gate 2 slice 7: phone and accessibility pass, plus the Gate 2 leftovers"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -30,7 +30,7 @@ related:
   - 01M3BVD71SMNH4E0M2CRFKVHH8
 commits: []
 created-at: 2026-09-25T10:09:20Z
-updated-at: 2026-10-22T14:56:48Z
+updated-at: 2026-10-22T15:09:05Z
 updated-by: Aly Jafferani
 claimed-by: vm-14196
 claimed-at: 2026-09-25T10:09:31Z
