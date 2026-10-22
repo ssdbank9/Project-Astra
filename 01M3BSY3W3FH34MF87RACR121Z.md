@@ -26,8 +26,8 @@ related:
   - 01M3BS57ZY3F4GP2D6K1VPYGY5
 commits: []
 created-at: 2026-09-25T08:12:00Z
-updated-at: 2026-10-22T14:35:11Z
-updated-by: Claude
+updated-at: 2026-10-22T14:56:34Z
+updated-by: Aly Jafferani
 claimed-by: vm-4417
 claimed-at: 2026-09-25T08:12:20Z
 outcome-what: "Each project has a page at #/project/<id>/<tab>: Overview (facts, progress, next due), List (the schedule table), Board (read-only, 11 statuses in 7 columns, Accepted/Closed collapsed as Owner-decided, Divide by owner or criticality kept in the link), Timeline (the Gantt) and Activity (project history), with Add a task and owner-only Save as template and Close project. Cards, rows and bars open the task panel; Projects rows link to the page. The Gantt nodes move between the portfolio and the project page instead of being duplicated."
