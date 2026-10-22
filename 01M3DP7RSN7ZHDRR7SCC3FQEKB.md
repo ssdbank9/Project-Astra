@@ -32,7 +32,7 @@ related:
   - 01M3CEHBP9XNTK0SG1Q8XV92JJ
 commits: []
 created-at: 2026-09-26T01:45:51Z
-updated-at: 2026-10-16T12:57:03Z
+updated-at: 2026-10-22T14:36:10Z
 updated-by: Claude
 claimed-by: vm-1352
 claimed-at: 2026-09-26T01:45:58Z
@@ -76,3 +76,4 @@ review-check: "1. Repo root: .venv/bin/python tests/run.py (Windows: .venv\\Scri
 - **2026-09-26 04:22 · Claude** — Follow-up (coordinator, from Aly's rule that the Chairman never receives work): _may_submit returns False for a chairman-role user before any other check, so a legacy Chairman assignee cannot submit; the task stays flagged needs_new_assignee and permissions.can_submit hides Submit. Test: test_assignment ExistingAssignmentsTests.test_the_chairman_never_submits_even_as_a_legacy_assignee.
 - **2026-09-26 05:37 · Claude** — Review 13b fixes: buildSchedule(task,closed,{canPropose:!ro}) - the proposal form needs edit rights, while a pending proposal's Approve/Request controls follow can_decide_protected or can_request_protected only (so a designated approver keeps 'Request Owner approval'; the Chairman and viewers still see 'Owner decision required'). Driver cases added: an approver panel, and a collaborator-only flagged task in the Home tile and matchesRisk.
 - **2026-10-16 12:57 · Claude** — 2026-10-16: new tests assert the Chairman's bulk Assign over HTTP and that can_manage_project stays False for the Chairman (tests/test_signoff_gaps_http.py and tests/test_signoff_gaps.py). Plan is empty (0/0); not changed.
+- **2026-10-22 14:36 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.
