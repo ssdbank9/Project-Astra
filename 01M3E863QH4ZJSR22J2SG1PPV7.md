@@ -26,7 +26,7 @@ related:
   - 01M3DP7RSN7ZHDRR7SCC3FQEKB
 commits: []
 created-at: 2026-09-26T06:59:31Z
-updated-at: 2026-10-22T14:36:20Z
+updated-at: 2026-10-22T14:36:25Z
 updated-by: Claude
 claimed-by: vm-797
 claimed-at: 2026-09-26T06:59:43Z
@@ -37,6 +37,7 @@ review-summary: "G1PPV7 routes the assignee through `_assignee_refusal` with rol
 review-gaps: "5 Lows (older rules not restated, one Codex line, SSH check missed ::/0 and wide ranges, one broad assertRaises, private artifact link without caveat), all fixed in the follow-up commit on top of 0f0511b (the same commit that moves this ticket to signoff; its SHA is in git log for this ticket)."
 review-verdict: "approve with follow-ups (0 High, 0 Medium, 5 Low; Lows fixed)"
 review-check: independent probe14.py 27/27 at 0f0511b and reproduces the bug at 146a5b3; M1-M5 reverts; full suite Ran 680 tests OK; diff-check and CR scan clean
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # A viewer assigned a top-level task before 3FQEKB can still submit it
