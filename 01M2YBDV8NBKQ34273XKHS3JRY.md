@@ -1,7 +1,7 @@
 ---
 id: 01M2YBDV8NBKQ34273XKHS3JRY
 title: Reconcile latest Owner-only authorization
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 goal: Make every application path enforce the latest rule that protected lifecycle and all file/final-result mutations are App Owner-only while Managers retain only approved ordinary project operations.
@@ -15,7 +15,7 @@ commits:
   - 9ec1279
   - 6a82463
 created-at: 2026-09-20T02:48:19Z
-updated-at: 2026-10-22T14:55:10Z
+updated-at: 2026-10-22T15:07:06Z
 updated-by: Aly Jafferani
 claimed-by: vm-6287
 claimed-at: 2026-09-21T15:35:28Z
