@@ -1,7 +1,7 @@
 ---
 id: 01M39HQB2EFDXWXH92WYGTEYTG
 title: "Secondary owners: primary owner can grant and remove full Owner access"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -21,7 +21,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-24T11:10:01Z
-updated-at: 2026-10-22T14:55:42Z
+updated-at: 2026-10-22T15:07:42Z
 updated-by: Aly Jafferani
 claimed-by: vm-26532
 claimed-at: 2026-09-24T11:12:14Z
