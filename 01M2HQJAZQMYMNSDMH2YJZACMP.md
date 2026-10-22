@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJAZQMYMNSDMH2YJZACMP
 title: "Schedule-revision model: baseline / current / pending"
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Aly Jafferani
@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:22Z
-updated-at: 2026-10-22T14:54:04Z
+updated-at: 2026-10-22T15:05:58Z
 claimed-by: X1CarbonPC-37068
 claimed-at: 2026-09-15T07:51:20Z
 updated-by: Aly Jafferani
