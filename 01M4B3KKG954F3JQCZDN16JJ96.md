@@ -1,7 +1,7 @@
 ---
 id: 01M4B3KKG954F3JQCZDN16JJ96
 title: Allow owners to rename an entity without breaking project links
-status: signoff
+status: done
 ready: true
 creator: Codex
 assignee: Codex
@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T11:57:29Z
-updated-at: 2026-10-22T14:57:58Z
+updated-at: 2026-10-22T15:10:23Z
 updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-21680
 claimed-at: 2026-10-07T12:02:00Z
