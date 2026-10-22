@@ -14,8 +14,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T16:11:32Z
-updated-at: 2026-10-13T17:15:12Z
-updated-by: Codex
+updated-at: 2026-10-22T16:32:53Z
+updated-by: Claude
 claimed-by: X1CarbonPC-40532
 claimed-at: 2026-10-13T16:12:16Z
 question: Please review the report and authorize the next repair scope; no deployment is proposed.
@@ -47,3 +47,5 @@ outcome-resolves: "Provides concrete evidence, limitations and prioritized repai
 
 ## Progress
 - **2026-10-13 16:38 · Codex** — Current-source disposable Chrome confirmed persisted wrong-task save and failed-assignee lookup clearing owner. Full832 passes despite defects. All38 built unaccepted records139 criteria plus5 context records12 criteria enumerated. Review recommends repairs; no app fixes or acceptance. Report independent review pending; native prompt/focus tooling limited last template/admin checks.
+- **2026-10-22 16:17 · Claude** — 2026-10-22 close review: Claude and Codex both recommend closing (Codex read-only review of a per-ticket packet). Cited tests and documents exist at bdbf795 and the full suite passes (1112 OK, skipped=1 at 6f61d74). Waiting for Aly's board move to done.
+- **2026-10-22 16:32 · Claude** — 2026-10-22 tested before closing (Aly: do not close on his okay alone). Claude, temp copy of bdbf795: focused tests pass; guard removal: its repairs (WMW428, MJ5Q35) pass their guard removals; the report's documents exist; restored copy passes. Codex, its own temp copy: PASS; F1-F9 implemented, backend repairs mapped; probe: search escapes HTML and encodes links. Both recommend closing.

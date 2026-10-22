@@ -14,8 +14,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T18:00:29Z
-updated-by: Codex
+updated-at: 2026-10-22T16:33:22Z
+updated-by: Claude
 claimed-by: X1CarbonPC-18440
 claimed-at: 2026-10-15T16:35:36Z
 outcome-what: "Implemented the primary Owner daily in-app summary, configurable local time and IANA zone, no-polling scheduler and Owner-transfer inheritance; added migration, settings, HTTP, browser and scheduler coverage."
@@ -60,3 +60,5 @@ question: "Please review and accept the daily summary implementation, including 
 - **2026-10-15 17:35 · Codex** — Correction: jaira dod rewrites the visible Definition of Done checklist but leaves the separate frontmatter definition-of-done field used in lane prompts. A follow-up jaira set was needed to synchronize both representations; verify both the rendered ticket and --for-lane JSON after changing acceptance criteria.
 - **2026-10-15 17:36 · Codex** — Aly's 2026-10-15 decision: when primary App Owner is transferred, the new primary inherits the saved daily summary schedule and time zone. Treat these as app-level Owner settings, not separate personal preferences; covered by the owner-transfer regression test.
 - **2026-10-15 17:56 · Codex** — 2026-10-15 final verification: the owner-selected time and IANA time zone are persisted as app-level settings; a new primary Owner inherits them. The full suite passed 927 tests in 767.731s (one skipped). A synthetic Chrome session saved America/Chicago and opened the daily Inbox item. Independent read-only review found no new correctness or acceptance issue. The first full run caught a stale Waitress test double; the test now supplies a disposable database path and asserts scheduler start/stop. The current README records the local receipt. No cloud, hosting, deployment or external notification work occurred.
+- **2026-10-22 16:18 · Claude** — 2026-10-22 close review: Claude and Codex both recommend closing (Codex read-only review of a per-ticket packet). Cited tests and documents exist at bdbf795 and the full suite passes (1112 OK, skipped=1 at 6f61d74). Waiting for Aly's board move to done.
+- **2026-10-22 16:33 · Claude** — 2026-10-22 tested before closing: KEEP OPEN. Codex found and Claude reproduced a defect: seconds_until_next_digest (src/astra/daily_digest.py:18-27) compares the target and now as same-zone wall-clock times, so in the repeated hour after a DST fall-back a delivery time already passed (first occurrence) still looks ahead and the wait is 0. Repro: 2026-11-01 06:10 UTC, delivery 01:30 America/New_York -> 0 s; 30 minutes of zero waits between 06:00 and 07:00 UTC, so the scheduler loop spins and queries SQLite instead of sleeping. Default 09:00 Asia/Karachi (no DST) is unaffected. Fix: compare in UTC and roll to the next day when the target instant is not after now; add DST fall-back and spring-forward tests. Guard removal on the delivery-time gate was caught by both reviewers; the 8 focused tests pass.
