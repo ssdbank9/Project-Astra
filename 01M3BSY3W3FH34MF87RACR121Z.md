@@ -26,7 +26,7 @@ related:
   - 01M3BS57ZY3F4GP2D6K1VPYGY5
 commits: []
 created-at: 2026-09-25T08:12:00Z
-updated-at: 2026-10-22T14:35:07Z
+updated-at: 2026-10-22T14:35:11Z
 updated-by: Claude
 claimed-by: vm-4417
 claimed-at: 2026-09-25T08:12:20Z
@@ -37,6 +37,7 @@ review-summary: "Review 10 (2026-09-25, session file lock10-review.md) of 15562d
 review-gaps: "Left for later: I2 Divide by owner groups by display name, so two people with the same name share a lane (group by owner_user_id); the Home strip counts use each project's own timezone while its labels use the app timezone (Asia/Karachi), so a project in a far timezone can differ by a day at the edges; Divide by entity, a project Activity filter and 'since Monday' tile deltas are not built; the Gantt 'today' line and the portfolio 'As of' still read the browser clock (outside these slices); slice 7 (phone and accessibility pass) remains. The fix commit was not re-reviewed."
 review-verdict: "approve with follow-ups; M1-M2 and L1-L8 fixed in 7bfa045ea033dd3001c6e083d0fa9b01cbad9276, not re-reviewed"
 review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 503 tests' and 'OK'. 2. Sign in as the owner, open Projects and click a project: its page opens on Overview with tabs Overview, List, Board, Timeline, Activity. 3. Click Board: 7 columns (Draft, Ready, In progress, Blocked, Submitted, Accepted, Closed); Accepted and Closed are narrow and show a lock. 4. Set Divide by to Owner: each person gets a lane, and every lane's columns sit exactly under the column headers; scroll the board sideways: the lane names stay at the left. 5. A card without a criticality shows no 'Unrated' badge. 6. Click a card title: the task opens in the side panel. 7. Edit the address to end in /nope and press Enter: Overview opens and the address changes to /overview. 8. Sign in as a member: Save as template and Close project are not shown."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Gate 2 slice 5: project page with Overview, List, Board, Timeline and Activity tabs
