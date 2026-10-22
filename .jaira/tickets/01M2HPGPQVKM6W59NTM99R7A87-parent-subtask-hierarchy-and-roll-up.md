@@ -19,13 +19,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T04:52:00Z
-updated-at: 2026-09-20T03:12:06Z
+updated-at: 2026-10-22T14:30:59Z
 claimed-by: X1CarbonPC-46912
 claimed-at: 2026-09-15T05:00:40Z
-updated-by: Aly Jafferani
+updated-by: Claude
 outcome-what: set_parent with cycle prevention; subtask roll-up (completed/total) in task_detail shown separately from declared progress; parent picker in create + change-parent in detail; clickable subtasks; 3 new tests (55 total).
 outcome-why: "Section 6/11: parent/subtask was Partial — no UI, no roll-up, no cycle policy."
-question: "Accept, or send back? Roll-up counts only DIRECT children as completed/total (not recursive descendants) and 'completed' means the accepted lifecycle state — is that the granularity you want?"
+question: "Ready to accept per the 2026-10-22 consensus (roll-up counts direct children only; a child counts as completed when it is accepted). Only Aly's board move to done remains."
 outcome-resolves: "DoD met: subtasks viewable, roll-up separate from progress, cycles prevented, cross-project parent rejected, unit+HTTP tests, existing tests green."
 review-summary: "set_parent re-parents with three guards (self-parent rejected, same-project enforced, ancestor-walk cycle guard via _task_ancestors) and records a parent_changed audit event. list_subtasks returns DIRECT children; task_detail attaches subtask_rollup {total, completed} where completed = accepted lifecycle status, kept as a SEPARATE field that never overwrites the parent's declared progress (UI shows both). POST /api/tasks/{id}/parent, create-dialog parent picker, clickable subtasks in detail. Meets the accepted DoD: direct-children granularity, accepted=completed."
 review-gaps: "None material. Notes: (1) rollup denominator counts all direct children incl. cancelled/abandoned, so a parent may read '2 of 5' with 3 dead - defensible under the accepted 'completed = accepted state' design. (2) The detail-dialog parent picker does not pre-filter the task's own descendants; a cycle pick is safely rejected server-side, so a UX nicety not a correctness hole. No cross-project re-parent path; update_task does not touch parent_task_id so the guard cannot be bypassed. Authz correct (manage to set, view to read). No N+1/unbounded recursion."
@@ -61,3 +61,4 @@ review-check: "Read set_parent, _task_ancestors, list_subtasks, task_detail roll
 - **2026-09-15 18:32 · Aly Jafferani** — OWNER ACCEPTED (2026-09-15): direct-children roll-up granularity; accepted lifecycle state = completed. Proceeding to model review.
 - **2026-09-19 06:14 · Aly Jafferani** — HANDOFF 2026-09-19 (Claude->Codex): see astra_project_tracker/CODEX_HANDOFF_2026-09-19.md. PARKED in signoff - waiting on the App Owner (Codex cannot move it out). Review verdict: pass. Owner question: roll-up counts only DIRECT children, completed=accepted lifecycle state - is that the granularity wanted?
 - **2026-09-20 03:12 · Aly Jafferani** — Owner confirmation recorded 2026-09-20: roll-up counts accepted/completed DIRECT children only and remains separate from declared progress.
+- **2026-10-22 14:30 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. Answer: roll-up counts direct children only; a child counts as completed when it is accepted.

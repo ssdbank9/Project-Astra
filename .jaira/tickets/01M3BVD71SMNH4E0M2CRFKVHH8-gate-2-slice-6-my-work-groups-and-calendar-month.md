@@ -27,7 +27,7 @@ related:
   - 01M3BSY3W3FH34MF87RACR121Z
 commits: []
 created-at: 2026-09-25T08:37:44Z
-updated-at: 2026-09-25T09:53:01Z
+updated-at: 2026-10-22T14:35:21Z
 updated-by: Claude
 claimed-by: vm-10500
 claimed-at: 2026-09-25T08:38:56Z
@@ -38,6 +38,7 @@ review-summary: "Review 10 (2026-09-25, session file lock10-review.md) of 15562d
 review-gaps: "Left for later: I2 Divide by owner groups by display name, so two people with the same name share a lane (group by owner_user_id); the Home strip counts use each project's own timezone while its labels use the app timezone (Asia/Karachi), so a project in a far timezone can differ by a day at the edges; Divide by entity, a project Activity filter and 'since Monday' tile deltas are not built; the Gantt 'today' line and the portfolio 'As of' still read the browser clock (outside these slices); slice 7 (phone and accessibility pass) remains. The fix commit was not re-reviewed."
 review-verdict: "approve with follow-ups; M1-M2 and L1-L8 fixed in 7bfa045ea033dd3001c6e083d0fa9b01cbad9276, not re-reviewed"
 review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 503 tests' and 'OK'. 2. Sign in and open My Work: five groups Overdue, Today, This week, Later, No date, each with a count; a task due exactly 7 days from today is under This week. 3. Type part of a task name in the filter box: the groups narrow while you type. 4. Click Calendar: a month starting on Monday with today circled; Previous, Today and Next change the month and the address; a day with more than 3 tasks shows '+N more', and clicking it shows the rest. 5. Change the computer's timezone to Samoa and reload the calendar: today is still circled on Pakistan's date. 6. Narrow the window to phone width: the calendar becomes a list of the days that have work. 7. Open Inbox as the owner: tabs Needs action, Unread, All with counts; unread rows are tinted; click Open task on an unread row: the task opens and the Unread count drops by one; Mark all read empties Unread."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Gate 2 slice 6: My Work groups and calendar month view, Inbox polish
@@ -75,3 +76,4 @@ review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; 
 - **2026-09-25 08:39 · Claude** — Plan choices: calendar and inbox tabs are links (route-driven, like the project tabs) rather than ARIA tablists, so Back works and a link can be shared. The phone agenda is rendered alongside the grid and CSS shows one of them, so there is no width detection in JS. 'Hide done' from research 6.1 and 'Undo mark read' from 6.3 are left out: My Work lists open work only, and Aly ruled Undo out of these slices.
 - **2026-09-25 08:53 · Claude** — Found while building: app.js already had a function renderCalendar (the project working-days dialog, about line 1800). A second declaration with the same name is silently replaced by the later one, so the month view first drew nothing and threw in the browser. The month view's entry point is workCalendar. Screenshots used a copy of the lock #9 demo database (scratchpad l10cal, port 8797) with extra tasks due 2026-09-30 so the '+N more' fold shows; the shared demo on 8795 was not changed.
 - **2026-09-25 09:48 · Claude** — Review 10 follow-ups (fix commit): M1, the calendar's today ring and default month come from the server's today, and the grid is built with UTC dates; M2, My Work 'This week' uses the shared dueThisWeek rule (day 7 included, pinned by a test); L1, unread Inbox links use --teal-dark (contrast test extended); L2, Inbox, My Work and Home task links are 44px targets below 1024px; L3, a wiring test proves that Open task marks the notification read; L8, the unused 'keep' variable is gone. Browser-timezone tests run node with TZ=Pacific/Pago_Pago and a faked clock (BROWSER_ELSEWHERE in tests/test_web.py).
+- **2026-10-22 14:35 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.

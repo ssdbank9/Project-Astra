@@ -270,3 +270,31 @@ transition and deployment remain separate.
   any active App Owner, primary or secondary, with reason/history/notices.
   The Chairman exception in the old code/test conflicted with that rule.
   This is reconciliation with the recorded decision, not a new attributed quote.
+
+### 2026-10-22 — signoff queue cleared on Claude's recommendations
+
+- Asked to clear the 41 signoff tickets, Aly said "assess it yourself based on
+  your recommendation", then "I'll accept them in jaira board now; record my
+  answers per your recommendations". Claude recommended accepting all 41; Codex
+  reviewed that recommendation and agreed after one correction (8B9NBH below).
+  Aly performs the board moves. The open questions are answered as follows:
+  - 9R7A87: roll-up counts direct children only; a child counts as completed
+    when it is accepted.
+  - Z24KVH: accepted as built. Later decisions already notify the acting owner
+    of blocked attempts and attachment events (KBWY86, 6G89SJ); email stays
+    off under the daily-summary decision.
+  - JZACMP: a direct date edit with a reason stays allowed; propose/approve is
+    the governed route; the baseline stays locked once captured.
+  - XDA2JR: keep the permissive default calendar (7 working days, no
+    holidays); restrict a project's calendar only when a project needs it.
+  - 5WZ4A8: the config panel stays the home for project schedule dates; Gantt
+    start and target markers are a possible follow-up, not required.
+  - J5NY8E: no app change; `build_daily_digest` keeps labelling by
+    `digest_date` and bucketing by `now`, which callers pass explicitly.
+- Questions already settled before this date and not re-asked: QY0WG2
+  (Unrated below Low), Y3WC71 (CSV header first, 2026-09-15), 8B9NBH
+  (role-based suggested owner, attachment links carried, current picker kept,
+  2026-09-15; one shared member role, Slack 2026-09-24), AYW0QC (full
+  critical path; arrows shipped in `8fa1ae3`), 6G89SJ (notify the acting
+  owner), CS93C6 (manual final-result marks, 2026-09-15), HS3JRY (approved on
+  Slack), JM7CFP (approved in chat 2026-10-09).

@@ -13,8 +13,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T11:57:29Z
-updated-at: 2026-10-07T12:25:03Z
-updated-by: Codex
+updated-at: 2026-10-22T14:37:32Z
+updated-by: Claude
 claimed-by: X1CarbonPC-21680
 claimed-at: 2026-10-07T12:02:00Z
 outcome-what: "Reviewed owner entity-rename feature activated locally."
@@ -24,6 +24,7 @@ review-summary: "Independent read-only review passed source, role boundaries, at
 review-gaps: Windows symlink check skipped. Actual user-session re-login after local restart remains pending; synthetic browser workflow passed.
 review-verdict: PASS
 review-check: "Parent full suite 745 OK (skipped=1); independent focused 6 OK; three guard-removal probes caught; synthetic browser success, retained filing, audit and duplicate-error feedback verified."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Allow owners to rename an entity without breaking project links
@@ -44,3 +45,4 @@ review-check: "Parent full suite 745 OK (skipped=1); independent focused 6 OK; t
 
 ## Progress
 - **2026-10-07 12:16 · Codex** — Approved entity created and school project filed in real authenticated UI. Rename implementation independently reviewed; 6 focused tests and 3 guard-removal probes pass. Synthetic browser rename preserves checked filing and records history; success followed by duplicate refusal restores alert/error styling. Current live DB backed up before activation. Full suite still running; local server activation and push pending.
+- **2026-10-22 14:37 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.

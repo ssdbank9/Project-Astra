@@ -22,7 +22,7 @@ related:
   - 01M39BH4WDNX4GQGFCWWZSZ9T2
 commits: []
 created-at: 2026-09-24T10:28:47Z
-updated-at: 2026-09-24T11:07:41Z
+updated-at: 2026-10-22T14:33:37Z
 updated-by: Claude
 claimed-by: vm-13562
 claimed-at: 2026-09-24T10:30:59Z
@@ -37,6 +37,7 @@ review-gaps: |-
   - Round 1 send-back (missing cross-project own-row test; free-form table/key) fixed in round 2.
 review-verdict: Approve — independent reviewer
 review-check: "Copy the tree (git ls-files | tar) to a scratch dir; run the 6 focused tests (the 2 K62ZAP tests, 2 ZSZ9T2 tests, test_project_history_readable_by_members_not_outsiders, test_project_schedule_and_history_authorization_over_http) with PYTHONPATH=src: OK; node --check src/astra/static/app.js; drop the parentheses around (e.event_type IN (...) OR e.actor_user_id=?) in _history_rows and rerun: FAILED (failures=4); git diff --check."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Full history for Owner and Chairman; hide approval details from other non-managers' task history
@@ -77,3 +78,4 @@ review-check: "Copy the tree (git ls-files | tar) to a scratch dir; run the 6 fo
 - **2026-09-24 10:32 · Claude** — Pre-work findings. Task kinds were checked against all 29 self._event calls in service.py; the 18 ordinary kinds are the ones Aly listed, and there are no others. Hidden kinds: protected_action_blocked/requested/approved/rejected/cancelled, attachment_add_blocked, attachment_removal_blocked, final_result_mark_blocked, final_result_unmark_blocked, import_key_assigned. task_events is the only reader of task_events (route web.py:215); task_detail does not embed events. A designated approver is a task_reviewers row with role approver; add_task_reviewer requires the person to be a project member (_validate_assignee), so an approver can always view the project. Choice: the own-rows rule (actor_user_id = the viewer) applies to project history as well, so both endpoints share one SQL predicate '(event_type IN allow-list OR actor_user_id=?)'. Today a non-manager's own project rows can only be their own protected_action_blocked attempts, which hold nothing they did not send. Brainstorm and pre-process were skipped: Aly settled the direction in Slack and the plan is on the ticket. Next: failing tests.
 - **2026-09-24 10:43 · Claude** — Implemented. service.py: _sees_full_history (chairman, or can_manage_project) and _history_rows (one SQL predicate: allow-list OR actor_user_id = the viewer) are shared by task_events and project_events. NON_MANAGER_TASK_EVENT_KINDS sits next to NON_MANAGER_PROJECT_EVENT_KINDS. The table and column in _history_rows are fixed by the two callers, never user input. Mutations in a scratch copy each fail the focused tests: drop the chairman clause, drop own-rows, filter everyone, filter nobody, add protected_action_requested to the allow-list, bypass the get_task gate. Tests seed rows with _event(notify=False) and _project_event because no public path writes every kind. Not changed: _is_project_manager (task_detail permissions) versus can_manage_project; the Owner is covered by both. Out of scope: the secondary-owner request in the same Slack message (ts 1790245584.314119) is ticket 2.
 - **2026-09-24 11:02 · Claude** — Review round 1 send-back addressed. Medium: added a second project and task that each filtered user can view, with a hidden row they wrote there. Tests assert it never appears in the first task's or project's history (service test, all 3 filtered users; HTTP test, approver). M1 (dropping the parentheses around 'event_type IN (...) OR actor_user_id=?') now fails: failures=4. Before this change it passed, because a precedence leak only shows when the same person has rows on another task or project. Low: _history_rows now derives the key column from a fixed {table: key} mapping, so an unknown table raises KeyError; callers pass only the table name. Full suite: 374 OK.
+- **2026-10-22 14:33 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.

@@ -15,11 +15,11 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T13:57:04Z
-updated-at: 2026-09-24T06:25:11Z
+updated-at: 2026-10-22T14:32:35Z
 claimed-by: vm-17792
 claimed-at: 2026-09-24T06:09:32Z
 updated-by: Claude
-question: "One call to confirm: an accepted submission is auto-added to the repository (acceptance = a final result), and can be unmarked afterward by a task manager. Is auto-on-accept what you want, or should EVERY final result be an explicit manual mark? Also: attachments must be marked by hand (not auto) — confirm that's right."
+question: "Ready to accept per the 2026-10-22 consensus (already settled 2026-09-15: every final result is a manual mark; acceptance records nothing). Only Aly's board move to done remains."
 outcome-what: "Recorded the round-2 independent review (approve) and fixed the stale frontmatter DoD text."
 outcome-why: "Rework e94a1a6 closed the round-1 gaps; the reviewer approved with low findings only."
 outcome-resolves: "Review lane for CS93C6; frontmatter definition-of-done now matches DoD 1."
@@ -94,3 +94,4 @@ review-check: "1. cd /workspace/project-astra && git checkout codex/migration-sa
 - **2026-09-24 06:14 · Claude** — DoD 1 reworded (jaira dod --text) on 2026-09-24: the old text said 'wired to the accepted-version lifecycle (an accepted submission is a final result)' and its proof described accept_submission auto-recording plus a test that no longer exists. That behaviour was removed on purpose (owner decision 2026-09-15). The item now states the current rule: acceptance records nothing; every final result is an explicit manual mark. Proof re-ticked against current tests.
 - **2026-09-24 06:14 · Claude** — Rework findings. (a) CSV formula neutralisation was already applied to this export by Y3WC71 (web._csv_final_results uses _csv_cell; test_web.test_csv_exports_neutralise_formula_cells covers a final-results row), so nothing new was needed there. (b) The 'to' date bound was '<day>T23:59:59' against a microsecond isoformat marked_at, so a mark in the last second of the day was dropped (review gap 4); now 'marked_at < next day'. The new core and HTTP date tests failed on exactly this before the fix. (c) Still open, not fixed here: dates are whole UTC days, not the project timezone (Asia/Karachi is UTC+5), so a mark at 02:00 local counts as the previous day; the 'Marked' column shows toLocaleDateString, which can differ from the filter's UTC day. q LIKE wildcards are not escaped (review gap 5). (d) The dialog body has no inner padding (content touches the dialog edge); that was already so before this change (see scratchpad/ui-shots/CS93C6-before-final-results.png). (e) Dialog tests use a small node driver (FINAL_RESULTS_DRIVER in tests/test_web.py), not the shared WIRING_DRIVER, because the wiring driver only knows #detail-body and #inbox-body.
 - **2026-09-24 06:24 · Claude** — Round 2 review (2026-09-24): approve. Frontmatter definition-of-done set to the reworded DoD 1 text (reviewer low finding 1). Review fields appended, not overwritten, so the round-1 send-back stays readable. Follow-ups not fixed here: to=9999-12-31 gives HTTP 500 (OverflowError); UTC-day dates vs Asia/Karachi; unescaped LIKE wildcards in q.
+- **2026-10-22 14:32 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. Answer: already settled 2026-09-15: every final result is a manual mark; acceptance records nothing.

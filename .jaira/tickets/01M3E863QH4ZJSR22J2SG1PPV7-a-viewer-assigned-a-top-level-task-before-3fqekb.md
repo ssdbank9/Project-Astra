@@ -26,7 +26,7 @@ related:
   - 01M3DP7RSN7ZHDRR7SCC3FQEKB
 commits: []
 created-at: 2026-09-26T06:59:31Z
-updated-at: 2026-10-16T12:56:38Z
+updated-at: 2026-10-22T14:36:25Z
 updated-by: Claude
 claimed-by: vm-797
 claimed-at: 2026-09-26T06:59:43Z
@@ -37,6 +37,7 @@ review-summary: "G1PPV7 routes the assignee through `_assignee_refusal` with rol
 review-gaps: "5 Lows (older rules not restated, one Codex line, SSH check missed ::/0 and wide ranges, one broad assertRaises, private artifact link without caveat), all fixed in the follow-up commit on top of 0f0511b (the same commit that moves this ticket to signoff; its SHA is in git log for this ticket)."
 review-verdict: "approve with follow-ups (0 High, 0 Medium, 5 Low; Lows fixed)"
 review-check: independent probe14.py 27/27 at 0f0511b and reproduces the bug at 146a5b3; M1-M5 reverts; full suite Ran 680 tests OK; diff-check and CR scan clean
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # A viewer assigned a top-level task before 3FQEKB can still submit it
@@ -78,3 +79,4 @@ review-check: independent probe14.py 27/27 at 0f0511b and reproduces the bug at 
 - **2026-09-26 07:00 · Claude** — Plan reasoning: the fix sits in _may_submit because every submit goes through it: submit_task checks it before BEGIN IMMEDIATE and again on the re-read row, and task_detail's permissions.can_submit reads it, so the API, the board move to Submitted and the panel button all follow one rule. The role is read at submit time, so a member demoted to viewer is covered with no change to grant_project_access, and restoring them to member gives Submit back. The in-transaction row (SELECT id, project_id, owner_user_id, status, revision) has no parent_task_id, so the parent is read from the database, as the collaborator branch already does.
 - **2026-09-26 07:03 · Claude** — Paths into submitted, walked at 146a5b3: (1) POST /api/tasks/<id>/submit -> submit_task, which checks _may_submit before the transaction and again on the re-read row (service.py submit_task). (2) Board move to Submitted -> _move_task, owner/manager only (can_manage_project), then submit_task. (3) update_task refuses status=submitted ('Use the dedicated submitted action', _validate_task_update). (4) Bulk changes are owner/manager only and have no submit kind. (5) Importer: owner or manager only; a new top-level row with a viewer owner is E_OWNER_VIEWER; status submitted on an existing task is refused (NO_IMPORT_ON_UPDATE). (6) set_parent refuses promoting a viewer's subtask to top level ('Reassign it first'). (7) Membership demotion (grant_project_access to viewer) changes nothing on the task; the flag appears and submit is now refused because the role is read at submit time. Only (1) and (2) could reach the viewer, and both go through _may_submit. Managers and owners still submit a flagged task: that is management, not the viewer receiving work. Dead end avoided: refusing the demotion itself would change existing data, which 3FQEKB rule e) forbids.
 - **2026-10-16 12:56 · Claude** — Proof line numbers refreshed 2026-10-16 at HEAD d381d66: _may_submit is service.py:2703 and the panel hides Submit at app.js:2294 (proof cited app.js:2167). Test names still exist.
+- **2026-10-22 14:36 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.
