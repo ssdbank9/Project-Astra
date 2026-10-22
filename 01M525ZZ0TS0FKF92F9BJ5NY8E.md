@@ -23,8 +23,8 @@ related:
 follows: 01M2HQJYWEE65RW16FVKF9HBSJ
 commits: []
 created-at: 2026-10-16T11:01:43Z
-updated-at: 2026-10-22T14:37:55Z
-updated-by: Claude
+updated-at: 2026-10-22T14:58:11Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-41964
 claimed-at: 2026-10-16T11:02:05Z
 outcome-what: "Digest test passes a fixed timezone-aware now (2026-10-15 09:00 Karachi). Waitress tests stop the asyncore loop from its own thread via a trigger thunk, shut down the task dispatcher, join this server's workers and assert they exited; setUp cleans up if it fails after create_server."
