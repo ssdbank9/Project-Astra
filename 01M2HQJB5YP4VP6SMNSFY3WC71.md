@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJB5YP4VP6SMNSFY3WC71
 title: Exports and search
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Claude
@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:22Z
-updated-at: 2026-10-22T14:54:10Z
+updated-at: 2026-10-22T15:06:06Z
 claimed-by: vm-1022
 claimed-at: 2026-09-24T05:49:42Z
 updated-by: Aly Jafferani
