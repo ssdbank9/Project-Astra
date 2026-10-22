@@ -30,7 +30,7 @@ related:
   - 01M3BVD71SMNH4E0M2CRFKVHH8
 commits: []
 created-at: 2026-09-25T10:09:20Z
-updated-at: 2026-10-22T14:35:27Z
+updated-at: 2026-10-22T14:35:32Z
 updated-by: Claude
 claimed-by: vm-14196
 claimed-at: 2026-09-25T10:09:31Z
@@ -41,6 +41,7 @@ review-summary: "Review 11 (2026-09-25, session file lock11-review.md) of febb3b
 review-gaps: "Left for later: the reviewer's 7px sideways scroll on the portfolio at 390 under WCAG text-spacing overrides was not reproduced or fixed (it needs a CSP bypass in the test browser); 200% zoom was checked through 720x450@2x only, not with real browser zoom on every screen; no screen-reader run with NVDA or VoiceOver; iOS Safari and Android Chrome were not run on devices (Chromium emulation only); the import template settings dialog was not opened in the audit (its field is covered by the 16px rule); the Inbox day groups use the browser's day (accepted in review 10). The fix commit was not re-reviewed."
 review-verdict: "approve with follow-ups; M1-M2 and L1-L5 fixed in 5d39d19bb7fcc1c7281382613dca75554f308814, not re-reviewed"
 review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 510 tests' and 'OK'. 2. Start Astra, sign in as the owner on a phone (or narrow the browser below 1024px): buttons and fields are finger-sized and tapping a field does not zoom the page. 3. Open any task: it fills the screen without an 'Open full page' button; press Tab and Shift+Tab many times: focus never lands on anything behind the panel; press Esc: the panel closes and focus is back where you were. 4. Open My Work > Calendar on a tablet width (800-1000px): a list of days with work, nothing cut off. 5. On a laptop press Ctrl and + to 200% and open a task: same as step 3. 6. Open Projects > a project > Board, Divide by Owner: two people with the same name have separate lanes. 7. The browser tab shows the small Astra icon. 8. On Home, 'Portfolio Gantt ›' at the top right opens the portfolio timeline, which says 'Due dates as of <today> (Asia/Karachi)'."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Gate 2 slice 7: phone and accessibility pass, plus the Gate 2 leftovers
