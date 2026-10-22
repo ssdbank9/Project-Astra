@@ -16,14 +16,14 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-22T15:48:31Z
+updated-at: 2026-10-22T15:48:45Z
 updated-by: Claude
 outcome-what: "Plan step 4 done locally: deploy/ now holds the real systemd unit, Caddyfile, journald and sshd files and a read-only verify-host.sh; the runbook installs them instead of inline copies; tests/test_deploy_config.py pins loopback-only, least privilege, Secure cookies, header and body-limit parity with Astra, no secrets and LF."
 outcome-why: "Copy-pasted config in a document drifts and is never tested; the files now ship with the release and fail the suite if a safety rule is broken."
-outcome-resolves: "Step 4 of the 6BXYJZ plan. Full suite 1112 OK (skipped=1); 20 mutants caught; systemd-analyze verify clean and exposure 1.5 OK in WSL Ubuntu 26.04; independent review found no blockers and its findings are fixed except the Caddy admin-socket hardening, left for staging. caddy validate not run (Caddy not installed). Nothing deployed."
+outcome-resolves: "Step 4 of the 6BXYJZ plan. Full suite 1112 OK (skipped=1); 20 mutants caught; in WSL Ubuntu 26.04 systemd-analyze verify is clean, exposure 1.5 OK, and caddy v2.11.7 validate reports Valid configuration; independent review found no blockers and its findings are fixed except the Caddy admin-socket hardening, left for staging. Nothing deployed."
 claimed-by: X1CarbonPC-29580
 claimed-at: 2026-10-22T15:19:37Z
-question: "Step 8 (synthetic staging on the Oracle Always Free VM) needs your explicit go-ahead and your Stage 0 choices (OCI region, Ubuntu version, DuckDNS name). Separately: may I install Caddy inside local WSL from Caddy's official apt repository, only to run caddy validate on deploy/caddy/Caddyfile?"
+question: "Step 8 (synthetic staging on the Oracle Always Free VM) needs your explicit go-ahead and your Stage 0 choices (OCI region, Ubuntu version, DuckDNS name). Step 4 is done locally; nothing is deployed."
 ---
 
 # Production security and deployment
