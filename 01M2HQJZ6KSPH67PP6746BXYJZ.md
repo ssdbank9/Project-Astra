@@ -16,7 +16,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-22T15:48:25Z
+updated-at: 2026-10-22T15:48:31Z
 updated-by: Claude
 outcome-what: "Plan step 4 done locally: deploy/ now holds the real systemd unit, Caddyfile, journald and sshd files and a read-only verify-host.sh; the runbook installs them instead of inline copies; tests/test_deploy_config.py pins loopback-only, least privilege, Secure cookies, header and body-limit parity with Astra, no secrets and LF."
 outcome-why: "Copy-pasted config in a document drifts and is never tested; the files now ship with the release and fail the suite if a safety rule is broken."
@@ -48,7 +48,7 @@ question: "Step 8 (synthetic staging on the Oracle Always Free VM) needs your ex
 - [x] Repair any confirmed local security or deploy-configuration gap without exposing the service; add targeted tests for each changed boundary and role.
   proof: src/astra/__main__.py: CLI rejects non-IPv4-loopback before _run; tests/test_core.py: test_serve_refuses_non_loopback_hosts_before_starting and test_serve_allows_the_documented_loopback_host
 - [x] Prepare least-privilege, loopback-only Astra service and Caddy/TLS/logging/firewall configuration, persistent database path and secret-free operational instructions; verify templates locally.
-  proof: deploy/systemd/astra.service, deploy/caddy/Caddyfile, deploy/journald/astra.conf, deploy/ssh/00-astra.conf, deploy/verify-host.sh, .gitattributes; tests/test_deploy_config.py (10 tests, 20 mutants caught); WSL systemd 259: systemd-analyze verify clean (ExecStart stubbed), security exposure 1.5 OK; dash -n ok; caddy validate NOT run (Caddy not installed)
+  proof: deploy/ files + tests/test_deploy_config.py (10 tests, 20 mutants caught); WSL Ubuntu 26.04: systemd-analyze verify clean (ExecStart stubbed), exposure 1.5 OK; dash -n ok; caddy v2.11.7 validate: Valid configuration (as caddy user)
 - [x] Reconcile the deployment runbook with the current app and approved decisions; verify vendor commands against official sources when needed and mark unexecuted steps clearly.
   proof: docs/handoff/DEPLOYMENT_RUNBOOK.md: DuckDNS secret handling, Caddy version/validation, HSTS sequence and Q22 gate; official vendor links; docs/handoff/OPEN_QUESTIONS.md: Q22
 - [x] Run focused security/regression checks, the full Windows suite, line-ending and private-file checks; obtain an independent review and fix confirmed findings.
