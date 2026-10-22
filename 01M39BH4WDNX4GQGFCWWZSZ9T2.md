@@ -1,7 +1,7 @@
 ---
 id: 01M39BH4WDNX4GQGFCWWZSZ9T2
 title: Limit Project history event kinds for non-managers
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -22,7 +22,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-24T09:21:46Z
-updated-at: 2026-10-22T14:55:29Z
+updated-at: 2026-10-22T15:07:27Z
 updated-by: Aly Jafferani
 claimed-by: vm-684
 claimed-at: 2026-09-24T09:22:00Z
