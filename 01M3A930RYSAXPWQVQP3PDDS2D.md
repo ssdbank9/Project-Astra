@@ -1,7 +1,7 @@
 ---
 id: 01M3A930RYSAXPWQVQP3PDDS2D
 title: Server command to transfer the primary owner and reset a password
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -28,7 +28,7 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T17:58:21Z
-updated-at: 2026-10-22T14:55:55Z
+updated-at: 2026-10-22T15:08:01Z
 updated-by: Aly Jafferani
 claimed-by: vm-13753
 claimed-at: 2026-09-24T17:58:31Z
