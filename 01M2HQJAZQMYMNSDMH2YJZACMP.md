@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:22Z
-updated-at: 2026-10-16T11:07:01Z
+updated-at: 2026-10-22T14:31:15Z
 claimed-by: X1CarbonPC-37068
 claimed-at: 2026-09-15T07:51:20Z
 updated-by: Claude
@@ -60,3 +60,4 @@ review-check: "Read _ensure_baseline, _impacted_successors, propose/approve/reje
 - **2026-09-19 06:14 · Aly Jafferani** — HANDOFF 2026-09-19 (Claude->Codex): see astra_project_tracker/CODEX_HANDOFF_2026-09-19.md. PARKED in signoff - waiting on the App Owner. Verdict: pass. Owner question: OK that direct date edits still change current immediately (propose/approve is the governed alternative)? Baseline captured once, never editable - intended?
 - **2026-09-20 03:10 · Aly Jafferani** — Owner confirmation recorded 2026-09-20: ordinary authorized date edits may update current dates immediately with reason and audit; protected-impact changes require Owner approval. Baseline is captured once and never silently edited.
 - **2026-10-16 11:07 · Claude** — Review 2026-10-16 (Claude): approve/reject of a schedule proposal is now owner-only and a manager call becomes an owner request (test_manager_schedule_decision_is_an_owner_request); the original review wording about manager approval is stale. The schedule_revised event contents (old, new, actor, reason) are being asserted in tests/test_signoff_gaps.py.
+- **2026-10-22 14:31 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. Answer: a direct date edit with a reason stays allowed; propose/approve is the governed route; the baseline stays locked once captured.
