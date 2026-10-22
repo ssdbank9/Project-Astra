@@ -1,7 +1,7 @@
 ---
 id: 01M2HPGB3Z4FE25004KHQY0WG2
 title: "Criticality: approved sorting and confirmation workflow"
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Claude
@@ -19,7 +19,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T04:51:48Z
-updated-at: 2026-10-22T14:53:44Z
+updated-at: 2026-10-22T15:05:35Z
 claimed-by: vm-809
 claimed-at: 2026-09-24T05:49:40Z
 updated-by: Aly Jafferani
