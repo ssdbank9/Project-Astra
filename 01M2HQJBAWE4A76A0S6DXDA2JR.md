@@ -17,10 +17,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:22Z
-updated-at: 2026-10-22T14:31:40Z
+updated-at: 2026-10-22T14:54:16Z
 claimed-by: X1CarbonPC-33840
 claimed-at: 2026-09-15T08:08:05Z
-updated-by: Claude
+updated-by: Aly Jafferani
 outcome-what: "Per-project working calendar: configurable workweek (weekday set) + holidays, owner-only; is_working_day / working_days_between helpers; task_detail.working_days_to_due; Calendar control in People dialog. Permissive default (every day counts). 3 new tests (72 total)."
 outcome-why: "Section 6/11: project calendar was Partial (timezone done, workweeks/holidays not); owner wants the mechanism but any day usable by default."
 question: "Ready to accept per the 2026-10-22 consensus (keep the permissive default calendar (7 working days, no holidays); restrict a project's calendar only when needed). Only Aly's board move to done remains."
