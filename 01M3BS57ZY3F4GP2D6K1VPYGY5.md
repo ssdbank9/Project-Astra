@@ -26,7 +26,7 @@ related:
   - 01M3BF5Z67ZKA6JJG020DR3PKR
 commits: []
 created-at: 2026-09-25T07:58:25Z
-updated-at: 2026-10-22T14:34:56Z
+updated-at: 2026-10-22T14:35:01Z
 updated-by: Claude
 claimed-by: vm-1430
 claimed-at: 2026-09-25T07:58:42Z
@@ -37,6 +37,7 @@ review-summary: "Review 10 (2026-09-25, session file lock10-review.md) of 15562d
 review-gaps: "Left for later: I2 Divide by owner groups by display name, so two people with the same name share a lane (group by owner_user_id); the Home strip counts use each project's own timezone while its labels use the app timezone (Asia/Karachi), so a project in a far timezone can differ by a day at the edges; Divide by entity, a project Activity filter and 'since Monday' tile deltas are not built; the Gantt 'today' line and the portfolio 'As of' still read the browser clock (outside these slices); slice 7 (phone and accessibility pass) remains. The fix commit was not re-reviewed."
 review-verdict: "approve with follow-ups; M1-M2 and L1-L8 fixed in 7bfa045ea033dd3001c6e083d0fa9b01cbad9276, not re-reviewed"
 review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 503 tests' and 'OK'. 2. Start Astra and sign in as the primary owner: Home shows 'Counts as of HH:MM' once, then six tiles (Overdue, Blocked, Awaiting Owner, Due in 7 days, Critical path, Undated). 3. Note the Due in 7 days number, then add up the 8 bars of the This week card (Today plus 7 days): the two numbers are the same. 4. Click the Blocked tile: the Portfolio timeline opens filtered to blocked open work, with a chip for the filter. 5. Back on Home, in Needs Owner decision click Review: the task opens in the side panel; click Approve on a request: it leaves the list and the Awaiting Owner tile drops by one. 6. Sign in as a member: no Awaiting Owner tile and no Needs Owner decision card. 7. Change the computer's timezone to one far from Pakistan (for example Samoa) and reload Home: the first bar still says Today for Pakistan's date and the bars do not shift."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Gate 2 slice 4: Command Center Home
