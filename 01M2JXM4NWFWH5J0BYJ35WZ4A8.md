@@ -23,7 +23,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T16:15:27Z
-updated-at: 2026-10-16T11:06:20Z
+updated-at: 2026-10-22T14:32:40Z
 claimed-by: vm-21109
 claimed-at: 2026-09-24T06:15:34Z
 updated-by: Claude
@@ -75,3 +75,4 @@ review-check: "Full suite tests/run.py: 357 tests OK (187s), merge-base 351. No 
 - **2026-09-24 06:33 · Claude** — Second independent review: approve with low findings; moved to signoff. The first round's send-back review fields were overwritten, not appended; they remain in git history at 5ea33b9 and in the 05:33 note. Open decision for Aly at signoff: GET /api/projects/{id}/events shows all project event kinds (owner-request payloads/reasons, import metadata) to viewers; accept, or filter non-managers to project_schedule_changed and project_closed.
 - **2026-09-24 09:27 · Claude** — Aly decided in Slack on 2026-09-24 (thread 1790160392.461299, message ts 1790241586.565819, "yes these decisions are okay proceed now") that Project history should show non-managers (anyone who can view but not can_manage_project) only project_schedule_changed and project_closed. Implemented as a follow-up in ZSZ9T2; this ticket is not moved.
 - **2026-10-16 11:06 · Claude** — Review 2026-10-16 (Claude): DoD 2 reworded. It said a manager succeeds; since Aly's B1 review (2026-10-13, service.py:1152) a manager is refused on a target-date change and succeeds only on a start-only change. Tests already assert this. Original wording is in git history. Cited line numbers in the proofs are stale; test names still exist. Aly: please confirm the reworded criterion.
+- **2026-10-22 14:32 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. Answer: the config panel stays the home for project schedule dates; Gantt start/target markers are an optional follow-up.
