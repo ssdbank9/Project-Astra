@@ -1,7 +1,7 @@
 ---
 id: 01M3BE0B99E7TFPEA6MAPZTYC9
 title: "Gate 2 slice 2: shell frame (left rail, top bar, hash router, filters in the URL, toolbar into menus)"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -29,7 +29,7 @@ related:
   - 01M3BDCQSRG5SDAJY6J54T4DEA
 commits: []
 created-at: 2026-09-25T04:43:30Z
-updated-at: 2026-10-22T14:56:14Z
+updated-at: 2026-10-22T15:08:25Z
 updated-by: Aly Jafferani
 claimed-by: vm-5586
 claimed-at: 2026-09-25T04:43:42Z
