@@ -27,8 +27,8 @@ related:
   - 01M3BSY3W3FH34MF87RACR121Z
 commits: []
 created-at: 2026-09-25T08:37:44Z
-updated-at: 2026-10-22T14:35:21Z
-updated-by: Claude
+updated-at: 2026-10-22T14:56:41Z
+updated-by: Aly Jafferani
 claimed-by: vm-10500
 claimed-at: 2026-09-25T08:38:56Z
 outcome-what: "My Work List tab with five due groups, counts and a filter box; a Calendar tab with a Monday-first month grid (prev/today/next, my or all tasks, +N more folding, phone agenda); Inbox tabs Needs action/Unread/All with unread styling, Open task (marks read), Mark read and Mark all read"
