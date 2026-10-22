@@ -17,10 +17,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:22Z
-updated-at: 2026-10-22T14:31:30Z
+updated-at: 2026-10-22T14:54:10Z
 claimed-by: vm-1022
 claimed-at: 2026-09-24T05:49:42Z
-updated-by: Claude
+updated-by: Aly Jafferani
 outcome-what: "Independent review approved the export scope, CSV formula neutralisation and filter-named filename rework"
 outcome-why: "Review found no medium-or-higher issues; 339 tests green and all mutants killed"
 question: "Ready to accept per the 2026-10-22 consensus (already settled 2026-09-15: CSV header row first, as-of time in the filename). Only Aly's board move to done remains."
