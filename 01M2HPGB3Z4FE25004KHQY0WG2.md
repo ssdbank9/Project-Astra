@@ -19,13 +19,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T04:51:48Z
-updated-at: 2026-10-22T14:30:44Z
+updated-at: 2026-10-22T14:30:49Z
 claimed-by: vm-809
 claimed-at: 2026-09-24T05:49:40Z
 updated-by: Claude
 outcome-what: "Independent review recorded: approve with low gaps"
 outcome-why: "Reviewer verified 343-test suite green, new tests fail on old code, 10/10 mutants caught"
-question: "Please accept, or send back: (1) OK that criticality is now criticality-PRIMARY over due-date in the task list order? (2) Any real-browser check needed before sign-off? No browser surface here so it's unverified visually."
+question: "Ready to accept per the 2026-10-22 consensus (already settled: Unrated sorts below Low with an amber badge; criticality-first order is the DoD). Only Aly's board move to done remains."
 outcome-resolves: "Criticality sort order, Unrated visibility and audited confirmation per the definition of done"
 review-summary: "Independent review of 2baaf71 (on 54b6744). confirm_criticality (src/astra/service.py) now re-reads the task's criticality and revision inside its BEGIN IMMEDIATE write transaction, fixing the race where two interleaved confirmations recorded a false old value. It takes an optional expected_revision and returns 409 when stale; web.py passes it through and the app.js detail form sends the revision it rendered with. A non-string level returns 400 instead of 500; a null, non-string or blank reason is refused instead of being stored as 'None'. A new critLabel() helper shows the existing amber Unrated badge in the Gantt meta column, a new Criticality column in the schedule table, and the detail dialog. 10 new tests (7 core, 3 web) pin the audit record (actor, old, new, reason), the manager-only 403, Normal-above-Low order, the export sort parameter, the 400s and the two-connection race."
 review-gaps: "Low gaps: (1) On phones the schedule table is the default view and the new Criticality column is 9th of 11 in a sideways-scrolling table, so the Unrated badge is off-screen until you scroll right (builder's own mobile screenshot shows no badge). Suggested follow-up: place the column right after Task. (2) The ticket was not moved review -> in-progress before rework and still carried the 54b6744 review fields; these four fields are now overwritten with this review. (3) Unrated still sorts below every Low task, including overdue ones (_CRITICALITY_RANK ELSE 4, service.py:836-837), as the ticket specified; whether a badge alone counts as 'not sorted away' is Aly's call. Info: expected_revision is optional on POST /api/tasks/{id}/criticality (documented as deliberate; the audit event still records the true old value); rated levels still show as raw lowercase text next to the upper-case UNRATED badge (predates this change)."
