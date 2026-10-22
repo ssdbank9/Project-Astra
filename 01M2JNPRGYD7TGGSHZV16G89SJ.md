@@ -15,11 +15,11 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T13:57:04Z
-updated-at: 2026-10-22T14:32:18Z
+updated-at: 2026-10-22T14:32:24Z
 updated-by: Claude
 claimed-by: vm-1221
 claimed-at: 2026-09-24T16:18:13Z
-question: ""
+question: "Ready to accept per the 2026-10-22 consensus (already settled: acting owner is notified (KBWY86); DoD reworded to the link model with Aly's approval 2026-09-24, which meets Codex's condition). Only Aly's board move to done remains."
 outcome-what: "Attachment links: one path check (validate_attachment_path in service.py) refuses empty, over-1024-character, control-character, relative, '..', UNC/network, \\\\?\\ and \\\\.\\ device, reserved device names (CON, NUL, COM1-9, LPT1-9), URL and file: paths, and any path outside the folders in ASTRA_ATTACHMENT_ROOTS (unset = links disabled); after the text check, realpath must also stay inside a folder. It runs on add (HTTP 400), on Excel/CSV import (row warning W_ATTACHMENT_PATH_SKIPPED, row still imports) and on template apply (link not copied). The file-exists check runs only on paths that pass; other stored rows report exists=None and are never looked up. Removing an attachment that is a final result is refused with 409 'Unmark the final result first.', recorded as attachment_removal_blocked (reason final_result) and notified to the other owners. 13 new tests (core, import, HTTP authorization matrix, CSRF, 404, 409, 400, viewer render); test path fixtures moved into an allowed folder (tests/link_roots.py). README and excel-import.md updated. No schema change."
 outcome-why: "The 2026-09-19 review was NO-GO: any stored path reached os.path.exists on every task read (an existence oracle, and on Windows a UNC path triggers SMB access); deleting an attachment silently cascade-deleted its final result with no audit; and there were no HTTP denial tests. Aly (Slack ts 1790263718.995539) asked to fix only these three on today's link model."
 outcome-resolves: "Owner decision Items 1-4 on this ticket: Item 1 allowlisted folders plus UNC/device rejection before any existence check; Item 2 removal blocked while marked, blocked attempt audited and notified, explicit audited unmark first; Item 3 viewers get no form (already true, now tested); Item 4 HTTP authorization and CSRF coverage. Items 5-16 (hosted upload/storage/download) are on MXY7BG. DoD 1 was reworded to the link model on 2026-09-24 (e9d52af)."
