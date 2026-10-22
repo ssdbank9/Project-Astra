@@ -1,7 +1,7 @@
 ---
 id: 01M3ADA4DRPMWYVBJ2ZJXX9RFM
 title: Notify owners when a project is closed or its dates change
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -30,7 +30,7 @@ related:
   - 01M3ADCB413BRFJTKCEXZ72D79
 commits: []
 created-at: 2026-09-24T19:12:08Z
-updated-at: 2026-10-22T14:56:01Z
+updated-at: 2026-10-22T15:08:10Z
 updated-by: Aly Jafferani
 claimed-by: vm-593
 claimed-at: 2026-09-24T19:12:09Z
