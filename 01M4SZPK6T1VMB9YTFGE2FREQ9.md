@@ -14,8 +14,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T06:37:49Z
-updated-at: 2026-10-13T07:47:19Z
-updated-by: Codex
+updated-at: 2026-10-22T16:17:49Z
+updated-by: Claude
 claimed-by: X1CarbonPC-17880
 claimed-at: 2026-10-13T06:45:32Z
 outcome-what: "Durable deadline notices for active App Owners and Chairman; complete composed-operation project finish snapshots."
@@ -54,3 +54,4 @@ question: Aly accepted 2FREQ9 on 2026-10-13. Acceptance is complete; only the Al
 - **2026-10-13 07:09 · Codex** — All 807 tests pass (existing one symlink skip). Chairman browser Inbox verified: saved task and project finish 10 to 14 October; individual mark-read survives reload. Source/test independent review passes with guard-removal proof. Supplemental bulk/Undo and handoff review is being run separately; reviewer capacity failures were tooling only. Preserve all unrelated dirty Owner Done transitions.
 - **2026-10-13 07:11 · Codex** — Independent supplemental bulk+Undo and handoff/screenshot review passed. Full suite807 OK skip1. Publication receipt will be ticked only after the normal push; human lane does not imply acceptance.
 - **2026-10-13 07:22 · Codex** — Aly explicitly accepted 2FREQ9 in chat on 2026-10-13: I accept 2FREQ9. Accepted published receipt e9a15f42c83c514dab64cc6cf8556a436806836b, implementation79a1f881ca5451646249616a27dd41b8484545d8. Do not ask Aly to repeat acceptance. Human lane remains unchanged under AGENTS.md; only Aly performs its Done transition. Acceptance does not authorize deployment, accounts or external delivery.
+- **2026-10-22 16:17 · Claude** — 2026-10-22 close review: Claude and Codex both recommend closing (Codex read-only review of a per-ticket packet). Cited tests and documents exist at bdbf795 and the full suite passes (1112 OK, skipped=1 at 6f61d74). Waiting for Aly's board move to done.
