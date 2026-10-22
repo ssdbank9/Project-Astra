@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJZ6KSPH67PP6746BXYJZ
 title: Production security and deployment
-status: in-progress
+status: human
 ready: true
 creator: Aly Jafferani
 assignee: Claude
@@ -16,7 +16,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-22T15:42:27Z
+updated-at: 2026-10-22T15:42:34Z
 updated-by: Claude
 outcome-what: "Plan step 4 done locally: deploy/ now holds the real systemd unit, Caddyfile, journald and sshd files and a read-only verify-host.sh; the runbook installs them instead of inline copies; tests/test_deploy_config.py pins loopback-only, least privilege, Secure cookies, header and body-limit parity with Astra, no secrets and LF."
 outcome-why: "Copy-pasted config in a document drifts and is never tested; the files now ship with the release and fail the suite if a safety rule is broken."
