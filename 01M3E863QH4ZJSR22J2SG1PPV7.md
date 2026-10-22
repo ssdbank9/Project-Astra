@@ -26,8 +26,8 @@ related:
   - 01M3DP7RSN7ZHDRR7SCC3FQEKB
 commits: []
 created-at: 2026-09-26T06:59:31Z
-updated-at: 2026-10-22T14:36:25Z
-updated-by: Claude
+updated-at: 2026-10-22T14:57:20Z
+updated-by: Aly Jafferani
 claimed-by: vm-797
 claimed-at: 2026-09-26T06:59:43Z
 outcome-what: "_may_submit (src/astra/service.py) now runs the 3FQEKB assignee rule for the task's assignee as well as for collaborators, so a project viewer who holds a top-level task (assigned before the rules, or kept after a demotion from member) cannot submit it; permissions.can_submit follows, so the panel hides Submit. Three service tests and one HTTP test; README, HANDOFF and NEXT_STEPS updated."
