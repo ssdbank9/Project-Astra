@@ -1,7 +1,7 @@
 ---
 id: 01M2HPH35W0MHCMKGRQ9Z24KVH
 title: Durable in-app notification inbox for the owner
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Aly Jafferani
@@ -19,7 +19,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T04:52:13Z
-updated-at: 2026-10-22T14:53:58Z
+updated-at: 2026-10-22T15:05:50Z
 claimed-by: X1CarbonPC-13392
 claimed-at: 2026-09-15T05:04:15Z
 updated-by: Aly Jafferani
