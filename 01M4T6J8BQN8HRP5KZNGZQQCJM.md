@@ -14,7 +14,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-13T08:37:47Z
-updated-at: 2026-10-22T16:18:09Z
+updated-at: 2026-10-22T16:33:01Z
 updated-by: Claude
 claimed-by: X1CarbonPC-29860
 claimed-at: 2026-10-13T08:39:42Z
@@ -55,3 +55,4 @@ outcome-resolves: "Full832 OK(skip1symlink), independent final source and guard-
 - **2026-10-13 10:58 · Codex** — Final assignee fix required restarting superseded full suite after exact process verification. Final focused44 OK, independent finalassignment29/18 OK with create/update eligibility mutations. Browser Owner deadline20to23 persisted; closedOverview controls hidden/reopenrestored. Manageradmin dialog is inaccessible, not a claimed browser readonly branch. B1 note explicitly bounds static/runtime route coverage and retains hosted gates/A5 password feature gap. Full final receipt pending.
 - **2026-10-13 11:05 · Codex** — Full suite832 FAILED:8 historical schema fixture errors and1 late-write conflict message regression. Fixtures now insert historical task rows directly, without production guard fallback; locked authorization retains established conflict message. Migration48 OK; independent delta review and superseding full pending.
 - **2026-10-22 16:18 · Claude** — 2026-10-22 close review: Claude and Codex both recommend closing (Codex read-only review of a per-ticket packet). Cited tests and documents exist at bdbf795 and the full suite passes (1112 OK, skipped=1 at 6f61d74). Waiting for Aly's board move to done.
+- **2026-10-22 16:33 · Claude** — 2026-10-22 tested before closing (Aly: do not close on his okay alone). Claude, temp copy of bdbf795: focused tests pass; guard removal: removing the sign-in JSON check fails 2 tests; removing nosniff fails 12; restored copy passes. Codex, its own temp copy: PASS; duplicate Content-Length accepted fails a test; probe: non-ASCII Content-Length -> 400. Both recommend closing.
