@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-06T18:38:12Z
-updated-at: 2026-10-22T14:37:01Z
+updated-at: 2026-10-22T14:37:06Z
 updated-by: Claude
 outcome-what: "Added project-bound nine-column CSV download-fill-upload, logged spare task keys, Shared/alternative plan filtering and independent critical paths."
 outcome-why: Owners need one simple file per project without manual project IDs or repeated uploads.
@@ -22,6 +22,7 @@ review-summary: "Independent read-only review passed: project-bound minimal CSV,
 review-gaps: "none within the approved feature scope; real workbook population, Microsoft Excel desktop saving and hosted deployment remain unverified."
 review-verdict: "Independent source review passed, sixteen focused tests and HTTP role test passed independently; parent final suite Ran 739 tests in 812.249s OK (skipped=1), eleven guard-removal checks and desktop/phone Chrome workflow passed. Ready for Aly acceptance within this feature scope."
 review-check: "1. Run .venv\\Scripts\\python.exe tests\\run.py and expect OK. 2. Open an existing project and click Import workplan. 3. Download its CSV and fill spare keyed task rows, keeping project metadata. 4. Upload, preview and confirm; expect the tasks without duplicates. 5. Choose a named plan in Timeline; expect Shared plus that plan and its critical path. 6. Re-download for later edits."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Project plan options and minimal bound workplan CSV
