@@ -29,8 +29,8 @@ related:
   - 01M3BDCQSRG5SDAJY6J54T4DEA
 commits: []
 created-at: 2026-09-25T04:43:30Z
-updated-at: 2026-10-22T14:34:41Z
-updated-by: Claude
+updated-at: 2026-10-22T14:56:14Z
+updated-by: Aly Jafferani
 claimed-by: vm-5586
 claimed-at: 2026-09-25T04:43:42Z
 outcome-what: "Gate 2 shell frame: a left rail (Home, My Work, Inbox with unread badge, Projects, Capture; a bottom bar on phones), a sticky top bar (breadcrumb and title, search with Ctrl K or /, ? shortcut list, account menu with People for owners, Sign out, Sign out everywhere), a hash router (#/home, #/my-work, #/inbox, #/projects) using location.hash and history.replaceState only, Home filters in the link with removable chips, 'Showing X of Y' and Clear all; the toolbar keeps only filters and its buttons live in a keyboard-operable More menu; My Work groups my open tasks by due date; the Inbox is a page with Approve/Reject; Projects lists projects and opens one on Home; Capture reuses the task form with optional fields folded and a 'Show it' toast when filters hide the new task; amber and gray no longer used as text. After review 9: Review 9 fixes: sign-out reloads the page; the task panel sits below the top bar and is 380px at 1024-1279px; a filter picked with the panel open survives closing; malformed or non-id links are ignored and a failed load is not a sign-out; no page-wide single-key shortcuts (j/k only in the panel); Esc in a panel field keeps focus in the panel; j/k follow the screen's order; 44px phone targets; each fact shown once, steps and dependencies before Lifecycle; More menu is a sheet on phones; one muted grey token; action toasts stay until used; Clear all beside the chips; page title Home."
