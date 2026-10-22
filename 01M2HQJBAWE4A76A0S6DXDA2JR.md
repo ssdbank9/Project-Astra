@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJBAWE4A76A0S6DXDA2JR
 title: "Project calendar: workweeks and holidays"
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Aly Jafferani
@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:22Z
-updated-at: 2026-10-22T14:54:16Z
+updated-at: 2026-10-22T15:06:15Z
 claimed-by: X1CarbonPC-33840
 claimed-at: 2026-09-15T08:08:05Z
 updated-by: Aly Jafferani
