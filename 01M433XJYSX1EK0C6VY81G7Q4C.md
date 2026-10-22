@@ -13,8 +13,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T09:29:01Z
-updated-at: 2026-10-04T18:18:31Z
-updated-by: Codex
+updated-at: 2026-10-22T14:36:51Z
+updated-by: Claude
 claimed-by: X1CarbonPC-53068
 claimed-at: 2026-10-04T15:07:35Z
 outcome-what: "Added atomic refusal of mixed Manager status requests and ordinary edits, with normalized unchanged-form support and safe progress validation."
@@ -54,3 +54,4 @@ review-check: "1. Sign in as a Manager in a disposable local test project and op
 ## Progress
 - **2026-10-04 15:09 · Codex** — Use the existing update_task service seam and compare normalized persisted fields before both protected-request routes. A full form with unchanged fields remains a status-only request. Return ValueError so the existing HTTP 400 form error handling retains inputs. Preserve dedicated lifecycle actions and direct App Owner writes. No schema or UI redesign is required.
 - **2026-10-04 15:41 · Codex** — Independent review caught unsupported progress types at the new normalization boundary. Lists, objects and infinity are translated to ValueError locally; ordinary and Owner-save normalization is unchanged. The textarea label includes its contents, so browser verification used observed form name attributes. No UI source change was needed. Default full suite: 700 tests in 368.566s, OK (skipped=1); source hashes unchanged, no new tmp dirs or ResourceWarnings.
+- **2026-10-22 14:36 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.
