@@ -1,7 +1,7 @@
 ---
 id: 01M3BS57ZY3F4GP2D6K1VPYGY5
 title: "Gate 2 slice 4: Command Center Home"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -26,7 +26,7 @@ related:
   - 01M3BF5Z67ZKA6JJG020DR3PKR
 commits: []
 created-at: 2026-09-25T07:58:25Z
-updated-at: 2026-10-22T14:56:28Z
+updated-at: 2026-10-22T15:08:40Z
 updated-by: Aly Jafferani
 claimed-by: vm-1430
 claimed-at: 2026-09-25T07:58:42Z
