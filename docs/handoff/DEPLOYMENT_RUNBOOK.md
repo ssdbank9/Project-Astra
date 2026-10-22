@@ -179,10 +179,25 @@ sudo dpkg-reconfigure -plow unattended-upgrades
 (`age` is in Ubuntu's repositories on recent releases; verify, or install
 `gnupg` instead if Aly chose gpg.)
 
-Turn off SSH passwords and root login:
+Fetch the approved release now, because the host configuration files below
+come from its `deploy/` folder. The repository is public, so no credentials
+are needed. Before a tag exists, use the exact commit SHA Aly approved instead
+of `<tag>`; never deploy a moving branch head.
 
 ```bash
-printf 'PasswordAuthentication no\nPermitRootLogin no\nKbdInteractiveAuthentication no\n' | sudo tee /etc/ssh/sshd_config.d/00-astra.conf
+sudo git clone https://github.com/ssdbank9/Project-Astra.git /opt/astra/app
+sudo git -C /opt/astra/app checkout <tag>
+sudo git -C /opt/astra/app rev-parse HEAD
+```
+
+The SHA printed must match the approved release. Every file in `deploy/` is
+secret-free and pinned by `tests/test_deploy_config.py`; see
+[deploy/README.md](../../deploy/README.md).
+
+Turn off SSH passwords and root login with `deploy/ssh/00-astra.conf`:
+
+```bash
+sudo install -m 644 /opt/astra/app/deploy/ssh/00-astra.conf /etc/ssh/sshd_config.d/00-astra.conf
 sudo sshd -t
 sudo sshd -T | grep -Ei '^(passwordauthentication|permitrootlogin|kbdinteractiveauthentication) '
 sudo systemctl reload ssh
@@ -198,8 +213,7 @@ the file is `00-astra.conf`, ahead of any file the cloud image ships.
 Keep the journal small so logs cannot fill the disk:
 
 ```bash
-sudo mkdir -p /etc/systemd/journald.conf.d
-printf '[Journal]\nSystemMaxUse=200M\n' | sudo tee /etc/systemd/journald.conf.d/astra.conf
+sudo install -D -m 644 /opt/astra/app/deploy/journald/astra.conf /etc/systemd/journald.conf.d/astra.conf
 sudo systemctl restart systemd-journald
 ```
 
@@ -248,18 +262,12 @@ Verification: `ls -ld /srv/astra/data` shows `drwx------ astra astra`.
 
 ## Stage 5 — Install Astra **[AGENT]**
 
-The repository is public, so no credentials are needed to clone it.
+The approved release is already in `/opt/astra/app` (stage 3).
 
 ```bash
-sudo git clone https://github.com/ssdbank9/Project-Astra.git /opt/astra/app
-cd /opt/astra/app
-sudo git checkout <tag>
 sudo python3 -m venv /opt/astra/app/.venv
 sudo /opt/astra/app/.venv/bin/python -m pip install /opt/astra/app
 ```
-
-Before a tag exists, check out the exact commit SHA Aly approved instead of
-`<tag>`. Never deploy a moving branch head.
 
 This installs Astra and its declared runtime dependencies, including Waitress
 for the hosted WSGI server. On Linux, `tzdata` is Windows-only. The build step
@@ -278,7 +286,7 @@ sudo -u astra env ASTRA_HOME=/srv/astra/data /opt/astra/app/.venv/bin/astra --he
   `reset-password`.
 - The timezone line prints `Asia/Karachi` (the app's "today" uses it).
 
-Rollback: `sudo rm -rf /opt/astra/app` and repeat.
+Rollback: `sudo rm -rf /opt/astra/app/.venv` and repeat this stage.
 
 ---
 
@@ -314,35 +322,15 @@ Rollback: stop here and delete `/srv/astra/data/astra.sqlite3*` to start again.
 
 ## Stage 7 — Run Astra under systemd **[AGENT]**
 
-Create `/etc/systemd/system/astra.service`:
+Install the unit from the release:
 
-```ini
-[Unit]
-Description=Astra project tracker
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=astra
-Group=astra
-Environment=ASTRA_HOME=/srv/astra/data
-Environment=ASTRA_SECURE_COOKIES=1
-Environment=PYTHONDONTWRITEBYTECODE=1
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/astra/app/.venv/bin/astra serve --waitress --host 127.0.0.1 --port 8765
-Restart=on-failure
-RestartSec=5
-UMask=0077
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectHome=yes
-ProtectSystem=strict
-ReadWritePaths=/srv/astra/data
-
-[Install]
-WantedBy=multi-user.target
+```bash
+sudo install -m 644 /opt/astra/app/deploy/systemd/astra.service /etc/systemd/system/astra.service
+sudo systemd-analyze verify /etc/systemd/system/astra.service
 ```
+
+`systemd-analyze verify` reports no problem for `astra.service` when the unit
+is valid (it may still print warnings about other units on the image).
 
 Why each setting matters:
 
@@ -359,6 +347,10 @@ Why each setting matters:
   until hosted uploads (MXY7BG) exist.
 - The WSGI application opens and migrates the database before Waitress starts
   listening. A refused or failed migration prevents the service from starting.
+- The service runs as `astra`, may write only `/srv/astra/data`
+  (`ProtectSystem=strict`), holds no capabilities and has no outbound network
+  (`IPAddressDeny=any`, loopback allowed). Astra sends no email and calls no
+  external service, so nothing needs more.
 
 Start it:
 
@@ -380,7 +372,7 @@ journalctl -u astra -n 20 --no-pager
 - `ss` shows `127.0.0.1:8765` only, never `0.0.0.0:8765`.
 - `curl` prints `200` (`GET /` serves the page without signing in; do not use
   `curl -I`, because Astra has no `HEAD` handler).
-- The journal shows `Astra is running at http://127.0.0.1:8765`.
+- The journal shows `Astra (Waitress) is running at http://127.0.0.1:8765`.
 
 Rollback: `sudo systemctl disable --now astra`.
 
@@ -458,45 +450,39 @@ version` and require 2.10.0 or newer; do not remove the body limit to make an
 older installation accept the file. Validate the complete configuration with
 `caddy validate` before reloading the service.
 
-Replace `/etc/caddy/Caddyfile` with:
+Install the Caddyfile from the release, putting the DuckDNS name in place of
+`<name>`:
 
-```caddy
-<name>.duckdns.org {
-	encode gzip
-	request_body {
-		max_size 6MB
-	}
-	# Enable only after HTTPS and certificate renewal checks pass.
-	# header Strict-Transport-Security "max-age=31536000"
-	header {
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
-		Referrer-Policy "no-referrer"
-		Content-Security-Policy "default-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'"
-	}
-	reverse_proxy 127.0.0.1:8765
-	log {
-		output file /var/log/caddy/astra-access.log
-	}
-}
+```bash
+sudo sh -c 'sed "s/<name>/YOUR-DUCKDNS-NAME/" /opt/astra/app/deploy/caddy/Caddyfile > /etc/caddy/Caddyfile'
 ```
+
+Replace `YOUR-DUCKDNS-NAME` with the name Aly chose (letters, digits and
+hyphens only).
 
 - Caddy gets and renews the certificate itself and redirects HTTP to HTTPS.
 - `max_size 6MB` sits just above Astra's own 5 MB import limit, so Astra gives
   the friendly "The file is larger than 5 MB." message.
 - The access log is the only place real client addresses are recorded, because
   Waitress sees every request as coming from `127.0.0.1`. Astra and Waitress do
-  not trust forwarded client-address headers.
-- Caddy applies the security headers to both upstream replies and proxy errors;
-  the WSGI application applies the same headers to its own responses.
+  not trust forwarded client-address headers. Caddy writes it as JSON, rolls
+  it at 10 MiB and keeps 30 days.
+- Caddy sets the security headers on every reply from Astra, replacing
+  Astra's identical ones rather than doubling them, and removes `Server` and
+  `Via`. Caddy's own error replies (for example 502 while Astra is down) do
+  not get them; those replies have no body to protect.
 - For initial staging certificate checks, leave the HSTS line commented out.
   After HTTPS and renewal checks pass, enable it and reload Caddy. A browser
   remembers HSTS for the configured year, so use HTTPS thereafter.
 
 ```bash
-sudo caddy validate --config /etc/caddy/Caddyfile
+sudo -u caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 sudo systemctl reload caddy
 ```
+
+Validate as the `caddy` user, not root: validation opens the access log, and a
+first run as root would create it owned by root, which the service then cannot
+write.
 
 Verification, from Aly's PC:
 
@@ -509,6 +495,17 @@ Test-NetConnection <ip> -Port 8765
 - HTTPS prints `200` with a valid certificate (no warning in the browser).
 - HTTP answers with a redirect to `https://`.
 - Port 8765 is not reachable (`TcpTestSucceeded : False`).
+
+**[AGENT]** On the VM, run the read-only host check. It prints one PASS or FAIL
+line per check (Astra running, port 8765 on loopback only, data folder
+permissions, SSH settings, Caddy version and configuration) and changes
+nothing:
+
+```bash
+sudo sh /opt/astra/app/deploy/verify-host.sh
+```
+
+Every line must read PASS.
 
 **[ALY]** Sign in at `https://<name>.duckdns.org` in a browser. In the browser's
 developer tools (Application, Cookies), `astra_session` shows `Secure`,
@@ -860,6 +857,11 @@ answers `200`.
    sudo systemctl restart astra
    ```
 
+   If `sudo git diff --stat <old-tag> <new-tag> -- deploy/` lists a file,
+   reinstall that file the way stage 3, 7 or 9 does (the Caddyfile with its
+   `sed`), then `sudo systemctl daemon-reload` for the unit or validate and
+   reload Caddy, and run `sudo sh /opt/astra/app/deploy/verify-host.sh`.
+
 5. Verify: `systemctl status astra`, `journalctl -u astra -n 50` (no errors, no
    "Astra cannot upgrade this database" message), the site answers `200`, Aly
    signs in and opens Home, a project board and a task.
@@ -880,6 +882,8 @@ back.
   sudo systemctl restart astra
   ```
 
+  Reinstall any `deploy/` file the two tags differ in, as in stage 14 step 4.
+
 - **The schema changed:** the old code refuses the upgraded database. Stop
   Astra, restore the backup taken in stage 14 step 2 (stage 11.4, server
   steps), check out and reinstall the old tag, start Astra. Anything entered
@@ -887,7 +891,8 @@ back.
   backup can be decrypted only on Aly's PC, so this rollback needs Aly
   present, and the 4-hour RTO counts from then.
 - **Caddy change went wrong:** restore the previous Caddyfile,
-  `sudo caddy validate --config /etc/caddy/Caddyfile`, `sudo systemctl reload caddy`.
+  `sudo -u caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`,
+  `sudo systemctl reload caddy`.
 - **Whole VM lost or reclaimed:** create a new VM (stages 1 to 9), restore the
   latest off-host backup (stage 11.4), point DuckDNS at the new IP (stage 8).
   Users keep the same URL.

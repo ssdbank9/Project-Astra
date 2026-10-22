@@ -1,0 +1,3 @@
+# Host configuration is copied onto Linux as-is; CRLF would break sh and
+# confuse systemd and Caddy. Keep these LF on every checkout.
+deploy/** text eol=lf

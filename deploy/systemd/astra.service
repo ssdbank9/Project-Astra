@@ -1,0 +1,54 @@
+# Astra under systemd (runbook stage 7). Install as
+# /etc/systemd/system/astra.service. Holds no secret: the database path is the
+# only setting, and the first owner is created separately (runbook stage 6).
+[Unit]
+Description=Astra project tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=astra
+Group=astra
+Environment=ASTRA_HOME=/srv/astra/data
+Environment=ASTRA_SECURE_COOKIES=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+# Loopback only: the CLI refuses any other address, and only Caddy talks to it.
+ExecStart=/opt/astra/app/.venv/bin/astra serve --waitress --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+# The database folder is the only place the service may write.
+ProtectSystem=strict
+ReadWritePaths=/srv/astra/data
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+
+# No privileges to gain or keep.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+# Astra needs no outbound network: it answers Caddy on loopback and nothing
+# else (no email, no external AI). Unix sockets stay allowed for journald.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target

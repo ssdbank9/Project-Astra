@@ -1,0 +1,39 @@
+# Caddy in front of Astra (runbook stage 9). Install as /etc/caddy/Caddyfile
+# after replacing <name> with the DuckDNS subdomain Aly chose. Needs Caddy
+# 2.10.0 or newer for request_body; run `caddy validate` before reloading.
+# Holds no secret: Caddy obtains and renews the certificate itself.
+<name>.duckdns.org {
+	encode gzip
+
+	# Just above Astra's 5 MB import limit and equal to Waitress's own cap,
+	# so oversized uploads get Astra's friendly message, not a proxy error.
+	request_body {
+		max_size 6MB
+	}
+
+	# Enable only after HTTPS and certificate renewal checks pass.
+	# header Strict-Transport-Security "max-age=31536000"
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+		-Server
+		-Via
+	}
+
+	reverse_proxy 127.0.0.1:8765
+
+	# The only record of real client addresses: Waitress sees every request as
+	# 127.0.0.1, and Astra ignores forwarded-address headers. JSON lines feed
+	# the optional fail2ban filter (runbook stage 10); files roll at 10 MiB and
+	# are kept for up to 30 days.
+	log {
+		output file /var/log/caddy/astra-access.log {
+			roll_size 10MiB
+			roll_keep 10
+			roll_keep_for 720h
+		}
+		format json
+	}
+}
