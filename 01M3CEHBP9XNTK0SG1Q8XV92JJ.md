@@ -27,7 +27,7 @@ related:
   - 01M3BSY3W3FH34MF87RACR121Z
 commits: []
 created-at: 2026-09-25T14:12:02Z
-updated-at: 2026-10-16T12:56:33Z
+updated-at: 2026-10-22T14:36:00Z
 updated-by: Claude
 claimed-by: vm-26940
 claimed-at: 2026-09-25T14:12:18Z
@@ -82,3 +82,4 @@ review-check: "1. Repo root: .venv/bin/python tests/run.py (Windows: .venv\\Scri
 - **2026-09-25 17:27 · Claude** — Re-review 12d M1: _write_bulk called _top_column (a full enriched list_tasks) twice per task under BEGIN IMMEDIATE: 200 of 1000 tasks held the write lock 33 s and another writer failed. Now _board_snapshot (two plain queries: id/status/parent, and the set of waiting tasks) is read once before and once after the writes; _top_column reads one task, and _wip_entry_gate counts the project only when the entered column has a limit. The same 1000/200 bulk applies in about 0.2 s (Review12dTests timing test, bound 2 s; 23 s on 55ddf3c). Single-task paths load the enriched list at most once (a test counts list_tasks calls).
 - **2026-09-26 02:27 · Claude** — Lock #13 (2026-09-26): review 12e L1 test gap closed. test_board Review12eTests.test_a_revision_bumped_between_the_recheck_and_the_write_refuses_the_bulk bumps one task's revision after the in-transaction recheck; the per-row check refuses with 'changed since the preview; nothing was changed' and nothing is written. Removing the check fails it (the write's own revision predicate would still refuse, with a different message). The member checkbox case is a driver test in the 3FQEKB commit (bulkScope changed there).
 - **2026-10-16 12:56 · Claude** — Proof line numbers refreshed 2026-10-16 at HEAD d381d66 (test names unchanged and still exist): service.py _bulk_plan :3845, bulk_apply :4029, bulk undo :4069, WIP-limit setter :3700, _wip_gate :3791; db.py v20 migration :812; app.js pickRange :1183. Older figures in the proofs (:2842, :2983, :3014, :2772, :2827, db:795, app.js:1109) are stale. The three review-12e revert gaps now have tests (Review12eTests and AstraBulkDriverTests); hold, submit, reopen and request-changes paths at the WIP limit remain unverified.
+- **2026-10-22 14:36 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.
