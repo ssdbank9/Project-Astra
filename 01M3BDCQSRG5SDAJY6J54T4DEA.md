@@ -27,8 +27,8 @@ related:
   - 01M2WNN5PQXBBCD0XTZGJQY55P
 commits: []
 created-at: 2026-09-25T04:32:48Z
-updated-at: 2026-10-22T14:34:30Z
-updated-by: Claude
+updated-at: 2026-10-22T14:56:08Z
+updated-by: Aly Jafferani
 claimed-by: vm-2127
 claimed-at: 2026-09-25T04:32:57Z
 outcome-what: "Design foundation for the Gate 2 shell: Inter 4.001 self-hosted (latin + latin-ext variable woff2 from Google Fonts css2 v20, OFL file shipped) behind a strict static allowlist with font/woff2, one-year immutable caching and CSP font-src 'self'; semantic tokens (surfaces, lines, muted text, spacing, radii, elevation, motion) and a type scale (11/12/14/16/20/24) on :root with today's palette kept; a global :focus-visible ring; reduced motion switches off every transition and animation; the 13 CSP-blocked inline style attributes in app.js replaced by .fine and .muted; toolbar and header wrap, so no sideways scroll at 1440/1024/390 and no header overlap on phones. After review 9: Review 9 fixes: sign-out reloads the page; the task panel sits below the top bar and is 380px at 1024-1279px; a filter picked with the panel open survives closing; malformed or non-id links are ignored and a failed load is not a sign-out; no page-wide single-key shortcuts (j/k only in the panel); Esc in a panel field keeps focus in the panel; j/k follow the screen's order; 44px phone targets; each fact shown once, steps and dependencies before Lifecycle; More menu is a sheet on phones; one muted grey token; action toasts stay until used; Clear all beside the chips; page title Home."
