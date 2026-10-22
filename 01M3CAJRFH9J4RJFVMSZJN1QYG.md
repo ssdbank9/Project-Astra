@@ -26,7 +26,7 @@ related:
   - 01M3C0MZ2TASFSNYRN1E3C1Z74
 commits: []
 created-at: 2026-09-25T13:02:54Z
-updated-at: 2026-10-16T12:56:44Z
+updated-at: 2026-10-22T14:35:37Z
 updated-by: Claude
 claimed-by: vm-1562
 claimed-at: 2026-09-25T13:03:12Z
@@ -82,3 +82,4 @@ review-check: "1. Linux or macOS, repo root: .venv/bin/python tests/run.py (Wind
 - **2026-09-25 17:27 · Claude** — Re-review 12d M2: an owner's approval no longer counts as the dependency override by itself. decide_owner_action_request runs the action's own gates at decision time (the owner_decision exemption is gone from _dependency_gate, _wip_entry_gate and _date_impact_gate) and answers NeedsConfirmation; the Inbox sends override_dependencies / override_wip / confirmed on the decision and the override is recorded in the deciding owner's name. list_owner_action_requests adds gates {lines, column} per pending request for the card. Kept as before: a manager's accept_submission still files the request while the task waits (the owner is asked at decision time); the coordinator asked for the confirm, not a refusal at filing.
 - **2026-09-26 02:27 · Claude** — Lock #13 (2026-09-26): review 12e L1 test gaps closed in a test-only commit. test_board Review12eTests.test_undo_is_refused_for_every_status_the_board_never_undoes pins the undo source-status check for changes_requested, on_hold, submitted and reopened. The earlier test was already caught: review 12e's revert experiment left a dangling line continuation (a SyntaxError), so unittest crashed on import and its harness saw no FAIL line. Verified: removing the check cleanly fails both tests.
 - **2026-10-16 12:56 · Claude** — Proof line numbers refreshed 2026-10-16 at HEAD d381d66: move_task service.py:3074, undo_board_move is now undo_move :3184, app.js moveCard :852, openMoveMenu :976; db.py v19 migration :788. The 'three revert experiments uncaught' gap is closed: Review12eTests pin both server checks and AstraBulkDriverTests pins the member checkboxes.
+- **2026-10-22 14:35 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.
