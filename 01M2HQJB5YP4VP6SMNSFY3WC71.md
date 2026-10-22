@@ -17,13 +17,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:22Z
-updated-at: 2026-10-22T14:31:25Z
+updated-at: 2026-10-22T14:31:30Z
 claimed-by: vm-1022
 claimed-at: 2026-09-24T05:49:42Z
 updated-by: Claude
 outcome-what: "Independent review approved the export scope, CSV formula neutralisation and filter-named filename rework"
 outcome-why: "Review found no medium-or-higher issues; 339 tests green and all mutants killed"
-question: "Accept, or send back? The CSV has a leading '# Astra export — as of ...' comment line before the header row (Excel shows it as a row) — keep it, or drop it for a clean header-first CSV?"
+question: "Ready to accept per the 2026-10-22 consensus (already settled 2026-09-15: CSV header row first, as-of time in the filename). Only Aly's board move to done remains."
 outcome-resolves: "Ready for a person to accept in signoff; low gaps recorded in review-gaps"
 review-summary: "Adds export scope tests at service and HTTP level: a member never sees another project's task, a hidden project_id returns 403, and anonymous search and export return 403; the auth-removal mutant now fails both. Task and final-results CSV writers prefix a single quote on any cell starting with = + - @, tab or CR (web._csv_cell with the shared importer.FORMULA_PREFIXES). Both CSVs still start with their header row. Filenames list the active filters (e.g. __status=in_progress__open-only) after the as-of stamp, sanitised so no quote, slash or CR/LF reaches the header, per the owner's 2026-09-15 decision against an in-band row. Export buttons use the server filename; README documents it."
 review-gaps: "Low only: (1) web._csv_cell does not trim leading whitespace before checking the first character, unlike importer.csv_cell, so '  =x' stays unquoted; service trims titles so risk is small. (2) _filter_slug names filters the service ignored (e.g. type=foo, band=abc). (3) Final-results member scope is tested only at service level (test_core), not over HTTP. (4) Ticket question field is stale (comment-row question decided 2026-09-15). (5) No real browser confirmed a.download=\"\" in app.js:459/:468 takes the Content-Disposition name. Info: search does not escape LIKE wildcards % and _; stays within scope, nothing leaks."
