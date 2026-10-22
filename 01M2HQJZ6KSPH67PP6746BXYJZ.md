@@ -16,7 +16,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:43Z
-updated-at: 2026-10-22T15:24:21Z
+updated-at: 2026-10-22T15:31:04Z
 updated-by: Claude
 outcome-what: "Finished the evidence-based scope and eight-step plan; local implementation work is authorized, while staging and exposure remain separately gated."
 outcome-why: "The existing code already has several protections, so the work must target verified gaps and prove local readiness before any cloud action."
@@ -46,8 +46,8 @@ claimed-at: 2026-10-22T15:19:37Z
   proof: 6BXYJZ plan checklist records source/config audit scope
 - [x] Repair any confirmed local security or deploy-configuration gap without exposing the service; add targeted tests for each changed boundary and role.
   proof: src/astra/__main__.py: CLI rejects non-IPv4-loopback before _run; tests/test_core.py: test_serve_refuses_non_loopback_hosts_before_starting and test_serve_allows_the_documented_loopback_host
-- [ ] Prepare least-privilege, loopback-only Astra service and Caddy/TLS/logging/firewall configuration, persistent database path and secret-free operational instructions; verify templates locally.
-  proof: 6BXYJZ plan checklist records loopback service and proxy prep
+- [x] Prepare least-privilege, loopback-only Astra service and Caddy/TLS/logging/firewall configuration, persistent database path and secret-free operational instructions; verify templates locally.
+  proof: deploy/systemd/astra.service, deploy/caddy/Caddyfile, deploy/journald/astra.conf, deploy/ssh/00-astra.conf, deploy/verify-host.sh, .gitattributes; tests/test_deploy_config.py (10 tests, 20 mutants caught); WSL systemd 259: systemd-analyze verify clean (ExecStart stubbed), security exposure 1.5 OK; dash -n ok; caddy validate NOT run (Caddy not installed)
 - [x] Reconcile the deployment runbook with the current app and approved decisions; verify vendor commands against official sources when needed and mark unexecuted steps clearly.
   proof: docs/handoff/DEPLOYMENT_RUNBOOK.md: DuckDNS secret handling, Caddy version/validation, HSTS sequence and Q22 gate; official vendor links; docs/handoff/OPEN_QUESTIONS.md: Q22
 - [x] Run focused security/regression checks, the full Windows suite, line-ending and private-file checks; obtain an independent review and fix confirmed findings.
