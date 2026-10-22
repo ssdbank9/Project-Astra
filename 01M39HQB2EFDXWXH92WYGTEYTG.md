@@ -21,8 +21,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-24T11:10:01Z
-updated-at: 2026-10-22T14:33:48Z
-updated-by: Claude
+updated-at: 2026-10-22T14:55:42Z
+updated-by: Aly Jafferani
 claimed-by: vm-26532
 claimed-at: 2026-09-24T11:12:14Z
 outcome-what: "Schema v16 (users.is_primary_owner + CHECK + partial unique index, user_events); primary-only grant/revoke of secondary owners with audit and notifications; shared _guard_user_target on user-changing calls; owner notices to all other active owners; owners cannot approve/reject their own requests; template 'owner' = acting owner; routes POST/DELETE /api/users/{id}/secondary-owner, GET /api/user-events; People screen badges, buttons and Owner access history; README"
