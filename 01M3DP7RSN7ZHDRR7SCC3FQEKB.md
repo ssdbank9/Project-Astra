@@ -1,7 +1,7 @@
 ---
 id: 01M3DP7RSN7ZHDRR7SCC3FQEKB
 title: "Assignment rules: Chairman assigns, never receives; viewers get subtasks only"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -32,7 +32,7 @@ related:
   - 01M3CEHBP9XNTK0SG1Q8XV92JJ
 commits: []
 created-at: 2026-09-26T01:45:51Z
-updated-at: 2026-10-22T14:57:13Z
+updated-at: 2026-10-22T15:09:34Z
 updated-by: Aly Jafferani
 claimed-by: vm-1352
 claimed-at: 2026-09-26T01:45:58Z
