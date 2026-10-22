@@ -1,7 +1,7 @@
 ---
 id: 01M3ADA4DRPMWYVBJ2ZJXX9RFM
 title: Notify owners when a project is closed or its dates change
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -30,8 +30,8 @@ related:
   - 01M3ADCB413BRFJTKCEXZ72D79
 commits: []
 created-at: 2026-09-24T19:12:08Z
-updated-at: 2026-10-22T14:34:19Z
-updated-by: Claude
+updated-at: 2026-10-22T15:08:10Z
+updated-by: Aly Jafferani
 claimed-by: vm-593
 claimed-at: 2026-09-24T19:12:09Z
 outcome-what: "Project closes (an owner closing directly, or approving a Manager's close request) and project date changes now send an inbox notice to every other active owner through _notify_owners (actor excluded; ordinary, uncapped). The summary names the project, whether it closed with open work (or the start/target dates old → new) and who did it. Secondary owners keep the right to close, including with open work. No new audit rows, no schema change. Also filed Z72D79 (backlog, Aly): record settings changes and reopen a closed project."

@@ -1,7 +1,7 @@
 ---
 id: 01M3A930RYSAXPWQVQP3PDDS2D
 title: Server command to transfer the primary owner and reset a password
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -28,8 +28,8 @@ related:
   - 01M39HQB2EFDXWXH92WYGTEYTG
 commits: []
 created-at: 2026-09-24T17:58:21Z
-updated-at: 2026-10-22T14:34:08Z
-updated-by: Claude
+updated-at: 2026-10-22T15:08:01Z
+updated-by: Aly Jafferani
 claimed-by: vm-13753
 claimed-at: 2026-09-24T17:58:31Z
 outcome-what: "New server commands: 'astra transfer-primary --to EMAIL [--yes]' moves the primary flag to an active secondary owner in one transaction (old primary stays a secondary owner, is signed out everywhere); 'astra reset-password --email EMAIL [--yes]' sets a 12+ character password read twice with getpass (interactive terminal required) for any active user, signs them out everywhere and clears failed sign-ins. Both print the database first and refuse a missing one, ask for the target email unless --yes, record user_events primary_owner_transferred / password_reset (actor = target, detail via=cli with OS user and host), and exit 0/1/2 with one-line errors (init-owner and serve bind errors too). A transfer notifies every active owner; a reset notifies the user, and the other owners only when the user is an owner. Owner-access writes re-check the actor is still the active primary inside the transaction. People screen labels them 'via server command'. README documents Windows and Linux use."

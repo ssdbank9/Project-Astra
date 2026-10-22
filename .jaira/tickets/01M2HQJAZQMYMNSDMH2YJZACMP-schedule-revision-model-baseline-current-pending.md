@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJAZQMYMNSDMH2YJZACMP
 title: "Schedule-revision model: baseline / current / pending"
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Aly Jafferani
@@ -17,10 +17,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:22Z
-updated-at: 2026-10-22T14:31:20Z
+updated-at: 2026-10-22T15:05:58Z
 claimed-by: X1CarbonPC-37068
 claimed-at: 2026-09-15T07:51:20Z
-updated-by: Claude
+updated-by: Aly Jafferani
 outcome-what: "Baseline/current/pending schedule model: immutable baseline captured on first schedule; propose/approve/reject schedule proposals with reason + audit (schedule_revised); dependents shown-not-moved (impacted_successors); Schedule section in task detail; 4 new tests (66 total)."
 outcome-why: "Section 6/11 required preserving original baseline, current plan, and pending proposals separately with change history; none existed."
 question: "Ready to accept per the 2026-10-22 consensus (a direct date edit with a reason stays allowed; propose/approve is the governed route; the baseline stays locked once captured). Only Aly's board move to done remains."

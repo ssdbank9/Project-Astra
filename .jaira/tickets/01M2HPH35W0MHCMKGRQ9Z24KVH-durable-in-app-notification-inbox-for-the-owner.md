@@ -1,7 +1,7 @@
 ---
 id: 01M2HPH35W0MHCMKGRQ9Z24KVH
 title: Durable in-app notification inbox for the owner
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Aly Jafferani
@@ -19,10 +19,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T04:52:13Z
-updated-at: 2026-10-22T14:31:09Z
+updated-at: 2026-10-22T15:05:50Z
 claimed-by: X1CarbonPC-13392
 claimed-at: 2026-09-15T05:04:15Z
-updated-by: Claude
+updated-by: Aly Jafferani
 outcome-what: "Durable in-app owner notifications: notifications table (idempotent per event), owner notified of others' task changes, header bell + inbox dialog with mark-read / mark-all-read; 3 new tests (58 total)."
 outcome-why: "Section 7/11: durable event notifications were Missing; task_events were audit-only with no owner inbox."
 question: "Ready to accept per the 2026-10-22 consensus (accepted as built; later decisions notify the acting owner of blocked attempts and attachment events (KBWY86, 6G89SJ); email stays off). Only Aly's board move to done remains."

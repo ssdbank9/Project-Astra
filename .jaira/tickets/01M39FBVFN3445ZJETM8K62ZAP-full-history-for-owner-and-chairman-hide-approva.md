@@ -1,7 +1,7 @@
 ---
 id: 01M39FBVFN3445ZJETM8K62ZAP
 title: "Full history for Owner and Chairman; hide approval details from other non-managers' task history"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -22,8 +22,8 @@ related:
   - 01M39BH4WDNX4GQGFCWWZSZ9T2
 commits: []
 created-at: 2026-09-24T10:28:47Z
-updated-at: 2026-10-22T14:33:37Z
-updated-by: Claude
+updated-at: 2026-10-22T15:07:34Z
+updated-by: Aly Jafferani
 claimed-by: vm-13562
 claimed-at: 2026-09-24T10:30:59Z
 outcome-what: "Added _sees_full_history (Chairman or can_manage_project) and _history_rows in service.py, shared by task_events and project_events; non-full viewers get NON_MANAGER_TASK_EVENT_KINDS / NON_MANAGER_PROJECT_EVENT_KINDS plus rows they wrote; tests for both endpoints over service and HTTP; ZSZ9T2 Chairman subtests now expect full history; README and app.js comment updated"

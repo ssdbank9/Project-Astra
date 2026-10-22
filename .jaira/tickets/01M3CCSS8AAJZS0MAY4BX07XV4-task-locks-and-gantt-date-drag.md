@@ -1,7 +1,7 @@
 ---
 id: 01M3CCSS8AAJZS0MAY4BX07XV4
 title: Task locks and Gantt date drag
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -28,8 +28,8 @@ related:
   - 01M3C0MZ2TASFSNYRN1E3C1Z74
 commits: []
 created-at: 2026-09-25T13:41:41Z
-updated-at: 2026-10-22T14:35:54Z
-updated-by: Claude
+updated-at: 2026-10-22T15:09:20Z
+updated-by: Aly Jafferani
 claimed-by: vm-32647
 claimed-at: 2026-09-25T13:41:59Z
 outcome-what: "Tasks now take renewable 60-second leases (task_locks, schema v19). Board and Gantt drags take a drag lease and the panel's Edit form an edit lease; they renew every 20 s while in use and are released on drop, save or close. Every task write checks the lease inside its write transaction (_event guard) and refuses with a 409 naming the holder and expiry. Cards show a lock chip, the panel a banner, and owners may Force unlock (task_lock_forced, holder noticed). Gantt bars can be dragged or resized by owners and managers, with a live date tip. Ordinary moves have a 15 s Undo (undo_move, generalised from the board). Moves that break a dependency, touch the critical path or pass the project target confirm first and notify the other owners (schedule_impact_confirmed). Invalid dates are refused and audited (gantt_move_blocked)."

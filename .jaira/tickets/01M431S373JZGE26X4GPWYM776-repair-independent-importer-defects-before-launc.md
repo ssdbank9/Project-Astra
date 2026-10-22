@@ -1,7 +1,7 @@
 ---
 id: 01M431S373JZGE26X4GPWYM776
 title: Repair independent importer defects before launch development
-status: signoff
+status: done
 ready: true
 creator: Codex
 assignee: Codex
@@ -15,8 +15,8 @@ related:
   - 01M343BZ654VN11E38293NT40T
 commits: []
 created-at: 2026-10-04T08:51:36Z
-updated-at: 2026-10-22T14:36:46Z
-updated-by: Claude
+updated-at: 2026-10-22T15:09:55Z
+updated-by: Aly Jafferani
 claimed-by: codex-astra-fixes-20261004
 claimed-at: 2026-10-04T08:59:39Z
 outcome-what: "Scoped importer repair independently reviewed and verified"

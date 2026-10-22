@@ -1,7 +1,7 @@
 ---
 id: 01M32AMMEW7SGBE4NRKTD73AQW
 title: "Gantt: visible colour-coded task steps with hover and click detail"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -27,8 +27,8 @@ commits:
   - b5ddafa
   - ad0549b6db535518705b2dd1817b701a21a5a546
 created-at: 2026-09-21T15:51:31Z
-updated-at: 2026-10-22T14:33:06Z
-updated-by: Claude
+updated-at: 2026-10-22T15:07:12Z
+updated-by: Aly Jafferani
 claimed-by: vm-13959
 claimed-at: 2026-09-21T16:27:02Z
 outcome-what: "Fixed the two review defects on the Gantt steps: Escape now dismisses a hover-only tooltip (document-level keydown) and lane-2 steps on two-lane tracks keep their own hit area (per-lane pseudo hit areas plus z-index on .lane-2); +N chip relabelled to cover lane-overflow steps."

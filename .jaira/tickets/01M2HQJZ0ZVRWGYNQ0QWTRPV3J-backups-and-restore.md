@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJZ0ZVRWGYNQ0QWTRPV3J
 title: Backups and restore
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -17,8 +17,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-22T14:31:51Z
-updated-by: Claude
+updated-at: 2026-10-22T15:06:23Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-49508
 claimed-at: 2026-10-15T09:41:41Z
 outcome-what: "Independent reviews found the local backup/restore change meets the ticket criteria with no blocking defect."

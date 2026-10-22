@@ -1,7 +1,7 @@
 ---
 id: 01M433XJYSX1EK0C6VY81G7Q4C
 title: Prevent mixed Manager saves from silently dropping edits
-status: signoff
+status: done
 ready: true
 creator: Codex
 assignee: Codex
@@ -13,8 +13,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T09:29:01Z
-updated-at: 2026-10-22T14:36:56Z
-updated-by: Claude
+updated-at: 2026-10-22T15:10:02Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-53068
 claimed-at: 2026-10-04T15:07:35Z
 outcome-what: "Added atomic refusal of mixed Manager status requests and ordinary edits, with normalized unchanged-form support and safe progress validation."

@@ -1,7 +1,7 @@
 ---
 id: 01M2JXM4NWFWH5J0BYJ35WZ4A8
 title: Project schedule dates with change history
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Claude
@@ -23,10 +23,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T16:15:27Z
-updated-at: 2026-10-22T14:32:45Z
+updated-at: 2026-10-22T15:06:59Z
 claimed-by: vm-21109
 claimed-at: 2026-09-24T06:15:34Z
-updated-by: Claude
+updated-by: Aly Jafferani
 question: "Ready to accept per the 2026-10-22 consensus (the config panel stays the home for project schedule dates; Gantt start/target markers are an optional follow-up). Only Aly's board move to done remains."
 outcome-what: "Rework after review send-back: added GET /api/projects/{id}/events (reuses service.project_events, gated by can_view_project) and a Project history dialog (toolbar button when one project is selected) that lists project events newest first, rendering schedule changes as Start/Target old -> new with actor and reason; moved the old-date read inside the write transaction in set_project_schedule; added 6 tests (3 core, 1 HTTP, 2 static UI) and tightened test_project_schedule_over_http to read the audit row back; README documents the feature."
 outcome-why: "Review verdict 'send back' (gaps 1-4): nothing failed if the authorization check was deleted or before/after swapped, the HTTP test never read the audit row, and no user could see a project date change. Gap 5 (stale 'before' under concurrent edits) was cheap to close. Aly approved reassignment and the fix (Slack ts 1790228901.999149)."

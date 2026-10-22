@@ -1,7 +1,7 @@
 ---
 id: 01M3BF5Z67ZKA6JJG020DR3PKR
 title: "Gate 2 slice 3: docked task side panel with its own link"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -25,8 +25,8 @@ related:
   - 01M3BE0B99E7TFPEA6MAPZTYC9
 commits: []
 created-at: 2026-09-25T05:04:03Z
-updated-at: 2026-10-22T14:34:51Z
-updated-by: Claude
+updated-at: 2026-10-22T15:08:32Z
+updated-by: Aly Jafferani
 claimed-by: vm-9335
 claimed-at: 2026-09-25T05:04:22Z
 outcome-what: "Task detail is now a panel docked on the right (460px, non-modal, the screen behind moves over and stays usable) instead of a modal dialog. It has its own link: ?task=<id> over the current screen or #/task/<id> as a full page, both surviving reload and Back/Forward, with Copy link and Open full page. Esc or x closes it (a first Esc only leaves a text field), focus moves into it on open and back to the opener on close, j/k step through the tasks of the screen behind, and below 1024px it is a full-screen sheet. It opens on project and status, the title, state chips with glyphs, a role line, six facts and section links, then the one Lifecycle block with today's button names. After review 9: Review 9 fixes: sign-out reloads the page; the task panel sits below the top bar and is 380px at 1024-1279px; a filter picked with the panel open survives closing; malformed or non-id links are ignored and a failed load is not a sign-out; no page-wide single-key shortcuts (j/k only in the panel); Esc in a panel field keeps focus in the panel; j/k follow the screen's order; 44px phone targets; each fact shown once, steps and dependencies before Lifecycle; More menu is a sheet on phones; one muted grey token; action toasts stay until used; Clear all beside the chips; page title Home."

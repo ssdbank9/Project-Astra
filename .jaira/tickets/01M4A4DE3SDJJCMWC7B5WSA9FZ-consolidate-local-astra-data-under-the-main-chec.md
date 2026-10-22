@@ -1,7 +1,7 @@
 ---
 id: 01M4A4DE3SDJJCMWC7B5WSA9FZ
 title: Consolidate local Astra data under the main checkout
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -13,8 +13,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-07T02:52:21Z
-updated-at: 2026-10-22T14:37:19Z
-updated-by: Claude
+updated-at: 2026-10-22T15:10:15Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-38872
 claimed-at: 2026-10-07T03:16:32Z
 outcome-what: "Independently reviewed local data consolidation."

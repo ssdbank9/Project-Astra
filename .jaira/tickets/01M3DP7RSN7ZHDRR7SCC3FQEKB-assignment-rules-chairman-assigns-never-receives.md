@@ -1,7 +1,7 @@
 ---
 id: 01M3DP7RSN7ZHDRR7SCC3FQEKB
 title: "Assignment rules: Chairman assigns, never receives; viewers get subtasks only"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -32,8 +32,8 @@ related:
   - 01M3CEHBP9XNTK0SG1Q8XV92JJ
 commits: []
 created-at: 2026-09-26T01:45:51Z
-updated-at: 2026-10-22T14:36:15Z
-updated-by: Claude
+updated-at: 2026-10-22T15:09:34Z
+updated-by: Aly Jafferani
 claimed-by: vm-1352
 claimed-at: 2026-09-26T01:45:58Z
 outcome-what: "Added can_assign (owner, the project's manager, Chairman) and an assign-only update path for the Chairman (panel Assign form, bulk Assign and its Undo); _validate_assignee now refuses the Chairman everywhere and a project viewer on a top-level task (create, update, bulk, hold owner, set_parent promotion, importer E_OWNER_CHAIRMAN/E_OWNER_VIEWER, templates). Existing assignments are kept and flagged needs_new_assignee (card, List row, panel, Home tile, risk=reassign). Pickers take a purpose (task, subtask, reviewer): no Chairman, viewers only for subtasks marked (viewer), and a now-forbidden current owner stays selected and marked. README table, handoff and CLAUDE.md; 22 new tests (16 service in test_assignment.py, 6 HTTP and driver in test_web.py) and one updated importer test."

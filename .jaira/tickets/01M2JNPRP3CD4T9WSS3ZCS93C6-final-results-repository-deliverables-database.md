@@ -1,7 +1,7 @@
 ---
 id: 01M2JNPRP3CD4T9WSS3ZCS93C6
 title: Final results repository (deliverables database)
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Claude
@@ -15,10 +15,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T13:57:04Z
-updated-at: 2026-10-22T14:32:35Z
+updated-at: 2026-10-22T15:06:52Z
 claimed-by: vm-17792
 claimed-at: 2026-09-24T06:09:32Z
-updated-by: Claude
+updated-by: Aly Jafferani
 question: "Ready to accept per the 2026-10-22 consensus (already settled 2026-09-15: every final result is a manual mark; acceptance records nothing). Only Aly's board move to done remains."
 outcome-what: "Recorded the round-2 independent review (approve) and fixed the stale frontmatter DoD text."
 outcome-why: "Rework e94a1a6 closed the round-1 gaps; the reviewer approved with low findings only."

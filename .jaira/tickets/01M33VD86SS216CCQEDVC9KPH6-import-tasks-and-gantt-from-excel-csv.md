@@ -1,7 +1,7 @@
 ---
 id: 01M33VD86SS216CCQEDVC9KPH6
 title: Import tasks and Gantt from Excel/CSV
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -29,10 +29,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-22T06:03:49Z
-updated-at: 2026-10-22T14:33:16Z
+updated-at: 2026-10-22T15:07:20Z
 claimed-by: vm-2112
 claimed-at: 2026-09-22T06:04:02Z
-updated-by: Claude
+updated-by: Aly Jafferani
 outcome-what: "Independent review round 2 recorded: go. Round-1 HIGH/MEDIUM defects verified fixed against the code with probe-rerun.py (59/1/11) and 39 new adversarial probes (39 PASS, 0 FAIL, 14 NOTE incl. HTTP 409/413 and download roles); 170 tests OK, node --check and git diff --check clean, worktree clean."
 outcome-why: "The diff satisfies every definition-of-done line with proofs that name real tests; the remaining seven findings are LOW (corrupt zip -> 500, closed-project download writes keys, XML control chars, two doc wordings, event label, CSV formula pattern) and belong in a follow-up ticket, so a person can now accept or send back."
 outcome-resolves: "Review of fix commit c1f2f0b for the round-1 defects P17/P17b, P6a, P6c, P6d, P5b, P15c, P18, P1c, P12, P2d, P16b, P19, P7e, P21e and of the project-scoped pre-filled template download requested by Aly on 2026-09-22 07:18 UTC."

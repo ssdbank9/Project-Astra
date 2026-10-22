@@ -1,7 +1,7 @@
 ---
 id: 01M2JNPRGYD7TGGSHZV16G89SJ
 title: Attachments on tasks
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Claude
@@ -15,8 +15,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T13:57:04Z
-updated-at: 2026-10-22T14:32:24Z
-updated-by: Claude
+updated-at: 2026-10-22T15:06:44Z
+updated-by: Aly Jafferani
 claimed-by: vm-1221
 claimed-at: 2026-09-24T16:18:13Z
 question: "Ready to accept per the 2026-10-22 consensus (already settled: acting owner is notified (KBWY86); DoD reworded to the link model with Aly's approval 2026-09-24, which meets Codex's condition). Only Aly's board move to done remains."
