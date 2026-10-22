@@ -17,7 +17,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-22T14:31:46Z
+updated-at: 2026-10-22T14:31:51Z
 updated-by: Claude
 claimed-by: X1CarbonPC-49508
 claimed-at: 2026-10-15T09:41:41Z
@@ -29,6 +29,7 @@ review-summary: "The CLI creates verified standalone SQLite snapshots from a rea
 review-gaps: "OCI keys, encrypted off-site and desktop copies, 7/4/3 retention automation, actual desktop/server restore drills, and hosted rollback have not been executed. The runbook keeps the backup timer disabled until upload and retention controls are implemented and tested; these deployment outcomes remain unverified."
 review-verdict: "The local TRPV3J definition of done is met by code, tests, and documentation. Independent specification and standards reviews found no blocking defect. Proceed to Aly's sign-off; deployment claims remain unverified."
 review-check: "1. Run .venv/Scripts/python.exe -m unittest tests.test_backup -v; 11 tests should pass. 2. Run .venv/Scripts/python.exe tests/run.py; 902 tests should pass with one symlink skip when unavailable. 3. Use a disposable ASTRA_HOME, create sample data, run astra backup and restore to a new path, then reopen and verify the sample data. 4. Confirm an existing target stays unchanged on refusal and a corrupt backup is refused. 5. Cloud upload, retention and hosted rollback are deployment drills and remain unverified."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Backups and restore
