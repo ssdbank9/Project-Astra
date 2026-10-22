@@ -27,7 +27,7 @@ related:
   - 01M2WNN5PQXBBCD0XTZGJQY55P
 commits: []
 created-at: 2026-09-25T04:32:48Z
-updated-at: 2026-10-22T14:34:25Z
+updated-at: 2026-10-22T14:34:30Z
 updated-by: Claude
 claimed-by: vm-2127
 claimed-at: 2026-09-25T04:32:57Z
@@ -38,6 +38,7 @@ review-summary: "Review 9 (2026-09-25) of 91bc390/08b926c/cf44fb6: request chang
 review-verdict: "approve with follow-ups; review 9 request changes fixed in c47062be15677f357a4e25a8fafbd73e69f0ccf5, re-review approve with follow-ups, N1-N3 fixed in 03acafcf3ffccca9cce65495a4045abf1a3cc2eb, not re-reviewed"
 review-gaps: "Left for later: L4 and L5 partial (1024px screen behind the 380px panel is still about 516px; the Gantt legend orphans an item); the pre-existing Gantt project-flag contrast (.proj-flag, white on #d1495b, 4.36:1); Open full page still shown on phones where the panel is already full screen; a Manage rail entry so Import and Templates are reachable outside Home (later slice); no favicon (404 in the console)."
 review-check: "1. Windows, repo root: .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 484 tests' and 'OK'. 2. Start Astra and sign in as the primary owner: a left rail (Home, My Work, Inbox, Projects, Capture) and a top bar with search and your initials. 3. On Home pick Criticality: Low and Open work only: chips appear under the filters with 'Showing X of Y' and Clear all; reload the page: the filters are still set. 4. Click a task link in the Gantt: it opens in a panel on the right, the Gantt stays usable, the top bar is still visible; press Esc: the panel closes and focus is back on the link. 5. Open a task, click Copy link, paste the link in a new tab: the same task opens. 6. Open Inbox with a task open, then Sign out from the account menu and sign in as a member: none of your Inbox or the task is on screen. 7. Resize to phone width: the rail is a bottom bar and a task fills the screen."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Gate 2 slice 1: design foundation (tokens, self-hosted Inter, focus rings, no inline styles, no sideways scroll)
