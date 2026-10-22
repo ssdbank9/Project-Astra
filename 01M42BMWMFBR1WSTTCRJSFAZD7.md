@@ -23,8 +23,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T02:24:50Z
-updated-at: 2026-10-22T14:36:36Z
-updated-by: Claude
+updated-at: 2026-10-22T14:57:26Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-26304
 claimed-at: 2026-10-04T02:26:57Z
 outcome-what: Closed unsuccessful SQLite setup; ordered fixture cleanup; decoded all Node capture sites as UTF-8; resolved expected missing-database paths; added four regressions and A0 evidence.
