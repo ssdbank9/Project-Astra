@@ -17,13 +17,13 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:22Z
-updated-at: 2026-10-22T14:31:15Z
+updated-at: 2026-10-22T14:31:20Z
 claimed-by: X1CarbonPC-37068
 claimed-at: 2026-09-15T07:51:20Z
 updated-by: Claude
 outcome-what: "Baseline/current/pending schedule model: immutable baseline captured on first schedule; propose/approve/reject schedule proposals with reason + audit (schedule_revised); dependents shown-not-moved (impacted_successors); Schedule section in task detail; 4 new tests (66 total)."
 outcome-why: "Section 6/11 required preserving original baseline, current plan, and pending proposals separately with change history; none existed."
-question: "Accept, or send back? Two calls: (1) direct date edits via the normal edit form still change 'current' immediately (with a reason) — the propose/approve flow is the governed alternative, not the only path. OK, or should ALL date changes be forced through propose/approve? (2) baseline is captured once and never editable — intended?"
+question: "Ready to accept per the 2026-10-22 consensus (a direct date edit with a reason stays allowed; propose/approve is the governed route; the baseline stays locked once captured). Only Aly's board move to done remains."
 outcome-resolves: "DoD met: baseline immutable, current+pending separate, each change records old/new/actor/time/reason/approval, dependents never silently rescheduled, unit+HTTP tests, existing tests green."
 review-summary: "Schedule-revision model matches the accepted spec. Baseline lives in two nullable tasks columns with a single writer _ensure_baseline (guarded by baseline cols NULL AND some date NOT NULL), so it snapshots once and never overwrites; invoked from create_task, update_task, template instantiation, and approve. Current = live tasks.start/due. Pending = task_schedule_proposals (db v5). propose_schedule requires a non-empty reason, validates due>=start, inserts pending, emits schedule_proposed, returns impacted_successors (open successors, untouched). approve applies proposal to current, calls _ensure_baseline, marks the row approved, writes schedule_revised (before->after/actor/reason). reject requires a fresh non-empty reason and is a true no-op on the task. Authz enforced at HTTP (auth+CSRF) and service (can_manage_project). Meets the accepted DoD."
 review-gaps: "None material. (1) Multiple concurrent pending proposals allowed; approving one does not auto-reject the others (each approval is governed/audited, no silent mutation). (2) propose_schedule permits both dates null (governed 'clear schedule') - defensible feature. Adversarial checks clean: baseline null-then-stuck impossible; reject never mutates; approve re-reads the live task so before->after is accurate in a direct-edit/pending race."
