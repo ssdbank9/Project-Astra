@@ -1,7 +1,7 @@
 ---
 id: 01M3BVD71SMNH4E0M2CRFKVHH8
 title: "Gate 2 slice 6: My Work groups and calendar month view, Inbox polish"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -27,7 +27,7 @@ related:
   - 01M3BSY3W3FH34MF87RACR121Z
 commits: []
 created-at: 2026-09-25T08:37:44Z
-updated-at: 2026-10-22T14:56:41Z
+updated-at: 2026-10-22T15:08:57Z
 updated-by: Aly Jafferani
 claimed-by: vm-10500
 claimed-at: 2026-09-25T08:38:56Z
