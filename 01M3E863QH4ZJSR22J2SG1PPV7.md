@@ -1,7 +1,7 @@
 ---
 id: 01M3E863QH4ZJSR22J2SG1PPV7
 title: A viewer assigned a top-level task before 3FQEKB can still submit it
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -26,7 +26,7 @@ related:
   - 01M3DP7RSN7ZHDRR7SCC3FQEKB
 commits: []
 created-at: 2026-09-26T06:59:31Z
-updated-at: 2026-10-22T14:57:20Z
+updated-at: 2026-10-22T15:09:41Z
 updated-by: Aly Jafferani
 claimed-by: vm-797
 claimed-at: 2026-09-26T06:59:43Z
