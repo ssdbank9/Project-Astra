@@ -1,141 +1,46 @@
-# Agent start prompt — Project Astra (2026-09-26)
+# Agent start prompt — Project Astra (2026-10-24)
 
-**Current review entry point (2026-10-13):** for pre-deployment independent
-review, use [INDEPENDENT_LLM_REVIEW_PROMPT.md](INDEPENDENT_LLM_REVIEW_PROMPT.md)
-and the supplied frozen package SHA. [The current plan](PRE_DEPLOYMENT_REVIEW_2026-10-13.md)
-and [board audit](BOARD_AUDIT_2026-10-13.md) supersede the counts, status and
-first-task assumptions below. This September prompt is retained as historical
-startup context; it does not authorize deployment or current implementation.
+This is the current pick-up prompt. It is the same text as section 11 of
+[HANDOFF_2026-10-24.md](HANDOFF_2026-10-24.md), which explains the state it
+refers to. The September prompt this file used to hold is in git history
+(`git log -p -- docs/handoff/AGENT_START_PROMPT.md`).
 
-Aly: paste everything between the two lines below as your first message to
-whichever agent takes over next. It works for any AI coding agent and for a
-human developer. It assumes the handoff pack is committed under
-`docs/handoff/` on the branch. For the file each tool reads by itself, see
-"Using this with a specific tool" in `docs/handoff/README.md`.
+Aly: paste everything between the two lines as the first message to the next
+agent (Claude on the new account, Codex or another model).
 
 ---
 
-You are taking over Project Astra. Astra is a private, owner-hosted project
-tracker: Python standard library only, one SQLite database, a plain
-HTML/CSS/JavaScript front end. I am Aly Jafferani, the App Owner and the only
-person who makes decisions. Work only from GitHub, never from an old local copy.
+You are taking over Project Astra, a private, owner-hosted project tracker: Python (standard library plus Waitress), one SQLite database, plain HTML/CSS/JavaScript, no framework or build step. I am Aly Jafferani, the App Owner and the only person who makes decisions.
 
-- Repository: https://github.com/ssdbank9/Project-Astra.git (public)
-- Branch: `codex/migration-safety-remediation` (the name is historical; it is
-  the working branch for every agent)
-- Head: the head you pull. The pack was written at `0b90ceb`; the commits
-  made since are listed in `HANDOFF_2026-09-26.md` section 1, "Since the pack
-  was written". Tell me the head you pulled in the preflight.
-- Schema v22; the full suite is `Ran 963 tests`, `OK` (verified 2026-10-16 after commit `8b2554f`; it was 680 at the original pack and grows with every ticket)
-- My Windows checkout: `C:\Users\Aly Jafferani\Documents\ChatGPT\Project-Astra`.
-  Never use `...\ChatGPT\New project`; it is an old, unrelated repository.
+- Repository: https://github.com/ssdbank9/Project-Astra.git (public). Branch: `codex/migration-safety-remediation`.
+- My Windows checkout: `C:\Users\Aly Jafferani\Documents\ChatGPT\Project-Astra`. Never use `...\ChatGPT\New project`.
+- The current handover is `docs/handoff/HANDOFF_2026-10-24.md`. It was written at commit `a8be8d2` plus the handover commit. If the head you pull is newer, other agents have worked since: read `git log a8be8d2..HEAD` and the ticket notes, and trust them over the handover.
 
-## 1. Read these first, in this order
+Before anything else:
 
-1. `AGENTS.md` in the repository root: the working rules. It is the single
-   source of the rules for every agent and developer.
-2. `docs/handoff/README.md` (the index of the pack)
-3. `docs/handoff/HANDOFF_2026-09-26.md` (state, setup, rules, architecture,
-   permissions, board, gaps, risks)
-4. `docs/handoff/NEXT_STEPS.md` (phases A to F)
-5. `docs/handoff/OPEN_QUESTIONS.md` and `docs/handoff/DECISIONS_LOG.md`
-6. `pending-global-mistakes.md`. On my Windows machine also read
-   `C:\Users\Aly Jafferani\.codex\mistakes.md` if it exists.
-7. `README.md` (current behaviour, schema upgrade notes)
-8. `docs/handoff/DEPLOYMENT_RUNBOOK.md` only when we reach phase D.
+1. Read `AGENTS.md`, then `docs/handoff/HANDOFF_2026-10-24.md`, then `docs/handoff/DECISIONS_LOG.md`, then `pending-global-mistakes.md` (and `C:\Users\Aly Jafferani\.codex\mistakes.md` if it exists).
+2. Run read-only checks and report the output: `git fetch origin`, `git pull --ff-only`, `git status --short --branch`, `git rev-parse HEAD`, `git ls-remote origin refs/heads/codex/migration-safety-remediation`, `.venv\Scripts\python.exe tests\run.py` (expect at least 1112 tests and OK), and the board by lane (`jaira list --json`; the tickets are under the `tickets` key).
+3. Tell me, in a few short lines:
+   - the head you pulled;
+   - the test result;
+   - the board counts by lane;
+   - anything that changed since `a8be8d2`;
+   - the first item from section 8 of the handover that is still open.
 
-## 2. Rules you must follow
+Rules, in short (AGENTS.md wins if this differs):
+- Pull before work. Before every push, check `git ls-remote` that origin has not moved. Never force-push, rebase or amend published history.
+- Stage only your own files; never `git add .` or `-A`. LF line endings only.
+- Run the full suite before every push and report the exact result and the final SHA.
+- Get an independent review of every change from someone who did not write it. For guards, prove a test fails when the guard is removed. For UI work, check it in a browser.
+- jaira:
+  - Set `JAIRA_USER` to your own agent name, never to me.
+  - Never run `jaira init` or any `--force`.
+  - Move tickets into `human` or `signoff` only, never out of them.
+  - The ticket file rides in the same commit as its code.
+- Do not deploy, provision, create accounts, use credentials or turn on external AI unless I say so. Ask me for any decision, account, password or acceptance.
+- Keep messages short and plain. Give me PowerShell commands one line at a time, and remind me to type `powershell` first if my window is Command Prompt.
+- Every fact must come from the repository, git, the tests or me. Say "unverified" otherwise.
 
-Follow every rule in `AGENTS.md`. In short:
-
-- Work only on `codex/migration-safety-remediation` unless I name another
-  branch. Pull before you start.
-- Right before a push, check with `git ls-remote` that origin has not moved
-  since you pulled. If it has, pull (merge), re-run the tests, then push
-  normally. Never force-push, rebase or amend published history.
-- After each push, tell me the final SHA, the files changed, the tickets and
-  their lanes, and the tests run with the exact result.
-- Use the jaira CLI for the board, never hand edits. Never run `jaira init`,
-  never use `--force`, never set `JAIRA_USER` to me. Move tickets into `human`
-  or `signoff`, never out of `human`, `signoff` or `done`. The ticket file
-  rides in the same commit as its code.
-- Get an independent review of every change by someone who did not write it
-  before you call it ready.
-- Never commit secrets, `.env` files, keys, a live database, venvs or caches.
-  Keep files LF.
-- Do not deploy, provision anything or create real users unless I say so.
-  When a step needs a decision, an account, a password or an acceptance,
-  ask me.
-- Give me PowerShell steps one line at a time, and keep your messages short and
-  plain.
-- Every fact you report must come from the repository, git, the tests or me.
-  Say "unverified" when you cannot check something.
-
-## 3. Preflight (read-only; report the output)
-
-If `jaira` is not installed:
-`go install github.com/BeMuCa/jaira/cmd/jaira@v0.2.0` (it prints
-`jaira version dev`, which is expected).
-
-Linux or macOS:
-
-```bash
-git fetch origin
-git switch codex/migration-safety-remediation
-git pull --ff-only
-git status --short --branch
-git rev-parse HEAD
-git ls-remote origin refs/heads/codex/migration-safety-remediation
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-.venv/bin/python tests/run.py
-node --check src/astra/static/app.js
-jaira validate --json
-```
-
-Windows PowerShell (one line at a time):
-
-```powershell
-git fetch origin
-git switch codex/migration-safety-remediation
-git pull --ff-only
-git status --short --branch
-git rev-parse HEAD
-git ls-remote origin refs/heads/codex/migration-safety-remediation
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -e .
-.venv\Scripts\python.exe tests\run.py
-node --check src\astra\static\app.js
-jaira validate --json
-```
-
-Expect `Ran 963 tests` and `OK` (about 14 to 20 minutes on Aly's laptop on 2026-10-16; the count only grows). Node must be
-installed, or the UI driver tests are skipped. Then list the board by lane
-with `jaira next --per-lane --json`, or from the ticket files' `status:`
-lines. Live snapshot on 2026-10-16: 93 tickets, 41 in signoff, 14 in human,
-11 in backlog, 26 in done and 1 in progress, unless I have accepted or sent
-back tickets since.
-
-## 4. Your first task
-
-Stay read-only for this task.
-
-1. Run the preflight and report it.
-2. Make a full (non-shallow) clone in a scratch folder and try merging
-   `codex/migration-safety-remediation` into `origin/main` there. Report any
-   conflicts and run the full suite on the merge result. Do not push anything.
-   Note that `main` carries two ticket files this branch lacks (WT5TCK and
-   0RSY5C); say whether WT5TCK is now covered by 3FQEKB and whether the bug in
-   0RSY5C still exists.
-3. Check ticket 3NT40T (Excel import hardening follow-ups) item by item against
-   the code. Items 3 and 6 look already fixed by `c295bb7` and `d295d78`;
-   confirm or refute each item with file and line references.
-4. Write me a one-page summary: what is ready for my signoff, the merge result,
-   what 3NT40T still needs, and the open questions I still have to answer
-   (from `OPEN_QUESTIONS.md`), with your recommended default for each.
-
-After that, the plan is `NEXT_STEPS.md` phase A: I sign off and answer the
-questions; then you do the small review fixes (A3) and 3NT40T, then prepare
-the pull request into `main` for me to merge.
+Do not start any implementation until I answer your report.
 
 ---

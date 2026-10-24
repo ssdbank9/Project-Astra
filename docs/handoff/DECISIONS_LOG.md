@@ -298,3 +298,17 @@ transition and deployment remain separate.
   critical path; arrows shipped in `8fa1ae3`), 6G89SJ (notify the acting
   owner), CS93C6 (manual final-result marks, 2026-09-15), HS3JRY (approved on
   Slack), JM7CFP (approved in chat 2026-10-09).
+
+### 2026-10-22 — closing human-lane tickets, F9HBSJ and local Caddy (chat with Claude)
+
+- "don't go by my okay only test all the 7 both you and codex think are okay
+  and then finalize it": Claude and Codex each tested 2FREQ9, WMW428, 26ZF8D,
+  ZQQCJM, MJ5Q35, JQY55P and F9HBSJ before any of them may close. Six passed;
+  F9HBSJ failed (DST scheduler defect). Results are on each ticket.
+- "Keep Z9JCZ6, MTEDTM and AX572Q open for now." They stay in human until Aly
+  confirms them himself; the only earlier acceptance record is a ticket note
+  signed with his name, which agents have written before.
+- "Not now, leave F9HBSJ open." The DST fix waits until Aly asks for it.
+- "Yes, install Caddy inside local WSL from Caddy's official apt repository,
+  only to run caddy validate on deploy/caddy/Caddyfile." Done; the service was
+  stopped and disabled.

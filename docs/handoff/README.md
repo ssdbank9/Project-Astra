@@ -1,5 +1,21 @@
 # Astra handoff index
 
+## Current handover — 2026-10-24 (start here)
+
+Read [HANDOFF_2026-10-24.md](HANDOFF_2026-10-24.md). It supersedes every
+status, count and next-step statement below, which are dated history. The
+pick-up prompt for the next agent is its section 11, also in
+[AGENT_START_PROMPT.md](AGENT_START_PROMPT.md).
+
+In short, at `a8be8d2`:
+- The 41 signoff tickets are done.
+- 6BXYJZ step 4 shipped tested host configuration in `deploy/`; nothing is
+  deployed.
+- Six human-lane tickets were tested by Claude and Codex and wait for Aly's
+  board move.
+- F9HBSJ has a DST scheduler defect and stays open.
+- Board: 93 tickets, 67 done, 15 human, 11 backlog.
+
 ## Daily in-app summary — 2026-10-15
 
 F9HBSJ now implements a primary-Owner-controlled daily Inbox summary with an
