@@ -1622,7 +1622,7 @@ document.querySelector("#logout").onclick=async()=>{await api("/api/logout",{met
 document.querySelector("#logout-all").onclick=async()=>{await api("/api/logout-all",{method:"POST",body:"{}"});signedOut()};
 async function changePasswordFromForm(form,errorElement,forced){
   const values=Object.fromEntries(new FormData(form));
-  errorElement.textContent="";
+  errorElement.textContent="";errorElement.classList.remove("is-info");
   if(values.new_password!==values.confirm_password){errorElement.textContent="The new passwords do not match.";return}
   try{
     const data=await api("/api/password/change",{method:"POST",body:JSON.stringify({current_password:values.current_password,new_password:values.new_password})});
@@ -2949,11 +2949,15 @@ async function submitResetPassword(e){
   const name=form.querySelector("#reset-password-user").selectedOptions[0]?.dataset.name||"the user";
   const own=data.user_id===state.user.id;
   try{
-    await api(`/api/users/${data.user_id}/password`,{method:"POST",body:JSON.stringify({password:data.password})});
+    const reset=await api(`/api/users/${data.user_id}/password`,{method:"POST",body:JSON.stringify({password:data.password})});
+    if(own){  // the server now requires a change before anything else, so go straight to that screen
+      state.user={...state.user,...reset.user};form.reset();document.querySelector("#people-dialog").close();showSignedInState();
+      const note=document.querySelector("#forced-password-error");note.classList.add("is-info");
+      note.textContent="Your password was reset and your other sessions were signed out. Enter it as the current password, then choose a new one.";
+      return}
     await openPeople();  // re-render, so the owner-access history shows the reset
     const done=document.querySelector("#reset-password-error");done.classList.add("is-info");
-    done.textContent=own?"Your password has been changed. Your other sessions were signed out."
-      :`Password reset for ${name}. Give them the new password; they are signed out everywhere else.`;
+    done.textContent=`Password reset for ${name}. Give them the new password; they are signed out everywhere else.`;
     document.querySelector("#reset-password-form").scrollIntoView({block:"nearest"});
   }catch(x){out.textContent=x.message}
 }

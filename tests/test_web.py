@@ -349,6 +349,43 @@ class AstraWebTests(unittest.TestCase):
         response, _ = self.request("GET", "/api/projects", cookie=cookie)
         self.assertEqual(response.status, 200)
 
+    def test_forced_change_refuses_the_temporary_password_as_the_new_one(self):
+        owner = self.server.service.get_user(
+            self.server.service.db.execute("SELECT id FROM users WHERE email='owner@example.org'").fetchone()[0]
+        )
+        self.server.service.create_user(owner, "member@example.org", "Member", "temporary password")
+        response, login = self.request("POST", "/api/login", {
+            "email": "member@example.org", "password": "temporary password",
+        }, complete_first_login=False)
+        cookie = response.getheader("Set-Cookie").split(";", 1)[0]
+
+        response, refused = self.request("POST", "/api/password/change", {
+            "current_password": "temporary password", "new_password": "temporary password",
+        }, cookie=cookie, csrf=login["csrf"])
+        self.assertEqual(response.status, 400)
+        self.assertIn("different from your current password", refused["error"])
+        response, me = self.request("GET", "/api/me", cookie=cookie)
+        self.assertTrue(me["user"]["must_change_password"])
+        response, _ = self.request("GET", "/api/projects", cookie=cookie)
+        self.assertEqual(response.status, 403)
+
+    def test_signed_in_owner_cannot_change_to_the_same_password(self):
+        db = self.server.service.db
+        cookie1, csrf1 = self._owner_session()
+        self._owner_session()  # a second session that a real change would revoke
+        snapshot = lambda: (
+            db.execute("SELECT password_hash,must_change_password FROM users WHERE email='owner@example.org'").fetchone()[:],
+            db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0],
+            db.execute("SELECT COUNT(*) FROM user_events").fetchone()[0],
+        )
+        before = snapshot()
+        response, refused = self.request("POST", "/api/password/change", {
+            "current_password": "correct horse battery", "new_password": "correct horse battery",
+        }, cookie=cookie1, csrf=csrf1)
+        self.assertEqual(response.status, 400)
+        self.assertIn("different from your current password", refused["error"])
+        self.assertEqual(snapshot(), before)
+
     def test_forced_password_session_can_sign_out_without_unlocking_api(self):
         owner_id = self.server.service.db.execute(
             "SELECT id FROM users WHERE email='owner@example.org'"
@@ -2727,7 +2764,8 @@ class AstraStaticAssetTests(unittest.TestCase):
         for phrase in ('primary_owner_transferred:"Primary owner transferred"', 'password_reset:"Password reset"',
                        '" via server command"', 'data-reset-password=', 'id="reset-password-form"',
                        'const MIN_PASSWORD=8;', 'minlength="${MIN_PASSWORD}"',
-                       '"Your password has been changed. Your other sessions were signed out."',
+                       # B3Y1XY: an own reset now lands on the forced-change screen with this note.
+                       '"Your password was reset and your other sessions were signed out. Enter it as the current password, then choose a new one."',
                        '"Blocked password reset of the primary owner"'):
             self.assertIn(phrase, self.js)
 

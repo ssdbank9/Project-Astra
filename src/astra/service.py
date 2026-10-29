@@ -525,6 +525,9 @@ class AstraService:
                 raise Forbidden("Sign in required.")
             if not verify_password(current_password, row["password_hash"]):
                 raise ValueError("Current password is incorrect.")
+            # 0RHNMG review: re-entering a temporary password must not count as changing it.
+            if new_password == current_password:
+                raise ValueError("Choose a new password that is different from your current password.")
             self.db.execute(
                 "UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?",
                 (password_hash, actor["id"]),

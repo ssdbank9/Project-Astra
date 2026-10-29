@@ -95,6 +95,44 @@ class PasswordChangeServiceTests(unittest.TestCase):
                 ).fetchone()[0], before_events)
                 self.assertEqual(self.session_hashes(self.member["id"]), before_sessions)
 
+    def test_reusing_the_temporary_password_does_not_meet_the_forced_change(self):
+        # 0RHNMG review: re-entering the temporary password as the new one used to clear the flag.
+        self.add_session(self.member["id"], "current-session")
+        self.add_session(self.member["id"], "other-session")
+        before_hash = self.db.execute(
+            "SELECT password_hash FROM users WHERE id=?", (self.member["id"],)
+        ).fetchone()[0]
+        before_events = self.db.execute("SELECT COUNT(*) FROM user_events").fetchone()[0]
+
+        with self.assertRaisesRegex(ValueError, "different from your current password"):
+            self.service.change_own_password(
+                self.member, "temporary member password", "temporary member password",
+                keep_session="current-session",
+            )
+
+        row = self.db.execute(
+            "SELECT password_hash,must_change_password FROM users WHERE id=?", (self.member["id"],)
+        ).fetchone()
+        self.assertEqual(row["password_hash"], before_hash)
+        self.assertTrue(row["must_change_password"])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM user_events").fetchone()[0], before_events)
+        self.assertEqual(self.session_hashes(self.member["id"]), {"current-session", "other-session"})
+
+    def test_reuse_is_refused_for_a_signed_in_user_who_is_not_forced(self):
+        changed = self.service.change_own_password(
+            self.member, "temporary member password", "permanent member password"
+        )
+        self.assertFalse(changed["must_change_password"])
+        with self.assertRaisesRegex(ValueError, "different from your current password"):
+            self.service.change_own_password(
+                changed, "permanent member password", "permanent member password"
+            )
+
+    def test_wrong_current_password_is_reported_before_reuse(self):
+        # A wrong current password must not reveal whether the new one matches the stored one.
+        with self.assertRaisesRegex(ValueError, "Current password is incorrect"):
+            self.service.change_own_password(self.member, "wrong guess 123", "wrong guess 123")
+
 
 if __name__ == "__main__":
     unittest.main()

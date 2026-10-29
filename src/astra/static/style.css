@@ -685,6 +685,7 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 #import-dialog button:disabled { opacity: .55; cursor: not-allowed; }
 .import-body .error.is-info { color: var(--teal); }
 #people-body .error.is-info { color: var(--teal); }
+#password-required .error.is-info { color: var(--teal); }
 #people-body .form-hint { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
 #people-body .people-list button.link { white-space: nowrap; }
 #people-body .people-list li.user-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
