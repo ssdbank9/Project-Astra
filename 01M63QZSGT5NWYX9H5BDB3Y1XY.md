@@ -19,7 +19,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-29T11:51:08Z
-updated-at: 2026-10-29T11:51:08Z
+updated-at: 2026-10-29T11:51:19Z
+updated-by: Claude
 ---
 
 # Password change: refuse reusing the current password; fix own-reset screen
