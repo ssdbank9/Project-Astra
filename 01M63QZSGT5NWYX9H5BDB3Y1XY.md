@@ -19,7 +19,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-29T11:51:08Z
-updated-at: 2026-10-29T12:20:39Z
+updated-at: 2026-10-29T12:20:43Z
 updated-by: Claude
 claimed-by: X1CarbonPC-13024
 claimed-at: 2026-10-29T11:51:22Z
@@ -41,7 +41,7 @@ claimed-at: 2026-10-29T11:51:22Z
 
 <Steps, in order — filled in by the pre-process step, or by you.>
 
-- [ ] Write failing service, HTTP and frontend-driver tests for both defects
+- [x] Write failing service, HTTP and frontend-driver tests for both defects
 - [ ] Refuse new==current in change_own_password after the current-password check
 - [ ] On own reset, update state.user and show the forced-change screen with an info note instead of reopening People
 - [ ] Focused tests, browser check, full suite, independent review
