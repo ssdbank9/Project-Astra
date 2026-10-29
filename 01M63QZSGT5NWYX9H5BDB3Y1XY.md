@@ -1,7 +1,7 @@
 ---
 id: 01M63QZSGT5NWYX9H5BDB3Y1XY
 title: "Password change: refuse reusing the current password; fix own-reset screen"
-status: backlog
+status: todo
 ready: true
 creator: Claude
 assignee: Claude
@@ -19,7 +19,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-29T11:51:08Z
-updated-at: 2026-10-29T11:51:38Z
+updated-at: 2026-10-29T11:51:44Z
 updated-by: Claude
 claimed-by: X1CarbonPC-13024
 claimed-at: 2026-10-29T11:51:22Z
