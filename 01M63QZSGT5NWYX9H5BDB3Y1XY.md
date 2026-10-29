@@ -19,7 +19,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-29T11:51:08Z
-updated-at: 2026-10-29T12:20:52Z
+updated-at: 2026-10-29T12:20:56Z
 updated-by: Claude
 claimed-by: X1CarbonPC-13024
 claimed-at: 2026-10-29T11:51:22Z
@@ -44,7 +44,7 @@ claimed-at: 2026-10-29T11:51:22Z
 - [x] Write failing service, HTTP and frontend-driver tests for both defects
 - [x] Refuse new==current in change_own_password after the current-password check
 - [x] On own reset, update state.user and show the forced-change screen with an info note instead of reopening People
-- [ ] Focused tests, browser check, full suite, independent review
+- [x] Focused tests, browser check, full suite, independent review
 
 ## Progress
 - **2026-10-29 11:52 · Claude** — Same-password check compares the submitted strings after verify_password, not hashes: current is already verified, and doing it after keeps 'Current password is incorrect' as the answer to a wrong guess (no oracle on the stored password). reset_user_password (owner setting someone's temporary password) is deliberately unchanged: an owner may reissue the same temporary password. UI: the old own-reset success message ('Your password has been changed') could never show, so it was removed. Probe tests that found both bugs were written by an independent agent in a throwaway copy (34 tests, not committed).
