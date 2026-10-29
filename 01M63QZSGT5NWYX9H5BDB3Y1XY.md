@@ -1,7 +1,7 @@
 ---
 id: 01M63QZSGT5NWYX9H5BDB3Y1XY
 title: "Password change: refuse reusing the current password; fix own-reset screen"
-status: in-progress
+status: review
 ready: true
 creator: Claude
 assignee: Claude
@@ -19,10 +19,14 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-29T11:51:08Z
-updated-at: 2026-10-29T12:20:56Z
+updated-at: 2026-10-29T12:21:09Z
 updated-by: Claude
 claimed-by: X1CarbonPC-13024
 claimed-at: 2026-10-29T11:51:22Z
+outcome-what: "change_own_password refuses a new password equal to the current one (after the current-password check). An owner's own reset from People now updates state.user, clears the form, closes People and shows the forced-change screen with an info note, instead of reopening People into 403s. One stale test phrase updated to the new note."
+outcome-why: "Testing 0RHNMG found that re-entering a temporary password satisfied the forced change, and that an owner's own reset left a half-working app with an error until reload. Aly said fix both before accepting."
+outcome-resolves: "Forced changes now need a genuinely new password for every role (service + HTTP tests, forced and unforced), and the own-reset path lands on the change screen with no refused calls (frontend driver tests, browser check). Each guard's removal fails a test; full suite 1121 OK."
+executed-by: claude-opus-5-5
 ---
 
 # Password change: refuse reusing the current password; fix own-reset screen
