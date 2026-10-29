@@ -19,7 +19,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-29T11:51:08Z
-updated-at: 2026-10-29T11:52:11Z
+updated-at: 2026-10-29T12:20:39Z
 updated-by: Claude
 claimed-by: X1CarbonPC-13024
 claimed-at: 2026-10-29T11:51:22Z
@@ -29,7 +29,8 @@ claimed-at: 2026-10-29T11:51:22Z
 
 ## Definition of Done
 
-- [ ] Service and HTTP tests prove a change to the same password is refused with nothing changed (hash, flag, sessions, user_events), for forced and unforced users, and a wrong current password is still reported first; a frontend driver test proves an own reset shows the forced-change screen with an info note and makes no further data calls, while resetting someone else still refreshes People; each guard's removal fails a test; checked in a browser; full suite passes; independent review approves.
+- [x] Service and HTTP tests prove a change to the same password is refused with nothing changed (hash, flag, sessions, user_events), for forced and unforced users, and a wrong current password is still reported first; a frontend driver test proves an own reset shows the forced-change screen with an info note and makes no further data calls, while resetting someone else still refreshes People; each guard's removal fails a test; checked in a browser; full suite passes; independent review approves.
+  proof: tests/test_password_change.py test_reusing_the_temporary_password_does_not_meet_the_forced_change, test_reuse_is_refused_for_a_signed_in_user_who_is_not_forced, test_wrong_current_password_is_reported_before_reuse; tests/test_web.py test_forced_change_refuses_the_temporary_password_as_the_new_one, test_signed_in_owner_cannot_change_to_the_same_password; tests/test_own_password_reset_ui.py (4 tests); guard removals: service guard -> 3 fail, guard moved before verify -> 1 fails, if(own) branch -> 2 fail, is-info add/remove and dialog close -> 1 fails each; browser check on 127.0.0.1:8793 with synthetic accounts; full suite Ran 1121 tests OK (skipped=1); independent review: approve with nits, nits 1-3 addressed
 
 ## Options
 
