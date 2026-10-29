@@ -19,8 +19,10 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-29T11:51:08Z
-updated-at: 2026-10-29T11:51:19Z
+updated-at: 2026-10-29T11:51:22Z
 updated-by: Claude
+claimed-by: X1CarbonPC-13024
+claimed-at: 2026-10-29T11:51:22Z
 ---
 
 # Password change: refuse reusing the current password; fix own-reset screen
