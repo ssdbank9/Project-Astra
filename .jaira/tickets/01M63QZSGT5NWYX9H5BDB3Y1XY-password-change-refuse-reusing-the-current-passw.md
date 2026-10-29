@@ -1,7 +1,7 @@
 ---
 id: 01M63QZSGT5NWYX9H5BDB3Y1XY
 title: "Password change: refuse reusing the current password; fix own-reset screen"
-status: review
+status: signoff
 ready: true
 creator: Claude
 assignee: Claude
@@ -19,7 +19,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-29T11:51:08Z
-updated-at: 2026-10-29T12:21:09Z
+updated-at: 2026-10-29T12:21:46Z
 updated-by: Claude
 claimed-by: X1CarbonPC-13024
 claimed-at: 2026-10-29T11:51:22Z
@@ -27,6 +27,10 @@ outcome-what: "change_own_password refuses a new password equal to the current o
 outcome-why: "Testing 0RHNMG found that re-entering a temporary password satisfied the forced change, and that an owner's own reset left a half-working app with an error until reload. Aly said fix both before accepting."
 outcome-resolves: "Forced changes now need a genuinely new password for every role (service + HTTP tests, forced and unforced), and the own-reset path lands on the change screen with no refused calls (frontend driver tests, browser check). Each guard's removal fails a test; full suite 1121 OK."
 executed-by: claude-opus-5-5
+review-summary: "Two small changes. Server: change_own_password now refuses a new password identical to the current one, checked after the current password is verified, so a forced user must pick a genuinely new password and a wrong guess still only says 'Current password is incorrect'. Browser: when an owner resets their own password from People, the page no longer reopens People (whose data calls the server now refuses); it clears the reset form, closes People and shows the 'Choose a new password' screen with a teal note. Resetting someone else is unchanged."
+review-gaps: "Independent reviewer (separate agent, did not write the code) found no correctness or security defects; three nits were raised and fixed before commit (info styling, dialog close and form clear now tested; unforced HTTP case added). Not covered: the reviewer noted a lone UTF-16 surrogate in a password may raise UnicodeEncodeError (500) inside hash_password; this is existing behaviour, outside this ticket, and an earlier probe reported a clean 400 for invalid Unicode, so it is unverified either way. Whether an owner resetting their own password should be forced at all was left as-is (existing, tested behaviour)."
+review-verdict: "Approve. Diff matches every DoD item; guard removals each fail a test; full suite Ran 1121 tests OK (skipped=1); browser-checked with synthetic accounts. Reviewer verdict was approve with nits, all addressed."
+review-check: "1. In PowerShell in the project folder: .venv\\Scripts\\python.exe tests\\run.py — expect 'Ran 1121 tests' and 'OK (skipped=1)'.  2. Start Astra locally and sign in as a test member whose account you just created; on 'Choose a new password', type the temporary password in all three boxes and press Change password — you should see 'Choose a new password that is different from your current password.' and stay on that screen.  3. Enter a different new password — Astra opens.  4. Sign in as an owner, open account menu > People and access > Reset a password, pick YOURSELF, set a new password and press Reset password — People closes and the 'Choose a new password' screen appears with a teal note 'Your password was reset…'; no red error.  5. Use the reset password as current and pick a new one — Astra opens normally."
 ---
 
 # Password change: refuse reusing the current password; fix own-reset screen
