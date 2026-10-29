@@ -1,7 +1,7 @@
 ---
 id: 01M3CAJRFH9J4RJFVMSZJN1QYG
 title: Board drag and drop with Move to and 15-second Undo
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -26,8 +26,8 @@ related:
   - 01M3C0MZ2TASFSNYRN1E3C1Z74
 commits: []
 created-at: 2026-09-25T13:02:54Z
-updated-at: 2026-10-16T12:56:44Z
-updated-by: Claude
+updated-at: 2026-10-22T15:09:13Z
+updated-by: Aly Jafferani
 claimed-by: vm-1562
 claimed-at: 2026-09-25T13:03:12Z
 outcome-what: "The project board is now movable by owners and the project's managers. Drag within a column to reorder it (tasks.board_rank, schema v18). Drag across columns to change status through today's server rules (Blocked = hold dialog, Submitted/Accepted confirm, Closed and reopen ask for reasons, a manager's protected drops file Owner requests). Waiting-on-predecessor cards cannot go forward, and only an owner may override (dependency_override). Refusals are audited as board_move_blocked. Every card has a Move to menu for the keyboard and phones. Ordinary moves and reorders show a 15-second Undo, which is a new audited change. Also: Aly's 2026-09-25 decision lets a project manager put work on hold directly."
@@ -37,6 +37,7 @@ review-summary: "Reviews 12a-12e (2026-09-25) of a2161a0, 55ddf3c and 89e9229. T
 review-gaps: "Left for later: three revert experiments no test catches (review 12e L1): dropping the board-source-status check in undo_move, dropping the per-row revision check inside _write_bulk, and showing members the bulk checkboxes. Not tried on a real touch device (tablet long press, Playwright emulation only), no screen-reader run, and no live refresh (lock chips, banners and Inbox gate lines show the last load; the server rechecks at write and decision time). Review 12c I3: bulk assign, like the panel, accepts the chairman and project viewers; ask Aly whether viewers should be assignable. The Blocked WIP exemption: a card that enters Blocked because of a dependency is not refused, so a Blocked limit can be exceeded by an added link or a reopened predecessor. A manager's accept request on a waiting task is filed and the owner is asked at decision time (not refused at filing). An owner's own board Undo passes the dependency override itself (12d I1); the importer and templates bypass the WIP and dependency gates (owner-only, 12d I2)."
 review-verdict: "approve with follow-ups: reviews 12a, 12b, 12c and re-review 12d each approved with follow-ups (no High); every finding fixed in 55ddf3cba30d4ce1cfe34603f25413aa9f32eb0a and 89e92295337e0edf7016e1fb1b2a85aeb0cae825; review 12e of 89e9229 approves (0 High, 0 Medium, 1 Low: three uncaught revert experiments, left as follow-ups); Ran 639 tests, OK"
 review-check: "1. Linux or macOS, repo root: .venv/bin/python tests/run.py (Windows: .venv\\Scripts\\python.exe tests\\run.py); expect 'Ran 639 tests' and 'OK'. 2. Start Astra, sign in as a project manager, open Projects > a project > Board. 3. Drag a Draft card to Ready: it moves and a toast offers Undo for 15 seconds; press Undo: it goes back. 4. Drag a card that shows 'Waits on …' to In progress: it snaps back with 'Only an owner may override a dependency'. 5. On a card press Move to…, then use the arrow keys and Enter: the card moves without a mouse. 6. Sign in as the owner and drag the same waiting card: 'Override dependency' asks first; confirm and the task History shows dependency_override. 7. As the manager, ask to move an on-hold task back to In progress; as the owner open Inbox > Needs action: the card says 'Approving overrides: …' when a rule applies, and Approve asks you to confirm it."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Board drag and drop with Move to and 15-second Undo
@@ -82,3 +83,4 @@ review-check: "1. Linux or macOS, repo root: .venv/bin/python tests/run.py (Wind
 - **2026-09-25 17:27 · Claude** — Re-review 12d M2: an owner's approval no longer counts as the dependency override by itself. decide_owner_action_request runs the action's own gates at decision time (the owner_decision exemption is gone from _dependency_gate, _wip_entry_gate and _date_impact_gate) and answers NeedsConfirmation; the Inbox sends override_dependencies / override_wip / confirmed on the decision and the override is recorded in the deciding owner's name. list_owner_action_requests adds gates {lines, column} per pending request for the card. Kept as before: a manager's accept_submission still files the request while the task waits (the owner is asked at decision time); the coordinator asked for the confirm, not a refusal at filing.
 - **2026-09-26 02:27 · Claude** — Lock #13 (2026-09-26): review 12e L1 test gaps closed in a test-only commit. test_board Review12eTests.test_undo_is_refused_for_every_status_the_board_never_undoes pins the undo source-status check for changes_requested, on_hold, submitted and reopened. The earlier test was already caught: review 12e's revert experiment left a dangling line continuation (a SyntaxError), so unittest crashed on import and its harness saw no FAIL line. Verified: removing the check cleanly fails both tests.
 - **2026-10-16 12:56 · Claude** — Proof line numbers refreshed 2026-10-16 at HEAD d381d66: move_task service.py:3074, undo_board_move is now undo_move :3184, app.js moveCard :852, openMoveMenu :976; db.py v19 migration :788. The 'three revert experiments uncaught' gap is closed: Review12eTests pin both server checks and AstraBulkDriverTests pins the member checkboxes.
+- **2026-10-22 14:35 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.

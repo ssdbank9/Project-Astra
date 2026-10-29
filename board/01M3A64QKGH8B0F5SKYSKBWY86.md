@@ -1,0 +1,78 @@
+---
+id: 01M3A64QKGH8B0F5SKYSKBWY86
+title: "Blocked-attempt notices: notify the acting owner for Item 2 events and cap repeats per person"
+status: done
+ready: true
+creator: Claude
+assignee: Claude
+goal: "Every Owner decision Item 2 outcome on an attachment reaches an owner even on a single-owner install, and no one person can flood an owner's inbox with blocked-attempt notices, while every blocked attempt is still audited."
+context: |-
+  What is wrong today (branch codex/migration-safety-remediation at 2e2e728):
+  - Owner notices skip the actor (service.py _notify_owners, 'id<>?'). Only App Owners can remove an attachment link or unmark a final result, so on a single-owner install nobody is told about attachment_removal_blocked (final-result guard), final_result_unmarked or attachment_removed. Owner decision Item 2 on 6G89SJ says notify the App Owner on ALL of these.
+  - Blocked-attempt notices (*_blocked kinds) are unlimited: one person retrying can fill the inbox (GTEYTG review gap: cap blocked notices per actor per 10 minutes).
+  - owner_change_blocked has a same-key 10-minute dedupe that also drops the AUDIT row, so repeats are not audited.
+  - A blocked import with no target project writes no audit row at all; the notice is the only record.
+  Triggered by: independent review 4 of 6G89SJ (gap 1) and the GTEYTG follow-up. Aly approved the plan in Slack thread ts 1790256175.671249: 'yes update as per your recommendation, and move on' (ts 1790268694.030539), plan ts 1790269196.282199, write lock #5 ts 1790269492.403129.
+  Decided scope:
+  - Self-notice only for attachment_removal_blocked, final_result_unmarked, attachment_removed. Ordinary owner actions stay un-self-notified (Z24KVH).
+  - Cap: at most 5 blocked-kind notices per (recipient, actor) per rolling 10 minutes, pooled across kinds and targets; past the cap only the notice is skipped, never the audit row. Self-notices are not exempt.
+  - Needs schema v17: notifications.actor_user_id (nullable, no backfill) + index (user_id, actor_user_id, created_at).
+  Not in scope: daily digests (F9HBSJ), hosted attachments (MXY7BG).
+definition-of-done: "Acting owner is notified of attachment_removal_blocked, final_result_unmarked and attachment_removed (single-owner install covered); other kinds unchanged; schema v17 adds notifications.actor_user_id with index, fresh and upgraded databases equal; blocked-attempt notices are capped per recipient and actor per rolling 10 minutes in two buckets of 5 (owner_change_blocked on its own; the other blocked kinds pooled), the notice that reaches a cap says further attempts of that kind are in history only, the audit row is always written, a different actor still notifies, notices resume after the window; owner_change_blocked audits every repeat; a blocked import with no project is audited and listed separately from blocked owner changes; unit and migration tests; existing tests green."
+tags:
+  - astra
+blocked-by: []
+related:
+  - 01M2JNPRGYD7TGGSHZV16G89SJ
+  - 01M39HQB2EFDXWXH92WYGTEYTG
+  - 01M2HPH35W0MHCMKGRQ9Z24KVH
+commits: []
+created-at: 2026-09-24T17:06:51Z
+updated-at: 2026-10-22T15:07:52Z
+updated-by: Aly Jafferani
+claimed-by: vm-6361
+claimed-at: 2026-09-24T17:07:27Z
+outcome-what: "Owner notices: attachment_removal_blocked, final_result_unmarked and attachment_removed also reach the owner who acted, naming task, item and actor. Schema v17 adds notifications.actor_user_id (nullable, no backfill) and idx_notifications_actor; every notice stores its actor. Blocked-attempt notices are capped per recipient and actor per rolling 10 minutes in two buckets of 5: owner_change_blocked alone, and the other blocked kinds pooled across kinds and targets; the notice that reaches a cap says further attempts of that kind are in history only for now; the audit row is always written. owner_change_blocked no longer skips the audit row for same-key repeats. A blocked import with no target project is audited as a user_events import_blocked row about the actor; list_user_events and the People screen list blocked owner changes and blocked imports separately."
+outcome-why: "Review 4 of 6G89SJ (gap 1): only owners can remove or unmark, and owners were never self-notified, so a single-owner install heard nothing of Owner decision Item 2 outcomes. GTEYTG review gap: one person could flood the inbox with blocked notices. The old dedupe dropped audit rows and the no-project import had no audit at all. Aly approved (Slack ts 1790268694.030539, plan ts 1790269196.282199)."
+outcome-resolves: "Every DoD clause: self-notice for the three kinds with single-owner test; other kinds unchanged (ordinary notices uncapped test, Z24KVH tests green); v17 fresh equals upgraded and step rollback tested; two cap buckets with audit always written, cap line on the 5th notice, different actor still notifies, window edge and resume pinned; owner_change_blocked audits every repeat; no-project import audited and listed separately; tests/run.py Ran 421 tests, OK."
+review-summary: "Independent reviews 5 (e9d52af+37f0122) and 5b (de130d3), 2026-09-24. Acting owner is now notified of attachment_removal_blocked, final_result_unmarked and attachment_removed (single-owner installs hear of Owner Item 2 outcomes), naming task, item and actor; other owner actions stay un-self-notified. Schema v17 adds nullable notifications.actor_user_id + idx_notifications_actor (no backfill; fresh equals upgraded). Blocked-attempt notices are capped per recipient and actor per rolling 10 minutes in two buckets of 5: owner_change_blocked on its own, the other blocked kinds pooled; the notice that reaches a cap says further attempts of that kind are in history only; the audit row is always written. The owner_change_blocked same-key dedupe that dropped audit rows is gone. A blocked import with no target project is audited as a user_events import_blocked row; list_user_events and the People screen list blocked owner changes and blocked imports separately (50/10 each). Review 5 found the pooled cap could starve owner-change notices and import rows could push owner changes out of history; de130d3 fixed both and pinned window edge, NULL-actor rows and the no-project import cap. Review 5b verified: 421 tests OK, revert experiments fail the matching tests, CLI-made ticket edits."
+review-gaps: "Still open, all LOW: (1) the cap is soft under concurrency: COUNT and INSERT are not atomic under ThreadingHTTPServer, overshoot at most concurrent requests minus 1, and the cap line can land on a notice other than the 5th in that race. (2) Audit growth has no rate limit: every scripted owner-change attempt and no-project import preview adds a user_events row; rate-limit at the HTTP layer for the hosted deployment. (3) CLAUDE_HANDOFF_2026-09-24.md's v16 bullet still reads as current until the v17 bullet below it. (4) No HTTP or People-screen render test for the two blocked lists or the import_blocked label. Closed by later commits: review 5 gaps 1, 2, 3a-d, 4, 7, 8 (de130d3); review 5b gaps 1-4 (aa98547: DoD and outcome text now describe two buckets, cap line names its bucket and drops 'next 10 minutes' with a ' · ' break, window-edge test margins 30 s, owner-change bucket cap line asserted, handoff and CLAUDE.md say 421 tests). The aa98547 polish was verified by the full suite (Ran 421 tests, OK) but not re-reviewed."
+review-verdict: "approve-with-follow-ups (independent reviews 5 and 5b, 2026-09-24). The self-notice, the two cap buckets with their cap line, and the per-type history limits are correct and each is pinned by a test that fails when the fix is reverted. Remaining items are the four low follow-ups in review-gaps."
+review-check: "1. Windows, repo root, branch codex/migration-safety-remediation: run .venv\\Scripts\\python.exe tests\\run.py; expect 'Ran 421 tests' and 'OK'. 2. Start Astra on an existing database; it upgrades to schema 17 without error. 3. As a project viewer, click Remove on an attachment 6 times within 10 minutes; the owner's inbox shows 5 'attachment removal blocked' notices, the 5th ending 'Further blocked attempts of this kind by <viewer> are recorded in history only for now.'; the task history shows 6 blocked rows. 4. As a secondary owner, try to deactivate another owner; the primary still gets a 'blocked ... attempt' notice even after step 3-style flooding by the same person. 5. With a single owner, mark an attachment as a final result and click Remove; the owner gets a notice naming the task, the attachment and 'by <owner>'. Unmark, then Remove; two more notices arrive. 6. As a chairman, try an import without choosing a project; People screen shows it under 'Blocked imports without a project', separate from 'Blocked owner-access attempts'."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
+---
+
+# Blocked-attempt notices: notify the acting owner for Item 2 events and cap repeats per person
+
+## Definition of Done
+
+- [x] Acting owner is notified of attachment_removal_blocked, final_result_unmarked and attachment_removed (single-owner install covered); other kinds unchanged; schema v17 adds notifications.actor_user_id with index, fresh and upgraded databases equal; blocked-attempt notices are capped per recipient and actor per rolling 10 minutes in two buckets of 5 (owner_change_blocked on its own; the other blocked kinds pooled), the notice that reaches a cap says further attempts of that kind are in history only, the audit row is always written, a different actor still notifies, notices resume after the window; owner_change_blocked audits every repeat; a blocked import with no project is audited and listed separately from blocked owner changes; unit and migration tests; existing tests green.
+  proof: 37f0122 + de130d3 + commit E: service.py SELF_NOTICE_KINDS/_notify_owners, BLOCKED_NOTICE_* + _notify/_blocked_notices_sent (two buckets, cap line), _owner_change_blocked, _audit_import_blocked, list_user_events; db.py _migrate_v17. Tests: test_core test_single_owner_is_notified_of_own_blocked_removal_unmark_and_removal, test_blocked_notices_are_capped_per_actor_and_every_attempt_is_audited, test_blocked_notice_cap_is_per_actor, test_blocked_notice_window_edge_and_null_actor_rows, test_the_notice_that_reaches_the_cap_says_later_attempts_are_in_history_only, test_owner_self_notices_are_capped_too_and_ordinary_notices_are_not, test_repeated_blocked_owner_changes_are_all_audited_and_notices_capped, test_owner_change_notices_have_their_own_cap_bucket, test_blocked_imports_do_not_push_owner_changes_out_of_the_history; test_import test_manager_into_unmanaged_project_viewer_and_chairman_are_blocked_and_owner_notified, test_blocked_import_without_a_project_is_audited_every_time_and_its_notice_capped; test_db NotificationActorMigrationTests (3). tests/run.py Ran 421 tests, OK.
+
+## Options
+
+- [ ] brainstorm
+- [x] planning
+
+## Plan
+
+<Steps, in order — filled in by the pre-process step, or by you.>
+
+- [x] Schema v17 in db.py: notifications.actor_user_id (nullable, FK users) + idx_notifications_actor(user_id, actor_user_id, created_at); bump SCHEMA_VERSION
+  proof: src/astra/db.py _migrate_v17, V17_NOTIFICATION_ACTOR_INDEX, SCHEMA_VERSION=17; test_db NotificationActorMigrationTests
+- [x] service.py: _notify takes actor_id and stores it; BLOCKED_NOTICE_KINDS cap (5 per recipient+actor per 600 s) checked in _notify; constants next to the login throttle
+  proof: service.py BLOCKED_NOTICE_* constants after LOGIN_MAX_FAILURES; _notify actor_id + _blocked_notices_capped
+- [x] service.py: SELF_NOTICE_KINDS include the actor in _notify_owners for attachment_removal_blocked, final_result_unmarked, attachment_removed; summary names actor and attachment
+  proof: service.py SELF_NOTICE_KINDS; _notify_owners; _event/_notify_owner summary names item and actor
+- [x] service.py: owner_change_blocked audits every attempt (drop same-key dedupe); blocked no-project import audited in user_events (target = actor); list_user_events and People view group it with blocked rows
+  proof: service.py _owner_change_blocked (dedupe removed); _audit_import_blocked import_blocked user event; list_user_events; app.js renderPeople blocked filter + label
+- [x] Tests: update test_core 1453/2344/2377; add self-notice, cap, per-actor, window reset, no-project import audit, v17 migration tests
+  proof: test_core: test_single_owner_is_notified_of_own_blocked_removal_unmark_and_removal, test_blocked_notices_are_capped_per_actor_and_every_attempt_is_audited, test_blocked_notice_cap_is_per_actor, test_owner_self_notices_are_capped_too_and_ordinary_notices_are_not, test_repeated_blocked_owner_changes_are_all_audited_and_notices_capped; updated test_attachment_marked_as_final_result_cannot_be_removed, test_secondary_owner_cannot_change_owner_access_or_target_other_owners; test_import no-project audit; test_db v17 x3
+- [x] Handoff/README figures; full suite, diff --check, jaira validate, adversarial re-read; move to review; commit locally
+  proof: tests/run.py Ran 416 tests OK (was 409); git diff --check clean; node --check app.js ok; CLAUDE_HANDOFF_2026-09-24.md and CLAUDE.md figures v17/416
+
+## Progress
+- **2026-09-24 17:12 · Claude** — Choices (Claude, 2026-09-24): (1) A blocked import with no target project is audited as a user_events row, event_type import_blocked, target_user_id = actor_user_id = the actor (user_events is the established table for audit rows with no project or task, GTEYTG; project_events needs a project). list_user_events and the People screen group it with the blocked attempts, so it never pushes a grant out of view. The notice kind stays protected_action_blocked. (2) The cap is checked in _notify with a COUNT on notifications; two concurrent requests could both pass at 4, so the cap is soft by at most the number of simultaneous requests. (3) The cap counts notices, not attempts: the window slides on notices sent. (4) Self-notice summary: '<kind>: <task> · <attachment or final-result title> · by <actor>'; time is created_at. (5) Every notification now stores actor_user_id where an actor exists (all _notify callers pass it).
+- **2026-09-24 17:28 · Claude** — Review 5 (approve-with-follow-ups) fixed in commit C: owner_change_blocked has its own cap bucket; the notice that reaches the cap says further attempts are in history only; list_user_events limits owner changes and blocked imports separately (50 each) and the People screen shows them as two lists; window edge, NULL-actor rows and the no-project import cap are pinned by tests; test_db v17 tests moved above the main guard. Documented follow-ups, not done: gap 5 the cap is soft under concurrency (COUNT and INSERT can race; overshoot at most concurrent requests minus 1); gap 6 every scripted owner-change attempt and no-project import preview adds a user_events row with no rate limit (rate-limit at the HTTP layer for the hosted deployment); gap 9 the handoff's v16 bullet reads as current until the v17 bullet below it.
+- **2026-09-24 17:49 · Claude** — Reviews 5 and 5b recorded (approve-with-follow-ups). Open lows: soft cap under concurrency, audit growth without rate limit, handoff v16 bullet wording, no People-screen render test. Commit aa98547 (cap-line wording, 30 s test margins, ticket text) passed the full suite (421 OK) but was not re-reviewed.
+- **2026-10-22 14:33 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.

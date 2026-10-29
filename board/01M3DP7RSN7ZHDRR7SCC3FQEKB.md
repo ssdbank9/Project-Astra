@@ -1,7 +1,7 @@
 ---
 id: 01M3DP7RSN7ZHDRR7SCC3FQEKB
 title: "Assignment rules: Chairman assigns, never receives; viewers get subtasks only"
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -32,8 +32,8 @@ related:
   - 01M3CEHBP9XNTK0SG1Q8XV92JJ
 commits: []
 created-at: 2026-09-26T01:45:51Z
-updated-at: 2026-10-16T12:57:03Z
-updated-by: Claude
+updated-at: 2026-10-22T15:09:34Z
+updated-by: Aly Jafferani
 claimed-by: vm-1352
 claimed-at: 2026-09-26T01:45:58Z
 outcome-what: "Added can_assign (owner, the project's manager, Chairman) and an assign-only update path for the Chairman (panel Assign form, bulk Assign and its Undo); _validate_assignee now refuses the Chairman everywhere and a project viewer on a top-level task (create, update, bulk, hold owner, set_parent promotion, importer E_OWNER_CHAIRMAN/E_OWNER_VIEWER, templates). Existing assignments are kept and flagged needs_new_assignee (card, List row, panel, Home tile, risk=reassign). Pickers take a purpose (task, subtask, reviewer): no Chairman, viewers only for subtasks marked (viewer), and a now-forbidden current owner stays selected and marked. README table, handoff and CLAUDE.md; 22 new tests (16 service in test_assignment.py, 6 HTTP and driver in test_web.py) and one updated importer test."
@@ -43,6 +43,7 @@ review-summary: "Reviews 13a (of d082faf..da414e1) and 13b (of da414e1..f9961e0)
 review-gaps: "Question for Aly: reviewer and approver lists still include the Chairman and project viewers (reviewing is treated as not receiving work); should they? Open calls, unchanged: (1) a bulk Undo that would restore the Chairman as owner is refused, so undoing an assign away from a flagged owner fails as a whole; (2) putting a flagged task on hold needs a new responsible person, because the hold owner becomes the assignee; (4) a manager's accept on a waiting task still files an Owner request (lock #12 behaviour); (5) the Chairman and viewers still see read-only sections (lists), with the forms hidden. Review 13b I1: the Chairman as an approver can still file protected-action requests (for example set_on_hold returns a request). Also: no real touch device or screen-reader run; lock chips, banners and flags show the last load."
 review-verdict: "approve with follow-ups: reviews 13a and 13b each approved with follow-ups (no High); every finding fixed in d7b2e6675a6b783e9cedeb392f0f33ba75bd3b22, f9961e06ddd577b1e53ea281ff5030354302244e and 44f7c5993d05a4a7f04490af66daa42f1dd784ea; Ran 676 tests, OK"
 review-check: "1. Repo root: .venv/bin/python tests/run.py (Windows: .venv\\Scripts\\python.exe tests\\run.py); expect 'Ran 676 tests' and 'OK'. 2. Start Astra and sign in as the Chairman; open a project's Board and click a task: the panel shows an Assign section (Assigned to, Reason, Save assignee) and no Edit form. 3. Choose someone and press Save assignee: 'Assignee saved.' and the Owner fact changes. 4. In the assignee list, the Chairman's own name never appears. 5. Open the project's List tab: tick two tasks; the bar at the bottom offers only Assignee. 6. Sign in as a project manager, open a subtask (a step) and open its Owner list: viewers appear with '(viewer)'; open a top-level task: no viewers listed. 7. As the manager try to add the Chairman as a collaborator under Reviewers & approvers: refused with 'cannot be a collaborator'; adding them as a reviewer works. 8. As the owner, a task that was assigned to the Chairman before this change shows the amber 'Needs a new assignee' chip on its card and in the panel, and Home shows a 'Needs reassigning' count; reassign it and the chip goes."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Assignment rules: Chairman assigns, never receives; viewers get subtasks only
@@ -76,3 +77,4 @@ review-check: "1. Repo root: .venv/bin/python tests/run.py (Windows: .venv\\Scri
 - **2026-09-26 04:22 · Claude** — Follow-up (coordinator, from Aly's rule that the Chairman never receives work): _may_submit returns False for a chairman-role user before any other check, so a legacy Chairman assignee cannot submit; the task stays flagged needs_new_assignee and permissions.can_submit hides Submit. Test: test_assignment ExistingAssignmentsTests.test_the_chairman_never_submits_even_as_a_legacy_assignee.
 - **2026-09-26 05:37 · Claude** — Review 13b fixes: buildSchedule(task,closed,{canPropose:!ro}) - the proposal form needs edit rights, while a pending proposal's Approve/Request controls follow can_decide_protected or can_request_protected only (so a designated approver keeps 'Request Owner approval'; the Chairman and viewers still see 'Owner decision required'). Driver cases added: an approver panel, and a collaborator-only flagged task in the Home tile and matchesRisk.
 - **2026-10-16 12:57 · Claude** — 2026-10-16: new tests assert the Chairman's bulk Assign over HTTP and that can_manage_project stays False for the Chairman (tests/test_signoff_gaps_http.py and tests/test_signoff_gaps.py). Plan is empty (0/0); not changed.
+- **2026-10-22 14:36 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.

@@ -1,7 +1,7 @@
 ---
 id: 01M2HQJZ0ZVRWGYNQ0QWTRPV3J
 title: Backups and restore
-status: signoff
+status: done
 ready: true
 creator: Aly Jafferani
 assignee: Codex
@@ -17,8 +17,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-15T05:10:42Z
-updated-at: 2026-10-15T10:27:59Z
-updated-by: Codex
+updated-at: 2026-10-22T15:06:23Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-49508
 claimed-at: 2026-10-15T09:41:41Z
 outcome-what: "Independent reviews found the local backup/restore change meets the ticket criteria with no blocking defect."
@@ -29,6 +29,7 @@ review-summary: "The CLI creates verified standalone SQLite snapshots from a rea
 review-gaps: "OCI keys, encrypted off-site and desktop copies, 7/4/3 retention automation, actual desktop/server restore drills, and hosted rollback have not been executed. The runbook keeps the backup timer disabled until upload and retention controls are implemented and tested; these deployment outcomes remain unverified."
 review-verdict: "The local TRPV3J definition of done is met by code, tests, and documentation. Independent specification and standards reviews found no blocking defect. Proceed to Aly's sign-off; deployment claims remain unverified."
 review-check: "1. Run .venv/Scripts/python.exe -m unittest tests.test_backup -v; 11 tests should pass. 2. Run .venv/Scripts/python.exe tests/run.py; 902 tests should pass with one symlink skip when unavailable. 3. Use a disposable ASTRA_HOME, create sample data, run astra backup and restore to a new path, then reopen and verify the sample data. 4. Confirm an existing target stays unchanged on refusal and a corrupt backup is refused. 5. Cloud upload, retention and hosted rollback are deployment drills and remain unverified."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Backups and restore
@@ -60,3 +61,4 @@ review-check: "1. Run .venv/Scripts/python.exe -m unittest tests.test_backup -v;
 ## Progress
 - **2026-09-20 03:10 · Aly Jafferani** — Owner decision 2026-09-20: zero-dollar backup policy = nightly encrypted SQLite-consistent backup to OCI Object Storage within the free allowance plus encrypted desktop recovery copy; RPO 24 hours; target RTO 4 hours; retain 7 daily, 4 weekly and 3 monthly copies; Owner controls restore credentials; prove both restore directions before go-live.
 - **2026-10-15 10:09 · Aly Jafferani** — 2026-10-15: Local backup CLI, restore and failure-recovery tests pass. The full repository runner passed 902 tests with 1 symlink test skipped. Independent spec and standards reviewers found no remaining local blocker. Restore always uses a new path and migrates before success. OCI encryption/upload, 7/4/3 retention automation, real desktop/server restore drills, hosted rollback and production recovery remain unverified; keep the timer disabled until upload and retention are tested.
+- **2026-10-22 14:31 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.

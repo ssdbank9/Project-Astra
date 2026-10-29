@@ -1,7 +1,7 @@
 ---
 id: 01M3CCSS8AAJZS0MAY4BX07XV4
 title: Task locks and Gantt date drag
-status: signoff
+status: done
 ready: true
 creator: Claude
 assignee: Claude
@@ -28,8 +28,8 @@ related:
   - 01M3C0MZ2TASFSNYRN1E3C1Z74
 commits: []
 created-at: 2026-09-25T13:41:41Z
-updated-at: 2026-10-16T12:56:51Z
-updated-by: Claude
+updated-at: 2026-10-22T15:09:20Z
+updated-by: Aly Jafferani
 claimed-by: vm-32647
 claimed-at: 2026-09-25T13:41:59Z
 outcome-what: "Tasks now take renewable 60-second leases (task_locks, schema v19). Board and Gantt drags take a drag lease and the panel's Edit form an edit lease; they renew every 20 s while in use and are released on drop, save or close. Every task write checks the lease inside its write transaction (_event guard) and refuses with a 409 naming the holder and expiry. Cards show a lock chip, the panel a banner, and owners may Force unlock (task_lock_forced, holder noticed). Gantt bars can be dragged or resized by owners and managers, with a live date tip. Ordinary moves have a 15 s Undo (undo_move, generalised from the board). Moves that break a dependency, touch the critical path or pass the project target confirm first and notify the other owners (schedule_impact_confirmed). Invalid dates are refused and audited (gantt_move_blocked)."
@@ -39,6 +39,7 @@ review-summary: "Reviews 12b, 12d and 12e (2026-09-25) of 34eeca1, 55ddf3c and 8
 review-gaps: "Left for later: three revert experiments no test catches (review 12e L1): dropping the board-source-status check in undo_move, dropping the per-row revision check inside _write_bulk, and showing members the bulk checkboxes. Not tried on a real touch device (tablet long press, Playwright emulation only), no screen-reader run, and no live refresh (lock chips, banners and Inbox gate lines show the last load; the server rechecks at write and decision time). Review 12c I3: bulk assign, like the panel, accepts the chairman and project viewers; ask Aly whether viewers should be assignable. The Blocked WIP exemption: a card that enters Blocked because of a dependency is not refused, so a Blocked limit can be exceeded by an added link or a reopened predecessor. A manager's accept request on a waiting task is filed and the owner is asked at decision time (not refused at filing). An owner's own board Undo passes the dependency override itself (12d I1); the importer and templates bypass the WIP and dependency gates (owner-only, 12d I2)."
 review-verdict: "approve with follow-ups: reviews 12a, 12b, 12c and re-review 12d each approved with follow-ups (no High); every finding fixed in 55ddf3cba30d4ce1cfe34603f25413aa9f32eb0a and 89e92295337e0edf7016e1fb1b2a85aeb0cae825; review 12e of 89e9229 approves (0 High, 0 Medium, 1 Low: three uncaught revert experiments, left as follow-ups); Ran 639 tests, OK"
 review-check: "1. Repo root: .venv/bin/python tests/run.py (Windows: .venv\\Scripts\\python.exe tests\\run.py); expect 'Ran 639 tests' and 'OK'. 2. Sign in as a manager in one browser and open a task's Edit form, then type in the title. 3. Sign in as the owner in a second browser (private window) and drag the same card on the Board: it snaps back with 'is in use. <manager> is changing this task … until <local time>'. 4. Open that task as the owner: an amber banner names the holder; press Force unlock and give a reason: the manager is told. 5. Open the project's Timeline and drag a bar a few days right: the tip shows the new dates and a toast offers Undo. 6. Drag a bar's right end past the project target: 'Confirm the new dates' lists the consequence; confirm, and task History shows schedule_impact_confirmed. 7. Reopen a completed task with a due date past the target: the same confirm appears."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Task locks and Gantt date drag
@@ -84,3 +85,4 @@ review-check: "1. Repo root: .venv/bin/python tests/run.py (Windows: .venv\\Scri
 - **2026-09-25 17:27 · Claude** — Re-review 12d L1: reopen_task (revised due date) and approve_schedule_proposal now run _date_impact_gate inside their transaction, with confirmed (also on /reopen, /schedule-proposals/<id>/approve, the board's reopen drop and the owner-request decision). The Gantt passes its own impact reading down to update_task (known_impact), so a drag loads the project once. The 15:40 note's 'not yet committed' work landed in 34eeca1.
 - **2026-10-16 11:49 · Claude** — Aly decided 2026-10-16 (review-fix chat): keep the reviewer_added/reviewer_removed audit events; recorded in docs/handoff/DECISIONS_LOG.md. This settles the conflict with the 2026-09-22 no-reviewer-audit note.
 - **2026-10-16 12:56 · Claude** — Proof line numbers refreshed 2026-10-16 at HEAD d381d66: acquire_task_lock service.py:3298, force_unlock_task :3345, _schedule_impact :3367, reschedule_task :3619; app.js takeLease :1017, wireEditLease :1061. Correction: the outcome says invalid Gantt dates are audited as gantt_move_blocked; only permission refusals are audited, validation errors are not. New HTTP test asserts the 409 carries holder_name and expires_at.
+- **2026-10-22 14:35 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.

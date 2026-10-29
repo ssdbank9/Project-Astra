@@ -1,7 +1,7 @@
 ---
 id: 01M433XJYSX1EK0C6VY81G7Q4C
 title: Prevent mixed Manager saves from silently dropping edits
-status: signoff
+status: done
 ready: true
 creator: Codex
 assignee: Codex
@@ -13,8 +13,8 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-10-04T09:29:01Z
-updated-at: 2026-10-04T18:18:31Z
-updated-by: Codex
+updated-at: 2026-10-22T15:10:02Z
+updated-by: Aly Jafferani
 claimed-by: X1CarbonPC-53068
 claimed-at: 2026-10-04T15:07:35Z
 outcome-what: "Added atomic refusal of mixed Manager status requests and ordinary edits, with normalized unchanged-form support and safe progress validation."
@@ -24,6 +24,7 @@ review-summary: "Before either Manager protected-status request is created, the 
 review-gaps: "none within this repair scope; Aly acceptance and hosted readiness remain outstanding, and the existing Windows symlink check is unverified."
 review-verdict: PASS
 review-check: "1. Sign in as a Manager in a disposable local test project and open a draft task. 2. Enter a new title, select cancelled and enter a reason. 3. Press Save changes: expect Save task edits separately from a status request. Nothing was saved or requested; all entered fields remain. 4. Restore the original status and save the edits, then change only the status with a reason: the ordinary save persists and the status-only save creates an App Owner request. 5. As an App Owner, a direct mixed save still persists; Viewer and Chairman mixed saves remain forbidden."
+question: "Ready to accept per the 2026-10-22 consensus. Only Aly's board move to done remains."
 ---
 
 # Prevent mixed Manager saves from silently dropping edits
@@ -54,3 +55,4 @@ review-check: "1. Sign in as a Manager in a disposable local test project and op
 ## Progress
 - **2026-10-04 15:09 · Codex** — Use the existing update_task service seam and compare normalized persisted fields before both protected-request routes. A full form with unchanged fields remains a status-only request. Return ValueError so the existing HTTP 400 form error handling retains inputs. Preserve dedicated lifecycle actions and direct App Owner writes. No schema or UI redesign is required.
 - **2026-10-04 15:41 · Codex** — Independent review caught unsupported progress types at the new normalization boundary. Lists, objects and infinity are translated to ValueError locally; ordinary and Owner-save normalization is unchanged. The textarea label includes its contents, so browser verification used observed form name attributes. No UI source change was needed. Default full suite: 700 tests in 368.566s, OK (skipped=1); source hashes unchanged, no new tmp dirs or ResourceWarnings.
+- **2026-10-22 14:36 · Claude** — Sign-off consensus 2026-10-22 (Claude assessment, Codex review; full suite 1102 OK at 2661bf7; every proof's named tests exist): ACCEPT. No open question.
