@@ -25,8 +25,8 @@ related:
 follows: 01M33VD86SS216CCQEDVC9KPH6
 commits: []
 created-at: 2026-09-22T08:22:56Z
-updated-at: 2026-10-04T08:58:44Z
-updated-by: Codex
+updated-at: 2026-10-29T12:22:02Z
+updated-by: Claude
 claimed-by: codex-astra-fixes-20261004
 claimed-at: 2026-10-04T08:37:49Z
 outcome-what: Exact CSV round-trip criterion needs Aly decision after sample review
@@ -62,3 +62,4 @@ question: Which CSV contract should be accepted after reviewing Aly sample workp
 ## Progress
 
 - **2026-10-04 08:50 · Codex** — 2026-10-04: Aly authorized fixes then development. Codex claimed the unclaimed Claude todo ticket. XML stripping and formula neutralisation already exist; Windows A0 is pushed at 10fcccdf. Exact formula/apostrophe CSV round trips require an explicit format policy. Aly asked for an easy basic-Excel workflow and a sample workplan before that choice; XLSX is recommended as the primary user workflow. Keep R2 open and repair the independent items in a scoped related ticket.
+- **2026-10-29 12:22 · Claude** — 2026-10-25 (Claude): Aly chose 'Keep open' when asked whether to archive 3NT40T as superseded by JM7CFP.
