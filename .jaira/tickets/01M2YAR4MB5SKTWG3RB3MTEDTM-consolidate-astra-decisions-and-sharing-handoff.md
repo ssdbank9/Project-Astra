@@ -13,7 +13,7 @@ blocked-by: []
 related: []
 commits: []
 created-at: 2026-09-20T02:36:28Z
-updated-at: 2026-10-22T16:17:39Z
+updated-at: 2026-11-08T18:11:56Z
 claimed-by: X1CarbonPC-49560
 claimed-at: 2026-09-20T02:36:37Z
 updated-by: Claude
@@ -52,3 +52,4 @@ outcome-resolves: "Aly can now share one current document with Claude and unders
 - **2026-09-20 02:49 · Aly Jafferani** — Cross-check against service.py found current Chairman privileges and Manager attachment/final-result mutations are broader than the later approved Owner-only contract. The handoff now marks this as a sharing blocker, pending-global-mistakes records it, and backlog ticket HS3JRY makes the reconciliation durable. No production behavior was changed.
 - **2026-09-20 03:10 · Aly Jafferani** — Owner accepted the remaining recommended decision package on 2026-09-20. The handoff is being updated to replace the deferred host question with the zero-dollar Oracle Always Free + DuckDNS + Caddy selection and to record notifications, budgets, backups and AI defaults. Human-lane movement remains person-owned.
 - **2026-10-22 16:17 · Claude** — 2026-10-22: Aly chose to keep this open for now. Claude proposed closing it; Codex's review disagreed because the only acceptance record is a ticket note signed 'Aly Jafferani' (2026-09-20) with no independent Aly quote or Slack ts, and agent-written notes have carried Aly's identity before (see JM7CFP correction note). Needs Aly's own confirmation before it closes.
+- **2026-11-08 18:11 · Claude** — 2026-11-08 (Claude, on Aly's delegation 'please continue and decide'): accepted; see docs/handoff/DECISIONS_LOG.md 2026-11-08 for the exceptions. Waiting only for Aly's board move to done; agents cannot leave human.

@@ -13,10 +13,11 @@ tags:
   - asana
 blocked-by: []
 related: []
-commits: []
+commits:
+  - c25e1f6e4ea74ef35a9a14b42190dc3ba1253bf0
 created-at: 2026-09-15T12:45:25Z
-updated-at: 2026-09-15T13:06:32Z
-updated-by: Aly Jafferani
+updated-at: 2026-11-08T18:09:28Z
+updated-by: Claude
 ---
 
 # Cohesive UX shell + feature interoperability
@@ -36,3 +37,4 @@ updated-by: Aly Jafferani
 
 ## Progress
 - **2026-09-15 13:06 · Aly Jafferani** — DESIGN APPROVED by owner (2026-09-15). Canvas artifact METAtTHJSL4xSuNrAXXPsR v4. Shell = Option A palette + left nav (Views: Board/Timeline/Calendar/My Work/Portfolio; Entities>Projects) + view tabs + DOCKED side panel (not modal). Interoperability map captured (portfolio card->filtered board; notification/search/critical-bar->task panel; My Work->its project; drag card between sections; drag Gantt bar->schedule proposal; inline edit; quick-add). TIMELINE VIEW must be a DETAILED SWIMLANE Gantt (per owner's reference sketch): swimlanes grouped by workstream/owner with the accountable owner highlighted; month->week grid; a duration bar per workstream + per-SUBTASK bars across weeks, each bar labelled with dates AND carrying that subtask's OWN owner avatar (subtask owners can differ from workstream owner); critical-path bars highlighted crimson; legend for critical-path + owner-per-task. Working files: astra_project_tracker/design/Shell.dc.html + ShellTimeline.dc.html. Next: front-end rebuild incrementally toward this (backend endpoints exist).
+- **2026-11-08 18:09 · Claude** — 2026-11-08 (Claude, on Aly's delegation 'please continue and decide'): archived. Reason in docs/handoff/DECISIONS_LOG.md 2026-11-08. Restore with 'jaira restore'.

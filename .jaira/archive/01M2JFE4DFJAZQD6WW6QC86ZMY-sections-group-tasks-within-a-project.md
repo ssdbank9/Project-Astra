@@ -13,9 +13,11 @@ tags:
   - asana
 blocked-by: []
 related: []
-commits: []
+commits:
+  - c25e1f6e4ea74ef35a9a14b42190dc3ba1253bf0
 created-at: 2026-09-15T12:07:30Z
-updated-at: 2026-09-15T12:07:30Z
+updated-at: 2026-11-08T18:10:35Z
+updated-by: Claude
 ---
 
 # Sections: group tasks within a project
@@ -35,3 +37,4 @@ updated-at: 2026-09-15T12:07:30Z
 
 ## Progress
 
+- **2026-11-08 18:10 · Claude** — 2026-11-08 (Claude, on Aly's delegation 'please continue and decide'): archived. Reason in docs/handoff/DECISIONS_LOG.md 2026-11-08. Restore with 'jaira restore'.

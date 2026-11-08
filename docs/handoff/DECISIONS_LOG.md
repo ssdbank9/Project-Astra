@@ -312,3 +312,44 @@ transition and deployment remain separate.
 - "Yes, install Caddy inside local WSL from Caddy's official apt repository,
   only to run caddy validate on deploy/caddy/Caddyfile." Done; the service was
   stopped and disabled.
+
+### 2026-11-08 — remaining human-lane and backlog decisions (chat with Claude)
+
+Aly's own answers, quoted:
+
+- 0RHNMG: "REVIEW IT ONCE AND TEST IT THOROUGHLY FOR ALL POSSIBLE OUTCOMES
+  BEFORE ACCEPTING IT". An independent agent tested every clause (all passed)
+  and found two defects. Aly: "Fix both first". Fixed in B3Y1XY (`567c0b6`),
+  now in signoff. Once Aly accepts B3Y1XY, 0RHNMG is archived as a duplicate
+  of JRNDC8.
+- 3NT40T: "Keep open".
+- Backlog: "LETS ASSESS IF NEEDED OR NOT". Z9JCZ6, MTEDTM, AX572Q: "LETS REVIEW
+  ITEMS THESE AS WELL ONE BY ONE".
+
+Then Aly said "please continue and decide". The decisions below were made by
+Claude under that delegation, not typed by Aly. Aly can reverse any of them.
+
+- Z9JCZ6 accepted with exceptions. `docs/design/astra-product-ux-baseline.md`
+  is the production UX spec, except:
+  - Workload (screen 8) is dropped, as decided earlier (line 106 of this log).
+  - The Automation Center (screen 9) and low-data mode wait until after the
+    pilot. Neither exists in the code today.
+- MTEDTM accepted as the record of the 2026-09-20 decisions.
+  - Its status and run instructions are replaced by later handovers, the
+    newest being `HANDOFF_2026-10-24.md`.
+  - Its product decisions still hold, as AGENTS.md says.
+- AX572Q accepted as a prototype. The production app already has drag and
+  drop, Undo, locks and bulk select (JN1QYG, X07XV4, XV92JJ). Its What-if mode
+  waits until after the pilot, as `NEXT_STEPS.md` already says.
+- Backlog archived, all restorable with `jaira restore`:
+  - Already built: X8FNA5 (UX shell, Gate 2 slices 1-7), RWMRKM (My Work),
+    4G3NY0 (month calendar).
+  - Covered by something built: A48JEX (the Board tab has status columns),
+    C86ZMY ("Part of" grouping).
+  - Dropped: S1C6PN (Workload).
+  - Not needed for launch: 2Z8AH5 (custom fields), PRJAD8 (goals),
+    386TA6 (status updates).
+- Kept in backlog: MXY7BG (hosted attachments, the next build) and KK400X
+  (AI first pass, waiting for Aly to choose an AI provider).
+- Agents cannot move tickets out of `human`. Aly closes Z9JCZ6, MTEDTM and
+  AX572Q on the board or with his own `--force`.
