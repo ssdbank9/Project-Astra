@@ -30,8 +30,10 @@ related:
   - 01M2JNPRGYD7TGGSHZV16G89SJ
 commits: []
 created-at: 2026-09-24T16:27:54Z
-updated-at: 2026-11-08T18:39:16Z
+updated-at: 2026-11-08T18:40:53Z
 updated-by: Claude
+claimed-by: X1CarbonPC-26956
+claimed-at: 2026-11-08T18:40:53Z
 ---
 
 # Hosted attachments: managed upload, streaming and storage
