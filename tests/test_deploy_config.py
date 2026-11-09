@@ -82,11 +82,29 @@ class DeployServiceTests(unittest.TestCase):
 
 class DeployCaddyTests(unittest.TestCase):
     def test_body_limit_sits_between_astra_import_limit_and_waitress_cap(self):
-        sizes = re.findall(r"^\s*max_size\s+(\S+)\s*$", caddy_text(), re.M)
-        self.assertEqual(len(sizes), 1)
-        waitress_cap = int(re.search(r"max_request_body_size=([\d_]+)", inspect.getsource(web.serve_waitress)).group(1))
-        self.assertGreater(caddy_bytes(sizes[0]), web.IMPORT_MAX_BYTES)
-        self.assertLessEqual(caddy_bytes(sizes[0]), waitress_cap)
+        text = caddy_text()
+        limits = dict(re.findall(r"^\s*request_body\s+@(\w+)\s*\{\s*max_size\s+(\S+)\s*\}", text, re.M))
+        self.assertEqual(set(limits), {"upload", "other"})
+        self.assertEqual(len(re.findall(r"^\s*max_size\s", text, re.M)), 2)
+        self.assertIn("max_request_body_size=WAITRESS_MAX_BODY_BYTES", inspect.getsource(web.serve_waitress))
+        waitress_cap = web.WAITRESS_MAX_BODY_BYTES
+        # Every other route: above the import limit, so Astra answers an oversized import.
+        self.assertGreater(caddy_bytes(limits["other"]), web.IMPORT_MAX_BYTES)
+        self.assertLess(caddy_bytes(limits["other"]), caddy_bytes(limits["upload"]))
+        # MXY7BG: the upload route admits exactly Astra's upload limit, which Waitress admits too.
+        self.assertEqual(caddy_bytes(limits["upload"]), web.UPLOAD_MAX_BYTES)
+        self.assertLessEqual(caddy_bytes(limits["upload"]), waitress_cap)
+
+    def test_the_larger_limit_applies_to_the_upload_route_only(self):
+        text = caddy_text()
+        upload = re.search(r"^\s*@upload\s+path_regexp\s+upload\s+(\S+)\s*$", text, re.M).group(1)
+        other = re.search(r"^\s*@other\s+not\s+path_regexp\s+other\s+(\S+)\s*$", text, re.M).group(1)
+        self.assertEqual(upload, other)
+        pattern = re.compile(upload)
+        self.assertTrue(pattern.search("/api/tasks/abc123/files"))
+        for path in ("/api/tasks/abc/files/x", "/api/tasks/abc/links", "/api/import/preview",
+                     "/api/tasks/a/b/files", "/x/api/tasks/abc/files"):
+            self.assertIsNone(pattern.search(path), path)
 
     def test_security_headers_match_what_astra_sends(self):
         text = caddy_text()

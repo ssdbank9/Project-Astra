@@ -8,7 +8,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 
 class SchemaMigrationRefused(RuntimeError):
@@ -863,6 +863,24 @@ def _migrate_v22(connection: sqlite3.Connection) -> None:
     """)
 
 
+def _migrate_v23(connection: sqlite3.Connection) -> None:
+    """v22 -> v23: hosted attachment kinds (MXY7BG, Owner Items 5-16 on 6G89SJ).
+
+    Every existing row is a local path link and keeps kind 'path'. A 'link' row stores an
+    HTTPS URL; a 'file' row stores a managed upload's storage key, size and SHA-256. Their
+    path column is ''.
+    """
+    _execute_statements(connection, """
+        ALTER TABLE task_attachments ADD COLUMN kind TEXT NOT NULL DEFAULT 'path'
+            CHECK (kind IN ('path','link','file'));
+        ALTER TABLE task_attachments ADD COLUMN url TEXT;
+        ALTER TABLE task_attachments ADD COLUMN storage_key TEXT;
+        ALTER TABLE task_attachments ADD COLUMN size_bytes INTEGER;
+        ALTER TABLE task_attachments ADD COLUMN sha256 TEXT;
+        ALTER TABLE task_attachments ADD COLUMN content_type TEXT;
+    """)
+
+
 # The ordered schema history: (version, step). migrate() runs every step whose version
 # is above the database's user_version, each in its own transaction with its bump.
 # Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
@@ -889,4 +907,5 @@ MIGRATION_STEPS = (
     (20, _migrate_v20),
     (21, _migrate_v21),
     (22, _migrate_v22),
+    (23, _migrate_v23),
 )

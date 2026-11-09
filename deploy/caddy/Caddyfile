@@ -5,9 +5,17 @@
 <name>.duckdns.org {
 	encode gzip
 
-	# Just above Astra's 5 MB import limit and equal to Waitress's own cap,
-	# so oversized uploads get Astra's friendly message, not a proxy error.
-	request_body {
+	# Managed file uploads (MXY7BG) are the one larger body: up to Astra's
+	# 25 MiB upload limit, which is also Waitress's own cap.
+	@upload path_regexp upload ^/api/tasks/[^/]+/files$
+	request_body @upload {
+		max_size 25MiB
+	}
+
+	# Every other route: just above Astra's 5 MB import limit, so an
+	# oversized import gets Astra's friendly message, not a proxy error.
+	@other not path_regexp other ^/api/tasks/[^/]+/files$
+	request_body @other {
 		max_size 6MB
 	}
 

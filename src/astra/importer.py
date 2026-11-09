@@ -2081,7 +2081,8 @@ class ImportEngine:
             ):
                 self.existing_edges.add((row["p"], row["s"]))
             for row in self.db.execute(
-                "SELECT a.task_id, a.path FROM task_attachments a JOIN tasks t ON t.id=a.task_id WHERE t.project_id=?",
+                "SELECT a.task_id, a.path FROM task_attachments a JOIN tasks t ON t.id=a.task_id"
+                " WHERE t.project_id=? AND a.kind='path'",
                 (self.project_id,),
             ):
                 self.existing_attachments.setdefault(row["task_id"], set()).add(row["path"])

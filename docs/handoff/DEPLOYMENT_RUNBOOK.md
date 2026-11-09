@@ -463,6 +463,8 @@ hyphens only).
 - Caddy gets and renews the certificate itself and redirects HTTP to HTTPS.
 - `max_size 6MB` sits just above Astra's own 5 MB import limit, so Astra gives
   the friendly "The file is larger than 5 MB." message.
+- The one exception is the file-upload route (`/api/tasks/<id>/files`, MXY7BG),
+  which allows `25MiB`: Astra's upload limit, and also Waitress's own cap.
 - The access log is the only place real client addresses are recorded, because
   Waitress sees every request as coming from `127.0.0.1`. Astra and Waitress do
   not trust forwarded client-address headers. Caddy writes it as JSON, rolls
@@ -600,7 +602,21 @@ ASTRA_HOME=/srv/astra/data /opt/astra/app/.venv/bin/astra backup --to "$PLAIN"
 age -R /srv/astra/backup-recipient.txt -o "$PLAIN.age" "$PLAIN"
 rm -f "$PLAIN"
 echo "backup written: $PLAIN.age"
+# Uploaded files (MXY7BG), taken after the database: a stored file is written
+# once and never changed, so every file the database copy names is already there.
+if [ -d /srv/astra/data/uploads/objects ]; then
+  tar -C /srv/astra/data -cf - uploads/objects \
+    | age -R /srv/astra/backup-recipient.txt -o "/srv/astra/backups/uploads-$STAMP.tar.age"
+  echo "files written: /srv/astra/backups/uploads-$STAMP.tar.age"
+fi
 ```
+
+Uploaded files live in `/srv/astra/data/uploads/objects` (under `ASTRA_HOME`,
+which the service may write). They are not in the SQLite backup, so the script
+saves them as a second encrypted file. One gap: a file removed in Astra between
+the two steps is missing from the copy, while the database copy still lists it.
+Restore both files from the same stamp. Nothing scans uploaded files for
+malware; Aly accepted that risk (Items 10-11 on 6G89SJ).
 
 Do not add age-based deletion here. The approved retention is 7 daily, 4 weekly
 and 3 monthly backups; the sample script does not implement or verify that
@@ -696,6 +712,13 @@ age -d -i "$env:USERPROFILE\Documents\AstraKeys\astra-backup-key.txt" -o astra.s
 python -c "import sqlite3; c=sqlite3.connect('astra.sqlite3'); print(c.execute('PRAGMA integrity_check').fetchone()[0], c.execute('PRAGMA user_version').fetchone()[0])"
 ```
 
+If the backup has an `uploads-<stamp>.tar.age` (MXY7BG), decrypt it the same way,
+from the same stamp as the database:
+
+```powershell
+age -d -i "$env:USERPROFILE\Documents\AstraKeys\astra-backup-key.txt" -o uploads.tar uploads-<stamp>.tar.age
+```
+
 It prints `ok 21` (or the schema version contained in the backup).
 
 If Astra reports database corruption, stop Astra and preserve the damaged data
@@ -722,6 +745,14 @@ Sign in with the real owner account and check recent tasks are there.
 
 ```powershell
 scp -i "$env:USERPROFILE\.ssh\astra_oci" astra.sqlite3 ubuntu@<ip>:/tmp/astra-restore.sqlite3
+```
+
+With uploaded files, copy the decrypted `uploads.tar` too. The block below
+restores it after the database; a database restored without it lists uploaded
+files it cannot serve.
+
+```powershell
+scp -i "$env:USERPROFILE\.ssh\astra_oci" uploads.tar ubuntu@<ip>:/tmp/astra-restore-uploads.tar
 ```
 
 ```bash
@@ -759,9 +790,15 @@ sudo -u astra env ASTRA_HOME="$RESTORE_HOME" /opt/astra/app/.venv/bin/python -c 
 sudo mv /srv/astra/data "$OLD_HOME"
 sudo install -d -o astra -g astra -m 700 /srv/astra/data
 sudo install -o astra -g astra -m 600 "$RESTORE_HOME/astra.sqlite3" /srv/astra/data/astra.sqlite3
+# Uploaded files (MXY7BG): the uploads tar from the same stamp, or every file the
+# restored database lists answers "File not found" on download.
+if [ -f /tmp/astra-restore-uploads.tar ]; then
+  sudo -u astra tar -C /srv/astra/data -xf /tmp/astra-restore-uploads.tar
+  sudo chmod -R u=rwX,go= /srv/astra/data/uploads
+fi
 sudo rm -f "$RESTORE_HOME/astra.sqlite3"
 sudo rmdir "$RESTORE_HOME"
-sudo rm -f /tmp/astra-restore.sqlite3
+sudo rm -f /tmp/astra-restore.sqlite3 /tmp/astra-restore-uploads.tar
 sudo systemctl start astra
 curl -fsS http://127.0.0.1:8765/ >/dev/null
 trap - ERR

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import logging
 import os
 import re
 import sqlite3
@@ -14,6 +15,9 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import importer
+from .attachment_storage import (
+    DEFAULT_UPLOAD_LIMIT, active_storage, checked_chunks, clean_filename, validate_https_url,
+)
 from .auth import hash_password, normalize_email, verify_password
 from .db import V15_EXPECTED_REVISION_SQL, owner_request_intent_key, transaction
 
@@ -89,7 +93,7 @@ BLOCKED_NOTICE_CAP = 5
 BLOCKED_NOTICE_KINDS = frozenset({
     "attachment_add_blocked", "attachment_removal_blocked", "final_result_mark_blocked",
     "final_result_unmark_blocked", "protected_action_blocked", "owner_change_blocked",
-    "board_move_blocked", "gantt_move_blocked",
+    "board_move_blocked", "gantt_move_blocked", "attachment_download_blocked",
 })
 
 # JN1QYG (owner decision 2026-09-19, Kanban dragging): the board's seven columns. Each
@@ -2135,6 +2139,8 @@ class AstraService:
             "can_request_accept_submission": self._can_request_protected_action(actor, task, "accept_submission"),
             "can_decide_protected": is_owner,
             "can_manage_files": is_owner,
+            # MXY7BG: local path links only where the installation allows them (desktop).
+            "can_link_paths": is_owner and bool(attachment_roots()),
             "can_read_files": True,
             "can_force_unlock": is_owner,
             # Review 13a L1: the panel offers Submit only to someone the server lets submit.
@@ -4311,6 +4317,91 @@ class AstraService:
                         {"path": path, "display_name": display_name}, None)
         return self._get_attachment(task_id, attachment_id)
 
+    @staticmethod
+    def _attachment_audit(row) -> dict:
+        audit = {"kind": row["kind"], "display_name": row["display_name"]}
+        if row["kind"] == "path" and row["path"]:
+            audit["path"] = row["path"]
+        if row["kind"] == "link":
+            audit["url"] = row["url"]
+        return audit
+
+    def _require_file_manager(self, actor: dict, task_id: str, attempted: dict) -> dict:
+        task = self.get_task(actor, task_id)
+        if actor["global_role"] != "owner":
+            self._event(task_id, actor["id"], "attachment_add_blocked", None, attempted,
+                        "Owner-only file management")
+            raise Forbidden("Owner access required for file management.")
+        return task
+
+    # MXY7BG Item 5 Type A and Items 12-13: any syntactically valid HTTPS link. Astra stores
+    # and shows it and never fetches, probes or previews it.
+    def add_task_link(self, actor: dict, task_id: str, url, display_name: str = "", note: str = "") -> dict:
+        self._require_file_manager(actor, task_id, {"kind": "link", "attempted_url": str(url or "").strip()[:2048]})
+        url = validate_https_url(url)
+        display_name = str(display_name or "").strip() or url
+        attachment_id = new_id()
+        with self._actor_transaction(actor):
+            self.db.execute(
+                "INSERT INTO task_attachments(id,task_id,path,display_name,note,added_by,added_at,kind,url)"
+                " VALUES(?,?,?,?,?,?,?,'link',?)",
+                (attachment_id, task_id, "", display_name, str(note or "").strip(), actor["id"], now_text(), url),
+            )
+            self._event(task_id, actor["id"], "attachment_added", None,
+                        {"kind": "link", "url": url, "display_name": display_name}, None)
+        return self._get_attachment(task_id, attachment_id)
+
+    # MXY7BG Item 5 Type B and Items 6-9: a managed upload. Authorization runs before a byte
+    # of the body is read; the bytes stream to storage with the limit and type checks applied
+    # while reading, and a refused or failed upload leaves nothing behind.
+    def add_task_file(self, actor: dict, task_id: str, filename, declared_type: str, stream, length: int,
+                      note: str = "", limit: int = DEFAULT_UPLOAD_LIMIT) -> dict:
+        self._require_file_manager(actor, task_id, {"kind": "file", "attempted_name": str(filename or "")[:200]})
+        name = clean_filename(filename)
+        storage = active_storage()
+        stored = storage.save(checked_chunks(stream, length, limit, name, declared_type))
+        attachment_id = new_id()
+        try:
+            with self._actor_transaction(actor):
+                self.db.execute(
+                    "INSERT INTO task_attachments(id,task_id,path,display_name,note,added_by,added_at,kind,"
+                    "storage_key,size_bytes,sha256,content_type) VALUES(?,?,?,?,?,?,?,'file',?,?,?,?)",
+                    (attachment_id, task_id, "", name, str(note or "").strip(), actor["id"], now_text(),
+                     stored.key, stored.size, stored.sha256, str(declared_type or "")[:200]),
+                )
+                self._event(task_id, actor["id"], "attachment_added", None,
+                            {"kind": "file", "display_name": name, "size_bytes": stored.size,
+                             "sha256": stored.sha256}, None)
+        except BaseException:
+            storage.delete(stored.key)
+            raise
+        return self._get_attachment(task_id, attachment_id)
+
+    # MXY7BG Item 14: every download rechecks task access immediately before the transfer and
+    # is audited, both when it is served and when it is refused.
+    def open_task_file(self, actor: dict, task_id: str, attachment_id: str):
+        row = self.db.execute(
+            "SELECT id, display_name, kind, storage_key, size_bytes FROM task_attachments WHERE id=? AND task_id=?",
+            (attachment_id, task_id),
+        ).fetchone()
+        try:
+            self.get_task(actor, task_id)
+        except (Forbidden, KeyError):
+            if row:
+                self._event(task_id, actor["id"], "attachment_download_blocked", None,
+                            {"attachment_id": attachment_id}, "No access to this task")
+            raise
+        if not row or row["kind"] != "file" or not row["storage_key"]:
+            raise KeyError("File not found.")
+        handle = active_storage().open(row["storage_key"])
+        try:
+            self._event(task_id, actor["id"], "attachment_downloaded", None,
+                        {"attachment_id": attachment_id, "display_name": row["display_name"]}, None, notify=False)
+        except BaseException:
+            handle.close()
+            raise
+        return {"display_name": row["display_name"], "size_bytes": row["size_bytes"]}, handle
+
     def list_task_attachments(self, actor: dict, task_id: str) -> list[dict]:
         # get_task enforces the same view authorization the whole task has.
         self.get_task(actor, task_id)
@@ -4319,17 +4410,12 @@ class AstraService:
                LEFT JOIN users u ON u.id=a.added_by WHERE a.task_id=? ORDER BY a.added_at, a.id""",
             (task_id,),
         ).fetchall()
-        result = []
-        for row in rows:
-            item = dict(row)
-            item["exists"] = self._path_exists(item["path"])
-            result.append(item)
-        return result
+        return [self._present_attachment(dict(row)) for row in rows]
 
     def remove_task_attachment(self, actor: dict, task_id: str, attachment_id: str) -> None:
         task = self.get_task(actor, task_id)  # validates existence and visibility first
         row = self.db.execute(
-            "SELECT path, display_name FROM task_attachments WHERE id=? AND task_id=?",
+            "SELECT path, display_name, kind, url, storage_key FROM task_attachments WHERE id=? AND task_id=?",
             (attachment_id, task_id),
         ).fetchone()
         if not row:
@@ -4350,9 +4436,17 @@ class AstraService:
             ).fetchone()
             if not final_result:
                 self.db.execute("DELETE FROM task_attachments WHERE id=? AND task_id=?", (attachment_id, task_id))
-                # Removing the link never touches the file on disk.
+                # Removing a path link never touches the file on disk.
                 self._event(task_id, actor["id"], "attachment_removed",
-                            {"path": row["path"], "display_name": row["display_name"]}, None, None)
+                            self._attachment_audit(row), None, None)
+        if not final_result and row["kind"] == "file" and row["storage_key"]:
+            # MXY7BG: a managed upload's bytes go with its row, after the removal commits. The
+            # row is already gone, so a storage error is logged for the operator, not raised.
+            try:
+                active_storage().delete(row["storage_key"])
+            except OSError as exc:
+                logging.getLogger("astra.attachments").error(
+                    "stored file %s for removed attachment %s was not deleted: %s", row["storage_key"], attachment_id, exc)
         if final_result:
             # Recorded after the empty transaction, so the audit row is kept.
             self._event(
@@ -4371,8 +4465,23 @@ class AstraService:
         ).fetchone())
         if not row:
             raise KeyError("Attachment not found.")
-        row["exists"] = self._path_exists(row["path"])
-        return row
+        return self._present_attachment(row)
+
+    def _present_attachment(self, item: dict) -> dict:
+        # MXY7BG (Aly, 2026-11-08, "Hide when hosted"): local path links are a desktop
+        # feature, on only where ASTRA_ATTACHMENT_ROOTS is set. Without it, as on the hosted
+        # server, a stored path is never shown or looked up; the row itself is kept.
+        item.pop("storage_key", None)  # internal: never leaves the server
+        if item.get("kind", "path") != "path":
+            item["exists"] = None
+            return item
+        if not attachment_roots():
+            item["path"] = ""
+            item["path_hidden"] = True
+            item["exists"] = None
+            return item
+        item["exists"] = self._path_exists(item["path"])
+        return item
 
     @staticmethod
     def _path_exists(path: str) -> bool | None:
@@ -4442,7 +4551,8 @@ class AstraService:
         for row in rows:
             parent = row["parent_task_id"]
             attachments = [dict(a) for a in self.db.execute(
-                "SELECT path, display_name, note FROM task_attachments WHERE task_id=? ORDER BY added_at, id",
+                "SELECT path, display_name, note FROM task_attachments WHERE task_id=? AND kind='path'"
+                " ORDER BY added_at, id",
                 (row["id"],),
             ).fetchall()]
             # 8B9NBH (owner decision 2026-09-15): carry a role-based SUGGESTED
@@ -4894,7 +5004,9 @@ class AstraService:
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         rows = self.db.execute(
             """SELECT fr.*, t.title task_title, t.project_id, p.name project_name,
-                      u.display_name marked_by_name, a.path attachment_path, s.version submission_version
+                      u.display_name marked_by_name, a.kind attachment_kind,
+                      CASE a.kind WHEN 'link' THEN a.url WHEN 'file' THEN a.display_name ELSE a.path END attachment_path,
+                      s.version submission_version
                FROM final_results fr JOIN tasks t ON t.id=fr.task_id JOIN projects p ON p.id=t.project_id
                LEFT JOIN users u ON u.id=fr.marked_by
                LEFT JOIN task_attachments a ON a.id=fr.attachment_id
@@ -4903,6 +5015,10 @@ class AstraService:
             params,
         ).fetchall()
         result = [dict(row) for row in rows]
+        if not attachment_roots():  # MXY7BG: no local path leaves a server without path links
+            for row in result:
+                if row["attachment_kind"] == "path":
+                    row["attachment_path"] = ""
         return self._attach_entity_names(result)
 
     def _attach_entity_names(self, rows: list[dict]) -> list[dict]:
@@ -5906,9 +6022,12 @@ class AstraService:
                 if row["p"] in key_of:
                     predecessors.setdefault(row["s"], []).append(key_of[row["p"]])
             attachments: dict[str, list] = {}
-            for row in self.db.execute(
-                "SELECT a.task_id, a.path FROM task_attachments a JOIN tasks t ON t.id=a.task_id WHERE t.project_id=? ORDER BY a.added_at",
-                (project_id,)):
+            # MXY7BG: only path links are importable, and no local path leaves a hosted server.
+            rows = self.db.execute(
+                "SELECT a.task_id, a.path FROM task_attachments a JOIN tasks t ON t.id=a.task_id"
+                " WHERE t.project_id=? AND a.kind='path' ORDER BY a.added_at", (project_id,),
+            ) if attachment_roots() else []
+            for row in rows:
                 attachments.setdefault(row["task_id"], []).append(row["path"])
             members = [dict(row) for row in self.db.execute(
                 """SELECT m.user_id, m.role, u.email, u.display_name FROM memberships m JOIN users u ON u.id=m.user_id

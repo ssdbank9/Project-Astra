@@ -194,6 +194,18 @@ class BackupCliTests(unittest.TestCase):
             old_db.execute("DROP TABLE daily_digest_runs")
             old_db.execute("DROP TABLE daily_digest_settings")
             old_db.execute("ALTER TABLE users DROP COLUMN must_change_password")
+            # v23 (MXY7BG) columns carry CHECKs, so rebuild the table as v20 had it.
+            old_db.execute("DROP TABLE task_attachments")
+            old_db.execute("""CREATE TABLE task_attachments (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                path TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                note TEXT NOT NULL DEFAULT '',
+                added_by TEXT NOT NULL REFERENCES users(id),
+                added_at TEXT NOT NULL
+            )""")
+            old_db.execute("CREATE INDEX idx_attachments_task ON task_attachments(task_id, added_at)")
             old_db.execute("PRAGMA user_version=20")
         finally:
             old_db.close()

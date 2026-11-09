@@ -15,8 +15,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
+from .attachment_storage import CHUNK_BYTES, DEFAULT_UPLOAD_LIMIT, UploadTooLarge
 from .auth import dummy_password_hash, new_token, token_digest, verify_password
 from .daily_digest import DailyDigestScheduler
 from .db import connect, database_path
@@ -28,6 +29,10 @@ SESSION_COOKIE = "astra_session"
 JSON_MAX_BYTES = 1_000_000
 # Raw file uploads (Excel/CSV import) get their own ceiling; JSON stays at 1 MB.
 IMPORT_MAX_BYTES = 5 * 1024 * 1024
+# MXY7BG: a managed upload is the one larger body; Waitress's cap must admit it, and Caddy
+# lets it through on the upload route only (deploy/caddy/Caddyfile).
+UPLOAD_MAX_BYTES = DEFAULT_UPLOAD_LIMIT
+WAITRESS_MAX_BODY_BYTES = UPLOAD_MAX_BYTES
 # Fonts are served by Astra itself (4T4DEA), so the page needs no third-party origin.
 CONTENT_SECURITY_POLICY = ("default-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; "
                            "base-uri 'none'; frame-ancestors 'none'")
@@ -47,6 +52,25 @@ class RequestBodyTimeout(TimeoutError):
 
 class InvalidRequestBody(ValueError):
     pass
+
+
+class _TimedReader:
+    """Turn a stalled upload read into Astra's request-timeout answer."""
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    def read(self, size: int) -> bytes:
+        try:
+            return self._raw.read(size)
+        except TimeoutError as exc:
+            raise RequestBodyTimeout("Request body timed out. Send the request again.") from exc
+
+
+def _content_disposition(name: str) -> str:
+    # An ASCII fallback for old clients plus the exact UTF-8 name (RFC 6266 / RFC 5987).
+    fallback = "".join(ch if 32 <= ord(ch) < 127 and ch not in '"\\;' else "_" for ch in name) or "download"
+    return f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{quote(name, safe="")}'
 
 
 def _as_of_slug(as_of: str | None) -> str:
@@ -149,6 +173,11 @@ class AstraRoutes:
                 if not task_id:
                     raise ValueError("task_id is required.")
                 return self._json({"dependencies": self.service.get_task_dependencies(user, task_id)})
+            parts = path.split("/")
+            if (len(parts) == 7 and path.startswith("/api/tasks/") and parts[4] == "attachments"
+                    and parts[6] == "download"):
+                user, _ = self._require_user()
+                return self._download_file(user, parts[3], parts[5])
             if path == "/api/users":
                 user, _ = self._require_user()
                 return self._json({"users": self.service.list_users(user)})
@@ -268,6 +297,25 @@ class AstraRoutes:
         self._service = AstraService(self.db)
         try:
             path = urlparse(self.path).path
+            if path.startswith("/api/tasks/") and path.endswith("/files") and path.count("/") == 4:
+                # MXY7BG Items 5-9. The body is the raw file; its name rides in X-Filename and its
+                # note in X-Note (both percent-encoded), its declared type in Content-Type. Who may
+                # upload, the CSRF token and the declared size are checked before it is read.
+                try:
+                    length = self._content_length()
+                    user, csrf = self._require_user()
+                    if self.headers.get("X-CSRF-Token") != csrf:
+                        raise Forbidden("Invalid request token.")
+                    attachment = self.service.add_task_file(
+                        user, path.split("/")[3], self._header_text("X-Filename"),
+                        self.headers.get("Content-Type", ""), _TimedReader(self.rfile), length,
+                        note=self._header_text("X-Note"), limit=UPLOAD_MAX_BYTES,
+                    )
+                except Exception:
+                    # A refused upload may leave unread bytes on the connection; never reuse it.
+                    self.close_connection = True
+                    raise
+                return self._json({"attachment": attachment}, HTTPStatus.CREATED)
             payload = self._body(path)
             if path == "/api/login":
                 return self._login(payload)
@@ -517,6 +565,12 @@ class AstraRoutes:
                     user, str(payload.get("task_id", "")), str(payload.get("user_id", "")), str(payload.get("role", ""))
                 )
                 return self._json({"ok": True})
+            if path.startswith("/api/tasks/") and path.endswith("/links") and path.count("/") == 4:
+                attachment = self.service.add_task_link(
+                    user, path.split("/")[3], payload.get("url"),
+                    str(payload.get("display_name", "")), str(payload.get("note", "")),
+                )
+                return self._json({"attachment": attachment}, HTTPStatus.CREATED)
             if path.startswith("/api/tasks/") and path.endswith("/attachments"):
                 task_id = path.split("/")[3]
                 attachment = self.service.add_task_attachment(
@@ -725,7 +779,7 @@ class AstraRoutes:
     # with the 1 MB ceiling whatever Content-Type the client declares.
     RAW_BODY_ROUTES = frozenset({"/api/import/preview", "/api/import/commit"})
 
-    def _body(self, path: str) -> dict:
+    def _content_length(self) -> int:
         # Only fixed-length bodies are supported. Reject ambiguous framing before
         # reading or dispatching; never let read(-1) bypass the byte ceiling.
         lengths = self.headers.get_all('Content-Length', [])
@@ -736,7 +790,10 @@ class AstraRoutes:
         text = lengths[0].strip() if lengths else '0'
         if not text or not text.isascii() or not text.isdecimal():
             raise InvalidRequestBody('Content-Length must be a non-negative decimal integer.')
-        length = int(text)
+        return int(text)
+
+    def _body(self, path: str) -> dict:
+        length = self._content_length()
         content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().casefold()
         if path in self.RAW_BODY_ROUTES:
             # Raw upload (import): bytes are handed to the service untouched.
@@ -750,6 +807,28 @@ class AstraRoutes:
         if not isinstance(value, dict):
             raise InvalidRequestBody('The request body must be a JSON object.')
         return value
+
+    def _download_file(self, user: dict, task_id: str, attachment_id: str):
+        # MXY7BG Item 14: streamed through Astra after the access recheck, never inline and
+        # never cached, whatever the file claims to be.
+        meta, handle = self.service.open_task_file(user, task_id, attachment_id)
+        try:
+            size = os.fstat(handle.fileno()).st_size
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", _content_disposition(meta["display_name"]))
+            self.send_header("Cache-Control", "private, no-store")
+            self.end_headers()
+        except BaseException:
+            handle.close()
+            raise
+        self._stream_body(handle)
+
+    def _stream_body(self, handle):
+        with handle:
+            while chunk := handle.read(CHUNK_BYTES):
+                self.wfile.write(chunk)
 
     def _read_request_bytes(self, length: int) -> bytes:
         try:
@@ -893,7 +972,7 @@ class AstraRoutes:
             return self._json({"error": str(exc), "confirm": exc.confirm, "impact": exc.impact}, HTTPStatus.CONFLICT)
         if isinstance(exc, (Conflict, ImportConflict)):
             return self._json({"error": str(exc)}, HTTPStatus.CONFLICT)
-        if isinstance(exc, (PayloadTooLarge, ImportTooLarge)):
+        if isinstance(exc, (PayloadTooLarge, ImportTooLarge, UploadTooLarge)):
             return self._json({"error": str(exc)}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
         if isinstance(exc, KeyError):
             return self._json({"error": str(exc).strip("'")}, HTTPStatus.NOT_FOUND)
@@ -975,11 +1054,28 @@ class _WSGIHandler(AstraRoutes):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def _stream_body(self, handle):
+        # Hand the open file to the WSGI server, which sends it chunk by chunk and calls
+        # close() when the response ends, even if the client goes away.
+        self._wsgi_stream = _FileChunks(handle)
+
     def log_message(self, format_string, *args):
         logging.getLogger("astra.http").info(format_string, *args)
 
     def log_error(self, format_string, *args):
         logging.getLogger("astra.http").error(format_string, *args)
+
+
+class _FileChunks:
+    def __init__(self, handle):
+        self._handle = handle
+
+    def __iter__(self):
+        while chunk := self._handle.read(CHUNK_BYTES):
+            yield chunk
+
+    def close(self):
+        self._handle.close()
 
 
 class AstraWSGIApplication:
@@ -1023,6 +1119,7 @@ class AstraWSGIApplication:
         handler._wsgi_headers = []
         handler._wsgi_headers_sent = False
         handler._wsgi_status = int(HTTPStatus.INTERNAL_SERVER_ERROR)
+        handler._wsgi_stream = None
         handler.headers = headers
         handler.rfile = environ.get("wsgi.input", io.BytesIO())
         handler.wfile = io.BytesIO()
@@ -1044,6 +1141,8 @@ class AstraWSGIApplication:
 
         status = HTTPStatus(handler._wsgi_status)
         start_response(f"{status.value} {status.phrase}", handler._wsgi_headers)
+        if handler._wsgi_stream is not None:
+            return handler._wsgi_stream
         return [handler.wfile.getvalue()]
 
 
@@ -1068,7 +1167,7 @@ def serve_waitress(host: str, port: int):
             ident="Astra",
             channel_timeout=30,
             max_request_header_size=16_384,
-            max_request_body_size=6_000_000,
+            max_request_body_size=WAITRESS_MAX_BODY_BYTES,
             expose_tracebacks=False,
         )
     finally:

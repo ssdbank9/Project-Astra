@@ -3461,7 +3461,7 @@ class ServerCommandCliTests(unittest.TestCase):
         self.assertTrue(run.call_args.args[0].waitress)
 
     def test_waitress_configuration_is_loopback_and_bounded(self):
-        from astra.web import serve_waitress
+        from astra.web import UPLOAD_MAX_BYTES, serve_waitress
         from types import SimpleNamespace
 
         application = SimpleNamespace(db_path=":memory:")
@@ -3475,7 +3475,9 @@ class ServerCommandCliTests(unittest.TestCase):
         self.assertEqual(run_server.call_args.kwargs["port"], 8765)
         self.assertEqual(run_server.call_args.kwargs["channel_timeout"], 30)
         self.assertEqual(run_server.call_args.kwargs["max_request_header_size"], 16_384)
-        self.assertEqual(run_server.call_args.kwargs["max_request_body_size"], 6_000_000)
+        # MXY7BG: the hosted server admits a managed upload of up to 25 MiB and no more.
+        self.assertEqual(run_server.call_args.kwargs["max_request_body_size"], UPLOAD_MAX_BYTES)
+        self.assertEqual(UPLOAD_MAX_BYTES, 25 * 1024 * 1024)
         self.assertEqual(run_server.call_args.kwargs["ident"], "Astra")
         self.assertFalse(run_server.call_args.kwargs["expose_tracebacks"])
         self.assertNotIn("trusted_proxy", run_server.call_args.kwargs)

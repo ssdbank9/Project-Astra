@@ -1492,6 +1492,72 @@ class WipLimitMigrationTests(unittest.TestCase):
             connection.close()
 
 
+class HostedAttachmentMigrationTests(unittest.TestCase):
+    """MXY7BG: v23 adds attachment kinds; every existing row stays a local path link."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "astra-v22.sqlite3"
+
+    @staticmethod
+    def deny_attachment_alter(action, arg1, arg2, *_):
+        if action == sqlite3.SQLITE_ALTER_TABLE and arg2 == "task_attachments":
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    def at_v22(self):
+        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.set_authorizer(self.deny_attachment_alter)
+        with self.assertRaises(sqlite3.DatabaseError):
+            db.migrate(connection)
+        connection.set_authorizer(None)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 22)
+        connection.execute(
+            "INSERT INTO users(id,email,display_name,password_hash,global_role,created_at,is_primary_owner)"
+            " VALUES('owner-1','o@example.org','Owner','x','owner','2026-01-01T00:00:00Z',1)")
+        connection.execute("INSERT INTO projects(id,name,created_at,created_by) VALUES('p1','P','2026-01-01','owner-1')")
+        connection.execute("INSERT INTO tasks(id,project_id,title,created_at,updated_at,created_by)"
+                           " VALUES('t1','p1','T','2026-01-01','2026-01-01','owner-1')")
+        connection.execute("INSERT INTO task_attachments(id,task_id,path,display_name,added_by,added_at)"
+                           " VALUES('a1','t1','C:\\docs\\a.pdf','a.pdf','owner-1','2026-01-01')")
+        return connection
+
+    def test_existing_rows_stay_path_links_and_the_schema_matches_a_fresh_one(self):
+        connection = self.at_v22()
+        try:
+            db.migrate(connection)
+            row = connection.execute("SELECT * FROM task_attachments WHERE id='a1'").fetchone()
+            self.assertEqual((row["kind"], row["path"], row["url"], row["storage_key"]),
+                             ("path", "C:\\docs\\a.pdf", None, None))
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE task_attachments SET kind='other' WHERE id='a1'")
+            fresh = db.connect(Path(self.temp.name) / "fresh.sqlite3")
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
+    def test_a_failed_v23_step_rolls_back_then_retries(self):
+        connection = self.at_v22()
+        try:
+            before = full_catalog(connection)
+            connection.set_authorizer(self.deny_attachment_alter)
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(full_catalog(connection), before)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 22)
+            db.migrate(connection)
+            self.assertIn("kind", table_columns(connection, "task_attachments"))
+        finally:
+            connection.close()
+
+
 class ForcedPasswordChangeMigrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -1501,6 +1567,8 @@ class ForcedPasswordChangeMigrationTests(unittest.TestCase):
         self.addCleanup(self.connection.close)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("CREATE TABLE users(id TEXT PRIMARY KEY, display_name TEXT NOT NULL)")
+        # Later steps run too: v23 (MXY7BG) alters task_attachments, so the stub has one.
+        self.connection.execute("CREATE TABLE task_attachments(id TEXT PRIMARY KEY)")
         self.connection.executemany(
             "INSERT INTO users(id,display_name) VALUES(?,?)",
             [("existing-a", "Existing A"), ("existing-b", "Existing B")],

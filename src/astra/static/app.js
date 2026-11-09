@@ -1818,7 +1818,10 @@ function renderFinalResults(results,filters){
   const projOpts=state.projects.map(p=>`<option value="${escapeHtml(p.id)}"${filters.project_id===p.id?" selected":""}>${escapeHtml(p.name)}</option>`).join("");
   const entOpts=(state.entities||[]).map(e=>`<option value="${escapeHtml(e.id)}"${filters.entity_id===e.id?" selected":""}>${escapeHtml(e.name)}</option>`).join("");
   const rows=(results||[]).map(r=>{
-    const where=r.source_type==="attachment"?`<code class="att-path">${escapeHtml(r.attachment_path||"")}</code>`:`accepted submission v${escapeHtml(String(r.submission_version||""))}`;
+    const where=r.source_type!=="attachment"?`accepted submission v${escapeHtml(String(r.submission_version||""))}`
+      :r.attachment_kind==="file"?`<a href="/api/tasks/${encodeURIComponent(r.task_id)}/attachments/${encodeURIComponent(r.attachment_id)}/download" download>${escapeHtml(r.attachment_path||"")}</a>`
+      :r.attachment_kind==="link"?`<a href="${escapeHtml(r.attachment_path||"")}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.attachment_path||"")}</a>`
+      :r.attachment_path?`<code class="att-path">${escapeHtml(r.attachment_path)}</code>`:`Local file link, not available on this server.`;
     const ents=(r.entities||[]).join(", ")||"—";
     return `<tr><td><strong>${escapeHtml(r.title)}</strong><br><small class="muted">${where}</small></td>
       <td>${escapeHtml(r.source_type)}</td>
@@ -2523,25 +2526,71 @@ function buildAttachments(task){
       :`<button type="button" class="link" data-mark-fr-att="${escapeHtml(a.id)}">Mark as final result</button>`;
     const removeCtl=canManageFiles
       ?`<button type="button" class="link" data-remove-attachment="${escapeHtml(a.id)}">Remove</button>`:"";
-    return `<li><strong>${escapeHtml(a.display_name)}</strong>${missing}<br>
-      <code class="att-path">${escapeHtml(a.path)}</code>
-      <button type="button" class="link" data-copy-path="${escapeHtml(a.path)}">Copy path</button>
+    return `<li>${attachmentLine(task,a)}${missing}
       ${removeCtl}
       ${frCtl}
       <br><small>Added by ${escapeHtml(a.added_by_name||"")} · ${escapeHtml(new Date(a.added_at).toLocaleString())}</small>${note}</li>`;
   }).join("")||"<li>No attachments linked.</li>";
-  const form=canManageFiles?`<form id="attachment-form">
+  const pathForm=task.permissions?.can_link_paths?`<form id="attachment-form"><h4>Link a file on this computer</h4>
       <label>File path<input name="path" placeholder="C:\\folder\\deliverable.pdf" required></label>
       <div class="grid"><label>Display name (optional)<input name="display_name"></label>
         <label>Note (optional)<input name="note"></label></div>
-      <div class="actions"><button>Link file</button></div><div class="error" id="attachment-error"></div></form>`:`<p class="blocked-text">Read/download only. File and final-result management is App Owner-only.</p><div class="error" id="attachment-error"></div>`;
+      <div class="actions"><button>Link file</button></div></form>`:"";
+  const form=canManageFiles?`<form id="upload-form"><h4>Upload a file</h4>
+      <label>File (up to ${UPLOAD_MAX_MB} MB)<input name="file" type="file" required></label>
+      <label>Note (optional)<input name="note"></label>
+      <div class="actions"><button>Upload</button></div></form>
+    <form id="link-form"><h4>Add a link</h4>
+      <label>Link<input name="url" type="url" placeholder="https://" required></label>
+      <div class="grid"><label>Display name (optional)<input name="display_name"></label>
+        <label>Note (optional)<input name="note"></label></div>
+      <div class="actions"><button>Add link</button></div></form>
+    ${pathForm}<div class="error" id="attachment-error"></div>`:`<p class="blocked-text">Read/download only. File and final-result management is App Owner-only.</p><div class="error" id="attachment-error"></div>`;
   return `<div class="attachments"><h3>Attachments</h3>
-    <p>Links to files kept in a folder on this machine — Astra stores the link, not the file. Removing a link never deletes the file.</p>
     <ul>${rows}</ul>
     ${form}</div>`;
 }
 
+// MXY7BG: Astra's upload limit (Owner Item 8); a bigger file is shared as a link instead.
+const UPLOAD_MAX_MB=25;
+function formatBytes(n){return n>=1048576?`${(n/1048576).toFixed(1)} MB`:n>=1024?`${Math.round(n/1024)} KB`:`${n} bytes`}
+function attachmentLine(task,a){
+  const name=escapeHtml(a.display_name);
+  // A link opens in a new tab and Astra never fetches it (Items 12-13); a file downloads through
+  // Astra after an access check (Item 14). Neither is ever described as safe or scanned (Item 11).
+  if(a.kind==="link")return `<a href="${escapeHtml(a.url)}" target="_blank" rel="noopener noreferrer"><strong>${name}</strong></a>
+      <br><small class="att-path">${escapeHtml(a.url)}</small>`;
+  if(a.kind==="file")return `<a href="/api/tasks/${encodeURIComponent(task.id)}/attachments/${encodeURIComponent(a.id)}/download" download><strong>${name}</strong></a>
+      <small class="muted">${escapeHtml(formatBytes(a.size_bytes||0))}</small>`;
+  if(!a.path)return `<strong>${name}</strong><br><small class="muted">Local file link, not available on this server.</small>`;
+  return `<strong>${name}</strong><br>
+      <code class="att-path">${escapeHtml(a.path)}</code>
+      <button type="button" class="link" data-copy-path="${escapeHtml(a.path)}">Copy path</button>`;
+}
+async function uploadAttachment(taskId,file,note){
+  const response=await fetch(taskApi(taskId,"/files"),{method:"POST",body:file,headers:{
+    "X-CSRF-Token":state.csrf||"","Content-Type":file.type||"application/octet-stream",
+    "X-Filename":encodeURIComponent(file.name),"X-Note":encodeURIComponent(note||"")}});
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error(data.error||"Upload failed.");
+  return data;
+}
 async function wireAttachments(task){
+  const refresh=async()=>{if(detailTaskId===task.id)await openDetail(task.id)};
+  document.querySelector("#upload-form")?.addEventListener("submit",async e=>{
+    e.preventDefault();const err=document.querySelector("#attachment-error");clearFeedback(err);
+    const form=e.target,file=form.querySelector('[name="file"]').files[0];
+    if(!file){err.textContent="Choose a file.";return}
+    if(file.size>UPLOAD_MAX_MB*1048576){err.textContent=`The file is larger than ${UPLOAD_MAX_MB} MB. Put it in a shared folder and add a link to it instead.`;return}
+    const button=form.querySelector("button");button.disabled=true;button.textContent="Uploading…";
+    try{await uploadAttachment(task.id,file,form.querySelector('[name="note"]').value);await refresh()}
+    catch(x){err.textContent=x.message;button.disabled=false;button.textContent="Upload"}
+  });
+  document.querySelector("#link-form")?.addEventListener("submit",async e=>{
+    e.preventDefault();const err=document.querySelector("#attachment-error");clearFeedback(err);
+    try{await api(taskApi(task.id,"/links"),{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});await refresh()}
+    catch(x){err.textContent=x.message}
+  });
   document.querySelector("#attachment-form")?.addEventListener("submit",async e=>{
     e.preventDefault();const err=document.querySelector("#attachment-error");clearFeedback(err);
     try{await api(taskApi(task.id,"/attachments"),{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});if(detailTaskId===task.id)await openDetail(task.id)}

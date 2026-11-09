@@ -21,7 +21,7 @@ from pathlib import Path
 
 from astra.db import connect
 from astra.service import AstraService
-from astra.web import AstraHandler, AstraServer, create_wsgi_app
+from astra.web import WAITRESS_MAX_BODY_BYTES, AstraHandler, AstraServer, create_wsgi_app
 
 from link_roots import allow_attachment_roots, link
 
@@ -180,7 +180,7 @@ class AstraWaitressIntegrationTests(AstraWsgiApplicationTests):
             ident="Astra",
             channel_timeout=30,
             max_request_header_size=16_384,
-            max_request_body_size=6_000_000,
+            max_request_body_size=WAITRESS_MAX_BODY_BYTES,
             expose_tracebacks=False,
         )
         # Only this server's task workers, not ones another test may have left.
@@ -4337,8 +4337,10 @@ for(const [name,task] of Object.entries(cases))out[name]=globalThis.__render(tas
 process.stdout.write(JSON.stringify(out));
 """
 
+# can_link_paths: these dialogs model a desktop install, where local path links are on (MXY7BG).
 OWNER_PERMS = {"can_edit_ordinary": True, "can_request_protected": False,
-               "can_decide_protected": True, "can_manage_files": True, "can_read_files": True}
+               "can_decide_protected": True, "can_manage_files": True, "can_link_paths": True,
+               "can_read_files": True}
 MANAGER_PERMS = {"can_edit_ordinary": True, "can_request_protected": True,
                  "can_decide_protected": False, "can_manage_files": False, "can_read_files": True}
 VIEWER_PERMS = {"can_edit_ordinary": False, "can_request_protected": False,
