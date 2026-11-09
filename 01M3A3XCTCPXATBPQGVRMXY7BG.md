@@ -30,7 +30,7 @@ related:
   - 01M2JNPRGYD7TGGSHZV16G89SJ
 commits: []
 created-at: 2026-09-24T16:27:54Z
-updated-at: 2026-11-09T05:52:21Z
+updated-at: 2026-11-09T05:52:25Z
 updated-by: Claude
 claimed-by: X1CarbonPC-26956
 claimed-at: 2026-11-08T18:40:53Z
@@ -60,3 +60,4 @@ claimed-at: 2026-11-08T18:40:53Z
 - **2026-09-24 16:29 · Claude** — Filed by Claude 2026-09-24 under Aly's exclusive write lock #4 while fixing 6G89SJ. Nothing here is started; it waits in backlog for Aly to answer the open questions in the context.
 - **2026-11-08 18:39 · Claude** — 2026-11-08 Aly's answers (chat with Claude), quoted from his picks: path links 'Hide when hosted' (desktop install keeps them, nothing deleted); storage 'Private folder on the VM' first, OCI later behind the same interface; downloads 'Through Astra only' (direct links Items 15-16 in a later slice); delivery 'In slices'. Slice 1 = HTTPS links + private-folder uploads (25 MB default cap, denylist) + audited streamed downloads + no local paths when hosted. Note: Waitress and Caddy currently cap request bodies at 6 MB (HANDOFF_2026-10-24 2.2), so the upload route needs its own limit.
 - **2026-11-09 05:52 · Claude** — Slice 1 review (independent subagent, 2026-11-09): no blocker. Fixed from it: final-results view/CSV name a file result and link a link result (CASE by kind); import template export carries path links only and none without roots (service _template_prefill, importer existing_attachments); restore runbook now restores the uploads tar; denylist gains .xll .sct .wsc .ws .ps1xml .psc1 .msh* .vb .desktop .library-ms .search-ms .diagcab; .zip accepts PK\x07\x08; open_task_file closes the handle if the audit insert fails; a storage OSError after a committed removal is logged (astra.attachments), not raised. Left as nits: Caddy 25MiB equals Astra's limit so a body one byte over gets Caddy's 413 (JS pre-check normally prevents it); no sweeper for incoming/*.part after a process kill; validate_https_url accepts odd hosts like https://-/ by design (syntax only).
+- **2026-11-09 05:52 · Claude** — Mutation check 2026-11-09: 30 slice-1 guards + 7 review-fix guards each removed in a throwaway copy, every one fails a test. Two tests were tightened to get there: the overlong-chunk test asserts the message, and the non-file download test patches storage out so the service must refuse by kind. Removing the EOF check in checked_chunks makes the read loop infinite, so the mutation script treats a timeout as caught.
