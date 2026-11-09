@@ -1,6 +1,7 @@
 """MXY7BG slice 1: HTTPS links, managed uploads to the private folder, audited streamed
 downloads, and no local path shown where path links are off (Owner Items 5-14 on 6G89SJ;
-Aly's 2026-11-08 choices on MXY7BG)."""
+Aly's 2026-11-08 choices on MXY7BG). Slice 2: the App Owner's upload limit and denylist
+additions (Items 8-9)."""
 import hashlib
 import http.client
 import io
@@ -17,7 +18,8 @@ from urllib.parse import quote
 
 from astra import attachment_storage as storage_module
 from astra.attachment_storage import (
-    DEFAULT_UPLOAD_LIMIT, FolderStorage, UploadTooLarge, check_upload, clean_filename, validate_https_url,
+    DEFAULT_POLICY, DEFAULT_UPLOAD_LIMIT, HARD_UPLOAD_LIMIT, MB, FolderStorage, UploadPolicy, UploadTooLarge,
+    check_upload, clean_filename, normalize_extension, normalize_mime_type, upload_ceiling, validate_https_url,
 )
 from astra.db import connect
 from astra.service import AstraService, Conflict, Forbidden
@@ -316,6 +318,216 @@ class DownloadTests(Fixture):
         self.assertEqual(len(self.stored_files()), 1)
 
 
+class SettingsTests(Fixture):
+    """Slice 2, Owner Items 8-9: the App Owner raises the limit up to the ceiling and adds to
+    the denylist; the built-in list cannot be reduced."""
+
+    def setUp(self):
+        super().setUp()
+        self.ceiling("")  # the machine's own ASTRA_UPLOAD_CEILING_MB must not leak into these tests
+
+    def save(self, **fields):
+        payload = {"upload_limit_mb": 25, "blocked_extensions": [], "blocked_mime_types": []}
+        payload.update(fields)
+        return self.service.update_attachment_settings(self.owner, **payload)
+
+    def ceiling(self, mb):
+        patcher = patch.dict(os.environ, {"ASTRA_UPLOAD_CEILING_MB": str(mb)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def setting_events(self):
+        return self.db.execute(
+            "SELECT * FROM user_events WHERE event_type='attachment_settings_changed' ORDER BY rowid"
+        ).fetchall()
+
+    def test_the_defaults_apply_until_the_owner_saves_something(self):
+        settings = self.service.get_attachment_settings(self.owner)
+        self.assertEqual((settings["upload_limit_mb"], settings["default_limit_mb"], settings["hard_limit_mb"],
+                          settings["server_ceiling_mb"]), (25, 25, 250, 25))
+        self.assertEqual((settings["blocked_extensions"], settings["blocked_mime_types"]), ([], []))
+        self.assertIn(".exe", settings["builtin_extensions"])
+        self.assertIn("application/x-msdownload", settings["builtin_mime_types"])
+        self.assertIsNone(settings["updated_at"])
+        self.assertEqual(self.service.upload_policy(), DEFAULT_POLICY)
+        self.assertEqual(DEFAULT_POLICY.limit, 25 * MB)
+        self.assertEqual(self.service.task_detail(self.owner, self.task["id"])["upload_limit_bytes"], 25 * MB)
+
+    def test_the_limit_is_the_owners_setting_up_to_the_ceiling_and_is_applied_before_reading(self):
+        self.ceiling(250)
+        self.save(upload_limit_mb="1")
+        with self.assertRaisesRegex(UploadTooLarge, "larger than 1 MB"):
+            self.service.add_task_file(self.owner, self.task["id"], "big.pdf", "application/pdf",
+                                       RefusingStream(), MB + 1)
+        exact = b"%PDF-" + b"x" * (MB - 5)
+        self.assertEqual(self.upload(self.owner, data=exact)["size_bytes"], MB)
+        self.assertEqual(self.service.task_detail(self.owner, self.task["id"])["upload_limit_bytes"], MB)
+        self.save(upload_limit_mb=250)
+        with self.assertRaises(UploadTooLarge):
+            self.service.add_task_file(self.owner, self.task["id"], "big.pdf", "application/pdf",
+                                       RefusingStream(), HARD_UPLOAD_LIMIT + 1)
+
+        class Drops(io.BytesIO):
+            def read(self, size=-1):
+                raise OSError("connection dropped")
+        with self.assertRaises(OSError):  # the ceiling itself passes the size check and is read
+            self.service.add_task_file(self.owner, self.task["id"], "big.pdf", "application/pdf",
+                                       Drops(), HARD_UPLOAD_LIMIT)
+        for bad in (0, 251, -1, "big", "", None, True, 2.5, [25], "25.0", "\uff12\uff15"):
+            with self.subTest(limit=bad), self.assertRaisesRegex(ValueError, "whole number of MB from 1 to 250"):
+                self.save(upload_limit_mb=bad)
+        self.assertEqual(self.service.upload_policy().limit, HARD_UPLOAD_LIMIT)
+        with self.assertRaises(ValueError):
+            UploadPolicy(HARD_UPLOAD_LIMIT + 1)
+        with self.assertRaises(ValueError):
+            UploadPolicy(MB - 1)
+
+    def test_the_server_ceiling_bounds_the_owners_limit_and_the_policy(self):
+        # Waitress spools a whole body before Astra runs, so the ceiling it admits is set on the
+        # server (ASTRA_UPLOAD_CEILING_MB, matched by Caddy), never from the app.
+        self.assertEqual(upload_ceiling(), DEFAULT_UPLOAD_LIMIT)
+        with self.assertRaisesRegex(ValueError, "admits uploads up to 25 MB"):
+            self.save(upload_limit_mb=26)
+        self.ceiling(40)
+        self.assertEqual(self.save(upload_limit_mb=40)["upload_limit_mb"], 40)
+        self.assertEqual(self.service.get_attachment_settings(self.owner)["server_ceiling_mb"], 40)
+        with self.assertRaisesRegex(ValueError, "admits uploads up to 40 MB"):
+            self.save(upload_limit_mb=41)
+        self.assertEqual(self.service.upload_policy().limit, 40 * MB)
+        self.ceiling(1)  # lowered on the server after the owner saved 40: the policy follows the server
+        self.assertEqual(self.service.upload_policy().limit, MB)
+        shown = self.service.get_attachment_settings(self.owner)
+        self.assertEqual((shown["upload_limit_mb"], shown["saved_limit_mb"], shown["server_ceiling_mb"]), (1, 40, 1))
+        self.assertEqual(self.service.task_detail(self.owner, self.task["id"])["upload_limit_bytes"], MB)
+        # Re-saving what the form shows is a real change from the saved 40, and is audited as one.
+        self.save(upload_limit_mb=1)
+        [event] = self.db.execute("SELECT detail_json FROM user_events WHERE event_type='attachment_settings_changed'"
+                                  " ORDER BY rowid DESC LIMIT 1").fetchall()
+        detail = json.loads(event["detail_json"])
+        self.assertEqual((detail["before"]["upload_limit_mb"], detail["after"]["upload_limit_mb"]), (40, 1))
+        self.ceiling(250)
+        self.assertEqual(self.service.upload_policy().limit, MB)  # the row now says 1, not 40
+        # A ceiling under the default with no row saved yet: the default is clamped too.
+        self.db.execute("DELETE FROM attachment_settings")
+        self.ceiling(10)
+        self.assertEqual(self.service.upload_policy().limit, 10 * MB)
+        shown = self.service.get_attachment_settings(self.owner)
+        self.assertEqual((shown["upload_limit_mb"], shown["saved_limit_mb"]), (10, None))
+        self.assertEqual(self.service.task_detail(self.owner, self.task["id"])["upload_limit_bytes"], 10 * MB)
+        for bad in ("abc", "0", "251", "-5", "25.0", "2５"):
+            with self.subTest(env=bad), patch.dict(os.environ, {"ASTRA_UPLOAD_CEILING_MB": bad}), \
+                    self.assertRaises(ValueError):
+                upload_ceiling()
+        with patch.dict(os.environ, {"ASTRA_UPLOAD_CEILING_MB": " 250 "}):
+            self.assertEqual(upload_ceiling(), HARD_UPLOAD_LIMIT)
+
+    def test_a_row_no_code_wrote_refuses_uploads_until_it_is_saved_again(self):
+        # Fail closed: the owner's blocked list is never silently dropped.
+        self.save(blocked_extensions=[".xyz"])
+        for broken in ("not json", "[7]", "{}"):
+            with self.subTest(broken=broken):
+                self.db.execute("UPDATE attachment_settings SET blocked_extensions=?", (broken,))
+                with self.assertLogs("astra.attachments", "ERROR"), self.assertRaises(Conflict):
+                    self.service.upload_policy()
+                with self.assertLogs("astra.attachments", "ERROR"), self.assertRaises(Conflict):
+                    self.upload(self.owner, name="minutes.txt", data=b"text", declared="")
+        self.assertEqual(self.stored_files(), [])
+        with self.assertRaises(Exception):  # the schema keeps the limit between 1 MB and 250 MB
+            self.db.execute("UPDATE attachment_settings SET upload_limit_bytes=5")
+        # The owner can still open the settings, is told, and saving again restores uploads.
+        with self.assertLogs("astra.attachments", "ERROR"):
+            shown = self.service.get_attachment_settings(self.owner)
+        self.assertIn("could not be read", shown["unusable"])
+        self.assertEqual((shown["upload_limit_mb"], shown["blocked_extensions"], shown["saved_limit_mb"]),
+                         (25, [], None))
+        with self.assertLogs("astra.attachments", "ERROR"):
+            self.assertEqual(self.service.task_detail(self.owner, self.task["id"])["upload_limit_bytes"], 25 * MB)
+        # Saving back exactly what the page showed is enough: the bad row is replaced and audited.
+        saved = self.service.update_attachment_settings(
+            self.owner, upload_limit_mb=shown["upload_limit_mb"], blocked_extensions=shown["blocked_extensions"],
+            blocked_mime_types=shown["blocked_mime_types"])
+        self.assertIsNone(saved["unusable"])
+        self.assertEqual(json.loads(self.setting_events()[-1]["detail_json"])["before"], {"unreadable": True})
+        self.assertEqual(self.upload(self.owner, name="minutes.txt", data=b"text", declared="")["kind"], "file")
+        saved = self.save(blocked_extensions=[".xyz"])
+        self.assertIsNone(saved["unusable"])
+        with self.assertRaises(ValueError):
+            self.upload(self.owner, name="a.xyz", data=b"x", declared="")
+
+    def test_owner_additions_block_uploads_and_the_builtin_list_cannot_be_reduced(self):
+        settings = self.save(blocked_extensions=[" .XYZ ", "abc", "*.Abc", ".exe", "", "xyz"],
+                             blocked_mime_types="application/x-foo, Text/Plain; charset=utf-8\n\ntext/javascript")
+        self.assertEqual(settings["blocked_extensions"], [".abc", ".xyz"])  # .exe is built in already
+        self.assertEqual(settings["blocked_mime_types"], ["application/x-foo", "text/plain"])
+        for name, declared in (("notes.XYZ", ""), ("a.abc", ""), ("plain.txt", "text/plain"),
+                               ("plain.txt", "APPLICATION/X-FOO; v=1"), ("setup.exe", "")):
+            with self.subTest(name=name, declared=declared), self.assertRaises(ValueError):
+                self.upload(self.owner, name=name, data=b"hello", declared=declared)
+        self.assertEqual(self.upload(self.owner, name="report.pdf")["kind"], "file")
+        self.assertEqual(len(self.stored_files()), 1)
+        # Saving empty lists removes the additions and nothing else.
+        self.save()
+        self.assertEqual(self.upload(self.owner, name="notes.xyz", data=b"hello", declared="")["kind"], "file")
+        with self.assertRaises(ValueError):
+            self.upload(self.owner, name="setup.exe", data=b"hello", declared="")
+        # The policy is read from the database, so another service instance sees the same.
+        self.save(blocked_extensions=["q"])
+        self.assertEqual(AstraService(self.db).upload_policy(), UploadPolicy(25 * MB, (".q",), ()))
+
+    def test_malformed_additions_are_refused_and_nothing_changes(self):
+        self.save(blocked_extensions=[".ok"])
+        for ext in ("../x", ".", "a b", "x" * 40, "a/b", "-a", "é", "a.b", "ſh"):  # long s folds to .sh
+            with self.subTest(ext=ext), self.assertRaises(ValueError):
+                self.save(blocked_extensions=[ext])
+        for mime in ("text", "text/", "/x", "a b/c", "text/plain/x", "text/é"):
+            with self.subTest(mime=mime), self.assertRaises(ValueError):
+                self.save(blocked_mime_types=[mime])
+        for bad in (7, None, [7], {"a": 1}, [None]):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.save(blocked_extensions=bad)
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.save(blocked_mime_types=bad)
+        with self.assertRaises(ValueError):
+            self.save(blocked_extensions=[f".e{n}" for n in range(201)])
+        self.assertEqual(self.service.get_attachment_settings(self.owner)["blocked_extensions"], [".ok"])
+        self.assertEqual(normalize_extension("*.PDF"), ".pdf")
+        self.assertEqual(normalize_mime_type(" Application/PDF ; q=1"), "application/pdf")
+
+    def test_only_the_app_owner_reads_or_changes_the_settings_and_changes_are_audited(self):
+        manager = self.user("manager", "manager")
+        chairman = self.user("chairman", None, "chairman")
+        for actor in (manager, chairman):
+            with self.subTest(actor=actor["email"]), self.assertRaises(Forbidden):
+                self.service.get_attachment_settings(actor)
+            with self.subTest(actor=actor["email"]), self.assertRaises(Forbidden):
+                self.service.update_attachment_settings(actor, upload_limit_mb=1, blocked_extensions=[],
+                                                        blocked_mime_types=[])
+        self.assertIsNone(self.db.execute("SELECT 1 FROM attachment_settings").fetchone())
+        self.assertEqual(self.setting_events(), [])
+        settings = self.save(upload_limit_mb=20, blocked_extensions=[".xyz"])
+        self.assertEqual(settings["updated_by_name"], "Owner")
+        self.assertIsNotNone(settings["updated_at"])
+        [event] = self.setting_events()
+        detail = json.loads(event["detail_json"])
+        self.assertEqual(detail["before"], {"upload_limit_mb": 25, "blocked_extensions": [], "blocked_mime_types": []})
+        self.assertEqual(detail["after"], {"upload_limit_mb": 20, "blocked_extensions": [".xyz"],
+                                           "blocked_mime_types": []})
+        # The same policy saved again by someone else: no event, and the row is not rewritten.
+        second = self.user("second")
+        self.service.grant_secondary_owner(self.owner, second["id"], "backup owner")
+        second = dict(self.db.execute("SELECT * FROM users WHERE id=?", (second["id"],)).fetchone())
+        again = self.service.update_attachment_settings(second, upload_limit_mb="20", blocked_extensions="XYZ",
+                                                        blocked_mime_types=[])
+        self.assertEqual((again["updated_at"], again["updated_by_name"]), (settings["updated_at"], "Owner"))
+        self.assertEqual(len(self.setting_events()), 1)
+        # Any App Owner may change it (as for the import template settings), and that is audited.
+        changed = self.service.update_attachment_settings(second, upload_limit_mb=21, blocked_extensions=["XYZ"],
+                                                          blocked_mime_types=[])
+        self.assertEqual(changed["updated_by_name"], "Second")
+        self.assertEqual(len(self.setting_events()), 2)
+        self.assertEqual(self.setting_events()[-1]["actor_user_id"], second["id"])
+
+
 class GuardUnitTests(unittest.TestCase):
     def test_storage_keys_are_32_hex_characters_only(self):
         with tempfile.TemporaryDirectory() as root:
@@ -464,6 +676,36 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(response.status, 413)
         response, _ = self.post_file(owner, data=b"", name="empty.pdf")
         self.assertEqual(response.status, 400)
+
+    def test_attachment_settings_are_owner_only_over_http_and_the_saved_limit_answers_413(self):
+        viewer = self.login("viewer@example.org", "viewer password")
+        headers = {"Cookie": viewer[0], "X-CSRF-Token": viewer[1], "Content-Type": "application/json"}
+        self.assertEqual(self.call("GET", "/api/attachment-settings", headers=headers)[0].status, 403)
+        body = json.dumps({"upload_limit_mb": 1, "blocked_extensions": [], "blocked_mime_types": []}).encode()
+        self.assertEqual(self.call("PUT", "/api/attachment-settings", body, headers)[0].status, 403)
+        owner = self.login("owner@example.org", "correct horse battery")
+        headers = {"Cookie": owner[0], "X-CSRF-Token": owner[1], "Content-Type": "application/json"}
+        response, raw = self.call("GET", "/api/attachment-settings", headers=headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(raw)["settings"]["upload_limit_mb"], 25)
+        response, raw = self.call("PUT", "/api/attachment-settings", body, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(raw)["settings"]["upload_limit_mb"], 1)
+        response, raw = self.call("PUT", "/api/attachment-settings", b'{"upload_limit_mb": 251}', headers)
+        self.assertEqual(response.status, 400)
+        self.assertIn("Missing blocked_extensions, blocked_mime_types", json.loads(raw)["error"])
+        self.assertEqual(json.loads(self.call("GET", "/api/attachment-settings", headers=headers)[1])
+                         ["settings"]["upload_limit_mb"], 1)
+        full = {"upload_limit_mb": 251, "blocked_extensions": [], "blocked_mime_types": []}
+        response, raw = self.call("PUT", "/api/attachment-settings", json.dumps(full).encode(), headers)
+        self.assertEqual(response.status, 400)
+        self.assertIn("1 to 250", json.loads(raw)["error"])
+        no_csrf = {"Cookie": owner[0], "Content-Type": "application/json"}
+        self.assertEqual(self.call("PUT", "/api/attachment-settings", body, no_csrf)[0].status, 403)
+        response, raw = self.post_file(owner, extra={"Content-Length": str(MB + 1)}, data=b"")
+        self.assertEqual(response.status, 413)
+        self.assertIn("larger than 1 MB", json.loads(raw)["error"])
+        self.assertEqual(self.db.execute("SELECT upload_limit_bytes FROM attachment_settings").fetchone()[0], MB)
 
     def test_download_refusals(self):
         owner = self.login("owner@example.org", "correct horse battery")

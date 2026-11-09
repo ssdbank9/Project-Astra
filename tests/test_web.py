@@ -21,7 +21,8 @@ from pathlib import Path
 
 from astra.db import connect
 from astra.service import AstraService
-from astra.web import WAITRESS_MAX_BODY_BYTES, AstraHandler, AstraServer, create_wsgi_app
+from astra.attachment_storage import upload_ceiling
+from astra.web import AstraHandler, AstraServer, create_wsgi_app
 
 from link_roots import allow_attachment_roots, link
 
@@ -180,7 +181,7 @@ class AstraWaitressIntegrationTests(AstraWsgiApplicationTests):
             ident="Astra",
             channel_timeout=30,
             max_request_header_size=16_384,
-            max_request_body_size=WAITRESS_MAX_BODY_BYTES,
+            max_request_body_size=upload_ceiling(),
             expose_tracebacks=False,
         )
         # Only this server's task workers, not ones another test may have left.

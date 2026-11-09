@@ -464,7 +464,16 @@ hyphens only).
 - `max_size 6MB` sits just above Astra's own 5 MB import limit, so Astra gives
   the friendly "The file is larger than 5 MB." message.
 - The one exception is the file-upload route (`/api/tasks/<id>/files`, MXY7BG),
-  which allows `25MiB`: Astra's upload limit, and also Waitress's own cap.
+  which allows `25MiB`: the server ceiling, and also Waitress's own cap. The
+  App Owner sets Astra's upload limit under People and access, Attachments
+  (25 MB unless raised) and cannot set it above the ceiling.
+- To let the App Owner raise the limit above 25 MB (at most 250): set
+  `max_size` on the upload route and `Environment=ASTRA_UPLOAD_CEILING_MB=<n>`
+  in `/etc/systemd/system/astra.service` to the same number, run
+  `caddy validate`, reload Caddy, `systemctl daemon-reload` and restart
+  `astra`; then the owner sets the limit in the app. The ceiling is not raised
+  from the app because Waitress receives and spools a whole body before
+  Astra's own checks run, so it bounds what any client can push at the server.
 - The access log is the only place real client addresses are recorded, because
   Waitress sees every request as coming from `127.0.0.1`. Astra and Waitress do
   not trust forwarded client-address headers. Caddy writes it as JSON, rolls

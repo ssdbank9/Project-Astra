@@ -9,6 +9,7 @@ from unittest import mock
 
 from astra import __main__ as cli
 from astra import web
+from astra.attachment_storage import DEFAULT_UPLOAD_LIMIT, HARD_UPLOAD_LIMIT, upload_ceiling
 
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = ROOT / "deploy"
@@ -86,14 +87,21 @@ class DeployCaddyTests(unittest.TestCase):
         limits = dict(re.findall(r"^\s*request_body\s+@(\w+)\s*\{\s*max_size\s+(\S+)\s*\}", text, re.M))
         self.assertEqual(set(limits), {"upload", "other"})
         self.assertEqual(len(re.findall(r"^\s*max_size\s", text, re.M)), 2)
-        self.assertIn("max_request_body_size=WAITRESS_MAX_BODY_BYTES", inspect.getsource(web.serve_waitress))
-        waitress_cap = web.WAITRESS_MAX_BODY_BYTES
+        self.assertIn("max_request_body_size=upload_ceiling()", inspect.getsource(web.serve_waitress))
+        with mock.patch.dict("os.environ", {"ASTRA_UPLOAD_CEILING_MB": ""}):
+            waitress_cap = upload_ceiling()
         # Every other route: above the import limit, so Astra answers an oversized import.
         self.assertGreater(caddy_bytes(limits["other"]), web.IMPORT_MAX_BYTES)
         self.assertLess(caddy_bytes(limits["other"]), caddy_bytes(limits["upload"]))
-        # MXY7BG: the upload route admits exactly Astra's upload limit, which Waitress admits too.
-        self.assertEqual(caddy_bytes(limits["upload"]), web.UPLOAD_MAX_BYTES)
-        self.assertLessEqual(caddy_bytes(limits["upload"]), waitress_cap)
+        # MXY7BG: the upload route admits exactly the shipped server ceiling (the 25 MiB default
+        # limit), which Waitress admits too; raising it is a runbook step for both at once.
+        self.assertEqual(caddy_bytes(limits["upload"]), DEFAULT_UPLOAD_LIMIT)
+        self.assertEqual(caddy_bytes(limits["upload"]), waitress_cap)
+        self.assertLess(caddy_bytes(limits["upload"]), HARD_UPLOAD_LIMIT)
+        # Raising it is documented as one step for Caddy and the unit together.
+        runbook = RUNBOOK.read_text(encoding="utf-8")
+        self.assertIn("ASTRA_UPLOAD_CEILING_MB", runbook)
+        self.assertIn("ASTRA_UPLOAD_CEILING_MB", CADDYFILE.read_text(encoding="utf-8"))
 
     def test_the_larger_limit_applies_to_the_upload_route_only(self):
         text = caddy_text()

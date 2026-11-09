@@ -16,7 +16,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import importer
 from .attachment_storage import (
-    DEFAULT_UPLOAD_LIMIT, active_storage, checked_chunks, clean_filename, validate_https_url,
+    DANGEROUS_EXTENSIONS, DANGEROUS_MIME_TYPES, DEFAULT_POLICY, DEFAULT_UPLOAD_LIMIT, HARD_UPLOAD_LIMIT, MB,
+    UploadPolicy, active_storage, checked_chunks, clean_filename, normalize_extension, normalize_mime_type,
+    normalize_policy_list, upload_ceiling, validate_https_url,
 )
 from .auth import hash_password, normalize_email, verify_password
 from .db import V15_EXPECTED_REVISION_SQL, owner_request_intent_key, transaction
@@ -2130,6 +2132,12 @@ class AstraService:
         is_owner = actor["global_role"] == "owner"
         is_manager = self._is_project_manager(actor, task["project_id"])
         can_assign = self.can_assign(actor, task["project_id"])
+        # MXY7BG slice 2: the limit the upload form states is the one the server applies; with
+        # unusable settings the form still renders and the upload itself is refused.
+        try:
+            task["upload_limit_bytes"] = self.upload_policy().limit
+        except Conflict:
+            task["upload_limit_bytes"] = min(DEFAULT_UPLOAD_LIMIT, upload_ceiling())
         task["permissions"] = {
             "can_edit_ordinary": is_owner or is_manager,
             # 3FQEKB: the Chairman sees the assignee control and nothing else new.
@@ -4355,11 +4363,11 @@ class AstraService:
     # of the body is read; the bytes stream to storage with the limit and type checks applied
     # while reading, and a refused or failed upload leaves nothing behind.
     def add_task_file(self, actor: dict, task_id: str, filename, declared_type: str, stream, length: int,
-                      note: str = "", limit: int = DEFAULT_UPLOAD_LIMIT) -> dict:
+                      note: str = "") -> dict:
         self._require_file_manager(actor, task_id, {"kind": "file", "attempted_name": str(filename or "")[:200]})
         name = clean_filename(filename)
         storage = active_storage()
-        stored = storage.save(checked_chunks(stream, length, limit, name, declared_type))
+        stored = storage.save(checked_chunks(stream, length, self.upload_policy(), name, declared_type))
         attachment_id = new_id()
         try:
             with self._actor_transaction(actor):
@@ -5862,6 +5870,116 @@ class AstraService:
     # read-only Chairmen are blocked, audited and the Owner is notified.
 
     IMPORT_OPTION_KEYS = {"valid_rows_only", "default_reason"}
+
+    # MXY7BG slice 2 (Owner Items 8-9): the upload limit and the App Owner's additions to the
+    # denylist live in one row and are read for every upload, so a change applies to the next
+    # upload without a restart. The built-in denylist cannot be reduced here.
+
+    def _attachment_settings_row(self):
+        return self.db.execute("SELECT * FROM attachment_settings WHERE id=1").fetchone()
+
+    UNUSABLE_SETTINGS = ("The saved attachment settings could not be read, so uploads are refused. "
+                         "An App Owner saves them again under People and access, Attachments.")
+
+    def _stored_policy(self) -> UploadPolicy | None:
+        """The row as the owner saved it (the limit not yet clamped), None without a row.
+        ValueError or TypeError for a row no code of ours wrote (a hand edit, a bad restore)."""
+        row = self._attachment_settings_row()
+        if not row:
+            return None
+        extensions, mime_types = json.loads(row["blocked_extensions"]), json.loads(row["blocked_mime_types"])
+        if not isinstance(extensions, list) or not isinstance(mime_types, list) or not all(
+                isinstance(item, str) for item in [*extensions, *mime_types]):
+            raise ValueError("blocked lists must be lists of text")
+        return UploadPolicy(int(row["upload_limit_bytes"]), tuple(extensions), tuple(mime_types))
+
+    def upload_policy(self) -> UploadPolicy:
+        """The policy every upload is checked against. The limit never exceeds what the server
+        admits (upload_ceiling). An unusable row refuses every upload until an owner saves the
+        settings again: the blocked list is never silently dropped."""
+        ceiling = upload_ceiling()
+        try:
+            stored = self._stored_policy()
+        except (TypeError, ValueError) as exc:
+            logging.getLogger("astra.attachments").error(
+                "attachment_settings row is unusable (%s); uploads are refused until it is saved again", exc)
+            raise Conflict(self.UNUSABLE_SETTINGS) from exc
+        if stored is None:
+            return UploadPolicy(min(DEFAULT_UPLOAD_LIMIT, ceiling))
+        return UploadPolicy(min(stored.limit, ceiling), stored.extra_extensions, stored.extra_mime_types)
+
+    @staticmethod
+    def _policy_fields(policy: UploadPolicy) -> dict:
+        return {"upload_limit_mb": policy.limit // MB, "blocked_extensions": list(policy.extra_extensions),
+                "blocked_mime_types": list(policy.extra_mime_types)}
+
+    def get_attachment_settings(self, actor: dict) -> dict:
+        """What the owner sees: the policy as applied (the limit clamped to the server ceiling), the
+        saved limit when it differs, and a notice when the saved row cannot be read."""
+        self.require_owner(actor)
+        row = self._attachment_settings_row()
+        unusable = None
+        try:
+            policy = self.upload_policy()
+            stored = self._stored_policy()
+        except Conflict as exc:
+            unusable, stored = str(exc), None
+            policy = UploadPolicy(min(DEFAULT_UPLOAD_LIMIT, upload_ceiling()))
+        result = self._policy_fields(policy)
+        result.update({
+            "default_limit_mb": DEFAULT_UPLOAD_LIMIT // MB, "hard_limit_mb": HARD_UPLOAD_LIMIT // MB,
+            "server_ceiling_mb": upload_ceiling() // MB,
+            "saved_limit_mb": stored.limit // MB if stored else None, "unusable": unusable,
+            "builtin_extensions": sorted(DANGEROUS_EXTENSIONS), "builtin_mime_types": sorted(DANGEROUS_MIME_TYPES),
+            "updated_at": row["updated_at"] if row else None, "updated_by_name": None,
+        })
+        if row:
+            user = self.db.execute("SELECT display_name FROM users WHERE id=?", (row["updated_by"],)).fetchone()
+            result["updated_by_name"] = user["display_name"] if user else None
+        return result
+
+    def update_attachment_settings(self, actor: dict, *, upload_limit_mb, blocked_extensions,
+                                   blocked_mime_types) -> dict:
+        self.require_owner(actor)
+        hard_mb = HARD_UPLOAD_LIMIT // MB
+        if isinstance(upload_limit_mb, str) and re.fullmatch(r"[0-9]{1,3}", upload_limit_mb.strip()):
+            upload_limit_mb = int(upload_limit_mb.strip())
+        if type(upload_limit_mb) is not int or not 1 <= upload_limit_mb <= hard_mb:
+            raise ValueError(f"The upload limit must be a whole number of MB from 1 to {hard_mb}.")
+        ceiling_mb = upload_ceiling() // MB
+        if upload_limit_mb > ceiling_mb:
+            raise ValueError(f"This server admits uploads up to {ceiling_mb} MB. Raise its ceiling first "
+                             f"(deployment runbook, stage 9), then set the limit here.")
+        policy = UploadPolicy(
+            upload_limit_mb * MB,
+            normalize_policy_list(blocked_extensions, normalize_extension, "blocked file extensions",
+                                  DANGEROUS_EXTENSIONS),
+            normalize_policy_list(blocked_mime_types, normalize_mime_type, "blocked media types",
+                                  DANGEROUS_MIME_TYPES),
+        )
+        with self._actor_transaction(actor):
+            # Compared and audited against the row as saved, not as clamped, so re-saving what
+            # the form shows under a lowered ceiling is a real change and is recorded as one.
+            try:
+                before = self._policy_fields(self._stored_policy() or DEFAULT_POLICY)
+            except (TypeError, ValueError):
+                # An unreadable row is replaced by whatever the owner saves, even the values the
+                # page showed for it, and the audit row says what it replaced.
+                before = {"unreadable": True}
+            after = self._policy_fields(policy)
+            if after == before:
+                return self.get_attachment_settings(actor)
+            self.db.execute(
+                "INSERT INTO attachment_settings(id,upload_limit_bytes,blocked_extensions,blocked_mime_types,"
+                "updated_by,updated_at) VALUES(1,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET"
+                " upload_limit_bytes=excluded.upload_limit_bytes, blocked_extensions=excluded.blocked_extensions,"
+                " blocked_mime_types=excluded.blocked_mime_types, updated_by=excluded.updated_by,"
+                " updated_at=excluded.updated_at",
+                (policy.limit, json.dumps(after["blocked_extensions"]), json.dumps(after["blocked_mime_types"]),
+                 actor["id"], now_text()),
+            )
+            self._app_setting_event(actor, "attachment_settings_changed", before, after)
+        return self.get_attachment_settings(actor)
 
     def _import_config(self) -> importer.TemplateConfig:
         row = self.db.execute("SELECT config_json FROM import_template_config WHERE id=1").fetchone()

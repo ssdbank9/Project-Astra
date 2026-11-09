@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from .attachment_storage import CHUNK_BYTES, DEFAULT_UPLOAD_LIMIT, UploadTooLarge
+from .attachment_storage import CHUNK_BYTES, UploadTooLarge, upload_ceiling
 from .auth import dummy_password_hash, new_token, token_digest, verify_password
 from .daily_digest import DailyDigestScheduler
 from .db import connect, database_path
@@ -29,10 +29,11 @@ SESSION_COOKIE = "astra_session"
 JSON_MAX_BYTES = 1_000_000
 # Raw file uploads (Excel/CSV import) get their own ceiling; JSON stays at 1 MB.
 IMPORT_MAX_BYTES = 5 * 1024 * 1024
-# MXY7BG: a managed upload is the one larger body; Waitress's cap must admit it, and Caddy
-# lets it through on the upload route only (deploy/caddy/Caddyfile).
-UPLOAD_MAX_BYTES = DEFAULT_UPLOAD_LIMIT
-WAITRESS_MAX_BODY_BYTES = UPLOAD_MAX_BYTES
+# MXY7BG: a managed upload is the one larger body. Waitress receives and spools a whole
+# body before Astra runs, so its cap is the server ceiling (upload_ceiling: 25 MB unless
+# ASTRA_UPLOAD_CEILING_MB raises it, matched by Caddy's max_size on the upload route only,
+# deploy/caddy/Caddyfile). The App Owner's limit applies below that ceiling, and an
+# upload over it is refused by the service with Astra's own message.
 # Fonts are served by Astra itself (4T4DEA), so the page needs no third-party origin.
 CONTENT_SECURITY_POLICY = ("default-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; "
                            "base-uri 'none'; frame-ancestors 'none'")
@@ -251,6 +252,9 @@ class AstraRoutes:
             if path == "/api/import/template-config":
                 user, _ = self._require_user()
                 return self._json({"config": self.service.get_import_template_config(user)})
+            if path == "/api/attachment-settings":
+                user, _ = self._require_user()
+                return self._json({"settings": self.service.get_attachment_settings(user)})
             if path == "/api/imports":
                 user, _ = self._require_user()
                 project = parse_qs(urlparse(self.path).query).get("project_id", [None])[0]
@@ -309,7 +313,7 @@ class AstraRoutes:
                     attachment = self.service.add_task_file(
                         user, path.split("/")[3], self._header_text("X-Filename"),
                         self.headers.get("Content-Type", ""), _TimedReader(self.rfile), length,
-                        note=self._header_text("X-Note"), limit=UPLOAD_MAX_BYTES,
+                        note=self._header_text("X-Note"),
                     )
                 except Exception:
                     # A refused upload may leave unread bytes on the connection; never reuse it.
@@ -641,6 +645,19 @@ class AstraRoutes:
                 raise Forbidden("Invalid request token.")
             if path == "/api/import/template-config":
                 return self._json({"config": self.service.set_import_template_config(user, payload)})
+            if path == "/api/attachment-settings":
+                # The whole policy is saved at once: a body without one of the lists would
+                # silently drop the owner's additions, so it is refused instead.
+                missing = [key for key in ("upload_limit_mb", "blocked_extensions", "blocked_mime_types")
+                           if key not in payload]
+                if missing:
+                    raise ValueError(f"Missing {', '.join(missing)}: send the limit and both blocked lists.")
+                settings = self.service.update_attachment_settings(
+                    user, upload_limit_mb=payload["upload_limit_mb"],
+                    blocked_extensions=payload["blocked_extensions"],
+                    blocked_mime_types=payload["blocked_mime_types"],
+                )
+                return self._json({"settings": settings})
             self.send_error(HTTPStatus.NOT_FOUND)
         except Exception as exc:
             self._error(exc)
@@ -1167,7 +1184,7 @@ def serve_waitress(host: str, port: int):
             ident="Astra",
             channel_timeout=30,
             max_request_header_size=16_384,
-            max_request_body_size=WAITRESS_MAX_BODY_BYTES,
+            max_request_body_size=upload_ceiling(),
             expose_tracebacks=False,
         )
     finally:
@@ -1175,6 +1192,7 @@ def serve_waitress(host: str, port: int):
 
 
 def serve(host: str, port: int):
+    upload_ceiling()  # a bad ASTRA_UPLOAD_CEILING_MB fails here, at start, as it does under Waitress
     server = AstraServer((host, port))
     server.daily_digest_scheduler = DailyDigestScheduler(server.db_path)
     server.daily_digest_scheduler.start()

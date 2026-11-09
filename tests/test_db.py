@@ -1558,6 +1558,76 @@ class HostedAttachmentMigrationTests(unittest.TestCase):
             connection.close()
 
 
+class AttachmentSettingsMigrationTests(unittest.TestCase):
+    """MXY7BG slice 2: v24 adds the one-row attachment_settings table with the 250 MB ceiling."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "astra-v23.sqlite3"
+
+    @staticmethod
+    def deny_settings_table(action, arg1, arg2, *_):
+        if action == sqlite3.SQLITE_CREATE_TABLE and arg1 == "attachment_settings":
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    def at_v23(self):
+        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.set_authorizer(self.deny_settings_table)
+        with self.assertRaises(sqlite3.DatabaseError):
+            db.migrate(connection)
+        connection.set_authorizer(None)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 23)
+        connection.execute(
+            "INSERT INTO users(id,email,display_name,password_hash,global_role,created_at,is_primary_owner)"
+            " VALUES('owner-1','o@example.org','Owner','x','owner','2026-01-01T00:00:00Z',1)")
+        return connection
+
+    def test_v24_adds_the_table_with_the_ceiling_and_matches_a_fresh_schema(self):
+        connection = self.at_v23()
+        try:
+            db.migrate(connection)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+            self.assertIsNone(connection.execute("SELECT 1 FROM attachment_settings").fetchone())
+            for bad in (0, 1024 * 1024 - 1, 250 * 1024 * 1024 + 1):
+                with self.subTest(limit=bad), self.assertRaises(sqlite3.IntegrityError):
+                    connection.execute(
+                        "INSERT INTO attachment_settings(id,upload_limit_bytes,updated_by,updated_at)"
+                        " VALUES(1,?,'owner-1','2026-01-01')", (bad,))
+            connection.execute(
+                "INSERT INTO attachment_settings(id,upload_limit_bytes,updated_by,updated_at)"
+                " VALUES(1,?,'owner-1','2026-01-01')", (250 * 1024 * 1024,))
+            with self.assertRaises(sqlite3.IntegrityError):  # one row only
+                connection.execute(
+                    "INSERT INTO attachment_settings(id,upload_limit_bytes,updated_by,updated_at)"
+                    " VALUES(2,1,'owner-1','2026-01-01')")
+            fresh = db.connect(Path(self.temp.name) / "fresh.sqlite3")
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
+    def test_a_failed_v24_step_rolls_back_then_retries(self):
+        connection = self.at_v23()
+        try:
+            before = full_catalog(connection)
+            connection.set_authorizer(self.deny_settings_table)
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(full_catalog(connection), before)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 23)
+            db.migrate(connection)
+            self.assertIn("upload_limit_bytes", table_columns(connection, "attachment_settings"))
+        finally:
+            connection.close()
+
+
 class ForcedPasswordChangeMigrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

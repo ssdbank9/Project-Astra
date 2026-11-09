@@ -7,7 +7,9 @@ Owner decisions Items 5-16 on 6G89SJ (Aly, 2026-09-19/20):
   MIME type and file signature, and a known extension whose signature does not match is
   refused (Item 9). Nothing is scanned and nothing is ever called safe (Items 10-11);
 - uploads stream to storage with the size limit enforced while reading, and a partial
-  file is removed on any failure (Item 8);
+  file is removed on any failure (Item 8). Slice 2: the App Owner sets the limit up to a
+  250 MB ceiling and adds extensions and media types to the denylist (UploadPolicy); the
+  built-in list and the signature checks always apply;
 - one storage interface (Item 6). The protected private-server folder is the first
   backend (Aly, 2026-11-08); OCI Object Storage comes later behind the same methods.
 """
@@ -33,9 +35,10 @@ CHUNK_BYTES = 64 * 1024
 # Enough to reach the ISO 9660 descriptor at 0x9001 as well as every leading signature.
 HEAD_BYTES = 64 * 1024
 UPLOAD_ROOT_ENV = "ASTRA_UPLOAD_ROOT"
+UPLOAD_CEILING_ENV = "ASTRA_UPLOAD_CEILING_MB"
 
 # Item 9 secure defaults: executables, installers, scripts, commands, libraries, disk images
-# and shortcuts. Making the list App Owner-configurable is a later slice.
+# and shortcuts. The App Owner may add to this list (UploadPolicy), never take from it.
 DANGEROUS_EXTENSIONS = frozenset({
     ".exe", ".com", ".scr", ".pif", ".cpl", ".msc", ".msi", ".msp", ".mst", ".appx", ".appxbundle",
     ".msix", ".msixbundle", ".bat", ".cmd", ".ps1", ".psm1", ".psd1", ".vbs", ".vbe", ".js", ".jse",
@@ -93,6 +96,92 @@ EXPECTED_SIGNATURES = {
 
 _HOST_CHARS = re.compile(r"^[^\s/\\?#@]+$")
 
+MB = 1024 * 1024
+MAX_POLICY_ENTRIES = 200
+_EXTENSION = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+_MIME_TYPE = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$")
+
+
+def upload_ceiling() -> int:
+    """The bytes the server admits on the upload route: Waitress's cap, which the Caddyfile's
+    max_size matches. The default limit unless ASTRA_UPLOAD_CEILING_MB raises it, never above
+    HARD_UPLOAD_LIMIT. A body up to this size reaches the server and is spooled before Astra's
+    own checks run, so the ceiling is raised only together with the proxy (runbook stage 9),
+    never from the app; the App Owner's limit can go up to it and no further.
+    """
+    text = os.environ.get(UPLOAD_CEILING_ENV, "").strip()
+    if not text:
+        return DEFAULT_UPLOAD_LIMIT
+    if not re.fullmatch(r"[0-9]{1,3}", text) or not 1 <= int(text) <= HARD_UPLOAD_LIMIT // MB:
+        raise ValueError(f"{UPLOAD_CEILING_ENV} must be a whole number of MB from 1 to {HARD_UPLOAD_LIMIT // MB}.")
+    return int(text) * MB
+
+
+def normalize_extension(value) -> str:
+    """'.xyz' in lower case: 'XYZ', '.xyz' and '*.xyz' all mean the same. ValueError otherwise."""
+    shown = str(value or "").strip()
+    text = shown.lower()
+    if text.startswith("*"):
+        text = text[1:]
+    if text.startswith("."):
+        text = text[1:]
+    if not _EXTENSION.fullmatch(text):
+        raise ValueError(f"'{shown}' is not a file extension. Use letters, digits, - and _, such as .xyz.")
+    return "." + text
+
+
+def normalize_mime_type(value) -> str:
+    """'type/subtype' in lower case without parameters, or ValueError."""
+    shown = str(value or "").strip()
+    text = shown.lower().split(";", 1)[0].strip()
+    if not _MIME_TYPE.fullmatch(text):
+        raise ValueError(f"'{shown}' is not a media type. Use the type/subtype form, such as application/x-foo.")
+    return text
+
+
+def normalize_policy_list(values, normalize, what: str, builtin: frozenset = frozenset()) -> tuple[str, ...]:
+    """The App Owner's additions as a sorted tuple. Text holds one entry per line or comma;
+    blanks are dropped; duplicates and built-in entries fold away."""
+    if isinstance(values, str):
+        values = re.split(r"[\r\n,]+", values)
+    if not isinstance(values, (list, tuple)):
+        raise ValueError(f"The {what} must be a list.")
+    kept: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            raise ValueError(f"The {what} must be text.")
+        if not value.strip():
+            continue
+        item = normalize(value)
+        if item not in builtin and item not in kept:
+            kept.append(item)
+    if len(kept) > MAX_POLICY_ENTRIES:
+        raise ValueError(f"At most {MAX_POLICY_ENTRIES} {what} can be added.")
+    return tuple(sorted(kept))
+
+
+@dataclass(frozen=True)
+class UploadPolicy:
+    """Items 8-9: the installation's upload limit and the App Owner's additions to the
+    denylist. The built-in extensions, media types and signatures always apply."""
+
+    limit: int = DEFAULT_UPLOAD_LIMIT
+    extra_extensions: tuple[str, ...] = ()
+    extra_mime_types: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if type(self.limit) is not int or not MB <= self.limit <= HARD_UPLOAD_LIMIT:
+            raise ValueError(f"The upload limit must be between 1 and {HARD_UPLOAD_LIMIT // MB} MB.")
+
+    def blocks_extension(self, ext: str) -> bool:
+        return ext in DANGEROUS_EXTENSIONS or ext in self.extra_extensions
+
+    def blocks_mime_type(self, declared: str) -> bool:
+        return declared in DANGEROUS_MIME_TYPES or declared in self.extra_mime_types
+
+
+DEFAULT_POLICY = UploadPolicy()
+
 
 class UploadTooLarge(ValueError):
     """The upload is bigger than the installation's limit."""
@@ -147,13 +236,14 @@ def file_extension(name: str) -> str:
     return f".{ext.casefold()}" if dot and ext else ""
 
 
-def check_upload(filename: str, declared_type: str, head: bytes) -> None:
+def check_upload(filename: str, declared_type: str, head: bytes,
+                 policy: UploadPolicy = DEFAULT_POLICY) -> None:
     """Refuse a known-dangerous or mismatched file (Item 9). Never a statement of safety."""
     ext = file_extension(filename)
-    if ext in DANGEROUS_EXTENSIONS:
+    if policy.blocks_extension(ext):
         raise ValueError(f"Files of type {ext} cannot be uploaded.")
     declared = (declared_type or "").split(";", 1)[0].strip().casefold()
-    if declared in DANGEROUS_MIME_TYPES:
+    if policy.blocks_mime_type(declared):
         raise ValueError("This kind of file cannot be uploaded.")
     for offset, magic, what in DANGEROUS_SIGNATURES:
         if head[offset:offset + len(magic)] == magic:
@@ -163,19 +253,20 @@ def check_upload(filename: str, declared_type: str, head: bytes) -> None:
         raise ValueError(f"This file's contents do not match its {ext} name.")
 
 
-def checked_chunks(stream: BinaryIO, length: int, limit: int, filename: str,
+def checked_chunks(stream: BinaryIO, length: int, policy: UploadPolicy, filename: str,
                    declared_type: str) -> Iterator[bytes]:
     """Read exactly ``length`` bytes in chunks, refusing an oversized, short or dangerous body.
 
-    The size is refused before a byte is read when the declared length is over the limit,
+    The size is refused before a byte is read when the declared length is over the
+    policy's limit,
     and no read ever asks for more than the declared length, so the limit holds while
     streaming too. The type check runs on the first HEAD_BYTES, before anything is handed
     on, so a refused file is never written past its first chunk.
     """
     if length <= 0:
         raise ValueError("The file is empty.")
-    if length > limit:
-        raise UploadTooLarge(f"The file is larger than {limit // (1024 * 1024)} MB.")
+    if length > policy.limit:
+        raise UploadTooLarge(f"The file is larger than {policy.limit / MB:g} MB.")
     remaining, head, checked = length, b"", False
     while remaining:
         chunk = stream.read(min(CHUNK_BYTES, remaining))
@@ -189,7 +280,7 @@ def checked_chunks(stream: BinaryIO, length: int, limit: int, filename: str,
             continue
         head += chunk
         if len(head) >= HEAD_BYTES or not remaining:
-            check_upload(filename, declared_type, head)
+            check_upload(filename, declared_type, head, policy)
             checked = True
             yield head
             head = b""

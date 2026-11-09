@@ -191,6 +191,7 @@ class BackupCliTests(unittest.TestCase):
         shutil.copy2(database_path(), older)
         old_db = sqlite3.connect(older)
         try:
+            old_db.execute("DROP TABLE attachment_settings")
             old_db.execute("DROP TABLE daily_digest_runs")
             old_db.execute("DROP TABLE daily_digest_settings")
             old_db.execute("ALTER TABLE users DROP COLUMN must_change_password")

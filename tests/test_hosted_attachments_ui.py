@@ -1,5 +1,6 @@
 """MXY7BG slice 1 in the browser code: how each attachment kind is drawn, which forms an owner
-gets, and how an upload is sent."""
+gets, and how an upload is sent. Slice 2: the upload form states the installation's limit and
+the admin Attachments section loads and saves the App Owner's policy."""
 import json
 import shutil
 import subprocess
@@ -21,12 +22,30 @@ globalThis.runProbe=async()=>{
   const html=buildAttachments(task);
   const desktop=buildAttachments({...task,permissions:{can_manage_files:true,can_link_paths:true}});
   const viewer=buildAttachments({...task,permissions:{can_manage_files:false,can_link_paths:false}});
+  const raised=buildAttachments({...task,upload_limit_bytes:40*1048576});
   let sent=null;
   globalThis.fetch=async(url,opts)=>{sent={url,method:opts.method,headers:opts.headers,body:opts.body};
     return {ok:false,status:400,json:async()=>({error:'This file looks like a Windows program and cannot be uploaded.'})}};
   state.csrf='tok';
   let error=null;
   try{await uploadAttachment('t 1',{name:'Rapport été.pdf',type:'',size:5},'n&b')}catch(e){error=e.message}
+  // Slice 2 admin section: load fills the form from the server, save sends the whole policy with
+  // the textareas as raw text, and every server value reaches the page as text.
+  const nodes={};
+  for(const id of ['attachment-settings-error','attachment-settings-status','attachment-ceiling','attachment-builtin-summary','attachment-builtin'])nodes[id]={textContent:''};
+  const form={isConnected:true,elements:{upload_limit_mb:{value:'',max:''},blocked_extensions:{value:''},blocked_mime_types:{value:''}},_submit:null,addEventListener(k,f){if(k==='submit')form._submit=f}};
+  nodes['attachment-settings-form']=form;
+  const qs2=document.querySelector;document.querySelector=s=>{const m=/^#([\\w-]+)$/.exec(s);return m&&nodes[m[1]]?nodes[m[1]]:qs2(s)};
+  const settings={upload_limit_mb:40,saved_limit_mb:120,unusable:null,default_limit_mb:25,hard_limit_mb:250,server_ceiling_mb:40,blocked_extensions:['.abc','.xyz'],blocked_mime_types:['text/plain'],builtin_extensions:['.exe','.js'],builtin_mime_types:[],updated_at:'2026-01-01T00:00:00Z',updated_by_name:'<b>Owner'};
+  let put=null;
+  api=async(path,opts)=>{if(opts&&opts.method==='PUT'){put={path,body:JSON.parse(opts.body)};return {settings:{...settings,upload_limit_mb:Number(put.body.upload_limit_mb),saved_limit_mb:Number(put.body.upload_limit_mb),unusable:'<i>unreadable'}}}return {settings}};
+  await loadAttachmentSettings();
+  const loaded={limit:form.elements.upload_limit_mb.value,max:form.elements.upload_limit_mb.max,ext:form.elements.blocked_extensions.value,mime:form.elements.blocked_mime_types.value,
+    status:nodes['attachment-settings-status'].textContent,ceiling:nodes['attachment-ceiling'].textContent,summary:nodes['attachment-builtin-summary'].textContent,builtin:nodes['attachment-builtin'].textContent};
+  form.elements.upload_limit_mb.value=' 60 ';form.elements.blocked_extensions.value='.q\\n r ';form.elements.blocked_mime_types.value='';
+  await form._submit({preventDefault(){},currentTarget:form});
+  const admin={loaded,put,saved:nodes['attachment-settings-status'].textContent,error:nodes['attachment-settings-error'].textContent,ceilingAfter:nodes['attachment-ceiling'].textContent};
+  document.querySelector=qs2;
   state.projects=[];state.entities=[];
   const qs=document.querySelector.bind(document);document.querySelector=s=>qs(s)||qs('#final-results-body');
   const stamp='2026-01-01T00:00:00Z',base={source_type:'attachment',title:'T',task_id:'t 1',task_title:'Deliver',project_name:'P',marked_at:stamp};
@@ -36,7 +55,7 @@ globalThis.runProbe=async()=>{
     {...base,attachment_id:'p1',attachment_kind:'path',attachment_path:''},
     {...base,attachment_id:'p2',attachment_kind:'path',attachment_path:'C:\\\\docs\\\\desk.pdf'}],{});
   const finals=document.querySelector("#final-results-body").innerHTML;
-  return {html,desktop,viewer,sent,error,finals};
+  return {html,desktop,viewer,raised,sent,error,finals,admin};
 };
 `;
 (0,eval)(src+probe);
@@ -72,6 +91,29 @@ class HostedAttachmentUiTests(unittest.TestCase):
         self.assertIn('Local file link, not available on this server.', finals)
         self.assertIn('<code class="att-path">C:\\docs\\desk.pdf</code>', finals)
         self.assertNotIn('<code class="att-path"></code>', finals)
+
+    def test_the_upload_form_states_the_installations_limit(self):
+        self.assertIn('File (up to 25 MB)', self.out['html'])
+        self.assertIn('File (up to 40 MB)', self.out['raised'])
+
+    def test_the_admin_attachment_section_loads_and_saves_the_whole_policy(self):
+        admin = self.out['admin']
+        loaded = admin['loaded']
+        self.assertEqual((loaded['limit'], loaded['max'], loaded['ext'], loaded['mime']),
+                         (40, 40, '.abc\n.xyz', 'text/plain'))
+        self.assertIn('Last saved', loaded['status'])
+        self.assertIn('<b>Owner', loaded['status'])  # text, never markup
+        self.assertIn('up to 40 MB', loaded['ceiling'])
+        self.assertIn('250 MB', loaded['ceiling'])
+        self.assertIn('saved limit of 120 MB is applied as 40 MB', loaded['ceiling'])
+        self.assertEqual(loaded['summary'], 'Always blocked, whatever is entered here: 2 file types')
+        self.assertEqual(loaded['builtin'], '.exe .js')
+        self.assertEqual(admin['put']['path'], '/api/attachment-settings')
+        self.assertEqual(admin['put']['body'], {'upload_limit_mb': '60', 'blocked_extensions': '.q\n r ',
+                                                'blocked_mime_types': ''})
+        self.assertIn('Saved. Uploads up to 60 MB', admin['saved'])
+        self.assertNotIn('saved limit of', admin['ceilingAfter'])
+        self.assertEqual(admin['error'], '<i>unreadable')  # the server's notice, as text
 
     def test_a_file_downloads_through_astra(self):
         self.assertIn('<a href="/api/tasks/t%201/attachments/f1/download" download>', self.out['html'])

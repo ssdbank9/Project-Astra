@@ -5,8 +5,10 @@
 <name>.duckdns.org {
 	encode gzip
 
-	# Managed file uploads (MXY7BG) are the one larger body: up to Astra's
-	# 25 MiB upload limit, which is also Waitress's own cap.
+	# Managed file uploads (MXY7BG) are the one larger body: the server
+	# ceiling, 25 MiB unless raised, which is also Waitress's cap. To let the
+	# App Owner set a higher limit (at most 250), raise this together with
+	# ASTRA_UPLOAD_CEILING_MB in the astra unit (runbook stage 9).
 	@upload path_regexp upload ^/api/tasks/[^/]+/files$
 	request_body @upload {
 		max_size 25MiB

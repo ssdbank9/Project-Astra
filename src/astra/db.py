@@ -8,7 +8,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 
 class SchemaMigrationRefused(RuntimeError):
@@ -881,6 +881,26 @@ def _migrate_v23(connection: sqlite3.Connection) -> None:
     """)
 
 
+def _migrate_v24(connection: sqlite3.Connection) -> None:
+    """v23 -> v24: the App Owner's upload limit and denylist additions (MXY7BG slice 2,
+    Owner Items 8-9 on 6G89SJ).
+
+    One row, or none for the defaults (25 MB, nothing added). The CHECK keeps the limit
+    between 1 MB and the 250 MB ceiling no setting may exceed; the two lists are JSON
+    arrays of lower-case entries.
+    """
+    _execute_statements(connection, """
+        CREATE TABLE attachment_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            upload_limit_bytes INTEGER NOT NULL CHECK (upload_limit_bytes BETWEEN 1048576 AND 262144000),
+            blocked_extensions TEXT NOT NULL DEFAULT '[]',
+            blocked_mime_types TEXT NOT NULL DEFAULT '[]',
+            updated_by TEXT NOT NULL REFERENCES users(id),
+            updated_at TEXT NOT NULL
+        );
+    """)
+
+
 # The ordered schema history: (version, step). migrate() runs every step whose version
 # is above the database's user_version, each in its own transaction with its bump.
 # Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
@@ -908,4 +928,5 @@ MIGRATION_STEPS = (
     (21, _migrate_v21),
     (22, _migrate_v22),
     (23, _migrate_v23),
+    (24, _migrate_v24),
 )

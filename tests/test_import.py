@@ -2140,4 +2140,6 @@ class ImportHttpTests(unittest.TestCase):
             body = source[index:].split("if path", 2)[1]
             self.assertIn("self.service.", body, header)
         route_pattern = re.compile(r'if path == "([^"]+)"')
-        self.assertEqual([route_pattern.search(h).group(1) for h in branches], ["/api/import/template-config"])
+        # MXY7BG slice 2 added the attachment settings; both PUT routes go through the service.
+        self.assertEqual([route_pattern.search(h).group(1) for h in branches],
+                         ["/api/import/template-config", "/api/attachment-settings"])

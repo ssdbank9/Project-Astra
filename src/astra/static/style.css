@@ -400,9 +400,9 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-strong); border-bottom-widt
 .note-row.unread .note-summary { color: var(--ink); font-weight: 650; }
 .note-meta { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-small); }
 .note-actions { display: flex; gap: 14px; padding-top: 2px; white-space: nowrap; }
-.daily-digest-panel, .daily-digest-settings { margin: 16px 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); }
+.daily-digest-panel, .daily-digest-settings, .attachment-settings { margin: 16px 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); }
 .digest-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.digest-head h2, .daily-digest-settings > h3 { margin: 0 0 4px; }
+.digest-head h2, .daily-digest-settings > h3, .attachment-settings > h3 { margin: 0 0 4px; }
 .digest-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .digest-section h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: var(--fs-lead); }
 .digest-items { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
@@ -410,7 +410,11 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-strong); border-bottom-widt
 .digest-items li > span, .digest-items li > small { color: var(--text-2); overflow-wrap: anywhere; }
 .digest-items li > a { justify-self: start; }
 .digest-empty { margin: 0; color: var(--muted); }
-.daily-digest-settings form { display: grid; max-width: 460px; gap: 10px; }
+.daily-digest-settings form, .attachment-settings form { display: grid; max-width: 460px; gap: 10px; }
+.attachment-settings input[type="number"] { max-width: 180px; }
+.attachment-settings textarea { min-height: 64px; }
+.attachment-settings .builtin-list { margin: 6px 0 0; overflow-wrap: anywhere; }
+.attachment-settings details summary { cursor: pointer; }
 .daily-digest-settings input[type="time"] { max-width: 180px; }
 .daily-digest-settings .checkbox { display: flex; align-items: center; gap: 8px; }
 .daily-digest-settings .checkbox input { width: 20px; height: 20px; }

@@ -2537,7 +2537,7 @@ function buildAttachments(task){
         <label>Note (optional)<input name="note"></label></div>
       <div class="actions"><button>Link file</button></div></form>`:"";
   const form=canManageFiles?`<form id="upload-form"><h4>Upload a file</h4>
-      <label>File (up to ${UPLOAD_MAX_MB} MB)<input name="file" type="file" required></label>
+      <label>File (up to ${uploadLimitMb(task)} MB)<input name="file" type="file" required></label>
       <label>Note (optional)<input name="note"></label>
       <div class="actions"><button>Upload</button></div></form>
     <form id="link-form"><h4>Add a link</h4>
@@ -2551,8 +2551,9 @@ function buildAttachments(task){
     ${form}</div>`;
 }
 
-// MXY7BG: Astra's upload limit (Owner Item 8); a bigger file is shared as a link instead.
-const UPLOAD_MAX_MB=25;
+// MXY7BG: the installation's upload limit (Owner Item 8, set by the App Owner in People and
+// access); a bigger file is shared as a link instead.
+function uploadLimitMb(task){return Math.max(1,Math.floor((task.upload_limit_bytes||25*1048576)/1048576))}
 function formatBytes(n){return n>=1048576?`${(n/1048576).toFixed(1)} MB`:n>=1024?`${Math.round(n/1024)} KB`:`${n} bytes`}
 function attachmentLine(task,a){
   const name=escapeHtml(a.display_name);
@@ -2581,7 +2582,8 @@ async function wireAttachments(task){
     e.preventDefault();const err=document.querySelector("#attachment-error");clearFeedback(err);
     const form=e.target,file=form.querySelector('[name="file"]').files[0];
     if(!file){err.textContent="Choose a file.";return}
-    if(file.size>UPLOAD_MAX_MB*1048576){err.textContent=`The file is larger than ${UPLOAD_MAX_MB} MB. Put it in a shared folder and add a link to it instead.`;return}
+    const limitMb=uploadLimitMb(task);
+    if(file.size>limitMb*1048576){err.textContent=`The file is larger than ${limitMb} MB. Put it in a shared folder and add a link to it instead.`;return}
     const button=form.querySelector("button");button.disabled=true;button.textContent="Uploading…";
     try{await uploadAttachment(task.id,file,form.querySelector('[name="note"]').value);await refresh()}
     catch(x){err.textContent=x.message;button.disabled=false;button.textContent="Upload"}
@@ -2740,6 +2742,39 @@ async function loadDailyDigestSettings(){
   }catch(err){error.textContent=`Settings could not be loaded. ${err.message}`}
   form.addEventListener("submit",saveDailyDigestSettings);
 }
+// MXY7BG slice 2: the App Owner's upload limit and denylist additions (Owner Items 8-9).
+function fillAttachmentSettings(form,settings){
+  form.elements.upload_limit_mb.value=settings.upload_limit_mb;form.elements.upload_limit_mb.max=settings.server_ceiling_mb;
+  const lowered=settings.saved_limit_mb&&settings.saved_limit_mb!==settings.upload_limit_mb?` Your saved limit of ${settings.saved_limit_mb} MB is applied as ${settings.upload_limit_mb} MB because of the ceiling.`:"";
+  document.querySelector("#attachment-ceiling").textContent=`This server admits uploads up to ${settings.server_ceiling_mb} MB; the ceiling itself is raised on the server, never here (deployment runbook, stage 9), and can never exceed ${settings.hard_limit_mb} MB.${lowered}`;
+  document.querySelector("#attachment-settings-error").textContent=settings.unusable||"";
+  form.elements.blocked_extensions.value=(settings.blocked_extensions||[]).join("\n");
+  form.elements.blocked_mime_types.value=(settings.blocked_mime_types||[]).join("\n");
+  const builtin=settings.builtin_extensions||[];
+  document.querySelector("#attachment-builtin-summary").textContent=`Always blocked, whatever is entered here: ${builtin.length} file types`;
+  document.querySelector("#attachment-builtin").textContent=builtin.join(" ");
+}
+async function loadAttachmentSettings(){
+  const form=document.querySelector("#attachment-settings-form");if(!form)return;
+  const error=document.querySelector("#attachment-settings-error"),status=document.querySelector("#attachment-settings-status");
+  try{
+    const {settings}=await api("/api/attachment-settings");
+    if(!form.isConnected)return;
+    fillAttachmentSettings(form,settings);
+    status.textContent=settings.updated_at?`Last saved ${new Date(settings.updated_at).toLocaleString()} by ${settings.updated_by_name||"an owner"}.`:`Default: ${settings.default_limit_mb} MB, nothing added to the blocked list.`;
+  }catch(err){error.textContent=`Settings could not be loaded. ${err.message}`}
+  form.addEventListener("submit",saveAttachmentSettings);
+}
+async function saveAttachmentSettings(event){
+  event.preventDefault();
+  const form=event.currentTarget,error=document.querySelector("#attachment-settings-error"),status=document.querySelector("#attachment-settings-status");
+  error.textContent="";status.textContent="Saving…";
+  try{
+    const {settings}=await api("/api/attachment-settings",{method:"PUT",body:JSON.stringify({upload_limit_mb:form.elements.upload_limit_mb.value.trim(),blocked_extensions:form.elements.blocked_extensions.value,blocked_mime_types:form.elements.blocked_mime_types.value})});
+    fillAttachmentSettings(form,settings);
+    status.textContent=`Saved. Uploads up to ${settings.upload_limit_mb} MB; ${settings.blocked_extensions.length} extension${settings.blocked_extensions.length===1?"":"s"} and ${settings.blocked_mime_types.length} media type${settings.blocked_mime_types.length===1?"":"s"} added to the blocked list.`;
+  }catch(err){status.textContent="";error.textContent=`Settings were not saved. ${err.message}`}
+}
 async function saveDailyDigestSettings(event){
   event.preventDefault();
   const form=event.currentTarget,error=document.querySelector("#daily-digest-settings-error"),status=document.querySelector("#daily-digest-settings-status");
@@ -2752,7 +2787,7 @@ async function saveDailyDigestSettings(event){
 }
 
 // GTEYTG: every owner has role "owner"; only the primary owner may give or remove owner access.
-const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset",password_changed:"Password changed",entity_active_changed:"Entity active state changed",entity_renamed:"Entity renamed",import_template_config_changed:"Import template settings changed",daily_digest_settings_changed:"Daily summary settings changed"};
+const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset",password_changed:"Password changed",entity_active_changed:"Entity active state changed",entity_renamed:"Entity renamed",import_template_config_changed:"Import template settings changed",daily_digest_settings_changed:"Daily summary settings changed",attachment_settings_changed:"Attachment settings changed"};
 // PDDS2D/3M2AYA: a password reset is either a server command or done in the app by an owner.
 const viaServerCommand=e=>(e.event_type==="primary_owner_transferred"||e.event_type==="password_reset")&&e.reason==="server command";
 const MIN_PASSWORD=8;
@@ -2775,7 +2810,7 @@ function renderPeople(users,memberships,ownerEvents){
   };
   const ownerEventRow=e=>{let change="";if(e.detail_json){const d=safeParse(e.detail_json),b=d.before,a=d.after;if(b&&a)change=` · ${escapeHtml(JSON.stringify(b))} → ${escapeHtml(JSON.stringify(a))}`;}return `<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(ownerEventLabel(e))}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`}${viaServerCommand(e)?" via server command":` by ${escapeHtml(e.actor_name)}`}${e.reason&&!viaServerCommand(e)?` · ${escapeHtml(e.reason)}`:""}${change}</li>`};
   const blocked=e=>e.event_type==="owner_change_blocked"||e.event_type==="import_blocked";
-  const settingEvents=new Set(["entity_active_changed","entity_renamed","import_template_config_changed","daily_digest_settings_changed"]);
+  const settingEvents=new Set(["entity_active_changed","entity_renamed","import_template_config_changed","daily_digest_settings_changed","attachment_settings_changed"]);
   const ownerHistory=(ownerEvents||[]).filter(e=>!blocked(e)&&!settingEvents.has(e.event_type)).slice(0,20).map(ownerEventRow).join("")||"<li>No owner access changes yet.</li>";
   const settingsHistory=(ownerEvents||[]).filter(e=>settingEvents.has(e.event_type)).slice(0,20).map(ownerEventRow).join("")||"<li>No app setting changes yet.</li>";
   const blockedList=type=>(ownerEvents||[]).filter(e=>e.event_type===type).slice(0,10).map(ownerEventRow).join("")||"<li>None.</li>";
@@ -2790,8 +2825,9 @@ function renderPeople(users,memberships,ownerEvents){
   const filingProjectOptions=state.projects.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("");
   document.querySelector("#people-body").innerHTML=`
     <h2>People &amp; access</h2>
-    <nav class="admin-sections" aria-label="Administration sections">${[["users","People"],["access","Project access"],["entities","Entities"],["calendar","Calendars"],["history","History"],...(primary?[["digest","Daily summary"]]:[])].map(([id,label])=>`<button type="button" class="quiet" data-admin-section="${id}">${label}</button>`).join("")}<button type="button" class="quiet" id="admin-templates">Templates</button><button type="button" class="quiet" id="admin-results">Final results</button></nav>
+    <nav class="admin-sections" aria-label="Administration sections">${[["users","People"],["access","Project access"],["entities","Entities"],["calendar","Calendars"],["history","History"],...(primary?[["digest","Daily summary"]]:[]),["attachments","Attachments"]].map(([id,label])=>`<button type="button" class="quiet" data-admin-section="${id}">${label}</button>`).join("")}<button type="button" class="quiet" id="admin-templates">Templates</button><button type="button" class="quiet" id="admin-results">Final results</button></nav>
     ${primary?`<section class="daily-digest-settings" aria-labelledby="admin-digest"><h3 id="admin-digest" tabindex="-1">Daily summary</h3><p class="fine">Astra adds one private in-app summary to your Inbox each day. It never emails anyone or adds other recipients.</p><form id="daily-digest-settings-form"><label class="checkbox"><input name="enabled" type="checkbox"> Send me the daily summary</label><label>Delivery time<input name="delivery_time" type="time" required></label><label>Your time zone<input name="timezone" list="daily-digest-timezones" placeholder="Start typing a city or time zone" required></label><datalist id="daily-digest-timezones">${digestTimeZoneOptions}</datalist><p class="fine">Choose your local time zone, such as Asia/Karachi or America/Chicago.</p><div class="error" id="daily-digest-settings-error" role="alert"></div><p id="daily-digest-settings-status" class="form-hint" role="status"></p><div class="actions"><button>Save summary settings</button></div></form></section>`:""}
+    <section class="attachment-settings" aria-labelledby="admin-attachments"><h3 id="admin-attachments" tabindex="-1">Attachments</h3><p class="fine">Uploads larger than the limit or of a blocked type are refused and nothing is kept. Astra does not scan files and never calls one safe.</p><form id="attachment-settings-form"><label>Upload limit in MB<input name="upload_limit_mb" type="number" min="1" max="250" step="1" inputmode="numeric" required></label><p class="fine" id="attachment-ceiling"></p><label>Also block these file extensions, one per line<textarea name="blocked_extensions" rows="3" placeholder=".xyz"></textarea></label><label>Also block these declared media types, one per line<textarea name="blocked_mime_types" rows="3" placeholder="application/x-example"></textarea></label><details class="fine"><summary id="attachment-builtin-summary">Always blocked, whatever is entered here</summary><p id="attachment-builtin" class="builtin-list"></p></details><div class="error" id="attachment-settings-error" role="alert"></div><p id="attachment-settings-status" class="form-hint" role="status"></p><div class="actions"><button>Save attachment settings</button></div></form></section>
     <h3 id="admin-users" tabindex="-1">Users</h3><ul class="people-list">${rows}</ul>
     <h3 id="admin-history" tabindex="-1">Owner access history</h3><ul class="people-list">${ownerHistory}</ul>
     <h3>Settings history</h3><ul class="people-list">${settingsHistory}</ul>
@@ -2856,6 +2892,7 @@ function renderPeople(users,memberships,ownerEvents){
   document.querySelector("#calendar-project").addEventListener("change",e=>renderCalendar(e.target.value));
   document.querySelector("#calendar-form").addEventListener("submit",e=>e.preventDefault());
   if(primary)loadDailyDigestSettings();
+  loadAttachmentSettings();
 }
 
 async function renderCalendar(projectId){
