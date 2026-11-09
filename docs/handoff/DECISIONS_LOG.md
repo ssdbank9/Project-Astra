@@ -158,6 +158,19 @@ Sources:
   for the import template settings; every change is audited in Settings
   history.
 
+### 2026-11-09 — Gantt chart replica and the front-end stack (chat with Claude)
+
+- Aly asked to review the Gantt chart with dependencies on shadcnstudio.com
+  (React, Tailwind CSS, shadcn/ui) and "replicate the exact same thing". The
+  work runs in its own session and gets its own ticket.
+- Stack, Aly's words: "Lets keep our JS for now if everything functions as
+  shadcn ui and all functionality works as desired or we can build the gantt
+  chart componenet on react only". So the front end stays plain HTML, CSS and
+  JavaScript (AGENTS.md); the Gantt must match the shadcnstudio one in look
+  and in every function. Only if a listed function cannot be made to work in
+  plain JS does Aly decide whether to build the Gantt component alone in
+  React. No React work starts without that decision.
+
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
 These are choices Claude made and reported; Aly has not overruled them. They
