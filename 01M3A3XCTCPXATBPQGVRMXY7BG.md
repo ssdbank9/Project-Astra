@@ -4,7 +4,7 @@ title: "Hosted attachments: managed upload, streaming and storage"
 status: backlog
 ready: true
 creator: Claude
-assignee: Aly Jafferani
+assignee: Claude
 goal: "Hosted Astra lets the App Owner attach files to a task as either an HTTPS link or an Astra-managed upload, stored privately and downloaded only through task authorization, as decided in Owner decision Items 5-16 on 6G89SJ."
 context: |-
   Astra attachments today are LOCAL FILE PATH links only (task_attachments.path; service.py add_task_attachment). No bytes are stored.
@@ -30,7 +30,7 @@ related:
   - 01M2JNPRGYD7TGGSHZV16G89SJ
 commits: []
 created-at: 2026-09-24T16:27:54Z
-updated-at: 2026-11-09T05:52:25Z
+updated-at: 2026-11-09T07:33:30Z
 updated-by: Claude
 claimed-by: X1CarbonPC-26956
 claimed-at: 2026-11-08T18:40:53Z
