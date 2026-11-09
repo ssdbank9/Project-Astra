@@ -171,6 +171,15 @@ Sources:
   plain JS does Aly decide whether to build the Gantt component alone in
   React. No React work starts without that decision.
 
+### 2026-11-09 — jaira retired (chat with Claude)
+
+- Aly: "I want you to stop using jaira its getting very restrictive now". The
+  board is retired. No agent runs `jaira` or edits `.jaira/` from now on; the
+  folder stays as read-only history. `docs/handoff/README.md` is the record of
+  status and open work, this log the record of decisions, and acceptance is a
+  line from Aly in chat recorded there. The jaira sections of `AGENTS.md`,
+  `CLAUDE.md` and `AGENT_START_PROMPT.md` were replaced accordingly.
+
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
 These are choices Claude made and reported; Aly has not overruled them. They

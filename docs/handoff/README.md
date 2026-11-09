@@ -1,5 +1,29 @@
 # Astra handoff index
 
+## 2026-11-09 — jaira retired; this file is the record of work
+
+Aly retired the jaira board on 2026-11-09 (see `DECISIONS_LOG.md`). Nothing
+below that mentions tickets, lanes or board counts is to be acted on through
+jaira any more; `.jaira/` is read-only history. From now on this file carries
+status and open work, updated in the same commit as the work.
+
+Status at `c7505d1` (plus this commit):
+
+- MXY7BG hosted attachments: slice 1 (`18c4e54`) and slice 2 (`8fdd9d5`) are
+  pushed and reviewed. Open: slice 3 (App Owner-only audited permanent direct
+  links, Owner Items 15-16) and slice 4 (OCI Object Storage backend and a
+  verified backend migration with rollback, Items 6-7). Nits left: two owners
+  saving the attachment settings at once overwrite each other (both audited);
+  `attachment_settings` is not in the backup required-table list.
+- Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
+  plain JS: in progress in its own session (Aly's stack decision is in
+  `DECISIONS_LOG.md`).
+- Waiting for Aly's acceptance from before the board was retired: B3Y1XY
+  (password reset fixes), Z9JCZ6, MTEDTM, AX572Q and the six tested tickets
+  recorded in `DECISIONS_LOG.md` on 2026-11-08; 0RHNMG is a duplicate of
+  JRNDC8 once B3Y1XY is accepted. Acceptance is now a line from Aly in chat,
+  recorded here.
+
 ## Current handover — 2026-10-24 (start here)
 
 Read [HANDOFF_2026-10-24.md](HANDOFF_2026-10-24.md). It supersedes every
