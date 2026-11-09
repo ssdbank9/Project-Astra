@@ -30,13 +30,13 @@ related:
   - 01M2JNPRGYD7TGGSHZV16G89SJ
 commits: []
 created-at: 2026-09-24T16:27:54Z
-updated-at: 2026-11-09T07:33:43Z
+updated-at: 2026-11-09T07:34:16Z
 updated-by: Claude
 claimed-by: X1CarbonPC-26956
 claimed-at: 2026-11-08T18:40:53Z
-outcome-what: "Slice 1 pushed as 18c4e54; slices 2-4 remain"
-outcome-why: "brainstorm and planning options are unticked, so the work goes straight to in-progress"
-outcome-resolves: nothing yet
+outcome-what: "Slice 1 (HTTPS links, private-folder uploads with cap and denylist, audited streamed downloads, paths hidden when hosted) pushed as 18c4e54; slices 2-4 not started"
+outcome-why: "Aly chose delivery in slices on 2026-11-08; the ticket stays in progress until slices 2-4 land or Aly defers them"
+outcome-resolves: nothing yet; DoD item 1 stays open
 ---
 
 # Hosted attachments: managed upload, streaming and storage
