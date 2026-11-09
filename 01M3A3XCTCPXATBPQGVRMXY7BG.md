@@ -30,7 +30,7 @@ related:
   - 01M2JNPRGYD7TGGSHZV16G89SJ
 commits: []
 created-at: 2026-09-24T16:27:54Z
-updated-at: 2026-11-09T15:12:28Z
+updated-at: 2026-11-09T15:34:08Z
 updated-by: Claude
 claimed-by: X1CarbonPC-26956
 claimed-at: 2026-11-08T18:40:53Z
@@ -55,7 +55,8 @@ outcome-resolves: nothing yet; DoD item 1 stays open
 <Steps, in order — filled in by the pre-process step, or by you.>
 
 - [ ] Slice 1: HTTPS links, private-folder uploads (25 MB, denylist), audited streamed downloads, path links hidden when hosted
-- [~] Slice 2: App Owner-configurable cap (to 250 MB) and denylist
+- [x] Slice 2: App Owner-configurable cap (to 250 MB) and denylist
+  proof: tests/test_hosted_attachments.py SettingsTests; tests/test_db.py AttachmentSettingsMigrationTests; tests/test_hosted_attachments_ui.py admin probe
 - [ ] Slice 3: Owner-only audited permanent direct links (Items 15-16)
 - [ ] Slice 4: OCI Object Storage backend and verified backend migration with rollback (Items 6-7)
 
