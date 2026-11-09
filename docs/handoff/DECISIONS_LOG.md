@@ -140,6 +140,24 @@ Sources:
 
 ---
 
+### 2026-11-09 — MXY7BG hosted attachments, slices 1 and 2 (chat with Claude)
+
+- Aly reassigned MXY7BG to Claude ("Yes, reassign") and started slice 2
+  ("Start slice 2"). Slice 1 (`18c4e54`) and slice 2 (`8fdd9d5`) are pushed.
+- Aly confirmed both of Claude's slice 2 design choices ("Confirm both"):
+  - The upload denylist is additions only. The App Owner adds file extensions
+    and declared media types under People and access, Attachments; the
+    built-in list and the file-signature checks can never be reduced from the
+    app. Allowing a built-in type would be a new decision.
+  - The ceiling on upload size is a server setting: `ASTRA_UPLOAD_CEILING_MB`
+    (default 25, at most 250), matched by Caddy's `max_size` on the upload
+    route (runbook stage 9). It is never raised from the app, because Waitress
+    receives and spools a whole body before Astra's checks run. The App
+    Owner's limit in the app can go up to the ceiling and no further.
+- Any App Owner, primary or secondary, may change the attachment settings, as
+  for the import template settings; every change is audited in Settings
+  history.
+
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
 These are choices Claude made and reported; Aly has not overruled them. They
