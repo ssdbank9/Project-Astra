@@ -1,7 +1,7 @@
 ---
 id: 01M3A3XCTCPXATBPQGVRMXY7BG
 title: "Hosted attachments: managed upload, streaming and storage"
-status: backlog
+status: todo
 ready: true
 creator: Claude
 assignee: Claude
@@ -30,10 +30,13 @@ related:
   - 01M2JNPRGYD7TGGSHZV16G89SJ
 commits: []
 created-at: 2026-09-24T16:27:54Z
-updated-at: 2026-11-09T07:33:30Z
+updated-at: 2026-11-09T07:33:37Z
 updated-by: Claude
 claimed-by: X1CarbonPC-26956
 claimed-at: 2026-11-08T18:40:53Z
+outcome-what: "Aly reassigned the ticket to Claude on 2026-11-09 (chat 'Yes, reassign') so slice 1 can be tracked in progress"
+outcome-why: slice 1 is pushed as 18c4e54; the ticket was still in backlog assigned to Aly
+outcome-resolves: nothing yet
 ---
 
 # Hosted attachments: managed upload, streaming and storage
