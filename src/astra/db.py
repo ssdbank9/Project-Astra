@@ -8,7 +8,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 
 class SchemaMigrationRefused(RuntimeError):
@@ -926,6 +926,23 @@ def _migrate_v25(connection: sqlite3.Connection) -> None:
     """)
 
 
+def _migrate_v26(connection: sqlite3.Connection) -> None:
+    """v25 -> v26: which storage backend holds each managed upload (MXY7BG slice 4, Owner
+    Items 6-7 on 6G89SJ).
+
+    Every upload so far is in the server folder. storage_previous names the backend a
+    migration copied the file from, while that old copy is kept: it is what a rollback
+    verifies and returns to, and what a prune removes.
+    """
+    _execute_statements(connection, """
+        ALTER TABLE task_attachments ADD COLUMN storage_backend TEXT
+            CHECK (storage_backend IN ('folder','s3'));
+        ALTER TABLE task_attachments ADD COLUMN storage_previous TEXT
+            CHECK (storage_previous IN ('folder','s3'));
+        UPDATE task_attachments SET storage_backend='folder' WHERE kind='file';
+    """)
+
+
 # The ordered schema history: (version, step). migrate() runs every step whose version
 # is above the database's user_version, each in its own transaction with its bump.
 # Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
@@ -955,4 +972,5 @@ MIGRATION_STEPS = (
     (23, _migrate_v23),
     (24, _migrate_v24),
     (25, _migrate_v25),
+    (26, _migrate_v26),
 )

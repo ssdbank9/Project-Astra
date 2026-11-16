@@ -1715,6 +1715,53 @@ class DirectLinkMigrationTests(unittest.TestCase):
             connection.close()
 
 
+class StorageBackendMigrationTests(unittest.TestCase):
+    """MXY7BG slice 4: v26 records which storage backend holds each managed upload."""
+
+    def test_v26_marks_every_existing_upload_as_in_the_folder_and_matches_a_fresh_schema(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        connection = sqlite3.connect(Path(temp.name) / "astra-v25.sqlite3", timeout=30, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        try:
+            with patch.object(db, "MIGRATION_STEPS", db.MIGRATION_STEPS[:25]), patch.object(db, "SCHEMA_VERSION", 25):
+                db.migrate(connection)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 25)
+            self.assertNotIn("storage_backend", table_columns(connection, "task_attachments"))
+            connection.execute(
+                "INSERT INTO users(id,email,display_name,password_hash,global_role,created_at,is_primary_owner)"
+                " VALUES('owner-1','o@example.org','Owner','x','owner','2026-01-01T00:00:00Z',1)")
+            connection.execute(
+                "INSERT INTO projects(id,name,created_at,created_by) VALUES('p1','P','2026-01-01','owner-1')")
+            connection.execute("INSERT INTO tasks(id,project_id,title,created_at,updated_at,created_by)"
+                               " VALUES('t1','p1','T','2026-01-01','2026-01-01','owner-1')")
+            for attachment, kind, path, url, key in (("file-1", "file", "", None, "k1"), ("file-2", "file", "", None, "k2"),
+                                                     ("link-1", "link", "", "https://example.org/", None),
+                                                     ("path-1", "path", "C:/docs/a.pdf", None, None)):
+                connection.execute(
+                    "INSERT INTO task_attachments(id,task_id,path,display_name,added_by,added_at,kind,url,storage_key)"
+                    " VALUES(?,'t1',?,'a.pdf','owner-1','2026-01-01',?,?,?)", (attachment, path, kind, url, key))
+            db.migrate(connection)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+            where = {row["id"]: (row["storage_backend"], row["storage_previous"]) for row in connection.execute(
+                "SELECT id, storage_backend, storage_previous FROM task_attachments")}
+            self.assertEqual(where, {"file-1": ("folder", None), "file-2": ("folder", None), "link-1": (None, None),
+                                     "path-1": (None, None)})
+            for column in ("storage_backend", "storage_previous"):
+                with self.subTest(column=column), self.assertRaises(sqlite3.IntegrityError):
+                    connection.execute(f"UPDATE task_attachments SET {column}='tape' WHERE id='file-1'")
+            connection.execute("UPDATE task_attachments SET storage_backend='s3', storage_previous='folder'"
+                               " WHERE id='file-1'")
+            fresh = db.connect(Path(temp.name) / "fresh.sqlite3")
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
+
 class ForcedPasswordChangeMigrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

@@ -3468,6 +3468,7 @@ class ServerCommandCliTests(unittest.TestCase):
         application = SimpleNamespace(db_path=":memory:")
         with patch("astra.web.create_wsgi_app", return_value=application), \
                 patch("astra.web.DailyDigestScheduler") as scheduler, \
+                patch("astra.web._warn_unreadable_storage"), \
                 patch("waitress.serve") as run_server, \
                 patch("sys.stdout", new_callable=io.StringIO):
             serve_waitress("127.0.0.1", 8765)

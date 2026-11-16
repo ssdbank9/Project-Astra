@@ -7,14 +7,14 @@ below that mentions tickets, lanes or board counts is to be acted on through
 jaira any more; `.jaira/` is read-only history. From now on this file carries
 status and open work, updated in the same commit as the work.
 
-Status at `c7505d1` (plus this commit):
+Status at `575f2fa` (plus this commit):
 
 - MXY7BG hosted attachments: slice 1 (`18c4e54`) and slice 2 (`8fdd9d5`) are
   pushed and reviewed. Slice 3 (App Owner-only audited permanent direct
-  links, Owner Items 15-16) is built, tested and reviewed and waits for Aly's
-  acceptance; slice 4 (OCI Object Storage backend and a verified backend
-  migration with rollback, Items 6-7) is next. Both are in "MXY7BG slices 3
-  and 4" below. Nits left: two owners saving the attachment settings at once
+  links, Owner Items 15-16, `5220018`) is built, tested and reviewed and waits
+  for Aly's acceptance, and so does slice 4 (OCI Object Storage backend and a verified
+  backend migration with rollback, Items 6-7). Both are in "MXY7BG slices 3
+  and 4" below. Nothing of slice 4 is provisioned or deployed. Nits left: two owners saving the attachment settings at once
   overwrite each other (both audited); `attachment_settings` and
   `attachment_links` are not in the backup required-table list.
 - Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
@@ -269,8 +269,9 @@ below; a step is ticked in the commit that pushes it.
 
 ### Slice 3: App Owner-only permanent direct links (Owner Items 15-16)
 
-Status: built, tested, reviewed and pushed in this commit. It waits for Aly's
-acceptance in chat. Nothing is deployed.
+Status: built, tested, reviewed and pushed in `5220018` (on the branch since
+the merge `575f2fa`; full suite there: 1299 tests, OK, 2 skipped on Windows).
+It waits for Aly's acceptance in chat. Nothing is deployed.
 
 - [x] 3.1 Schema v25 `attachment_links`: one active link per uploaded file,
   the token stored only as a SHA-256 hash, who created and who revoked it,
@@ -367,24 +368,124 @@ when removed.
 
 ### Slice 4: object storage backend and verified migration (Owner Items 6-7)
 
-In progress. The steps, refined while building:
+Status: built, tested, reviewed and pushed in this commit. It waits for Aly's
+acceptance in chat. Nothing is provisioned or deployed: no bucket, no key, no
+change on any server. The code has never talked to a real OCI tenancy.
 
-- [ ] 4.1 `object_storage.S3Storage`: OCI Object Storage through its
+- [x] 4.1 `object_storage.S3Storage`: OCI Object Storage through its
   S3-compatible API, signed with the standard library (no new dependency),
   behind the same methods as the folder backend. `ASTRA_STORAGE_BACKEND`
   (`folder` or `s3`) chooses the one active backend; the bucket, region,
   endpoint and Customer Secret Key are settings Aly places on the server.
-- [ ] 4.2 A test bucket that checks every signature; the storage tests run
-  against both backends.
-- [ ] 4.3 Each upload's row records the backend holding it (schema v26), so a
-  change of backend strands nothing. `astra storage-migrate --to <backend>`
-  copies each file, checks size and SHA-256, reads the copy back, and only
-  then switches the row. The old copy is kept, so the same command toward the
-  old backend is the rollback. `astra storage-prune` deletes old copies after
-  verifying the current ones. `astra storage-check` proves a backend first.
-- [ ] 4.4 Runbook stage 11.5: Aly's steps for the bucket and the key, the
-  outbound network decision, the switch, the rollback and a drill.
-- [ ] 4.5 Tests, guards, independent review, full suite, push.
+- [x] 4.2 A test bucket (`tests/fake_s3.py`) that checks every signature
+  itself; the storage tests run against both backends.
+- [x] 4.3 Each upload's row records the backend holding it (schema v26).
+  `astra storage-migrate --to <backend>` copies each file, checks size and
+  SHA-256, reads the copy back, and only then switches the row. The old copy
+  is kept, so the same command toward the old backend is the rollback.
+  `astra storage-prune` deletes old copies after verifying the current ones;
+  `astra storage-check` proves a backend first; `astra storage-status` shows
+  where the files are; `astra storage-verify` reads every file back and
+  checks it, on either backend (the check to run after a restore).
+- [x] 4.4 Runbook stage 11.5 and `deploy/systemd/object-storage.conf.example`.
+- [x] 4.5 Tests, guards, independent review, full suite.
+
+What it does:
+
+- The server folder stays the default. Nothing changes for an installation
+  that does not set `ASTRA_STORAGE_BACKEND=s3`.
+- Every upload goes to the active backend. A file is read, linked and deleted
+  through the backend its row names, so files uploaded before a switch keep
+  working until they are moved. Who may upload or download, the size limit,
+  the blocked types, the SHA-256, the history and the notices are decided in
+  the service and are the same for both backends.
+- The bucket stays private. Astra signs every request, never makes an object
+  public and never hands out a bucket address: a download still streams
+  through Astra after its access check. The key is read from the server's
+  environment (or a settings file for the commands), and is never stored in
+  the database, written to a log or an error, or taken as an argument.
+- A move is verified file by file. A file that fails any check stays where it
+  was, keeps working, and is listed; the command then exits with status 1 and
+  can be run again. Only one storage command runs at a time.
+- Each move and each prune is recorded in the owner history as a server
+  command, with where the files went and how many, and every App Owner gets
+  a notice. A command stopped with Ctrl-C records what it had already done;
+  if the record cannot be written the command says so and exits with status
+  1.
+- If the storage cannot be reached, an upload or download answers "File
+  storage is not available right now" (503), the cause goes to the server
+  log, and nothing is stored. A wrong bucket name is reported as storage not
+  available, never as a missing file. A download that breaks part-way ends
+  short; no error text is appended to the file.
+- Astra refuses to start with a wrong or incomplete configuration of the
+  active backend, and says in its log at start when files are recorded on a
+  backend whose settings are missing or incomplete. It does not contact the
+  bucket at start.
+
+How it was checked:
+
+- Tests: the full suite result is in the commit message. New:
+  `tests/test_object_storage.py` (request signing against the two worked
+  examples in the Amazon S3 reference, settings, both backends, the service
+  and both web servers on object storage, the migration, rollback, prune, the
+  commands), `StorageBackendMigrationTests` (`tests/test_db.py`), the example
+  drop-in check in `tests/test_deploy_config.py`.
+- Guard removal: 138 guards were removed one at a time in a complete
+  throwaway copy of the final code, after the untouched copy had passed. Each
+  removal made at least one test fail. Guards found untested on the way
+  (by this check and by the reviewers) got tests or were removed as needless.
+- Independent review: an agent that did not write the code read the diff
+  without editing it, four times, with its own probes each time. Round 1
+  found no blocker and eight items: an interrupted move left no history
+  entry; a download cut short on the development server carried an error
+  page; a removal racing a move left bytes in the bucket; a wrong bucket name
+  read as a missing file; `storage-check` could lose its verdict; four guards
+  had no test; the bucket had no restore procedure. Round 2 found that the
+  first fix for interrupts was itself wrong: a Ctrl-C landing just as a
+  file's row was committed discarded the copy the row named (no bytes lost,
+  but the file read as missing until rolled back). That part was reworked so
+  that the database decides. Round 3 confirmed the rework and found four
+  smaller items, one of which could overwrite a good kept copy with a damaged
+  one under a double fault; all four were fixed with tests. Round 4 confirmed those fixes and that no path destroys a good copy. It found one new small defect (a Ctrl-C at one moment was swallowed) and that an interrupted run did not print what it had done; both were fixed with tests. Those two last fixes were not read again by a reviewer.
+- Browser: on a local server, the uploads of a disposable database were moved
+  to a test bucket and back through the service code. The owner history then
+  showed both moves with where the files went and how many, and an
+  interrupted one marked as such; every owner had a notice; the files still
+  downloaded; no answer named where the bytes are kept. No other screen
+  changed.
+- Unverified, for Aly's drill (runbook stage 11.5): everything about a real
+  OCI bucket. That covers OCI's handling of the signed requests, the address
+  used to confirm the bucket refuses unsigned reads, the policy wording, and
+  the service's outbound rule.
+
+Decisions for Aly:
+
+1. Whether uploads move to object storage at all. The folder stays the
+   default until Aly says otherwise.
+2. Outbound network for the Astra service: only Oracle's Object Storage
+   address ranges, or all outbound traffic (runbook stage 11.5).
+3. How the bucket's contents are protected, since the server backup does not
+   hold files kept in the bucket. Until Aly chooses and a restore has been
+   tried once, files in the bucket have no tested backup, so Item 6's "same
+   backup and recovery" is met for the folder and only documented for the
+   bucket (runbook stage 11.5, with `storage-verify` as the check).
+4. Between switching the setting and finishing `storage-migrate`, new uploads
+   are in the bucket and older ones still in the folder. No user or project
+   chooses a destination, and `storage-status` shows the split. Is that
+   window acceptable under Item 7?
+5. Old copies stay until `storage-prune` is run by hand. After a prune, a
+   rollback copies the files back from the bucket instead of switching to a
+   kept copy.
+6. Astra records that a file is in object storage, not in which bucket.
+   Settings changed to another bucket the key can use are not detected
+   (files read as not found until the settings are put back). Should each
+   file's row also record its bucket, so that a wrong bucket is refused?
+
+Known limits, left as they are: a download that breaks before its first byte
+under Waitress answers a plain 500; a download is written to the history
+when it starts, also if it then breaks; a hung bucket holds a request for up
+to a minute; a command killed outright (not Ctrl-C) records nothing, and
+`storage-status` then shows where things stand.
 
 ## Current handover — 2026-10-24 (start here)
 

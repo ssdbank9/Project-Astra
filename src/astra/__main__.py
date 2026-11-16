@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import ipaddress
+import os
+import re
+import secrets
 import socket
 import sqlite3
 import sys
 from pathlib import Path
 
+from .attachment_storage import BACKENDS, StorageError, active_backend, storage_named
 from .backup import create_backup, restore_backup
 from .db import SchemaMigrationRefused, connect, database_path
 from .service import AstraService, Conflict, Forbidden
@@ -46,6 +51,24 @@ def main(argv=None):
         help="New database file; existing files are never replaced",
     )
     commands.add_parser("digest", help="Create today's App Owner summary if it is enabled and due")
+    # MXY7BG slice 4 (Owner Items 6-7): the upload storage backend and its controlled migration.
+    # The object storage key is read from the environment or --settings-file, never an argument.
+    storage_status = commands.add_parser("storage-status", help="Show where uploaded files are stored")
+    storage_check = commands.add_parser(
+        "storage-check", help="Write, read back and delete a test object on a storage backend")
+    storage_check.add_argument("--backend", choices=BACKENDS, help="Default: the active backend")
+    storage_migrate = commands.add_parser(
+        "storage-migrate", help="Copy uploaded files to the active backend, verify each, then switch it over")
+    storage_migrate.add_argument("--to", required=True, choices=BACKENDS, help="Must be the active backend")
+    storage_prune = commands.add_parser(
+        "storage-prune", help="Delete the old copies a migration kept, after verifying the current ones")
+    storage_prune.add_argument("--yes", action="store_true", help="Skip typing 'prune' to confirm")
+    storage_verify = commands.add_parser(
+        "storage-verify", help="Read every uploaded file back and check its size and SHA-256 (after a restore)")
+    for storage_command in (storage_status, storage_check, storage_migrate, storage_prune, storage_verify):
+        storage_command.add_argument(
+            "--settings-file", metavar="FILE",
+            help="Read ASTRA_* settings from KEY=VALUE lines, as the service does (for example /etc/astra/storage.env)")
     args = parser.parse_args(argv)
     if args.command == "serve":
         try:
@@ -70,6 +93,8 @@ def main(argv=None):
         raise SystemExit(str(exc).strip("'")) from None
     except (KeyboardInterrupt, EOFError):
         raise SystemExit("Aborted; nothing was changed.") from None
+    except StorageError as exc:
+        raise SystemExit(f"File storage: {exc}") from None
     except (sqlite3.OperationalError, OSError) as exc:
         if args.command == "serve" and not isinstance(exc, sqlite3.OperationalError):
             # For example the port is in use or the host name does not resolve.
@@ -115,6 +140,88 @@ def _via() -> dict:
     except Exception:  # getuser raises when no login name can be found
         os_user = ""
     return {"via": "cli", "os_user": os_user, "host": socket.gethostname()}
+
+
+def _load_settings_file(path: str) -> None:
+    """Put a settings file's ASTRA_* lines into this process's environment, as systemd's
+    EnvironmentFile does for the service, so the object storage key never has to be typed
+    on a command line. A line is never echoed back: it may hold the key."""
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SystemExit(f"Could not read the settings file {path}: {getattr(exc, 'strerror', None) or type(exc).__name__}") from None
+    for number, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        name, equals, value = line.partition("=")
+        name, value = name.strip(), value.strip()
+        if not equals or not re.fullmatch(r"ASTRA_[A-Z0-9_]+", name):
+            raise SystemExit(f"{path}, line {number}: expected ASTRA_NAME=value.")
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ[name] = value
+
+
+def _storage_check(name: str) -> None:
+    """Prove a backend works before any real file depends on it: write a small random
+    object, read it back, make sure nobody can read it without the key, delete it."""
+    storage = storage_named(name)
+    data = secrets.token_bytes(1024)
+    stored = storage.save([data])
+    deleted = False
+    try:
+        handle = storage.open(stored.key)
+        try:
+            back = handle.read()
+        finally:
+            handle.close()
+        if (back, stored.size, stored.sha256) != (data, len(data), hashlib.sha256(data).hexdigest()):
+            raise SystemExit(f"File storage: the {name} backend returned different bytes than were written.")
+        print(f"{name}: wrote a {len(data)}-byte test object, read it back and it matched.")
+        for where, status in getattr(storage, "anonymous_reads", lambda key: [])(stored.key):
+            if status is None:
+                print(f"{name}: could not try a read without the key at {where}; "
+                      "check in the OCI console that the bucket is private.")
+            elif 200 <= status < 300:
+                raise SystemExit(f"File storage: the bucket is PUBLIC: {where} answered a request without the key "
+                                 f"(HTTP {status}). Make the bucket private before Astra uses it.")
+            else:
+                print(f"{name}: a read without the key is refused (HTTP {status}) at {where}.")
+    finally:
+        # A verdict reached above must survive a delete that fails (a key that may write but
+        # not delete): say so on its own line and let the verdict through.
+        try:
+            storage.delete(stored.key)
+            deleted = True
+        except OSError as exc:
+            print(f"{name}: the test object {stored.key} could not be deleted ({exc}). Delete it by hand.")
+    if not deleted:
+        raise SystemExit(f"File storage: the {name} backend cannot delete objects, so Astra could not remove a "
+                         "file kept there.")
+    print(f"{name}: the test object was deleted. The backend is ready.")
+
+
+def _print_storage_failures(result: dict) -> None:
+    for failure in result["failed"]:
+        print(f"  FAILED {failure['display_name']} ({failure['attachment_id']}): {failure['error']}")
+
+
+def _uninterrupted(command):
+    """Run a storage command that had begun its work. Ctrl-C then does not mean "nothing was
+    changed": the files it had finished stay finished."""
+    try:
+        return command()
+    except KeyboardInterrupt as stop:
+        done = getattr(stop, "storage_result", None) or {"failed": []}
+        counts = [f"{value} {name}" for name, value in done.items() if type(value) is int]
+        if counts:
+            print(f"Before it was stopped: {', '.join(counts)}, {len(done['failed'])} failed.")
+        _print_storage_failures(done)
+        recorded = (f"It could NOT be RECORDED in the owner history ({done['unrecorded']}); note this run by hand."
+                    if done.get("unrecorded") else "The owner history shows what was recorded.")
+        raise SystemExit("Interrupted. Files already handled stay as they are. Run storage-status to see where "
+                         f"things stand, then the same command again to finish. {recorded}") from None
 
 
 def _run(args):
@@ -165,6 +272,50 @@ def _run(args):
         try:
             result = AstraService(db).run_due_daily_digests()
             print(f"Daily summary: {result['reason']}" + (f" ({result['date']})" if result.get("date") else ""))
+        finally:
+            db.close()
+    elif args.command in ("storage-status", "storage-check", "storage-migrate", "storage-prune", "storage-verify"):
+        if args.settings_file:
+            _load_settings_file(args.settings_file)
+        if args.command == "storage-check":
+            _storage_check(args.backend or active_backend())
+            return
+        db = _existing_database()
+        try:
+            service = AstraService(db)
+            if args.command == "storage-status":
+                status = service.storage_status()
+                print(f"Active backend: {status['active']}")
+                for row in status["backends"]:
+                    kept = f", {row['old_copies_kept']} with an old copy kept" if row["old_copies_kept"] else ""
+                    note = "" if row["backend"] == status["active"] else "  (not the active backend: run storage-migrate)"
+                    print(f"  {row['backend']}: {row['files']} files, {row['bytes']} bytes{kept}{note}")
+                if not status["backends"]:
+                    print("  No uploaded files.")
+                return
+            if args.command == "storage-verify":
+                result = service.verify_storage()
+                print(f"Verified {result['verified']} uploaded files; {len(result['failed'])} failed.")
+                _print_storage_failures(result)
+            elif args.command == "storage-migrate":
+                result = _uninterrupted(lambda: service.migrate_storage(args.to, _via()))
+                print(f"Moved to {args.to}: {result['moved']} copied and verified, {result['restored']} switched back "
+                      f"to a kept copy, {result['skipped']} skipped, {len(result['failed'])} failed.")
+                _print_storage_failures(result)
+                if result["moved"] or result["restored"]:
+                    print("The old copies are kept. Check the app, then run storage-prune to delete them.")
+            else:
+                if not args.yes and input("Type prune to delete the old copies: ").strip() != "prune":
+                    raise SystemExit("Confirmation did not match; nothing was changed.")
+                result = _uninterrupted(lambda: service.prune_storage(_via()))
+                print(f"Old copies removed: {result['pruned']}; {result['skipped']} skipped; "
+                      f"{len(result['failed'])} failed.")
+                _print_storage_failures(result)
+            if result.get("unrecorded"):
+                print(f"  NOT RECORDED in the owner history ({result['unrecorded']}). The files are as shown "
+                      "above; note this run by hand.")
+            if result["failed"] or result.get("unrecorded"):
+                raise SystemExit(1)  # nothing was lost: a failed file's row is unchanged
         finally:
             db.close()
     elif args.command == "serve" and args.waitress:

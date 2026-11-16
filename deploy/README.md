@@ -6,7 +6,8 @@ has been deployed: staging and real-user deployment still need Aly's separate
 go-ahead ([DEPLOYMENT_RUNBOOK.md](../docs/handoff/DEPLOYMENT_RUNBOOK.md)).
 
 None of these files holds a secret, and none may: the repository is public.
-The only value to fill in is the DuckDNS name in the Caddyfile.
+The only value to fill in is the DuckDNS name in the Caddyfile, and, if the optional
+object storage drop-in is used, the outbound address line Aly chooses.
 
 | File | Installed as | Runbook stage |
 | --- | --- | --- |
@@ -15,6 +16,7 @@ The only value to fill in is the DuckDNS name in the Caddyfile.
 | `journald/astra.conf` | `/etc/systemd/journald.conf.d/astra.conf` | 3 |
 | `ssh/00-astra.conf` | `/etc/ssh/sshd_config.d/00-astra.conf` | 3 |
 | `verify-host.sh` | run in place, `sudo sh verify-host.sh` | after 9 |
+| `systemd/object-storage.conf.example` (optional, on Aly's decision) | `/etc/systemd/system/astra.service.d/object-storage.conf` | 11.5 |
 
 What the files guarantee, each pinned by `tests/test_deploy_config.py`:
 

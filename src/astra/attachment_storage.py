@@ -11,7 +11,12 @@ Owner decisions Items 5-16 on 6G89SJ (Aly, 2026-09-19/20):
   250 MB ceiling and adds extensions and media types to the denylist (UploadPolicy); the
   built-in list and the signature checks always apply;
 - one storage interface (Item 6). The protected private-server folder is the first
-  backend (Aly, 2026-11-08); OCI Object Storage comes later behind the same methods.
+  backend (Aly, 2026-11-08); private OCI Object Storage (object_storage.py) is the second,
+  behind the same methods;
+- one active backend per installation (Item 7), chosen by ASTRA_STORAGE_BACKEND. Every
+  upload goes to it. Each upload's row records the backend that holds its bytes, so a
+  change of backend strands nothing: a file keeps downloading from where it is until the
+  verified migration (AstraService.migrate_storage) has moved it.
 """
 from __future__ import annotations
 
@@ -36,6 +41,8 @@ CHUNK_BYTES = 64 * 1024
 HEAD_BYTES = 64 * 1024
 UPLOAD_ROOT_ENV = "ASTRA_UPLOAD_ROOT"
 UPLOAD_CEILING_ENV = "ASTRA_UPLOAD_CEILING_MB"
+STORAGE_BACKEND_ENV = "ASTRA_STORAGE_BACKEND"
+BACKENDS = ("folder", "s3")  # Item 6: Backend B, the server folder; Backend A, object storage
 
 # Item 9 secure defaults: executables, installers, scripts, commands, libraries, disk images
 # and shortcuts. The App Owner may add to this list (UploadPolicy), never take from it.
@@ -293,7 +300,21 @@ class StoredObject:
     sha256: str
 
 
-_KEY = re.compile(r"^[0-9a-f]{32}$")
+_KEY = re.compile(r"[0-9a-f]{32}")
+
+
+def valid_key(key) -> bool:
+    """A storage key is 32 lower-case hex characters and nothing else, so it can never be a
+    path or reach outside the backend. fullmatch: a trailing newline is not a key either."""
+    return isinstance(key, str) and _KEY.fullmatch(key) is not None
+
+
+class StorageError(OSError):
+    """The storage backend could not be reached, refused the request or returned bad data."""
+
+
+class StorageNotConfigured(StorageError):
+    """The chosen backend's settings are missing or wrong."""
 
 
 class FolderStorage:
@@ -316,14 +337,20 @@ class FolderStorage:
         return incoming, objects
 
     def _object(self, key: str) -> Path:
-        if not isinstance(key, str) or not _KEY.match(key):
+        if not valid_key(key):
             raise KeyError("File not found.")
         return self.root / "objects" / key
 
     def save(self, chunks: Iterable[bytes]) -> StoredObject:
+        return self.put(secrets.token_hex(16), chunks)
+
+    def put(self, key: str, chunks: Iterable[bytes]) -> StoredObject:
+        """Store the chunks under ``key``. save() picks a new key for an upload; a migration
+        keeps each file's key."""
+        if not valid_key(key):
+            raise ValueError("Not a storage key.")
         incoming, objects = self._dirs()
-        key = secrets.token_hex(16)
-        partial = incoming / f"{key}.part"
+        partial = incoming / f"{key}.{secrets.token_hex(4)}.part"
         digest, size = hashlib.sha256(), 0
         try:
             with open(partial, "xb") as handle:
@@ -349,11 +376,40 @@ class FolderStorage:
         self._object(key).unlink(missing_ok=True)
 
 
+def stream_size(handle) -> int:
+    """How many bytes an opened stored file will give: a download's Content-Length. An
+    object storage download says so itself; a local file is asked through its descriptor."""
+    size = getattr(handle, "size", None)
+    if type(size) is int:
+        return size
+    return os.fstat(handle.fileno()).st_size
+
+
 def upload_root() -> Path:
     override = os.environ.get(UPLOAD_ROOT_ENV, "").strip()
     return Path(override).expanduser().resolve() if override else app_home() / "uploads"
 
 
-def active_storage() -> FolderStorage:
-    """The installation's one storage backend (Item 7)."""
-    return FolderStorage(upload_root())
+def active_backend(environ=None) -> str:
+    """Item 7: the name of the installation's one active backend. The server folder unless
+    ASTRA_STORAGE_BACKEND says s3; anything else is refused rather than guessed at."""
+    environ = os.environ if environ is None else environ
+    name = str(environ.get(STORAGE_BACKEND_ENV, "")).strip().lower() or "folder"
+    if name not in BACKENDS:
+        raise StorageNotConfigured(f"{STORAGE_BACKEND_ENV} must be one of: {', '.join(BACKENDS)}.")
+    return name
+
+
+def storage_named(name: str):
+    """The backend called ``name``: where a file recorded under that name is kept."""
+    if name == "folder":
+        return FolderStorage(upload_root())
+    if name == "s3":
+        from .object_storage import S3Storage  # imported here: object_storage imports this module
+        return S3Storage.from_env(upload_root() / "incoming")
+    raise StorageNotConfigured(f"Unknown storage backend {name!r}.")
+
+
+def active_storage():
+    """The installation's one active storage backend (Item 7): where every upload goes."""
+    return storage_named(active_backend())

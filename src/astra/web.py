@@ -18,7 +18,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from .attachment_storage import CHUNK_BYTES, UploadTooLarge, upload_ceiling
+from .attachment_storage import (
+    CHUNK_BYTES, StorageError, UploadTooLarge, active_storage, storage_named, stream_size, upload_ceiling,
+)
 from .auth import dummy_password_hash, new_token, token_digest, verify_password
 from .daily_digest import DailyDigestScheduler
 from .db import connect, database_path
@@ -853,7 +855,7 @@ class AstraRoutes:
 
     def _send_file(self, meta: dict, handle):
         try:
-            size = os.fstat(handle.fileno()).st_size
+            size = stream_size(handle)
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Length", str(size))
@@ -867,8 +869,15 @@ class AstraRoutes:
 
     def _stream_body(self, handle):
         with handle:
-            while chunk := handle.read(CHUNK_BYTES):
-                self.wfile.write(chunk)
+            try:
+                while chunk := handle.read(CHUNK_BYTES):
+                    self.wfile.write(chunk)
+            except OSError as exc:
+                # The status and the length are already sent, so no error answer can follow
+                # them. The connection is closed short of the promised length, which a client
+                # can tell; an error page written here would arrive as part of the file.
+                self.close_connection = True
+                logging.getLogger("astra.attachments").error("a download stopped part-way: %s", exc)
 
     def _read_request_bytes(self, length: int) -> bytes:
         try:
@@ -1014,6 +1023,12 @@ class AstraRoutes:
             return self._json({"error": str(exc)}, HTTPStatus.CONFLICT)
         if isinstance(exc, (PayloadTooLarge, ImportTooLarge, UploadTooLarge)):
             return self._json({"error": str(exc)}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        if isinstance(exc, StorageError):
+            # MXY7BG slice 4: the storage backend is down or misconfigured. The detail is for
+            # the operator's log; the person gets a plain answer and nothing was stored.
+            logging.getLogger("astra.attachments").error("file storage: %s", exc)
+            return self._json({"error": "File storage is not available right now. Try again later."},
+                              HTTPStatus.SERVICE_UNAVAILABLE)
         if isinstance(exc, KeyError):
             return self._json({"error": str(exc).strip("'")}, HTTPStatus.NOT_FOUND)
         if isinstance(exc, (ValueError, json.JSONDecodeError)):
@@ -1236,11 +1251,37 @@ def create_wsgi_app(db_path=None):
     return AstraWSGIApplication(db_path)
 
 
+def _warn_unreadable_storage(db_path) -> None:
+    """Item 7, nothing stranded silently: say at start when uploads are recorded on a backend
+    whose settings are missing or incomplete (the bucket settings were removed while files
+    are still in the bucket, for one). Those files answer 503 until the settings are back.
+    Settings only: the bucket is not contacted, so a wrong bucket name is not seen here
+    (astra storage-verify finds that). A failure of this look never stops the server."""
+    try:
+        db = connect(db_path)
+        try:
+            held = AstraService(db).storage_status()["backends"]
+        finally:
+            db.close()
+    except Exception as exc:
+        logging.getLogger("astra.attachments").error("could not look up where uploaded files are recorded: %s", exc)
+        return
+    for row in held:
+        try:
+            storage_named(row["backend"])
+        except StorageError as exc:
+            logging.getLogger("astra.attachments").error(
+                "%s uploaded files are recorded on the %s backend, which cannot be used: %s",
+                row["files"], row["backend"], exc)
+
+
 def serve_waitress(host: str, port: int):
     """Run the hosted WSGI application with conservative Waitress limits."""
     from waitress import serve as waitress_serve
 
+    active_storage()  # a wrong or incomplete storage configuration fails here, at start
     application = create_wsgi_app()
+    _warn_unreadable_storage(application.db_path)
     application.daily_digest_scheduler = DailyDigestScheduler(application.db_path)
     application.daily_digest_scheduler.start()
     print(f"Astra (Waitress) is running at http://{host}:{port}")
@@ -1261,7 +1302,9 @@ def serve_waitress(host: str, port: int):
 
 def serve(host: str, port: int):
     upload_ceiling()  # a bad ASTRA_UPLOAD_CEILING_MB fails here, at start, as it does under Waitress
+    active_storage()  # and so does a wrong or incomplete storage configuration
     server = AstraServer((host, port))
+    _warn_unreadable_storage(server.db_path)
     server.daily_digest_scheduler = DailyDigestScheduler(server.db_path)
     server.daily_digest_scheduler.start()
     print(f"Astra is running at http://{host}:{port}")

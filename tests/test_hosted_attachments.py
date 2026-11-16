@@ -262,7 +262,7 @@ class DownloadTests(Fixture):
         link = self.service.add_task_link(self.owner, self.task["id"], "https://example.org/")
         # Storage must never be asked for a non-file attachment: the service refuses by kind,
         # not because the storage layer happens to reject an empty key.
-        with patch("astra.service.active_storage", side_effect=AssertionError("storage consulted")):
+        with patch("astra.service.storage_named", side_effect=AssertionError("storage consulted")):
             for attachment_id in (link["id"], "missing"):
                 with self.subTest(attachment_id=attachment_id), self.assertRaises(KeyError):
                     self.service.open_task_file(self.owner, self.task["id"], attachment_id)
@@ -451,7 +451,7 @@ class DirectLinkTests(Fixture):
         stored_hash = self.link_rows()[0]["token_hash"]
         wrong = ("", None, 5, token.encode("ascii"), [token], "x" * 19, "x" * 129, "x" * 43, token[:-1],
                  token + "x", " " + token, stored_hash, link["id"] * 2)
-        with patch("astra.service.active_storage", side_effect=AssertionError("storage consulted")):
+        with patch("astra.service.storage_named", side_effect=AssertionError("storage consulted")):
             for bad in wrong:
                 with self.subTest(token=bad):
                     with self.assertRaises(KeyError):
@@ -495,7 +495,7 @@ class DirectLinkTests(Fixture):
         self.assertEqual((event["actor_user_id"], event["reason"]), (self.owner["id"], "sent to the wrong person"))
         self.assertEqual(json.loads(event["after_json"]),
                          {"attachment_id": attachment["id"], "display_name": "report.pdf", "link_id": link["id"]})
-        with patch("astra.service.active_storage", side_effect=AssertionError("storage consulted")):
+        with patch("astra.service.storage_named", side_effect=AssertionError("storage consulted")):
             with self.assertRaises(KeyError):
                 self.service.open_direct_link(token)
         with self.assertRaises(KeyError):  # already revoked

@@ -17,9 +17,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import importer
 from .attachment_storage import (
-    DANGEROUS_EXTENSIONS, DANGEROUS_MIME_TYPES, DEFAULT_POLICY, DEFAULT_UPLOAD_LIMIT, HARD_UPLOAD_LIMIT, MB,
-    UploadPolicy, active_storage, checked_chunks, clean_filename, normalize_extension, normalize_mime_type,
-    normalize_policy_list, upload_ceiling, validate_https_url,
+    CHUNK_BYTES, DANGEROUS_EXTENSIONS, DANGEROUS_MIME_TYPES, DEFAULT_POLICY, DEFAULT_UPLOAD_LIMIT,
+    HARD_UPLOAD_LIMIT, MB, UploadPolicy, active_backend, active_storage, checked_chunks, clean_filename,
+    normalize_extension, normalize_mime_type, normalize_policy_list, storage_named, upload_ceiling, upload_root,
+    validate_https_url,
 )
 from .auth import hash_password, normalize_email, verify_password
 from .db import V15_EXPECTED_REVISION_SQL, owner_request_intent_key, transaction
@@ -4404,9 +4405,10 @@ class AstraService:
             with self._actor_transaction(actor):
                 self.db.execute(
                     "INSERT INTO task_attachments(id,task_id,path,display_name,note,added_by,added_at,kind,"
-                    "storage_key,size_bytes,sha256,content_type) VALUES(?,?,?,?,?,?,?,'file',?,?,?,?)",
+                    "storage_key,size_bytes,sha256,content_type,storage_backend)"
+                    " VALUES(?,?,?,?,?,?,?,'file',?,?,?,?,?)",
                     (attachment_id, task_id, "", name, str(note or "").strip(), actor["id"], now_text(),
-                     stored.key, stored.size, stored.sha256, str(declared_type or "")[:200]),
+                     stored.key, stored.size, stored.sha256, str(declared_type or "")[:200], storage.name),
                 )
                 self._event(task_id, actor["id"], "attachment_added", None,
                             {"kind": "file", "display_name": name, "size_bytes": stored.size,
@@ -4513,13 +4515,14 @@ class AstraService:
         if not isinstance(token, str) or not 20 <= len(token) <= 128:
             raise KeyError("File not found.")
         row = self.db.execute(
-            "SELECT l.id link_id, l.task_id, l.created_by, a.display_name, a.kind, a.storage_key, a.size_bytes"
+            "SELECT l.id link_id, l.task_id, l.created_by, a.display_name, a.kind, a.storage_key, a.size_bytes,"
+            " a.storage_backend"
             " FROM attachment_links l JOIN task_attachments a ON a.id=l.attachment_id"
             " WHERE l.token_hash=? AND l.revoked_at IS NULL", (self._direct_link_hash(token),),
         ).fetchone()
         if not row or row["kind"] != "file" or not row["storage_key"]:
             raise KeyError("File not found.")
-        handle = active_storage().open(row["storage_key"])
+        handle = self._storage_of(row).open(row["storage_key"])
         try:
             self._event(row["task_id"], row["created_by"], "attachment_direct_download", None,
                         {"link_id": row["link_id"], "display_name": row["display_name"]}, "via direct link",
@@ -4529,11 +4532,293 @@ class AstraService:
             raise
         return {"display_name": row["display_name"], "size_bytes": row["size_bytes"]}, handle
 
+    # MXY7BG slice 4 (Owner Items 6-7 on 6G89SJ): one active storage backend per installation.
+    # Every upload goes to it; each row records the backend that holds its bytes, so a file is
+    # read from where it really is and a change of backend strands nothing. Moving the files
+    # is an operator command (astra storage-migrate), audited like the other server commands.
+    STORAGE_FAILURES_KEPT = 50  # failed files named in one audit row; the count is always whole
+
+    @staticmethod
+    def _storage_of(row):
+        """The backend that holds this upload's bytes; a row from before v26 is in the folder."""
+        return storage_named(row["storage_backend"] or "folder")
+
+    def storage_status(self) -> dict:
+        """For the operator: the active backend and what each backend holds."""
+        rows = self.db.execute(
+            "SELECT COALESCE(storage_backend,'folder') backend, COUNT(*) files, COALESCE(SUM(size_bytes),0) bytes,"
+            " COALESCE(SUM(storage_previous IS NOT NULL),0) old_copies_kept FROM task_attachments"
+            " WHERE kind='file' AND storage_key IS NOT NULL GROUP BY 1 ORDER BY 1").fetchall()
+        return {"active": active_backend(), "backends": [dict(row) for row in rows]}
+
+    def _storage_lock(self):
+        """One storage command at a time: a migration and a prune running together could
+        delete the copy the other had just switched a file to."""
+        root = upload_root()
+        root.mkdir(parents=True, exist_ok=True)
+        lock = root / "storage-command.lock"
+        try:
+            with open(lock, "x", encoding="utf-8") as handle:
+                handle.write(now_text())
+        except FileExistsError:
+            raise Conflict(f"Another storage command is running, or one was interrupted ({lock}). "
+                           "Make sure none is running, delete that file and run the command again.") from None
+        return lock
+
+    def _stored_uploads(self, where: str, params: tuple = ()):
+        return self.db.execute(
+            "SELECT id, display_name, storage_key, size_bytes, sha256, COALESCE(storage_backend,'folder') backend,"
+            " storage_previous FROM task_attachments WHERE kind='file' AND storage_key IS NOT NULL AND " + where
+            + " ORDER BY added_at, id", params).fetchall()
+
+    def _upload_is_on(self, row, backend: str) -> bool:
+        """Does the database, as committed, say this upload's bytes are on ``backend``?"""
+        return self.db.execute(
+            "SELECT 1 FROM task_attachments WHERE id=? AND storage_key=? AND COALESCE(storage_backend,'folder')=?",
+            (row["id"], row["storage_key"], backend)).fetchone() is not None
+
+    def _undo_open_transaction(self) -> None:
+        """An interrupt can leave a write transaction open. Its half-done change is undone, so
+        that what is read and written next is what the database really holds."""
+        if self.db.in_transaction:
+            self.db.rollback()
+
+    @staticmethod
+    def _verify_stored(storage, row) -> None:
+        """Read the whole stored copy back and compare it with the size and SHA-256 recorded
+        when the file was uploaded. ValueError when it differs; KeyError when it is not there."""
+        if not row["size_bytes"] or not row["sha256"]:
+            raise ValueError("no size and SHA-256 were recorded for it, so no copy can be verified")
+        handle = storage.open(row["storage_key"])
+        digest, seen = hashlib.sha256(), 0
+        try:
+            while chunk := handle.read(CHUNK_BYTES):
+                digest.update(chunk)
+                seen += len(chunk)
+        finally:
+            handle.close()
+        if (seen, digest.hexdigest()) != (row["size_bytes"], row["sha256"]):
+            raise ValueError(f"the copy on the {storage.name} backend does not match the recorded size and SHA-256")
+
+    @staticmethod
+    def _discard_copy(storage, key: str) -> None:
+        try:
+            storage.delete(key)
+        except OSError as exc:
+            logging.getLogger("astra.attachments").error(
+                "unverified copy %s on the %s backend was not deleted: %s", key, storage.name, exc)
+
+    @staticmethod
+    def _storage_failure(row, exc) -> dict:
+        return {"attachment_id": row["id"], "display_name": row["display_name"], "error": str(exc).strip("'")}
+
+    def _move_upload(self, row, destination) -> str:
+        """Put one upload on ``destination`` and point its row there. 'moved' after a verified
+        copy; 'restored' when the copy a migration kept there verified, so nothing was copied;
+        'skipped' when the row was removed or changed meanwhile. Raises, leaving the row as it
+        was, when anything could not be verified."""
+        key, source_name = row["storage_key"], row["backend"]
+        kept = row["storage_previous"] == destination.name
+        if kept:
+            try:
+                self._verify_stored(destination, row)
+            except (KeyError, ValueError):
+                kept = False  # the kept copy is gone or wrong: copy the file again
+        if not kept:
+            if not row["size_bytes"] or not row["sha256"]:
+                raise ValueError("no size and SHA-256 were recorded for it, so no copy can be verified")
+            source = storage_named(source_name)
+            try:
+                if row["storage_previous"] == destination.name:
+                    # A copy was kept on the destination and did not verify just now. It may
+                    # still be the better one: it is overwritten only by a source that is
+                    # itself read back and verified first.
+                    self._verify_stored(source, row)
+                handle = source.open(key)
+            except KeyError:
+                raise ValueError(f"its bytes are missing from the {source_name} backend") from None
+            try:
+                written = destination.put(key, iter(lambda: handle.read(CHUNK_BYTES), b""))
+            except BaseException as stop:
+                if not isinstance(stop, Exception):  # Ctrl-C: the copy may have landed, and no row names it
+                    self._discard_copy(destination, key)
+                raise
+            finally:
+                handle.close()
+            try:
+                if (written.size, written.sha256) != (row["size_bytes"], row["sha256"]):
+                    raise ValueError(
+                        f"the copy on the {source_name} backend does not match the recorded size and SHA-256")
+                self._verify_stored(destination, row)  # what the destination really holds, read back
+            except BaseException:
+                self._discard_copy(destination, key)
+                raise
+        # Metadata changes only now, after verification, and only if the row is still as read.
+        try:
+            with transaction(self.db):
+                changed = self.db.execute(
+                    "UPDATE task_attachments SET storage_backend=?, storage_previous=? WHERE id=? AND storage_key=?"
+                    " AND COALESCE(storage_backend,'folder')=?",
+                    (destination.name, source_name, row["id"], key, source_name)).rowcount
+        except BaseException:
+            # Whether the change was committed is not known here: an interrupt can arrive just
+            # after the commit. The database decides. A copy that a row names is never
+            # discarded; a copy no row names is not left behind.
+            self._undo_open_transaction()
+            if not kept and not self._upload_is_on(row, destination.name):
+                self._discard_copy(destination, key)
+            raise
+        if changed == 1:
+            return "restored" if kept else "moved"
+        if not kept and not self.db.execute("SELECT 1 FROM task_attachments WHERE storage_key=?", (key,)).fetchone():
+            self._discard_copy(destination, key)  # the attachment was removed meanwhile
+        return "skipped"
+
+    def _storage_command(self, kind: str, via: dict, result: dict, rows, handle_row, settled, summary) -> dict:
+        """Run ``handle_row`` over ``rows()`` under the storage lock. A file that fails is
+        listed and its row left alone. Whatever was done is audited even when the command is
+        stopped part-way with Ctrl-C: files already handled stay handled, and the record must
+        say so. ``settled(row)`` tells from the database whether one file's change was
+        committed: asked for the file an interrupt landed on, and for a file whose update
+        raised an error that may have come after its commit. An interrupt leaves with
+        ``storage_result`` set to what was done, for the command line to print."""
+        if self.db.in_transaction:
+            raise RuntimeError("A storage command cannot run inside an open database transaction.")
+        lock = self._storage_lock()
+        interrupted, started, in_flight, outcomes, failures = True, 0, None, [], result["failed"]
+
+        def committed(row, finishing=False):
+            try:
+                self._undo_open_transaction()
+                return settled(row)
+            except BaseException as exc:  # a second Ctrl-C, a busy database: the count goes without it
+                if not finishing and not isinstance(exc, Exception):
+                    raise  # a Ctrl-C while the command is still going must stop it
+                logging.getLogger("astra.attachments").exception("could not tell how far one file had got")
+                return None
+        try:
+            for row in rows():
+                in_flight, started = row, started + 1
+                try:
+                    outcomes.append(handle_row(row))
+                except (OSError, ValueError, KeyError, sqlite3.Error) as exc:
+                    done = committed(row)
+                    (outcomes if done else failures).append(done or self._storage_failure(row, exc))
+            interrupted = False
+        except BaseException as stop:
+            stop.storage_result = result
+            raise
+        finally:
+            if started > len(outcomes) + len(failures):  # the file the interrupt landed on
+                outcomes.append(committed(in_flight, finishing=True))
+            try:
+                for outcome in filter(None, outcomes):
+                    result[outcome] += 1
+                if any(value for name, value in result.items() if name not in ("target", "skipped")):
+                    self._storage_event(kind, via, {**result, "interrupted": interrupted},
+                                        summary(result) + (" (interrupted before it finished)" if interrupted else ""))
+            except BaseException as exc:
+                # The files are where the rows say. Only the history entry is missing, and the
+                # caller is told so instead of this hiding what the command did.
+                logging.getLogger("astra.attachments").exception("a storage command could not be recorded")
+                result["unrecorded"] = f"{type(exc).__name__}: {exc}".rstrip(": ")
+            try:
+                lock.unlink(missing_ok=True)
+            except OSError as exc:
+                logging.getLogger("astra.attachments").error("the lock %s could not be removed: %s", lock, exc)
+        return result
+
+    def migrate_storage(self, target: str, via: dict) -> dict:
+        """Item 7's controlled migration: move every upload that is not on ``target`` there,
+        one file at a time. Copy, compare the size and SHA-256 of what was written with the
+        database, read the copy back and compare again, and only then update the row. The old
+        copy stays where it was (storage_previous) until prune_storage, so the same command
+        toward the old backend is the rollback: it verifies the kept copy and points the row
+        back without copying. A file that fails any check keeps its row unchanged and is
+        reported; running the command again continues where it stopped."""
+        active = active_backend()
+        if target != active:
+            raise ValueError(
+                f"This installation is set to the {active} backend. Set ASTRA_STORAGE_BACKEND={target} and "
+                f"restart Astra first, so that new uploads go to {target} as well, then run this again.")
+        destination = storage_named(target)
+        return self._storage_command(
+            "storage_migrated", via, {"target": target, "moved": 0, "restored": 0, "skipped": 0, "failed": []},
+            lambda: self._stored_uploads("COALESCE(storage_backend,'folder')<>?", (target,)),
+            lambda row: self._move_upload(row, destination),
+            lambda row: (("restored" if row["storage_previous"] == target else "moved")
+                         if self._upload_is_on(row, target) else None),
+            lambda result: (f"uploaded files moved to the {target} storage via server command: {result['moved']} "
+                            f"copied and verified, {result['restored']} switched back to a kept copy, "
+                            f"{len(result['failed'])} failed"))
+
+    def _prune_upload(self, row) -> str:
+        """Delete the old copy a migration kept, after reading the current copy back and
+        verifying it. The row is looked at again just before the delete: if it no longer
+        names the same two copies, nothing is deleted."""
+        self._verify_stored(storage_named(row["backend"]), row)
+        same = (row["id"], row["storage_key"], row["backend"], row["storage_previous"])
+        if not self.db.execute(
+                "SELECT 1 FROM task_attachments WHERE id=? AND storage_key=? AND COALESCE(storage_backend,'folder')=?"
+                " AND storage_previous=?", same).fetchone():
+            return "skipped"
+        storage_named(row["storage_previous"]).delete(row["storage_key"])
+        with transaction(self.db):
+            self.db.execute("UPDATE task_attachments SET storage_previous=NULL WHERE id=? AND storage_key=?"
+                            " AND COALESCE(storage_backend,'folder')=? AND storage_previous=?", same)
+        return "pruned"
+
+    def _upload_was_pruned(self, row) -> bool:
+        found = self.db.execute("SELECT storage_previous FROM task_attachments WHERE id=? AND storage_key=?",
+                                (row["id"], row["storage_key"])).fetchone()
+        return found is not None and found["storage_previous"] is None
+
+    def prune_storage(self, via: dict) -> dict:
+        """Delete the old copies a migration kept. Each file's current copy is read back and
+        verified first; an old copy is never removed on the strength of a database row alone."""
+        return self._storage_command(
+            "storage_pruned", via, {"pruned": 0, "skipped": 0, "failed": []},
+            lambda: self._stored_uploads("storage_previous IS NOT NULL"), self._prune_upload,
+            lambda row: "pruned" if self._upload_was_pruned(row) else None,
+            lambda result: (f"old copies of uploaded files removed via server command: {result['pruned']} removed, "
+                            f"{len(result['failed'])} failed"))
+
+    def verify_storage(self) -> dict:
+        """Read every upload back from the backend its row names and compare it with the size
+        and SHA-256 recorded at upload: the check to run after a restore, on either backend.
+        Changes nothing and writes nothing."""
+        result = {"verified": 0, "failed": []}
+        for row in self._stored_uploads("1=1"):
+            try:
+                self._verify_stored(storage_named(row["backend"]), row)
+                result["verified"] += 1
+            except KeyError:
+                result["failed"].append(self._storage_failure(
+                    row, f"its bytes are missing from the {row['backend']} backend"))
+            except (OSError, ValueError) as exc:
+                result["failed"].append(self._storage_failure(row, exc))
+        return result
+
+    def _storage_event(self, kind: str, via: dict, result: dict, summary: str) -> None:
+        """Audit a storage command on an owner's record (the primary owner's when there is an
+        active one) and tell every owner."""
+        owner = self.db.execute("SELECT id FROM users WHERE global_role='owner' AND active=1"
+                                " ORDER BY is_primary_owner DESC, created_at, id LIMIT 1").fetchone()
+        if not owner:
+            raise RuntimeError("there is no active owner to record it on")
+        detail = {**via, "scope": "app", **{name: value for name, value in result.items() if name != "failed"},
+                  "failed": len(result["failed"]), "failed_files": result["failed"][:self.STORAGE_FAILURES_KEPT]}
+        with transaction(self.db):
+            event_id = self._insert_user_event(owner["id"], kind, owner["id"], "server command", detail)
+            self._notify(owner["id"], event_id, None, kind, summary, actor_id=owner["id"])
+            self._notify_owners(owner["id"], event_id, None, kind, summary)
+
     # MXY7BG Item 14: every download rechecks task access immediately before the transfer and
     # is audited, both when it is served and when it is refused.
     def open_task_file(self, actor: dict, task_id: str, attachment_id: str):
         row = self.db.execute(
-            "SELECT id, display_name, kind, storage_key, size_bytes FROM task_attachments WHERE id=? AND task_id=?",
+            "SELECT id, display_name, kind, storage_key, size_bytes, storage_backend FROM task_attachments"
+            " WHERE id=? AND task_id=?",
             (attachment_id, task_id),
         ).fetchone()
         try:
@@ -4545,7 +4830,7 @@ class AstraService:
             raise
         if not row or row["kind"] != "file" or not row["storage_key"]:
             raise KeyError("File not found.")
-        handle = active_storage().open(row["storage_key"])
+        handle = self._storage_of(row).open(row["storage_key"])
         try:
             self._event(task_id, actor["id"], "attachment_downloaded", None,
                         {"attachment_id": attachment_id, "display_name": row["display_name"]}, None, notify=False)
@@ -4567,7 +4852,8 @@ class AstraService:
     def remove_task_attachment(self, actor: dict, task_id: str, attachment_id: str) -> None:
         task = self.get_task(actor, task_id)  # validates existence and visibility first
         row = self.db.execute(
-            "SELECT path, display_name, kind, url, storage_key FROM task_attachments WHERE id=? AND task_id=?",
+            "SELECT path, display_name, kind, url, storage_key, storage_backend, storage_previous"
+            " FROM task_attachments WHERE id=? AND task_id=?",
             (attachment_id, task_id),
         ).fetchone()
         if not row:
@@ -4582,10 +4868,16 @@ class AstraService:
         # 6G89SJ (Owner decision 2026-09-19, Item 2): a link marked as a final result stays
         # until the final result is explicitly unmarked, which is audited. The schema's
         # ON DELETE CASCADE would otherwise drop the final result without a trace.
+        stored = None
         with self._actor_transaction(actor):
             final_result = self.db.execute(
                 "SELECT id, title FROM final_results WHERE attachment_id=?", (attachment_id,)
             ).fetchone()
+            # Slice 4: where the bytes are is read again inside the transaction: a storage
+            # migration may have moved the file since the row was read above.
+            stored = self.db.execute(
+                "SELECT storage_backend, storage_previous FROM task_attachments WHERE id=? AND task_id=?",
+                (attachment_id, task_id)).fetchone()
             if not final_result:
                 # MXY7BG slice 3: an active direct link dies with its file; say so on the task
                 # before the cascade removes the row.
@@ -4601,11 +4893,15 @@ class AstraService:
         if not final_result and row["kind"] == "file" and row["storage_key"]:
             # MXY7BG: a managed upload's bytes go with its row, after the removal commits. The
             # row is already gone, so a storage error is logged for the operator, not raised.
-            try:
-                active_storage().delete(row["storage_key"])
-            except OSError as exc:
-                logging.getLogger("astra.attachments").error(
-                    "stored file %s for removed attachment %s was not deleted: %s", row["storage_key"], attachment_id, exc)
+            # Slice 4: from the backend that holds them, and from the one a migration kept a copy on.
+            where = stored or row
+            for backend in filter(None, (where["storage_backend"] or "folder", where["storage_previous"])):
+                try:
+                    storage_named(backend).delete(row["storage_key"])
+                except OSError as exc:
+                    logging.getLogger("astra.attachments").error(
+                        "stored file %s (%s) for removed attachment %s was not deleted: %s", row["storage_key"],
+                        backend, attachment_id, exc)
         if final_result:
             # Recorded after the empty transaction, so the audit row is kept.
             self._event(
@@ -4630,7 +4926,8 @@ class AstraService:
         # MXY7BG (Aly, 2026-11-08, "Hide when hosted"): local path links are a desktop
         # feature, on only where ASTRA_ATTACHMENT_ROOTS is set. Without it, as on the hosted
         # server, a stored path is never shown or looked up; the row itself is kept.
-        item.pop("storage_key", None)  # internal: never leaves the server
+        for internal in ("storage_key", "storage_backend", "storage_previous"):
+            item.pop(internal, None)  # where the bytes are kept never leaves the server
         if item.get("kind", "path") != "path":
             item["exists"] = None
             if item["kind"] == "file":

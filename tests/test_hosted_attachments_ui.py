@@ -194,7 +194,10 @@ globalThis.runProbe=async()=>{
     {...base,attachment_id:'p1',attachment_kind:'path',attachment_path:''},
     {...base,attachment_id:'p2',attachment_kind:'path',attachment_path:'C:\\\\docs\\\\desk.pdf'}],{});
   const finals=document.querySelector("#final-results-body").innerHTML;
-  return {html,desktop,viewer,raised,sent,error,finals,admin,direct};
+  const storage={labels:[OWNER_EVENT_LABELS.storage_migrated,OWNER_EVENT_LABELS.storage_pruned],server:[viaServerCommand({event_type:'storage_migrated',reason:'server command'}),viaServerCommand({event_type:'storage_pruned',reason:'server command'}),viaServerCommand({event_type:'storage_migrated',reason:null})],
+    text:[storageEventText({event_type:'storage_migrated',detail_json:JSON.stringify({target:'s3',moved:2,restored:1,failed:0})}),storageEventText({event_type:'storage_migrated',detail_json:JSON.stringify({target:'folder',moved:'<b>',restored:0,failed:3})}),storageEventText({event_type:'storage_pruned',detail_json:JSON.stringify({pruned:4,failed:1})}),storageEventText({event_type:'storage_pruned',detail_json:'not json'}),storageEventText({event_type:'storage_migrated',detail_json:JSON.stringify({target:'s3',moved:1,restored:0,failed:0,interrupted:true})}),storageEventText({event_type:'storage_pruned',detail_json:JSON.stringify({pruned:1,failed:0,interrupted:true})})],
+    kinds:[storageEvent({event_type:'storage_migrated'}),storageEvent({event_type:'storage_pruned'}),storageEvent({event_type:'password_reset'})]};
+  return {html,desktop,viewer,raised,sent,error,finals,admin,direct,storage};
 };
 `;
 (0,eval)(src+probe);
@@ -357,6 +360,26 @@ class HostedAttachmentUiTests(unittest.TestCase):
     def test_the_task_history_names_the_direct_link_events(self):
         self.assertEqual(self.out['direct']['labels'],
                          ['Direct link created', 'Direct link revoked', 'Downloaded through a direct link'])
+
+    def test_storage_commands_are_named_in_the_owner_history_as_server_commands(self):
+        # MXY7BG slice 4: astra storage-migrate and storage-prune are audited like the other
+        # server commands, and the history names them instead of showing the raw event type.
+        self.assertEqual(self.out['storage'], {
+            'labels': ['Uploaded files moved', 'Old copies of uploaded files removed'],
+            'server': [True, True, False],
+            # The row says where the files went and how many; numbers only, whatever the detail holds.
+            'text': ['to object storage (2 copied and verified, 1 switched back to a kept copy, 0 failed)',
+                     'to the server folder (0 copied and verified, 0 switched back to a kept copy, 3 failed)',
+                     '4 removed, 1 failed', '0 removed, 0 failed',
+                     # A command that was cut short says so in the row, not only in the notice.
+                     'to object storage (1 copied and verified, 0 switched back to a kept copy, 0 failed, '
+                     'interrupted before it finished)',
+                     '1 removed, 0 failed, interrupted before it finished'],
+            'kinds': [True, True, False]})
+        # The owner history row uses that text in place of the name of the owner the audit row sits on.
+        source = (STATIC/'app.js').read_text(encoding='utf-8')
+        self.assertIn('storageEvent(e)?`: ${escapeHtml(storageEventText(e))}`:`: <strong>${escapeHtml(e.target_name)}</strong>`',
+                      source)
 
     def test_a_file_downloads_through_astra(self):
         self.assertIn('<a href="/api/tasks/t%201/attachments/f1/download" download>', self.out['html'])

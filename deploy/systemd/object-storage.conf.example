@@ -1,0 +1,23 @@
+# Optional: uploaded files in a private OCI Object Storage bucket (runbook
+# stage 11.5). NOT part of the main install. Use it only after Aly has decided
+# to keep uploads in object storage. Install as
+# /etc/systemd/system/astra.service.d/object-storage.conf
+#
+# The settings live in /etc/astra/storage.env (owner root, group astra, mode
+# 0640), never in this file and never in git. One NAME=value per line:
+#   ASTRA_STORAGE_BACKEND       s3 (folder goes back to the server folder)
+#   ASTRA_S3_ENDPOINT           https://<namespace>.compat.objectstorage.<region>.oraclecloud.com
+#   ASTRA_S3_REGION             the bucket's region identifier
+#   ASTRA_S3_BUCKET             the private bucket's name
+#   ASTRA_S3_ACCESS_KEY_ID      the Customer Secret Key's access key
+#   ASTRA_S3_SECRET_ACCESS_KEY  the Customer Secret Key itself; Aly places it
+[Service]
+EnvironmentFile=/etc/astra/storage.env
+
+# astra.service allows no outbound network at all (IPAddressDeny=any, loopback
+# only). Object storage needs outbound HTTPS to the endpoint above. Which
+# addresses to allow is Aly's decision (runbook stage 11.5 gives the options);
+# the chosen line is added here by hand, in this form:
+#   IPAddressAllow=<address range>
+# Until then the service cannot reach the bucket: uploads and downloads of
+# files kept there answer "File storage is not available right now".

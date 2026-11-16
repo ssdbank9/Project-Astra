@@ -865,6 +865,184 @@ server; the rollback result remains unverified until a timed restore drill.
 Verification: time the whole drill. It must fit in the 4-hour RTO. Record the
 date, the backup used and the time taken.
 
+### 11.5 Uploaded files in a private OCI Object Storage bucket (optional) **[ALY decides and creates the bucket and key, AGENT configures]**
+
+Astra keeps uploaded files in one place per installation: the server folder
+(`/srv/astra/data/uploads`, the default) or a private OCI Object Storage
+bucket. Skip this stage unless Aly chooses the bucket. The code is tested
+against a test bucket that checks every signature; it has not run against a
+real OCI tenancy (unverified until the drill at the end of this stage passes).
+
+Aly's decisions before anything is changed:
+
+1. Whether uploads move to object storage at all.
+2. Outbound network. `astra.service` allows no outbound traffic; object
+   storage needs outbound HTTPS to the bucket's endpoint, and a name lookup
+   for it. Either allow only Oracle's published Object Storage address ranges
+   for the region (narrow, but the list must be kept current), or allow all
+   outbound traffic from the service (simple, but Astra could then reach any
+   address). The chosen `IPAddressAllow=` line goes in the drop-in by hand.
+   Whether the name lookup works under the narrow choice is unverified; step
+   3 of the switch below shows it.
+3. How the bucket's contents are protected. The backup in 11.1 packs only the
+   server folder, so files kept in the bucket are in no Astra backup. Bucket
+   versioning, replication to a second region, or a scheduled copy are the
+   options. Until Aly has chosen one and it has been restored from once, the
+   bucket's files have no tested backup.
+
+Every command below is run as the service user, with the data folder and the
+settings file named. `ASTRA` stands for this prefix:
+
+```bash
+ASTRA="sudo -u astra env ASTRA_HOME=/srv/astra/data /opt/astra/app/.venv/bin/astra"
+SETTINGS="--settings-file /etc/astra/storage.env"
+```
+
+**[ALY]** In the OCI console (check each step against Oracle's current
+documentation; the exact wording is unverified):
+
+1. Create a bucket with visibility **Private**. Create no pre-authenticated
+   request for it. Note the namespace, the region identifier and the name.
+2. Create a user for Astra alone and a policy that lets it read, write and
+   delete objects in that one bucket and nothing else.
+3. Create a **Customer Secret Key** for that user. The secret is shown once.
+
+**[AGENT]** Create the settings file empty and closed before the key goes
+into it, then **[ALY]** types the six lines listed in
+`deploy/systemd/object-storage.conf.example`, starting with
+`ASTRA_STORAGE_BACKEND=folder`:
+
+```bash
+sudo install -d -m 0750 -o root -g astra /etc/astra
+sudo install -m 0640 -o root -g astra /dev/null /etc/astra/storage.env
+sudoedit /etc/astra/storage.env
+```
+
+**[AGENT]** Prove the bucket before any real file depends on it. The command
+writes a small random object, reads it back, makes sure a request without
+the key is refused, and deletes it. It never prints the key.
+
+```bash
+$ASTRA storage-check --backend s3 $SETTINGS
+```
+
+- It prints `a read without the key is refused` for each address it tries and
+  ends with `The backend is ready.`
+- If it says the bucket is **PUBLIC**, stop: make the bucket private first.
+- If it says the backend cannot delete objects, fix the policy first.
+- A command run by hand is not held by the service's network rules, so this
+  proves the bucket and the key, not the service's outbound access. That is
+  proven in step 3 below.
+
+Switch over (take a backup first, stage 11.1):
+
+1. Install `deploy/systemd/object-storage.conf.example` as
+   `/etc/systemd/system/astra.service.d/object-storage.conf` and add the
+   outbound line Aly chose.
+2. Set `ASTRA_STORAGE_BACKEND=s3` in `/etc/astra/storage.env`, then
+   `sudo systemctl daemon-reload` and `sudo systemctl restart astra`. From now
+   on new uploads go to the bucket; older files still download from the folder.
+3. In the app, upload a small file and download it again. A message that file
+   storage is not available means the service cannot reach the bucket: check
+   the outbound line and `journalctl -u astra -n 20`.
+4. Move the older files. Each one is copied, checked against the size and
+   SHA-256 recorded when it was uploaded, read back from the bucket and checked
+   again, and only then switched over. The copy in the folder stays.
+
+   ```bash
+   $ASTRA storage-migrate --to s3 $SETTINGS
+   $ASTRA storage-status $SETTINGS
+   ```
+
+   A `FAILED` line names a file that could not be verified. That file stays
+   where it was and keeps working; fix the cause and run the command again.
+   The command exits with status 1 while any file has failed.
+5. Download an older file in the app. Keep the folder copies until a backup
+   taken after the move has been verified, then delete them:
+
+   ```bash
+   $ASTRA storage-prune $SETTINGS
+   ```
+
+   Prune reads each file back from the bucket first and keeps the folder copy
+   of any file that does not verify.
+
+Rollback: set `ASTRA_STORAGE_BACKEND=folder`, restart Astra, and run
+
+```bash
+$ASTRA storage-migrate --to folder $SETTINGS
+$ASTRA storage-status $SETTINGS
+```
+
+Files whose folder copy was kept are verified and switched back without
+copying; files uploaded since are copied back and verified. Leave the bucket
+settings in place until `storage-status` shows no file on `s3` and a
+`storage-prune` has removed the copies kept in the bucket.
+
+Things to know while running these commands:
+
+- One storage command runs at a time. It holds
+  `/srv/astra/data/uploads/storage-command.lock`. If a command is killed, the
+  file stays: make sure no storage command is running, delete the file, and
+  run the command again.
+- Always pass `$SETTINGS`. Without it a command reads its own environment,
+  not the service's, and may take the folder for the active backend.
+- An interrupted command has still moved the files it finished.
+  `storage-status` shows where things stand and the same command finishes the
+  rest. What it finished is written to the owner history; if that record
+  cannot be written, the command says it was not recorded and exits with a
+  non-zero status, and the run is noted by hand. A command killed outright
+  (not Ctrl-C) records nothing.
+- Do not change the bucket name or the endpoint while files are recorded in
+  the bucket: Astra records that a file is in object storage, not in which
+  bucket. To change bucket, roll back to the folder first, then move to the
+  new bucket. Settings that name a bucket that does not exist, or one the key
+  may not use, make downloads answer "File storage is not available", and
+  nothing is deleted. Settings that name a different bucket the key can use
+  are not detected: files read as not found, new uploads go to that bucket,
+  and removing an attachment leaves its object behind in the first bucket.
+  Run `storage-verify` after any change to the settings.
+- Astra says so in its log at start (`journalctl -u astra`) when files are
+  recorded on a backend whose settings are missing or incomplete. It does
+  not contact the bucket at start.
+- While the bucket does not answer, each upload or download of a file kept
+  there waits up to a minute before it fails, and can hold up other requests
+  meanwhile.
+- If Astra or a command is killed outright at the wrong moment, an object
+  with no file record can stay in the bucket. Nothing reads it. One left by a
+  killed move is replaced when the move is run again, unless the attachment
+  was removed in between; one left by a killed upload, or by that removal,
+  stays until it is deleted in the OCI console.
+
+A move or a prune that changed or failed anything is recorded in the owner
+history as a server command, also when it was stopped with Ctrl-C, and every
+App Owner gets a notice. A run with nothing to do records nothing.
+
+Drill, before relying on it: with two or three test uploads, run the move,
+download them, roll back, download them, move again, prune, and download
+them once more.
+
+Backups and restore, for both backends:
+
+- The database backup (11.1) never contains uploaded files. It records each
+  file's size and SHA-256 and which backend holds it.
+- Files in the server folder are in the uploads archive of 11.1 and are
+  restored with it (11.4).
+- Files in the bucket are protected only by what Aly chose in decision 3.
+  Restoring an older database needs the bucket to still hold the objects that
+  database names, so do not empty the bucket after a backup that may be
+  restored.
+- After any restore, on either backend, read every file back and check it:
+
+  ```bash
+  $ASTRA storage-verify $SETTINGS
+  ```
+
+  It prints how many files verified and lists each file that is missing or
+  does not match, and exits with status 1 if there is one. It changes
+  nothing. Leave out `$SETTINGS` on an installation that has no settings
+  file.
+
 ---
 
 ## Stage 12 — Monitoring and uptime **[ALY picks the services, AGENT configures]**

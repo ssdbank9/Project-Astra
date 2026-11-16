@@ -2859,9 +2859,18 @@ async function saveDailyDigestSettings(event){
 }
 
 // GTEYTG: every owner has role "owner"; only the primary owner may give or remove owner access.
-const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset",password_changed:"Password changed",entity_active_changed:"Entity active state changed",entity_renamed:"Entity renamed",import_template_config_changed:"Import template settings changed",daily_digest_settings_changed:"Daily summary settings changed",attachment_settings_changed:"Attachment settings changed"};
+const OWNER_EVENT_LABELS={secondary_owner_granted:"Made secondary owner",secondary_owner_revoked:"Owner access removed",owner_change_blocked:"Blocked owner change",import_blocked:"Blocked import without a project",primary_owner_transferred:"Primary owner transferred",password_reset:"Password reset",password_changed:"Password changed",entity_active_changed:"Entity active state changed",entity_renamed:"Entity renamed",import_template_config_changed:"Import template settings changed",daily_digest_settings_changed:"Daily summary settings changed",attachment_settings_changed:"Attachment settings changed",storage_migrated:"Uploaded files moved",storage_pruned:"Old copies of uploaded files removed"};
 // PDDS2D/3M2AYA: a password reset is either a server command or done in the app by an owner.
-const viaServerCommand=e=>(e.event_type==="primary_owner_transferred"||e.event_type==="password_reset")&&e.reason==="server command";
+const viaServerCommand=e=>["primary_owner_transferred","password_reset","storage_migrated","storage_pruned"].includes(e.event_type)&&e.reason==="server command";
+// MXY7BG slice 4: a storage command's row says where the files went and how many, in place of
+// the name of the owner whose record carries the audit row.
+const storageEvent=e=>e.event_type==="storage_migrated"||e.event_type==="storage_pruned";
+function storageEventText(e){
+  const d=safeParse(e.detail_json),n=v=>Number(v)||0;
+  const cut=d.interrupted===true?", interrupted before it finished":"";
+  if(e.event_type==="storage_pruned")return `${n(d.pruned)} removed, ${n(d.failed)} failed${cut}`;
+  return `to ${d.target==="s3"?"object storage":"the server folder"} (${n(d.moved)} copied and verified, ${n(d.restored)} switched back to a kept copy, ${n(d.failed)} failed${cut})`;
+}
 const MIN_PASSWORD=8;
 function renderPeople(users,memberships,ownerEvents){
   const primary=!!state.user.is_primary_owner;
@@ -2880,7 +2889,7 @@ function renderPeople(users,memberships,ownerEvents){
     if(e.event_type==="owner_change_blocked"){try{if(JSON.parse(e.detail_json||"{}").action==="password reset of the primary owner")return "Blocked password reset of the primary owner"}catch{}}
     return OWNER_EVENT_LABELS[e.event_type]||e.event_type;
   };
-  const ownerEventRow=e=>{let change="";if(e.detail_json){const d=safeParse(e.detail_json),b=d.before,a=d.after;if(b&&a)change=` · ${escapeHtml(JSON.stringify(b))} → ${escapeHtml(JSON.stringify(a))}`;}return `<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(ownerEventLabel(e))}${e.event_type==="import_blocked"?"":`: <strong>${escapeHtml(e.target_name)}</strong>`}${viaServerCommand(e)?" via server command":` by ${escapeHtml(e.actor_name)}`}${e.reason&&!viaServerCommand(e)?` · ${escapeHtml(e.reason)}`:""}${change}</li>`};
+  const ownerEventRow=e=>{let change="";if(e.detail_json){const d=safeParse(e.detail_json),b=d.before,a=d.after;if(b&&a)change=` · ${escapeHtml(JSON.stringify(b))} → ${escapeHtml(JSON.stringify(a))}`;}return `<li>${escapeHtml(new Date(e.occurred_at).toLocaleString())} · ${escapeHtml(ownerEventLabel(e))}${e.event_type==="import_blocked"?"":storageEvent(e)?`: ${escapeHtml(storageEventText(e))}`:`: <strong>${escapeHtml(e.target_name)}</strong>`}${viaServerCommand(e)?" via server command":` by ${escapeHtml(e.actor_name)}`}${e.reason&&!viaServerCommand(e)?` · ${escapeHtml(e.reason)}`:""}${change}</li>`};
   const blocked=e=>e.event_type==="owner_change_blocked"||e.event_type==="import_blocked";
   const settingEvents=new Set(["entity_active_changed","entity_renamed","import_template_config_changed","daily_digest_settings_changed","attachment_settings_changed"]);
   const ownerHistory=(ownerEvents||[]).filter(e=>!blocked(e)&&!settingEvents.has(e.event_type)).slice(0,20).map(ownerEventRow).join("")||"<li>No owner access changes yet.</li>";

@@ -196,6 +196,26 @@ class DeployHostTests(unittest.TestCase):
         result = subprocess.run([sh, "-n", str(VERIFY)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_the_object_storage_drop_in_is_an_example_that_opens_no_network_and_holds_no_key(self):
+        # MXY7BG slice 4: optional, installed only on Aly's decision (runbook stage 11.5).
+        text = (DEPLOY / "systemd" / "object-storage.conf.example").read_text(encoding="utf-8")
+        active = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+        self.assertEqual(active, ["[Service]", "EnvironmentFile=/etc/astra/storage.env"])
+        self.assertNotIn("IPAddressAllow=any", text.replace(" ", ""))
+        # The unit itself still reaches nothing but this machine.
+        unit = (DEPLOY / "systemd" / "astra.service").read_text(encoding="utf-8")
+        self.assertIn("\nIPAddressDeny=any\nIPAddressAllow=localhost\n", unit)
+        self.assertNotIn("EnvironmentFile", unit)
+        runbook = RUNBOOK.read_text(encoding="utf-8")
+        for needed in ("deploy/systemd/object-storage.conf.example", "storage-check --backend s3",
+                       "storage-migrate --to s3", "storage-migrate --to folder", "storage-prune", "storage-verify",
+                       "storage-command.lock", "/etc/astra/storage.env"):
+            self.assertIn(needed, runbook)
+        # The key is read from the settings file or the environment: no command takes it.
+        from astra import __main__ as entry
+        import inspect
+        self.assertNotIn("secret", inspect.getsource(entry).lower().replace("secrets", ""))
+
     def test_runbook_installs_these_files_instead_of_its_own_copies(self):
         runbook = RUNBOOK.read_text(encoding="utf-8")
         for path in ("deploy/systemd/astra.service", "deploy/caddy/Caddyfile",
