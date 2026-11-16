@@ -1,15 +1,19 @@
 """MXY7BG slice 1: HTTPS links, managed uploads to the private folder, audited streamed
 downloads, and no local path shown where path links are off (Owner Items 5-14 on 6G89SJ;
 Aly's 2026-11-08 choices on MXY7BG). Slice 2: the App Owner's upload limit and denylist
-additions (Items 8-9)."""
+additions (Items 8-9). Slice 3: App Owner-only audited permanent direct links
+(Items 15-16)."""
+import contextlib
 import hashlib
 import http.client
 import io
 import json
+import logging
 import os
 import socket
 import tempfile
 import threading
+import time
 import unittest
 import urllib.request
 from pathlib import Path
@@ -22,8 +26,11 @@ from astra.attachment_storage import (
     check_upload, clean_filename, normalize_extension, normalize_mime_type, upload_ceiling, validate_https_url,
 )
 from astra.db import connect
-from astra.service import AstraService, Conflict, Forbidden
-from astra.web import AstraServer, RequestBodyTimeout, _TimedReader, _content_disposition, create_wsgi_app
+from astra.service import AstraService, Conflict, Forbidden, NeedsConfirmation
+from astra.web import (
+    AstraServer, RequestBodyTimeout, _FileChunks, _TimedReader, _WSGIHandler, _content_disposition,
+    _without_link_tokens, create_wsgi_app,
+)
 from link_roots import allow_attachment_roots
 
 PDF = b"%PDF-1.7\n" + b"x" * 1000
@@ -318,6 +325,310 @@ class DownloadTests(Fixture):
         self.assertEqual(len(self.stored_files()), 1)
 
 
+class DirectLinkTests(Fixture):
+    """Slice 3 (Owner Items 15-16): App Owner-only, confirmed, audited permanent direct links."""
+
+    def link(self, attachment=None, actor=None):
+        attachment = attachment or self.upload(self.owner)
+        created = self.service.create_direct_link(actor or self.owner, self.task["id"], attachment["id"],
+                                                  confirm="direct_link")
+        return attachment, created, created["url"].removeprefix("/files/")
+
+    def link_rows(self):
+        return self.db.execute("SELECT * FROM attachment_links ORDER BY rowid").fetchall()
+
+    def second_owner(self):
+        second = self.user("second")
+        self.service.grant_secondary_owner(self.owner, second["id"], "backup owner")
+        return dict(self.db.execute("SELECT * FROM users WHERE id=?", (second["id"],)).fetchone())
+
+    def shown(self, actor, attachment):
+        detail = self.service.task_detail(actor, self.task["id"])
+        [row] = [a for a in detail["attachments"] if a["id"] == attachment["id"]]
+        return row, json.dumps(detail, default=str)
+
+    def test_creation_needs_confirmation_and_only_the_hash_is_stored(self):
+        attachment = self.upload(self.owner)
+        for confirm in (None, "", "yes", True, "DIRECT_LINK"):
+            with self.subTest(confirm=confirm):
+                with self.assertRaises(NeedsConfirmation) as caught:
+                    self.service.create_direct_link(self.owner, self.task["id"], attachment["id"], confirm=confirm)
+                self.assertEqual((caught.exception.confirm, len(caught.exception.impact)), ("direct_link", 3))
+                self.assertIn("without signing in", str(caught.exception))
+        self.assertEqual(self.link_rows(), [])
+        self.assertEqual(self.events("direct_link_created"), [])
+        _, link, token = self.link(attachment)
+        self.assertEqual(link["url"], "/files/" + token)
+        self.assertGreaterEqual(len(token), 43)  # 32 random bytes
+        self.assertEqual((link["attachment_id"], link["display_name"]), (attachment["id"], "report.pdf"))
+        [row] = self.link_rows()
+        self.assertEqual(row["token_hash"], hashlib.sha256(token.encode("utf-8")).hexdigest())
+        self.assertEqual((row["id"], row["created_by"], row["revoked_at"]), (link["id"], self.owner["id"], None))
+        # The link is shown once: nothing in the database holds the token.
+        self.assertNotIn(token, chr(10).join(self.db.iterdump()))
+        [event] = self.events("direct_link_created")
+        self.assertEqual(event["actor_user_id"], self.owner["id"])
+        self.assertEqual(json.loads(event["after_json"]),
+                         {"attachment_id": attachment["id"], "display_name": "report.pdf", "link_id": link["id"]})
+        with self.assertRaises(Conflict) as caught:  # one active link per file
+            self.link(attachment)
+        self.assertNotIsInstance(caught.exception, NeedsConfirmation)
+        self.assertEqual(len(self.link_rows()), 1)
+        self.assertEqual(len(self.events("direct_link_created")), 1)
+
+    def test_two_links_never_share_a_token(self):
+        first = self.link()[2]
+        second = self.link(self.upload(self.owner, name="other.pdf"))[2]
+        self.assertNotEqual(first, second)
+        self.assertEqual(len({row["token_hash"] for row in self.link_rows()}), 2)
+
+    def test_the_task_shows_that_a_link_exists_but_never_the_link(self):
+        attachment, link, token = self.link()
+        viewer = self.user("viewer", "viewer")
+        token_hash = self.link_rows()[0]["token_hash"]
+        for actor in (self.owner, viewer):
+            row, raw = self.shown(actor, attachment)
+            with self.subTest(actor=actor["email"]):
+                self.assertEqual(set(row["direct_link"]), {"id", "created_at", "created_by_name"})
+                self.assertEqual((row["direct_link"]["id"], row["direct_link"]["created_by_name"]),
+                                 (link["id"], "Owner"))
+                self.assertNotIn(token, raw)
+                self.assertNotIn(token_hash, raw)
+
+    def test_only_the_app_owner_creates_or_revokes_and_attempts_are_audited(self):
+        _, link, token = self.link()
+        other = self.upload(self.owner, name="other.pdf")
+        assignee = self.user("assignee", "member")  # the person the task is assigned to
+        self.db.execute("UPDATE tasks SET owner_user_id=? WHERE id=?", (assignee["id"], self.task["id"]))
+        actors = [self.user("manager", "manager"), self.user("member", "member"), self.user("viewer", "viewer"),
+                  self.user("chairman", None, "chairman"), assignee]
+        for actor in actors:
+            with self.subTest(actor=actor["email"], action="create"):
+                with self.assertRaises(Forbidden):
+                    self.service.create_direct_link(actor, self.task["id"], other["id"], confirm="direct_link")
+            with self.subTest(actor=actor["email"], action="revoke"):
+                with self.assertRaises(Forbidden):
+                    self.service.revoke_direct_link(actor, self.task["id"], link["id"], "not mine to revoke")
+        blocked = self.events("attachment_add_blocked")
+        self.assertEqual([json.loads(event["after_json"])["kind"] for event in blocked],
+                         ["direct_link", "direct_link_revoke"] * len(actors))
+        self.assertEqual([event["actor_user_id"] for event in blocked],
+                         [actor["id"] for actor in actors for _ in range(2)])
+        outsider = self.user("outsider")  # cannot see the task at all
+        with self.assertRaises((Forbidden, KeyError)):
+            self.service.create_direct_link(outsider, self.task["id"], other["id"], confirm="direct_link")
+        with self.assertRaises((Forbidden, KeyError)):
+            self.service.revoke_direct_link(outsider, self.task["id"], link["id"], "not mine to revoke")
+        [row] = self.link_rows()
+        self.assertIsNone(row["revoked_at"])
+        self.assertEqual(len(self.events("direct_link_created")), 1)
+        self.assertEqual(self.events("direct_link_revoked"), [])
+        self.service.open_direct_link(token)[1].close()
+        # Any App Owner revokes another owner's link.
+        second = self.second_owner()
+        self.service.revoke_direct_link(second, self.task["id"], link["id"], "no longer needed")
+        [row] = self.link_rows()
+        self.assertEqual((row["revoked_by"], row["revoke_reason"]), (second["id"], "no longer needed"))
+
+    def test_anyone_holding_the_link_downloads_and_each_download_is_audited(self):
+        self.second_owner()  # would be told of the first owner's actions; a download is not one
+        _, link, token = self.link()
+        notices = self.db.execute("SELECT COUNT(*) FROM notifications").fetchone()[0]
+        for _ in range(2):
+            meta, handle = self.service.open_direct_link(token)
+            with handle:
+                self.assertEqual(handle.read(), PDF)
+            self.assertEqual(meta, {"display_name": "report.pdf", "size_bytes": len(PDF)})
+        events = self.events("attachment_direct_download")
+        self.assertEqual([(event["actor_user_id"], event["reason"]) for event in events],
+                         [(self.owner["id"], "via direct link")] * 2)
+        self.assertEqual(json.loads(events[0]["after_json"]), {"display_name": "report.pdf", "link_id": link["id"]})
+        self.assertEqual(self.events("attachment_downloaded"), [])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM notifications").fetchone()[0], notices)
+
+    def test_a_wrong_or_malformed_token_finds_nothing_and_storage_is_never_asked(self):
+        _, link, token = self.link()
+        stored_hash = self.link_rows()[0]["token_hash"]
+        wrong = ("", None, 5, token.encode("ascii"), [token], "x" * 19, "x" * 129, "x" * 43, token[:-1],
+                 token + "x", " " + token, stored_hash, link["id"] * 2)
+        with patch("astra.service.active_storage", side_effect=AssertionError("storage consulted")):
+            for bad in wrong:
+                with self.subTest(token=bad):
+                    with self.assertRaises(KeyError):
+                        self.service.open_direct_link(bad)
+            # Too short or too long is refused before anything is hashed or looked up.
+            with patch.object(AstraService, "_direct_link_hash", side_effect=AssertionError("hashed")):
+                for bad in ("x" * 19, "x" * 129, "x" * 100000):
+                    with self.subTest(length=len(bad)):
+                        with self.assertRaises(KeyError):
+                            self.service.open_direct_link(bad)
+        self.assertEqual(self.events("attachment_direct_download"), [])
+        self.service.open_direct_link(token)[1].close()
+
+    def test_revoking_needs_a_reason_is_recorded_and_stops_downloads(self):
+        attachment, link, token = self.link()
+        for reason in ("", "   ", None, ["a reason"], {"a": 1}, 5, True, b"bytes", "x" * 501):
+            with self.subTest(reason=reason):
+                with self.assertRaises(ValueError):
+                    self.service.revoke_direct_link(self.owner, self.task["id"], link["id"], reason)
+        # Ids that are not text find nothing, and are not mistaken for a refused attempt.
+        for task_id, link_id in (([self.task["id"]], link["id"]), (None, link["id"]), (self.task["id"], [link["id"]]),
+                                 (self.task["id"], {"id": link["id"]}), (self.task["id"], None), (self.task["id"], 7)):
+            with self.subTest(task_id=task_id, link_id=link_id):
+                with self.assertRaises(KeyError):
+                    self.service.revoke_direct_link(self.owner, task_id, link_id, "wrong shape")
+        self.assertEqual(self.events("attachment_add_blocked"), [])
+        elsewhere = self.service.create_task(self.owner, {"project_id": self.project["id"], "title": "Elsewhere"})
+        for task_id, link_id in ((elsewhere["id"], link["id"]), (self.task["id"], "missing"),
+                                 (self.task["id"], attachment["id"])):
+            with self.subTest(task_id=task_id, link_id=link_id):
+                with self.assertRaises(KeyError):
+                    self.service.revoke_direct_link(self.owner, task_id, link_id, "wrong place")
+        self.assertIsNone(self.link_rows()[0]["revoked_at"])
+        self.assertEqual(self.events("direct_link_revoked"), [])
+        self.service.open_direct_link(token)[1].close()
+        self.service.revoke_direct_link(self.owner, self.task["id"], link["id"], "  sent to the wrong person ")
+        [row] = self.link_rows()
+        self.assertEqual((row["revoked_by"], row["revoke_reason"]), (self.owner["id"], "sent to the wrong person"))
+        self.assertIsNotNone(row["revoked_at"])
+        [event] = self.events("direct_link_revoked")
+        self.assertEqual((event["actor_user_id"], event["reason"]), (self.owner["id"], "sent to the wrong person"))
+        self.assertEqual(json.loads(event["after_json"]),
+                         {"attachment_id": attachment["id"], "display_name": "report.pdf", "link_id": link["id"]})
+        with patch("astra.service.active_storage", side_effect=AssertionError("storage consulted")):
+            with self.assertRaises(KeyError):
+                self.service.open_direct_link(token)
+        with self.assertRaises(KeyError):  # already revoked
+            self.service.revoke_direct_link(self.owner, self.task["id"], link["id"], "again")
+        self.assertEqual(len(self.events("direct_link_revoked")), 1)
+        self.assertIsNone(self.shown(self.owner, attachment)[0]["direct_link"])
+        # A new link is a new token; the revoked one stays dead and stays on record.
+        _, _, renewed = self.link(attachment)
+        self.assertNotEqual(renewed, token)
+        self.assertEqual(len(self.link_rows()), 2)
+        with self.assertRaises(KeyError):
+            self.service.open_direct_link(token)
+        self.service.open_direct_link(renewed)[1].close()
+        # The longest reason allowed is kept whole.
+        self.service.revoke_direct_link(self.owner, self.task["id"], self.link_rows()[1]["id"],
+                                        "  " + "x" * 500 + " ")
+        self.assertEqual(self.link_rows()[1]["revoke_reason"], "x" * 500)
+
+    def test_every_app_owner_is_told_of_creation_and_revocation_including_the_one_who_acted(self):
+        second = self.second_owner()
+        self.user("manager", "manager")
+        _, link, _ = self.link()
+        self.service.revoke_direct_link(second, self.task["id"], link["id"], "review finished")
+        for kind, actor in (("direct_link_created", "Owner"), ("direct_link_revoked", "Second")):
+            rows = self.db.execute("SELECT user_id, summary FROM notifications WHERE kind=?", (kind,)).fetchall()
+            with self.subTest(kind=kind):
+                self.assertEqual(sorted(row["user_id"] for row in rows), sorted([self.owner["id"], second["id"]]))
+                for row in rows:
+                    self.assertIn("report.pdf", row["summary"])
+                    self.assertIn("by " + actor, row["summary"])
+
+    def test_removing_the_file_ends_its_link_and_says_so(self):
+        attachment, link, token = self.link()
+        self.service.remove_task_attachment(self.owner, self.task["id"], attachment["id"])
+        [event] = self.events("direct_link_revoked")
+        self.assertEqual((event["actor_user_id"], event["reason"]), (self.owner["id"], "attachment removed"))
+        self.assertEqual(json.loads(event["after_json"]),
+                         {"attachment_id": attachment["id"], "display_name": "report.pdf", "link_id": link["id"]})
+        self.assertEqual(self.link_rows(), [])
+        with self.assertRaises(KeyError):
+            self.service.open_direct_link(token)
+        # A file with no link, or whose link was already revoked, records no second ending.
+        plain = self.upload(self.owner, name="plain.pdf")
+        self.service.remove_task_attachment(self.owner, self.task["id"], plain["id"])
+        revoked, revoked_link, _ = self.link(self.upload(self.owner, name="revoked.pdf"))
+        self.service.revoke_direct_link(self.owner, self.task["id"], revoked_link["id"], "done with it")
+        self.service.remove_task_attachment(self.owner, self.task["id"], revoked["id"])
+        self.assertEqual([event["reason"] for event in self.events("direct_link_revoked")],
+                         ["attachment removed", "done with it"])
+
+    def test_a_final_result_keeps_its_file_and_its_link(self):
+        attachment, _, token = self.link()
+        self.service.mark_final_result(self.owner, self.task["id"], "attachment", attachment["id"], "")
+        with self.assertRaises(Conflict):
+            self.service.remove_task_attachment(self.owner, self.task["id"], attachment["id"])
+        self.assertEqual(self.events("direct_link_revoked"), [])
+        self.assertIsNone(self.link_rows()[0]["revoked_at"])
+        self.service.open_direct_link(token)[1].close()
+
+    def test_only_a_managed_upload_on_this_task_gets_a_direct_link(self):
+        web = self.service.add_task_link(self.owner, self.task["id"], "https://example.org/")
+        uploaded = self.upload(self.owner)
+        elsewhere = self.service.create_task(self.owner, {"project_id": self.project["id"], "title": "Elsewhere"})
+        for task_id, attachment_id in ((self.task["id"], web["id"]), (self.task["id"], "missing"),
+                                       (elsewhere["id"], uploaded["id"])):
+            for confirm in (None, "direct_link"):
+                with self.subTest(task_id=task_id, attachment_id=attachment_id, confirm=confirm):
+                    with self.assertRaises(KeyError):
+                        self.service.create_direct_link(self.owner, task_id, attachment_id, confirm=confirm)
+        self.assertEqual(self.link_rows(), [])
+        self.assertEqual(self.events("direct_link_created"), [])
+        shown = {a["kind"]: a for a in self.service.task_detail(self.owner, self.task["id"])["attachments"]}
+        self.assertNotIn("direct_link", shown["link"])
+        self.assertIsNone(shown["file"]["direct_link"])
+
+    def test_a_failed_direct_download_audit_closes_the_file(self):
+        _, _, token = self.link()
+        handles, real_open = [], FolderStorage.open
+
+        def spy(storage, key):
+            handles.append(real_open(storage, key))
+            return handles[-1]
+        with patch.object(FolderStorage, "open", spy):
+            with patch.object(self.service, "_event", side_effect=RuntimeError("audit down")):
+                with self.assertRaises(RuntimeError):
+                    self.service.open_direct_link(token)
+        [handle] = handles  # held here, so only an explicit close() can have closed it
+        self.assertTrue(handle.closed)
+
+    def test_a_file_that_already_has_a_link_is_refused_before_the_warning(self):
+        attachment, _, _ = self.link()
+        for confirm in (None, "direct_link"):
+            with self.subTest(confirm=confirm):
+                with self.assertRaises(Conflict) as caught:
+                    self.service.create_direct_link(self.owner, self.task["id"], attachment["id"], confirm=confirm)
+                self.assertNotIsInstance(caught.exception, NeedsConfirmation)
+                self.assertIn("already has a direct link", str(caught.exception))
+        self.assertEqual(len(self.link_rows()), 1)
+        self.assertEqual(len(self.events("direct_link_created")), 1)
+
+    def racing(self, between):
+        """Run `between` once, right after create_direct_link first looks for an active link."""
+        real, seen = self.service._active_direct_link, []
+
+        def look(attachment_id):
+            found = real(attachment_id)
+            seen.append(attachment_id)
+            if len(seen) == 1:
+                between()
+            return found
+        return patch.object(self.service, "_active_direct_link", look)
+
+    def test_a_link_another_owner_creates_meanwhile_is_a_conflict_not_a_second_link(self):
+        attachment = self.upload(self.owner)
+        second = self.second_owner()
+        with self.racing(lambda: self.link(attachment, second)):
+            with self.assertRaises(Conflict) as caught:
+                self.service.create_direct_link(self.owner, self.task["id"], attachment["id"], confirm="direct_link")
+        self.assertNotIsInstance(caught.exception, NeedsConfirmation)
+        self.assertIn("already has a direct link", str(caught.exception))
+        [row] = self.link_rows()
+        self.assertEqual(row["created_by"], second["id"])
+        self.assertEqual(len(self.events("direct_link_created")), 1)
+
+    def test_a_file_removed_meanwhile_gets_no_link(self):
+        attachment = self.upload(self.owner)
+        with self.racing(lambda: self.service.remove_task_attachment(self.owner, self.task["id"], attachment["id"])):
+            with self.assertRaises(KeyError):
+                self.service.create_direct_link(self.owner, self.task["id"], attachment["id"], confirm="direct_link")
+        self.assertEqual(self.link_rows(), [])
+        self.assertEqual(self.events("direct_link_created"), [])
+
+
 class SettingsTests(Fixture):
     """Slice 2, Owner Items 8-9: the App Owner raises the limit up to the ceiling and adds to
     the denylist; the built-in list cannot be reduced."""
@@ -559,6 +870,31 @@ class GuardUnitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "do not match"):
             check_upload("parts.zip", "application/zip", b"not a zip")
 
+    def test_a_direct_link_token_is_redacted_in_every_spelling_a_server_decodes(self):
+        token = "Abc-_1234567890abcdefghij"
+        for spelled in ("/files/", "//files/", "/%66iles/", "/files%2F", "/files%2f", "%2Ffiles%2F",
+                        "/%66%69%6C%65%73/", "/FILES/", "/%46%49%4c%45%53/", "http://host/files/"):
+            with self.subTest(spelled=spelled):
+                self.assertEqual(_without_link_tokens(f'"GET {spelled}{token}?x=1 HTTP/1.1" 200'),
+                                 f'"GET {spelled}[redacted] HTTP/1.1" 200')
+        self.assertEqual(_without_link_tokens(f"/files//{token}/x and /files/{token}"),
+                         "/files/[redacted] and /files/[redacted]")
+        # A tab or a line break a client put in the path hides no part of the token in a log
+        # line; in a traceback the token ends at the line's end and the next line is kept.
+        for inside in ("\t", "\r", "\n", "\r\n", "\x0b"):
+            for path in (f"/files/{inside}{token}", f"/files/{token[:10]}{inside}{token[10:]}"):
+                with self.subTest(path=path):
+                    self.assertEqual(_without_link_tokens(f"Exception while serving {path}"),
+                                     "Exception while serving /files/[redacted]")
+                    self.assertEqual(_without_link_tokens(f'"GET {path} HTTP/1.1" 200'),
+                                     '"GET /files/[redacted] HTTP/1.1" 200')
+        self.assertEqual(_without_link_tokens(f"OSError: /files/{token}\n  File x.py, line 1", many_lines=True),
+                         "OSError: /files/[redacted]\n  File x.py, line 1")
+        for kept in ('"GET /api/tasks/abc/files HTTP/1.1" 200', '"GET /static/app.js HTTP/1.1" 200',
+                     '"GET /files/ HTTP/1.1" 404', "profiles/abc and files", "/file/abc", "/files"):
+            with self.subTest(kept=kept):
+                self.assertEqual(_without_link_tokens(kept), kept)
+
 
 class PathLinkHidingTests(Fixture):
     def setUp(self):
@@ -731,6 +1067,138 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(response.status, 403)
 
 
+    def direct_link(self, session, attachment, confirm=True, csrf=True):
+        headers = {"Content-Type": "application/json"}
+        if session:
+            headers["Cookie"] = session[0]
+            if csrf:
+                headers["X-CSRF-Token"] = session[1]
+        body = json.dumps({"confirm": "direct_link"} if confirm else {}).encode()
+        return self.call("POST", f"/api/tasks/{self.task['id']}/attachments/{attachment['id']}/direct-link", body,
+                         headers)
+
+    def revoke(self, session, payload, csrf=True):
+        headers = {"Cookie": session[0], "Content-Type": "application/json"}
+        if csrf:
+            headers["X-CSRF-Token"] = session[1]
+        return self.call("DELETE", "/api/direct-links", json.dumps(payload).encode(), headers)
+
+    def active_links(self):
+        return self.db.execute("SELECT COUNT(*) FROM attachment_links WHERE revoked_at IS NULL").fetchone()[0]
+
+    def test_a_direct_link_is_confirmed_owner_only_and_downloads_without_a_session(self):
+        owner = self.login("owner@example.org", "correct horse battery")
+        viewer = self.login("viewer@example.org", "viewer password")
+        attachment = json.loads(self.post_file(owner)[1])["attachment"]
+        response, body = self.direct_link(owner, attachment, confirm=False)
+        self.assertEqual(response.status, 409)
+        answer = json.loads(body)
+        self.assertEqual((answer["confirm"], len(answer["impact"])), ("direct_link", 3))
+        self.assertEqual(self.direct_link(None, attachment)[0].status, 403)  # signed out
+        self.assertEqual(self.direct_link(owner, attachment, csrf=False)[0].status, 403)
+        self.assertEqual(self.direct_link(viewer, attachment)[0].status, 403)
+        self.assertEqual(self.active_links(), 0)
+        request_log = io.StringIO()
+        with contextlib.redirect_stderr(request_log):
+            response, body = self.direct_link(owner, attachment)
+            self.assertEqual(response.status, 201, body)
+            link = json.loads(body)["link"]
+            token = link["url"].removeprefix("/files/")
+            self.assertEqual(self.direct_link(owner, attachment)[0].status, 409)  # one active link per file
+            response, data = self.call("GET", link["url"])  # no cookie at all
+            self.assertEqual((response.status, data), (200, PDF))
+            self.assertEqual(response.getheader("Content-Type"), "application/octet-stream")
+            self.assertEqual(response.getheader("Content-Length"), str(len(PDF)))
+            self.assertEqual(response.getheader("Cache-Control"), "private, no-store")
+            self.assertEqual(response.getheader("X-Content-Type-Options"), "nosniff")
+            self.assertEqual(response.getheader("Referrer-Policy"), "no-referrer")
+            self.assertTrue(response.getheader("Content-Disposition").startswith("attachment;"))
+            self.assertEqual(self.call("GET", "/files/" + "x" * 43)[0].status, 404)
+            for path in ("/files/", f"/files/{token}/", f"/files/{token}/x", f"/api/files/{token}",
+                         f"/static/files/{token}", f"/files//{token}"):
+                response, data = self.call("GET", path)
+                with self.subTest(path=path):
+                    self.assertNotEqual(data, PDF)
+        logged = request_log.getvalue()
+        self.assertIn('"GET /files/[redacted] HTTP/1.1" 200', logged)
+        self.assertNotIn(token, logged)  # in no shape of path, a doubled slash included
+        downloads = self.db.execute(
+            "SELECT COUNT(*) FROM task_events WHERE event_type='attachment_direct_download'").fetchone()[0]
+        self.assertEqual(downloads, 1)
+        payload = {"task_id": self.task["id"], "link_id": link["id"], "reason": "sent to the wrong person"}
+        self.assertEqual(self.revoke(owner, payload, csrf=False)[0].status, 403)
+        self.assertEqual(self.revoke(viewer, payload)[0].status, 403)
+        self.assertEqual(self.revoke(owner, {**payload, "reason": " "})[0].status, 400)
+        self.assertEqual(self.revoke(owner, {"task_id": self.task["id"]})[0].status, 400)
+        self.assertEqual(self.revoke(owner, {**payload, "link_id": "missing"})[0].status, 404)
+        self.assertEqual(self.call("GET", link["url"])[0].status, 200)
+        self.assertEqual(self.revoke(owner, payload)[0].status, 200)
+        self.assertEqual(self.call("GET", link["url"])[0].status, 404)
+        self.assertEqual(self.revoke(owner, payload)[0].status, 404)
+        self.assertEqual(self.active_links(), 0)
+
+    def test_direct_links_are_owner_only_for_every_role_and_malformed_requests_answer_cleanly(self):
+        service = self.server.service
+        people = {}
+        for key, role, project_role in (("second", "member", None), ("manager", "member", "manager"),
+                                        ("member", "member", "member"), ("chairman", "chairman", None)):
+            people[key] = service.create_user(self.owner, f"{key}@example.org", key.title(), f"{key} password", role)
+            if project_role:
+                service.grant_project_access(self.owner, self.project["id"], people[key]["id"], project_role)
+        service.grant_secondary_owner(self.owner, people["second"]["id"], "backup owner")
+        self.db.execute("UPDATE users SET must_change_password=0")
+        owner = self.login("owner@example.org", "correct horse battery")
+        attachment = json.loads(self.post_file(owner)[1])["attachment"]
+        other = json.loads(self.post_file(owner, name="other.pdf")[1])["attachment"]
+        request_log = io.StringIO()
+        with contextlib.redirect_stderr(request_log):
+            response, body = self.direct_link(owner, attachment)
+            self.assertEqual(response.status, 201, body)
+            link = json.loads(body)["link"]
+            payload = {"task_id": self.task["id"], "link_id": link["id"], "reason": "not mine to revoke"}
+            for key in ("manager", "member", "chairman", "viewer"):
+                session = self.login(f"{key}@example.org", f"{key} password")
+                with self.subTest(role=key):
+                    self.assertEqual(self.direct_link(session, other)[0].status, 403)
+                    self.assertEqual(self.revoke(session, payload)[0].status, 403)
+            outsider = self.login("outsider@example.org", "outsider password")
+            self.assertIn(self.direct_link(outsider, other)[0].status, (403, 404))
+            self.assertIn(self.revoke(outsider, payload)[0].status, (403, 404))
+            self.assertEqual(self.active_links(), 1)
+            # A file that already has a link is refused outright: there is no warning to confirm.
+            response, body = self.direct_link(owner, attachment, confirm=False)
+            self.assertEqual(response.status, 409)
+            self.assertNotIn("confirm", json.loads(body))
+            # Only GET serves a direct link.
+            for method in ("POST", "HEAD", "PUT", "DELETE"):
+                response, data = self.call(method, link["url"])
+                with self.subTest(method=method):
+                    self.assertNotEqual(response.status, 200)
+                    self.assertNotEqual(data, PDF)
+            downloads = self.db.execute(
+                "SELECT COUNT(*) FROM task_events WHERE event_type='attachment_direct_download'").fetchone()[0]
+            self.assertEqual(downloads, 0)
+            # Any App Owner creates a link, and revokes another owner's.
+            second = self.login("second@example.org", "second password")
+            response, body = self.direct_link(second, other)
+            self.assertEqual(response.status, 201, body)
+            kept = json.loads(body)["link"]
+            self.assertEqual(self.revoke(second, payload)[0].status, 200)
+            # Ids or a reason that are not text, or a reason too long to keep, change nothing.
+            good = {"task_id": self.task["id"], "link_id": kept["id"], "reason": "tidying up"}
+            for change, status in (({"link_id": [kept["id"]]}, 404), ({"link_id": {"id": kept["id"]}}, 404),
+                                   ({"task_id": [self.task["id"]]}, 404), ({"reason": ["tidying up"]}, 400),
+                                   ({"reason": {"a": 1}}, 400), ({"reason": "x" * 501}, 400)):
+                with self.subTest(change=str(change)[:40]):
+                    self.assertEqual(self.revoke(owner, {**good, **change})[0].status, status)
+            self.assertEqual(self.active_links(), 1)
+            self.assertEqual(self.call("GET", kept["url"])[0].status, 200)
+            self.assertEqual(self.revoke(owner, {**good, "reason": "x" * 500})[0].status, 200)
+        self.assertEqual(self.active_links(), 0)
+        for created in (link, kept):
+            self.assertNotIn(created["url"].removeprefix("/files/"), request_log.getvalue())
+
+
 class WsgiStreamingTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -791,6 +1259,159 @@ class WsgiStreamingTests(unittest.TestCase):
         self.assertGreater(len(chunks), 1)
         self.assertEqual(b"".join(chunks), self.data)
         self.assertEqual(captured["headers"]["Content-Length"], str(len(self.data)))
+
+
+    def test_the_wsgi_request_log_never_carries_a_direct_link_token(self):
+        with self.assertLogs("astra.http", level="INFO") as logs:
+            _WSGIHandler.log_message(None, '"%s" %s', "GET /files/Abc-_1234567890abcdefghij HTTP/1.1", "200")
+        self.assertEqual(logs.output, ['INFO:astra.http:"GET /files/[redacted] HTTP/1.1" 200'])
+
+    def test_waitress_own_log_lines_never_carry_a_direct_link_token(self):
+        token = "Abc-_1234567890abcdefghij"
+        for name in ("waitress", "waitress.queue"):
+            for path in ("/files/" + token, "//files/" + token, "/files//" + token, "/%66iles/" + token):
+                with self.subTest(logger=name, path=path):
+                    logger = logging.getLogger(name)
+                    with self.assertLogs(name, level="INFO") as logs:
+                        logger.info("Client disconnected while serving %s" % path)
+                        logger.warning("Task queue depth is %d for %s", 3, path)
+                        logger.info("Serving on %s", "http://127.0.0.1:8765")
+                        try:
+                            raise OSError("could not send " + path)
+                        except OSError:
+                            logger.exception("Exception while serving %s" % path)
+                    logged = chr(10).join(logs.output)
+                    self.assertNotIn(token, logged)
+                    self.assertEqual(logged.count("[redacted]"), 4)  # three messages and the traceback
+                    self.assertIn("Task queue depth is 3 for ", logged)
+                    self.assertIn("Serving on http://127.0.0.1:8765", logged)
+                    self.assertIn("OSError: could not send ", logged)
+
+    def test_only_the_exact_path_serves_a_direct_link(self):
+        # Waitress hands Astra the decoded path, so a percent-encoded tab or line break arrives
+        # as the character itself. urlparse would drop it and find /files/<token> again; the
+        # adapter does not serve such a path, so none can be logged unredacted by a request
+        # that also got the file. (A raw control byte never gets this far: Waitress strips it.)
+        cookie, csrf = self.login()
+        captured, body = self.call(
+            "POST", f"/api/tasks/{self.task['id']}/attachments/{self.attachment['id']}/direct-link",
+            json.dumps({"confirm": "direct_link"}).encode(),
+            {"Cookie": cookie, "X-CSRF-Token": csrf, "Content-Type": "application/json"})
+        token = json.loads(b"".join(body))["link"]["url"].removeprefix("/files/")
+        spellings = [f"/files/{inside}{token}" for inside in ("\t", "\n", "\r", " ", "\x0b")]
+        spellings += [f"/files/{token[:10]}\t{token[10:]}", f"/files/{token}\n", f"/files/{token}\t", f"/fi\nles/{token}",
+                      f"/f\tiles/{token}", f"/files\r/{token}", f"/\nfiles/{token}", f"\t/files/{token}",
+                      f"/files/{token};p=1", f"/files/{token}/", f"//files/{token}", f"/files//{token}",
+                      f"/Files/{token}", f"/files/{token}#x"]
+        for path in spellings:
+            captured, body_iter = self.call("GET", path)
+            with self.subTest(path=path):
+                self.assertFalse(captured["status"].startswith("200"), captured["status"])
+                self.assertNotEqual(b"".join(body_iter), self.data)
+        captured, body_iter = self.call("GET", f"/files/{token}")  # the link itself still works
+        self.assertEqual((captured["status"][:3], b"".join(body_iter)), ("200", self.data))
+        body_iter.close()
+        db = connect(self.db_path)
+        try:
+            downloads = db.execute(
+                "SELECT COUNT(*) FROM task_events WHERE event_type='attachment_direct_download'").fetchone()[0]
+        finally:
+            db.close()
+        self.assertEqual(downloads, 1)
+
+    def test_a_direct_link_is_streamed_through_the_wsgi_adapter_without_a_session(self):
+        cookie, csrf = self.login()
+        captured, body = self.call(
+            "POST", f"/api/tasks/{self.task['id']}/attachments/{self.attachment['id']}/direct-link",
+            json.dumps({"confirm": "direct_link"}).encode(),
+            {"Cookie": cookie, "X-CSRF-Token": csrf, "Content-Type": "application/json"})
+        self.assertTrue(captured["status"].startswith("201"), b"".join(body))
+        url = json.loads(b"".join(body))["link"]["url"]
+        captured, body_iter = self.call("GET", url)
+        self.assertTrue(captured["status"].startswith("200"))
+        self.assertNotIsInstance(body_iter, list)
+        chunks = list(body_iter)
+        body_iter.close()
+        self.assertGreater(len(chunks), 1)
+        self.assertEqual(b"".join(chunks), self.data)
+        self.assertEqual(captured["headers"]["Content-Length"], str(len(self.data)))
+        self.assertEqual(captured["headers"]["Cache-Control"], "private, no-store")
+        captured, _ = self.call("GET", url + "x")
+        self.assertTrue(captured["status"].startswith("404"))
+        # A failure while serving a direct link is logged without the token.
+        with patch.object(AstraService, "open_direct_link", side_effect=RuntimeError("could not serve " + url)):
+            with self.assertLogs("astra.http", level="ERROR") as logs:
+                captured, _ = self.call("GET", url)
+        self.assertTrue(captured["status"].startswith("500"))
+        logged = chr(10).join(logs.output)
+        self.assertIn("/files/[redacted]", logged)
+        self.assertNotIn(url.removeprefix("/files/"), logged)
+
+
+class WaitressLogTests(unittest.TestCase):
+    """Real Waitress: a direct download that fails part-way is logged by Waitress itself, with
+    the request path in the message and the failure's own text in the traceback."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        patcher = patch.dict(os.environ, {"ASTRA_HOME": self.temp.name,
+                                          "ASTRA_UPLOAD_ROOT": os.path.join(self.temp.name, "up")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        db_path = Path(self.temp.name) / "astra.sqlite3"
+        app = create_wsgi_app(db_path)
+        db = connect(db_path)
+        self.addCleanup(db.close)
+        service = AstraService(db)
+        owner = service.create_initial_owner("owner@example.org", "Owner", "correct horse battery")
+        project = service.create_project(owner, "Hosted")
+        task = service.create_task(owner, {"project_id": project["id"], "title": "Deliver"})
+        data = b"%PDF-" + os.urandom(5 * storage_module.CHUNK_BYTES)
+        attachment = service.add_task_file(owner, task["id"], "big.pdf", "", io.BytesIO(data), len(data))
+        self.url = service.create_direct_link(owner, task["id"], attachment["id"], confirm="direct_link")["url"]
+        from waitress import create_server, wasyncore
+
+        before = set(threading.enumerate())
+        server = create_server(app, host="127.0.0.1", port=0, ident="Astra", channel_timeout=30,
+                               expose_tracebacks=False)
+        workers = [t for t in set(threading.enumerate()) - before if t.name.startswith("waitress-")]
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        self.port = server.effective_port
+
+        def stop():
+            # Close every socket from inside the loop thread; the emptied map ends server.run().
+            server.trigger.pull_trigger(lambda: wasyncore.close_all(server._map))
+            thread.join(timeout=5)
+            server.task_dispatcher.shutdown()
+            for worker in workers:
+                worker.join(timeout=5)
+        self.addCleanup(stop)
+
+    def test_a_download_that_fails_part_way_is_logged_without_the_token(self):
+        url = self.url
+
+        def failing(chunks):
+            yield chunks._handle.read(1024)
+            raise OSError("disk went away while sending " + url)
+        with patch.object(_FileChunks, "__iter__", failing):
+            with self.assertLogs("waitress", level="INFO") as logs:
+                connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+                try:
+                    connection.request("GET", url)
+                    with contextlib.suppress(http.client.HTTPException, OSError):
+                        connection.getresponse().read()
+                finally:
+                    connection.close()
+                deadline = time.monotonic() + 5
+                while not logs.records and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                time.sleep(0.2)  # anything Waitress logs straight after the first line
+        logged = chr(10).join(logs.output)
+        self.assertIn("Exception while serving /files/[redacted]", logged)
+        self.assertIn("disk went away while sending /files/[redacted]", logged)
+        self.assertNotIn(url.removeprefix("/files/"), logged)
 
 
 if __name__ == "__main__":

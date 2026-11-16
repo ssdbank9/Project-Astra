@@ -1,6 +1,7 @@
 """MXY7BG slice 1 in the browser code: how each attachment kind is drawn, which forms an owner
 gets, and how an upload is sent. Slice 2: the upload form states the installation's limit and
-the admin Attachments section loads and saves the App Owner's policy."""
+the admin Attachments section loads and saves the App Owner's policy. Slice 3: the App Owner's
+direct link controls, the warning before one is created, the link shown once and its revocation."""
 import json
 import shutil
 import subprocess
@@ -17,6 +18,8 @@ globalThis.runProbe=async()=>{
   const task={id:'t 1',permissions:{can_manage_files:true,can_link_paths:false},final_results:[],attachments:[
     {id:'l1',kind:'link',display_name:'Spec <b>',url:'https://example.org/a?b="c"',added_at:'2026-01-01T00:00:00Z'},
     {id:'f1',kind:'file',display_name:'report.pdf',size_bytes:2097152,added_at:'2026-01-01T00:00:00Z'},
+    {id:'f2',kind:'file',display_name:'shared <b>.pdf',size_bytes:5,added_at:'2026-01-01T00:00:00Z',
+      direct_link:{id:'L 1',created_at:'2026-01-02T00:00:00Z',created_by_name:'<i>Owner'}},
     {id:'p1',kind:'path',display_name:'old.pdf',path:'',path_hidden:true,added_at:'2026-01-01T00:00:00Z'},
     {id:'p2',kind:'path',display_name:'desk.pdf',path:'C:\\\\docs\\\\desk.pdf',added_at:'2026-01-01T00:00:00Z'}]};
   const html=buildAttachments(task);
@@ -46,6 +49,142 @@ globalThis.runProbe=async()=>{
   await form._submit({preventDefault(){},currentTarget:form});
   const admin={loaded,put,saved:nodes['attachment-settings-status'].textContent,error:nodes['attachment-settings-error'].textContent,ceilingAfter:nodes['attachment-ceiling'].textContent};
   document.querySelector=qs2;
+  // Slice 3: the direct link flow, driven through the real functions against a stub panel that
+  // only hands out a control the panel's markup really contains.
+  const kids={},focused=[];
+  const panel={hidden:true,_html:'',get innerHTML(){return this._html},set innerHTML(h){this._html=h;for(const k in kids)delete kids[k]},
+    querySelector(s){if(!this._html.includes('id="'+s.slice(1)+'"'))return null;return kids[s]||(kids[s]={textContent:'',_l:{},addEventListener(k,f){this._l[k]=f},focus(){focused.push(s)}})}};
+  const attErr={textContent:'',classList:{remove(){}}};
+  document.querySelector=s=>s==='#direct-link-panel'?panel:s==='#attachment-error'?attErr:qs2(s);
+  const calls=[];let refuse='',hold=null;
+  api=async(path,opts)=>{const body=JSON.parse(opts.body);calls.push({path,method:opts.method,body});
+    if(hold)await hold;
+    if(refuse){const e=new Error(refuse);e.status=403;throw e}
+    if(opts.method==='POST'&&!body.confirm){const e=new Error('Anyone <i>with the link');e.status=409;e.confirm='direct_link';e.impact=['one <b>','two','three'];throw e}
+    if(opts.method==='POST')return {link:{id:'L new',url:'/files/TOK-1'}};
+    return {ok:true}};
+  location.origin='https://astra.example';
+  const copied=[];let clipFails=false;
+  Object.defineProperty(globalThis,'navigator',{value:{clipboard:{writeText:async t=>{if(clipFails)throw new Error('denied');copied.push(t)}}},configurable:true,writable:true});
+  const reopened=[];openDetail=async id=>{reopened.push(id)};
+  detailTaskId='t 1';
+  const trigger={focus(){focused.push('trigger')}};
+  const dtask={id:'t 1',permissions:{can_manage_files:true},attachments:[{id:'f 2',kind:'file',direct_link:{id:'L new'}}]},dname='shared <b>.pdf';
+  await createDirectLink(dtask,'f 2',dname,undefined,trigger);
+  const confirmHtml=panel.innerHTML,confirmHidden=panel.hidden;
+  panel.querySelector('#direct-link-cancel')._l.click();
+  const cancelled={html:panel.innerHTML,hidden:panel.hidden};
+  await createDirectLink(dtask,'f 2',dname,undefined,trigger);
+  await panel.querySelector('#direct-link-confirm')._l.click();
+  const linkHtml=panel.innerHTML,linkHidden=panel.hidden,createFocus=focused.slice();
+  await panel.querySelector('#direct-link-copy')._l.click();
+  const copiedStatus=panel.querySelector('#direct-link-status').textContent;
+  clipFails=true;await panel.querySelector('#direct-link-copy')._l.click();
+  const failedStatus=panel.querySelector('#direct-link-status').textContent;
+  // Until Done, a redraw of the task puts the waiting link back without moving the focus;
+  // another task's redraw shows nothing of it.
+  panel.innerHTML='';panel.hidden=true;
+  await wireAttachments({...dtask,id:'other'});
+  const otherTask=panel.innerHTML;
+  await wireAttachments(dtask);
+  const redrawn={same:panel.innerHTML===linkHtml,hidden:panel.hidden,focusMoved:focused.length!==createFocus.length};
+  const done=panel.querySelector('#direct-link-done')._l.click;
+  await done();
+  const afterDone={html:panel.innerHTML,hidden:panel.hidden};
+  await wireAttachments(dtask);
+  afterDone.redraw=panel.innerHTML;
+  // Done pressed after the user moved to another task reopens nothing.
+  detailTaskId='other';await done();detailTaskId='t 1';
+  askRevokeDirectLink(dtask,'L 1',dname,trigger);
+  const revokeHtml=panel.innerHTML;
+  panel.querySelector('#revoke-link-cancel')._l.click();
+  const revokeCancelled={html:panel.innerHTML,hidden:panel.hidden};
+  askRevokeDirectLink(dtask,'L 1',dname,trigger);
+  const revokeFocus=focused.slice(createFocus.length);
+  const submit=panel.querySelector('#revoke-link-form')._l.submit;
+  const reason=value=>({preventDefault(){},target:{elements:{reason:{value}}}});
+  await submit(reason('sent wrongly'));
+  refuse='<b>Only the App Owner';await submit(reason('again'));
+  const refused=attErr.textContent;
+  refuse='';detailTaskId='other';await submit(reason('later'));
+  const cleared=attErr.textContent;
+  detailTaskId='t 1';refuse='Not <i>allowed';await createDirectLink(dtask,'f 2',dname);
+  const createRefused=attErr.textContent,panelKept=panel.innerHTML===revokeHtml;
+  const mainCalls=calls.slice(),mainReopened=reopened.slice();
+  // Answers that arrive after the user moved to another task draw nothing there. A link created
+  // meanwhile is shown when its task is back on screen, and is dropped for good once the viewer
+  // can no longer manage files or the link is no longer on the file.
+  refuse='';attErr.textContent='';panel.innerHTML='';panel.hidden=true;detailTaskId='other';
+  await createDirectLink(dtask,'f 2',dname);
+  const away={ask:panel.innerHTML};
+  await createDirectLink(dtask,'f 2',dname,'direct_link');
+  away.created=panel.innerHTML;
+  refuse='late <b>';await createDirectLink(dtask,'f 2',dname);refuse='';
+  away.refused=attErr.textContent;
+  detailTaskId='t 1';await wireAttachments(dtask);
+  away.back=panel.innerHTML===linkHtml;
+  panel.innerHTML='';await wireAttachments({...dtask,permissions:{can_manage_files:false}});
+  away.demoted=panel.innerHTML;
+  await wireAttachments(dtask);
+  away.demotedForGood=panel.innerHTML;
+  await createDirectLink(dtask,'f 2',dname,'direct_link');
+  away.shownAgain=panel.innerHTML===linkHtml;
+  // A redraw that does not carry the link may hold data read before the link was made: Astra
+  // looks once more, and drops the link only when a second look does not carry it either.
+  const gone={...dtask,attachments:[{id:'f 2',kind:'file'},{id:'f 3',kind:'file',direct_link:{id:'L other'}}]};
+  detailTaskId='other';let seen=reopened.length;panel.innerHTML='';await wireAttachments(gone);
+  away.elsewhere={html:panel.innerHTML,lookedAgain:reopened.slice(seen)};
+  detailTaskId='t 1';seen=reopened.length;await wireAttachments(gone);
+  away.firstMiss={html:panel.innerHTML,lookedAgain:reopened.slice(seen)};
+  await wireAttachments(dtask);
+  away.staleSurvived=panel.innerHTML===linkHtml;
+  panel.innerHTML='';await wireAttachments(gone);
+  away.unlinked=panel.innerHTML;
+  await wireAttachments(dtask);
+  away.unlinkedForGood=panel.innerHTML;
+  // The buttons drawn on the task reach those functions.
+  refuse='';calls.length=0;detailTaskId='t 1';focused.length=0;
+  document.querySelector('#detail-body').innerHTML=html;
+  await wireAttachments(task);
+  const createButton=document.querySelectorAll('#detail-body [data-direct-link]')[0],revokeButton=document.querySelectorAll('#detail-body [data-revoke-link]')[0];
+  createButton.focus=()=>{focused.push('create button')};revokeButton.focus=()=>{focused.push('revoke button')};
+  const off=()=>[createButton.disabled===true,revokeButton.disabled===true];
+  await createButton._l.click[0]();
+  const wired={create:calls[0],createPanel:panel.innerHTML,offWhileAsking:off()};
+  panel.querySelector('#direct-link-cancel')._l.click();
+  revokeButton._l.click[0]();
+  wired.revokePanel=panel.innerHTML;
+  panel.querySelector('#revoke-link-cancel')._l.click();
+  wired.focus=focused.slice();
+  revokeButton._l.click[0]();
+  await panel.querySelector('#revoke-link-form')._l.submit(reason('wired'));
+  wired.revoke=calls[1];
+  // One request at a time: while the confirmed request is on its way the link buttons are off
+  // and another click, on the task or on the warning, sends nothing.
+  await createButton._l.click[0]();
+  let release;hold=new Promise(r=>{release=r});
+  const confirmButton=panel.querySelector('#direct-link-confirm');
+  const sending=confirmButton._l.click();
+  const sentSoFar=calls.length;
+  await createButton._l.click[0]();await confirmButton._l.click();
+  wired.inFlight={off:off(),extraCalls:calls.length-sentSoFar};
+  hold=null;release();await sending;
+  // While the new link waits to be copied the link buttons stay off; Done turns them on again.
+  wired.shown=panel.innerHTML===linkHtml.replace('shared &lt;b&gt;.pdf','report.pdf');
+  wired.offWhileShown=off();
+  // A redraw draws new buttons: they are off as well while the link waits.
+  const linked={...task,attachments:task.attachments.map(a=>a.id==='f1'?{...a,direct_link:{id:'L new',created_at:'2026-01-03T00:00:00Z',created_by_name:'Owner'}}:a)};
+  document.querySelector('#detail-body').innerHTML=buildAttachments(linked);
+  await wireAttachments(linked);
+  const redrawnButtons=()=>[...document.querySelectorAll('#detail-body [data-revoke-link]')];
+  wired.offAfterRedraw=redrawnButtons().map(b=>b.disabled===true);
+  await panel.querySelector('#direct-link-done')._l.click();
+  wired.offAfterDone=redrawnButtons().map(b=>b.disabled===false);
+  document.querySelector('#detail-body').innerHTML='';
+  const direct={confirmHtml,confirmHidden,cancelled,linkHtml,linkHidden,copied,copiedStatus,failedStatus,reopened:mainReopened,revokeHtml,
+    refused,cleared,createRefused,panelKept,calls:mainCalls,wired,createFocus,revokeFocus,otherTask,redrawn,afterDone,revokeCancelled,away,
+    labels:[EVENT_LABELS.direct_link_created,EVENT_LABELS.direct_link_revoked,EVENT_LABELS.attachment_direct_download]};
+  document.querySelector=qs2;
   state.projects=[];state.entities=[];
   const qs=document.querySelector.bind(document);document.querySelector=s=>qs(s)||qs('#final-results-body');
   const stamp='2026-01-01T00:00:00Z',base={source_type:'attachment',title:'T',task_id:'t 1',task_title:'Deliver',project_name:'P',marked_at:stamp};
@@ -55,7 +194,7 @@ globalThis.runProbe=async()=>{
     {...base,attachment_id:'p1',attachment_kind:'path',attachment_path:''},
     {...base,attachment_id:'p2',attachment_kind:'path',attachment_path:'C:\\\\docs\\\\desk.pdf'}],{});
   const finals=document.querySelector("#final-results-body").innerHTML;
-  return {html,desktop,viewer,raised,sent,error,finals,admin};
+  return {html,desktop,viewer,raised,sent,error,finals,admin,direct};
 };
 `;
 (0,eval)(src+probe);
@@ -114,6 +253,110 @@ class HostedAttachmentUiTests(unittest.TestCase):
         self.assertIn('Saved. Uploads up to 60 MB', admin['saved'])
         self.assertNotIn('saved limit of', admin['ceilingAfter'])
         self.assertEqual(admin['error'], '<i>unreadable')  # the server's notice, as text
+
+    def test_only_the_owner_gets_direct_link_controls_and_everyone_sees_that_one_exists(self):
+        html, viewer = self.out['html'], self.out['viewer']
+        # One uploaded file without a link, one with: links and local paths never get a control.
+        self.assertEqual((html.count('data-direct-link='), html.count('data-revoke-link=')), (1, 1))
+        self.assertIn('data-direct-link="f1" data-att-name="report.pdf">Create direct link</button>', html)
+        self.assertIn('data-revoke-link="L 1" data-att-name="shared &lt;b&gt;.pdf">Revoke direct link</button>', html)
+        for text in (html, viewer):
+            self.assertEqual(text.count('Direct link active since'), 1)
+            self.assertIn(' by &lt;i&gt;Owner</small>', text)
+            self.assertNotIn('<i>Owner', text)
+            self.assertIn('<div id="direct-link-panel" class="direct-link-panel" hidden></div>', text)
+        self.assertNotIn('data-direct-link=', viewer)
+        self.assertNotIn('data-revoke-link=', viewer)
+
+    def test_creating_a_direct_link_warns_first_then_shows_the_link_once(self):
+        direct = self.out['direct']
+        self.assertFalse(direct['confirmHidden'])
+        self.assertIn('<h4 id="direct-link-title" tabindex="-1">Create a direct link to shared &lt;b&gt;.pdf?</h4>',
+                      direct['confirmHtml'])
+        self.assertIn('<p>Anyone &lt;i&gt;with the link</p>', direct['confirmHtml'])
+        self.assertIn('<li>one &lt;b&gt;</li><li>two</li><li>three</li>', direct['confirmHtml'])
+        self.assertEqual(direct['cancelled'], {'html': '', 'hidden': True})
+        path = '/api/tasks/t%201/attachments/f%202/direct-link'
+        self.assertEqual(direct['calls'][:3], [  # asked, cancelled, asked again, then confirmed
+            {'path': path, 'method': 'POST', 'body': {}},
+            {'path': path, 'method': 'POST', 'body': {}},
+            {'path': path, 'method': 'POST', 'body': {'confirm': 'direct_link'}}])
+        self.assertFalse(direct['linkHidden'])
+        self.assertIn('<h4 id="direct-link-title" tabindex="-1">Direct link to shared &lt;b&gt;.pdf</h4>',
+                      direct['linkHtml'])
+        self.assertIn('<code class="direct-link-url" id="direct-link-url">https://astra.example/files/TOK-1</code>',
+                      direct['linkHtml'])
+        self.assertIn('cannot show it again', direct['linkHtml'])
+        self.assertEqual(direct['copied'], ['https://astra.example/files/TOK-1'])
+        self.assertEqual((direct['copiedStatus'], direct['failedStatus']),
+                         ('Copied.', 'Select the link and copy it yourself.'))
+        # A refusal is shown as text and leaves the panel as it was.
+        self.assertEqual(direct['calls'][6], {'path': path, 'method': 'POST', 'body': {}})
+        self.assertEqual((direct['createRefused'], direct['panelKept']), ('Not <i>allowed', True))
+
+    def test_revoking_asks_for_a_reason_and_reopens_the_task_only_when_it_worked(self):
+        direct = self.out['direct']
+        self.assertIn('<form id="revoke-link-form"><h4>Revoke the direct link to shared &lt;b&gt;.pdf</h4>',
+                      direct['revokeHtml'])
+        self.assertIn('<input name="reason" id="revoke-link-reason" maxlength="500" required>', direct['revokeHtml'])
+        self.assertEqual(direct['calls'][3:6], [
+            {'path': '/api/direct-links', 'method': 'DELETE',
+             'body': {'task_id': 't 1', 'link_id': 'L 1', 'reason': reason}}
+            for reason in ('sent wrongly', 'again', 'later')])
+        self.assertEqual(len(direct['calls']), 7)
+        # Done, then the revoke that worked while the task was open; not the refused one, and
+        # neither a Done nor a revoke that finished after the user had moved to another task.
+        self.assertEqual(direct['reopened'], ['t 1', 't 1'])
+        self.assertEqual((direct['refused'], direct['cleared']), ('<b>Only the App Owner', ''))
+
+    def test_the_buttons_on_the_task_reach_the_direct_link_flow(self):
+        wired = self.out['direct']['wired']
+        self.assertEqual(wired['create'], {'path': '/api/tasks/t%201/attachments/f1/direct-link', 'method': 'POST',
+                                           'body': {}})
+        self.assertIn('id="direct-link-confirm"', wired['createPanel'])
+        self.assertIn('id="revoke-link-form"', wired['revokePanel'])
+        self.assertEqual(wired['revoke'], {'path': '/api/direct-links', 'method': 'DELETE',
+                                           'body': {'task_id': 't 1', 'link_id': 'L 1', 'reason': 'wired'}})
+
+    def test_focus_moves_into_the_panel_and_back_to_the_button_that_opened_it(self):
+        direct = self.out['direct']
+        # The warning, cancel, the warning again, then the link itself.
+        self.assertEqual(direct['createFocus'],
+                         ['#direct-link-title', 'trigger', '#direct-link-title', '#direct-link-title'])
+        self.assertEqual(direct['revokeFocus'], ['#revoke-link-reason', 'trigger', '#revoke-link-reason'])
+        self.assertEqual(direct['revokeCancelled'], {'html': '', 'hidden': True})
+        self.assertEqual(direct['wired']['focus'],
+                         ['#direct-link-title', 'create button', '#revoke-link-reason', 'revoke button'])
+
+    def test_a_link_waiting_to_be_copied_survives_a_redraw_until_done(self):
+        direct, wired = self.out['direct'], self.out['direct']['wired']
+        self.assertEqual(direct['otherTask'], '')  # another task's redraw shows nothing of it
+        self.assertEqual(direct['redrawn'], {'same': True, 'hidden': False, 'focusMoved': False})
+        self.assertEqual(direct['afterDone'], {'html': '', 'hidden': True, 'redraw': ''})
+        # While it waits the other link buttons are off, so no click can replace the panel.
+        self.assertTrue(wired['shown'])
+        self.assertEqual((wired['offWhileAsking'], wired['offWhileShown'], wired['offAfterRedraw'],
+                          wired['offAfterDone']), ([False, False], [True, True], [True, True], [True, True]))
+
+    def test_a_link_request_on_its_way_cannot_be_overtaken(self):
+        # Another file's warning arriving after the first link would replace the only panel
+        # that ever shows it: until the answer is back, no other link request is sent.
+        self.assertEqual(self.out['direct']['wired']['inFlight'], {'off': [True, True], 'extraCalls': 0})
+
+    def test_an_answer_for_a_task_no_longer_on_screen_draws_nothing_there(self):
+        self.assertEqual(self.out['direct']['away'], {
+            'ask': '', 'created': '', 'refused': '',  # nothing drawn on the other task
+            'back': True,  # the link made meanwhile is shown once its task is back
+            'demoted': '', 'demotedForGood': '',  # not to someone who can no longer manage files
+            'shownAgain': True,
+            'elsewhere': {'html': '', 'lookedAgain': []},  # a task that is not on screen is never reopened
+            # A redraw without the link may be older than the link: Astra looks once more
+            'firstMiss': {'html': '', 'lookedAgain': ['t 1']}, 'staleSurvived': True,
+            'unlinked': '', 'unlinkedForGood': ''})  # and drops it when the second look lacks it too
+
+    def test_the_task_history_names_the_direct_link_events(self):
+        self.assertEqual(self.out['direct']['labels'],
+                         ['Direct link created', 'Direct link revoked', 'Downloaded through a direct link'])
 
     def test_a_file_downloads_through_astra(self):
         self.assertIn('<a href="/api/tasks/t%201/attachments/f1/download" download>', self.out['html'])

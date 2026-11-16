@@ -2,6 +2,21 @@
 # after replacing <name> with the DuckDNS subdomain Aly chose. Needs Caddy
 # 2.10.0 or newer for request_body; run `caddy validate` before reloading.
 # Holds no secret: Caddy obtains and renews the certificate itself.
+{
+	# Caddy's own log (journald) records the request of any error it handles,
+	# a 502 while Astra is down for one, so it gets the same redaction of a
+	# direct link's token as the access log below. Not yet run in a real
+	# Caddy: runbook stage 9 checks both logs before any link is created.
+	log {
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "(?i)^.*(/|%2f)(f|%[46]6)(i|%[46]9)(l|%[46]c)(e|%[46]5)(s|%[57]3)(/|%2f).+$" "/files/redacted"
+			}
+		}
+	}
+}
+
 <name>.duckdns.org {
 	encode gzip
 
@@ -37,13 +52,22 @@
 	# The only record of real client addresses: Waitress sees every request as
 	# 127.0.0.1, and Astra ignores forwarded-address headers. JSON lines feed
 	# the optional fail2ban filter (runbook stage 10); files roll at 10 MiB and
-	# are kept for up to 30 days.
+	# are kept for up to 30 days. A direct link's token (/files/<token>) is the
+	# whole credential, so the filter keeps it out of the log: a URI that reaches
+	# /files/<anything>, in any spelling Waitress would decode to it (percent-
+	# encoded letters or slashes, a doubled slash, an absolute URL), is logged
+	# as /files/redacted and nothing else of it is kept.
 	log {
 		output file /var/log/caddy/astra-access.log {
 			roll_size 10MiB
 			roll_keep 10
 			roll_keep_for 720h
 		}
-		format json
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "(?i)^.*(/|%2f)(f|%[46]6)(i|%[46]9)(l|%[46]c)(e|%[46]5)(s|%[57]3)(/|%2f).+$" "/files/redacted"
+			}
+		}
 	}
 }

@@ -129,7 +129,27 @@ class DeployCaddyTests(unittest.TestCase):
         text = caddy_text()
         self.assertEqual(re.findall(r"^(\S+)\s*\{\s*$", text, re.M), ["<name>.duckdns.org"])
         self.assertRegex(text, r"output file /var/log/caddy/astra-access\.log")
-        self.assertRegex(text, r"(?m)^\s*format json\s*$")
+        self.assertRegex(text, r"(?m)^\s*wrap json\s*$")
+        # MXY7BG slice 3: a direct link's token never reaches the access log.
+        filters = re.findall(r'(?m)^\s*request>uri regexp "([^"]+)" "([^"]+)"\s*$', text)
+        # Twice, and the same: once for Caddy's own log (the global block, before the site),
+        # which records the request of an error such as a 502, and once for the access log.
+        own_log, site = text.split("\n<name>.duckdns.org {", 1)
+        self.assertEqual((own_log.count("request>uri regexp"), site.count("request>uri regexp")), (1, 1))
+        self.assertRegex(own_log, r"(?m)^\{\n(\t#[^\n]*\n)*\tlog \{\n\t\tformat filter \{\n\t\t\twrap json\n")
+        self.assertEqual(filters[0], filters[1])
+        pattern, replacement = filters[0]
+        # Every spelling Waitress would decode to /files/<token>, and a token carried anywhere
+        # else in the URI, is logged as /files/redacted and nothing more.
+        for uri in ("/files/Abc-_123", "/files/Abc-_123?x=1", "/files//Abc-_123", "/files/x/Abc-_123/y",
+                    "//files/Abc-_123", "/%66iles/Abc-_123", "/f%69les/Abc-_123", "/fi%6Ces/Abc-_123",
+                    "/fil%65s/Abc-_123", "/file%73/Abc-_123", "/files%2FAbc-_123", "/files%2fAbc-_123",
+                    "%2Ffiles/Abc-_123", "/%66%69%6c%65%73%2fAbc-_123", "/FILES/Abc-_123", "/%46%49%4C%45%53/Abc-_123",
+                    "http://host/files/Abc-_123", "/x?next=/files/Abc-_123"):
+            self.assertEqual(re.sub(pattern, replacement, uri), "/files/redacted", uri)
+        for uri in ("/files/", "/api/login", "/api/tasks/abc/files", "/api/tasks/abc/files?x=1", "/static/app.js",
+                    "/profiles/abc"):
+            self.assertEqual(re.sub(pattern, replacement, uri), uri)
         for directive in ("roll_size", "roll_keep", "roll_keep_for"):
             self.assertRegex(text, rf"(?m)^\s*{directive}\s+\S+\s*$")
 

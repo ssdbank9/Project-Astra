@@ -8,7 +8,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 
 class SchemaMigrationRefused(RuntimeError):
@@ -901,6 +901,31 @@ def _migrate_v24(connection: sqlite3.Connection) -> None:
     """)
 
 
+def _migrate_v25(connection: sqlite3.Connection) -> None:
+    """v24 -> v25: App Owner-only permanent direct links to managed uploads (MXY7BG slice 3,
+    Owner Items 15-16 on 6G89SJ).
+
+    A link is a random token the owner is shown once; only its SHA-256 is stored, so the
+    database never holds anything that downloads a file. One active link per attachment;
+    revocation keeps the row with who revoked it, when and why.
+    """
+    _execute_statements(connection, """
+        CREATE TABLE attachment_links (
+            id TEXT PRIMARY KEY,
+            attachment_id TEXT NOT NULL REFERENCES task_attachments(id) ON DELETE CASCADE,
+            task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            token_hash TEXT NOT NULL UNIQUE,
+            created_by TEXT NOT NULL REFERENCES users(id),
+            created_at TEXT NOT NULL,
+            revoked_by TEXT REFERENCES users(id),
+            revoked_at TEXT,
+            revoke_reason TEXT
+        );
+        CREATE UNIQUE INDEX idx_attachment_links_active ON attachment_links(attachment_id)
+            WHERE revoked_at IS NULL;
+    """)
+
+
 # The ordered schema history: (version, step). migrate() runs every step whose version
 # is above the database's user_version, each in its own transaction with its bump.
 # Append new steps here and raise SCHEMA_VERSION; never edit or reorder a shipped step.
@@ -929,4 +954,5 @@ MIGRATION_STEPS = (
     (22, _migrate_v22),
     (23, _migrate_v23),
     (24, _migrate_v24),
+    (25, _migrate_v25),
 )

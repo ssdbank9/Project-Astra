@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import secrets
 import logging
 import os
 import re
@@ -140,7 +141,8 @@ LOCK_GUARDED_KINDS = frozenset({
 # Owner decision Item 2 on 6G89SJ: the App Owner hears of every attachment removal outcome,
 # including their own, so a single-owner install is told too. Other owner actions are
 # still not self-notified (Z24KVH).
-SELF_NOTICE_KINDS = frozenset({"attachment_removal_blocked", "final_result_unmarked", "attachment_removed"})
+SELF_NOTICE_KINDS = frozenset({"attachment_removal_blocked", "final_result_unmarked", "attachment_removed",
+                               "direct_link_created", "direct_link_revoked"})
 
 # Approved baseline entities from the handoff (Section 4). Seeded only on explicit
 # owner request; never injected automatically.
@@ -4385,6 +4387,119 @@ class AstraService:
             raise
         return self._get_attachment(task_id, attachment_id)
 
+    # MXY7BG Items 15-16 (slice 3): a permanent direct link downloads one managed upload
+    # without a session, so it bypasses task authorization. Only the App Owner creates one,
+    # after an explicit confirmation; creation, revocation and every download through it are
+    # audited on the task, and every owner is told of creation and revocation. Only the
+    # token's SHA-256 is stored: the token is shown once and never kept.
+    DIRECT_LINK_CONFIRM = "direct_link"
+    DIRECT_LINK_IMPACT = (
+        "Anyone who has the link can download the file without signing in.",
+        "Task access is not checked for a direct link; only revoking it stops downloads.",
+        "Creation, revocation and every download through it are recorded; every App Owner is told.",
+    )
+    DIRECT_LINK_REASON_MAX = 500
+    DIRECT_LINK_TAKEN = "This file already has a direct link. Revoke it before creating another."
+
+    @staticmethod
+    def _direct_link_hash(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def _active_direct_link(self, attachment_id: str):
+        return self.db.execute(
+            "SELECT l.id, l.created_at, l.created_by, u.display_name created_by_name FROM attachment_links l"
+            " LEFT JOIN users u ON u.id=l.created_by WHERE l.attachment_id=? AND l.revoked_at IS NULL",
+            (attachment_id,),
+        ).fetchone()
+
+    def _file_attachment(self, task_id: str, attachment_id: str):
+        row = self.db.execute(
+            "SELECT id, display_name, kind, storage_key, size_bytes FROM task_attachments WHERE id=? AND task_id=?",
+            (attachment_id, task_id),
+        ).fetchone()
+        if not row or row["kind"] != "file" or not row["storage_key"]:
+            raise KeyError("File not found.")
+        return row
+
+    def create_direct_link(self, actor: dict, task_id: str, attachment_id: str, confirm=None) -> dict:
+        self._require_file_manager(actor, task_id, {"kind": "direct_link", "attachment_id": attachment_id})
+        row = self._file_attachment(task_id, attachment_id)
+        # Refused before the warning is shown: a second link could never be confirmed.
+        if self._active_direct_link(attachment_id):
+            raise Conflict(self.DIRECT_LINK_TAKEN)
+        if confirm != self.DIRECT_LINK_CONFIRM:
+            raise NeedsConfirmation(
+                f"A direct link to “{row['display_name']}” lets anyone who has it download the file without "
+                f"signing in, until you revoke it. Create it?", self.DIRECT_LINK_CONFIRM, self.DIRECT_LINK_IMPACT)
+        token = secrets.token_urlsafe(32)
+        link_id = new_id()
+        with self._actor_transaction(actor):
+            # Looked at again inside the transaction: since the checks above the file may have
+            # been removed, or another owner may have linked it.
+            row = self._file_attachment(task_id, attachment_id)
+            if self._active_direct_link(attachment_id):
+                raise Conflict(self.DIRECT_LINK_TAKEN)
+            self.db.execute(
+                "INSERT INTO attachment_links(id,attachment_id,task_id,token_hash,created_by,created_at)"
+                " VALUES(?,?,?,?,?,?)",
+                (link_id, attachment_id, task_id, self._direct_link_hash(token), actor["id"], now_text()),
+            )
+            self._event(task_id, actor["id"], "direct_link_created", None,
+                        {"attachment_id": attachment_id, "display_name": row["display_name"], "link_id": link_id},
+                        None)
+        return {"id": link_id, "attachment_id": attachment_id, "display_name": row["display_name"],
+                "url": f"/files/{token}"}
+
+    def revoke_direct_link(self, actor: dict, task_id: str, link_id: str, reason) -> None:
+        # The ids and the reason arrive from a JSON body: anything that is not text is refused
+        # here, before it can reach a query or be stored as the text of a list.
+        if not isinstance(task_id, str) or not isinstance(link_id, str):
+            raise KeyError("Direct link not found.")
+        self._require_file_manager(actor, task_id, {"kind": "direct_link_revoke", "link_id": link_id[:64]})
+        if reason is not None and not isinstance(reason, str):
+            raise ValueError("Give the reason for revoking the link as text.")
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValueError("Give a reason for revoking the link; it is recorded on the task.")
+        if len(reason) > self.DIRECT_LINK_REASON_MAX:
+            raise ValueError(f"Keep the reason to {self.DIRECT_LINK_REASON_MAX} characters or fewer.")
+        with self._actor_transaction(actor):
+            row = self.db.execute(
+                "SELECT l.id, l.attachment_id, a.display_name FROM attachment_links l"
+                " JOIN task_attachments a ON a.id=l.attachment_id"
+                " WHERE l.id=? AND l.task_id=? AND l.revoked_at IS NULL", (link_id, task_id),
+            ).fetchone()
+            if not row:
+                raise KeyError("Direct link not found.")
+            self.db.execute("UPDATE attachment_links SET revoked_by=?, revoked_at=?, revoke_reason=? WHERE id=?",
+                            (actor["id"], now_text(), reason, link_id))
+            self._event(task_id, actor["id"], "direct_link_revoked", None,
+                        {"attachment_id": row["attachment_id"], "display_name": row["display_name"],
+                         "link_id": link_id}, reason)
+
+    def open_direct_link(self, token):
+        """The file behind an active direct link, for anyone who holds the token (Item 15).
+        No session and no task check, by the owner's explicit decision; the download is
+        audited on the task under the owner who created the link."""
+        if not isinstance(token, str) or not 20 <= len(token) <= 128:
+            raise KeyError("File not found.")
+        row = self.db.execute(
+            "SELECT l.id link_id, l.task_id, l.created_by, a.display_name, a.kind, a.storage_key, a.size_bytes"
+            " FROM attachment_links l JOIN task_attachments a ON a.id=l.attachment_id"
+            " WHERE l.token_hash=? AND l.revoked_at IS NULL", (self._direct_link_hash(token),),
+        ).fetchone()
+        if not row or row["kind"] != "file" or not row["storage_key"]:
+            raise KeyError("File not found.")
+        handle = active_storage().open(row["storage_key"])
+        try:
+            self._event(row["task_id"], row["created_by"], "attachment_direct_download", None,
+                        {"link_id": row["link_id"], "display_name": row["display_name"]}, "via direct link",
+                        notify=False)
+        except BaseException:
+            handle.close()
+            raise
+        return {"display_name": row["display_name"], "size_bytes": row["size_bytes"]}, handle
+
     # MXY7BG Item 14: every download rechecks task access immediately before the transfer and
     # is audited, both when it is served and when it is refused.
     def open_task_file(self, actor: dict, task_id: str, attachment_id: str):
@@ -4443,6 +4558,13 @@ class AstraService:
                 "SELECT id, title FROM final_results WHERE attachment_id=?", (attachment_id,)
             ).fetchone()
             if not final_result:
+                # MXY7BG slice 3: an active direct link dies with its file; say so on the task
+                # before the cascade removes the row.
+                link = self._active_direct_link(attachment_id)
+                if link:
+                    self._event(task_id, actor["id"], "direct_link_revoked", None,
+                                {"attachment_id": attachment_id, "display_name": row["display_name"],
+                                 "link_id": link["id"]}, "attachment removed")
                 self.db.execute("DELETE FROM task_attachments WHERE id=? AND task_id=?", (attachment_id, task_id))
                 # Removing a path link never touches the file on disk.
                 self._event(task_id, actor["id"], "attachment_removed",
@@ -4482,6 +4604,11 @@ class AstraService:
         item.pop("storage_key", None)  # internal: never leaves the server
         if item.get("kind", "path") != "path":
             item["exists"] = None
+            if item["kind"] == "file":
+                # Slice 3: that a direct link exists, since when and by whom; never the token.
+                link = self._active_direct_link(item["id"])
+                item["direct_link"] = ({"id": link["id"], "created_at": link["created_at"],
+                                        "created_by_name": link["created_by_name"]} if link else None)
             return item
         if not attachment_roots():
             item["path"] = ""

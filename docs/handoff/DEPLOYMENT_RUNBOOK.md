@@ -523,6 +523,39 @@ developer tools (Application, Cookies), `astra_session` shows `Secure`,
 `HttpOnly` and `SameSite=Strict`. A wrong password shows "Incorrect email or
 password.".
 
+**[AGENT]** Direct link tokens stay out of the logs. A direct link
+(`/files/<token>`) is a credential: whoever has it downloads the file. The
+Caddyfile's log filter writes any request for one as `/files/redacted`, and
+Astra's own log writes `/files/[redacted]`. The filter is tested as a pattern
+only; it has not run inside a real Caddy (unverified until this step). Check
+it here with a made-up path, never a real link:
+
+```bash
+curl -sS -o /dev/null "https://<name>.duckdns.org/files/not-a-real-link-0123456789"
+curl -sS -o /dev/null "https://<name>.duckdns.org/%66iles/not-a-real-link-0123456789"
+sudo tail -n 2 /var/log/caddy/astra-access.log
+sudo grep -c 'not-a-real-link' /var/log/caddy/astra-access.log
+sudo journalctl -u caddy -u astra --since "-5 min" | grep -c 'not-a-real-link'
+```
+
+- The two log lines show `"uri":"/files/redacted"`.
+- Both counts print `0`.
+- Stop Astra (`sudo systemctl stop astra`), repeat the two `curl` lines and
+  the two counts, then start it again: Caddy's own error log must not hold the
+  path either when the upstream is down. Both counts print `0` again.
+- With Astra still stopped for that repeat, prove the errors really reached
+  the log that was searched. This count must be at least `2`:
+
+  ```bash
+  sudo journalctl -u caddy --since "-5 min" | grep -c '/files/redacted'
+  ```
+
+  A `0` here means Caddy's errors went somewhere else, and the check above
+  proved nothing: find where they are written and search there.
+
+If `caddy validate` rejects the `format filter` block, or a count is not `0`,
+stop and report it. Create no direct link on this server until this passes.
+
 Rollback: restore the previous Caddyfile and reload, or
 `sudo systemctl stop caddy` to take the site offline.
 

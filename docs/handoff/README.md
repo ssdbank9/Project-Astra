@@ -10,11 +10,13 @@ status and open work, updated in the same commit as the work.
 Status at `c7505d1` (plus this commit):
 
 - MXY7BG hosted attachments: slice 1 (`18c4e54`) and slice 2 (`8fdd9d5`) are
-  pushed and reviewed. Open: slice 3 (App Owner-only audited permanent direct
-  links, Owner Items 15-16) and slice 4 (OCI Object Storage backend and a
-  verified backend migration with rollback, Items 6-7). Nits left: two owners
-  saving the attachment settings at once overwrite each other (both audited);
-  `attachment_settings` is not in the backup required-table list.
+  pushed and reviewed. Slice 3 (App Owner-only audited permanent direct
+  links, Owner Items 15-16) is built, tested and reviewed and waits for Aly's
+  acceptance; slice 4 (OCI Object Storage backend and a verified backend
+  migration with rollback, Items 6-7) is next. Both are in "MXY7BG slices 3
+  and 4" below. Nits left: two owners saving the attachment settings at once
+  overwrite each other (both audited); `attachment_settings` and
+  `attachment_links` are not in the backup required-table list.
 - Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
   plain JS: in progress in its own session (Aly's stack decision is in
   `DECISIONS_LOG.md`).
@@ -23,6 +25,131 @@ Status at `c7505d1` (plus this commit):
   recorded in `DECISIONS_LOG.md` on 2026-11-08; 0RHNMG is a duplicate of
   JRNDC8 once B3Y1XY is accepted. Acceptance is now a line from Aly in chat,
   recorded here.
+
+## MXY7BG slices 3 and 4 — 2026-11-16
+
+Aly, 2026-11-09: "Do not create jaira this time. create small actionable steps
+to get to the desired results. also work on slices 3 and 4". The steps are
+below; a step is ticked in the commit that pushes it.
+
+### Slice 3: App Owner-only permanent direct links (Owner Items 15-16)
+
+Status: built, tested, reviewed and pushed in this commit. It waits for Aly's
+acceptance in chat. Nothing is deployed.
+
+- [x] 3.1 Schema v25 `attachment_links`: one active link per uploaded file,
+  the token stored only as a SHA-256 hash, who created and who revoked it,
+  when and why.
+- [x] 3.2 Service: create (App Owner only, after an explicit confirmation that
+  the link bypasses task access), revoke with a reason, resolve a token to a
+  file. Creation, revocation and every download through a link are recorded on
+  the task; every App Owner is told of creation and revocation.
+- [x] 3.3 Web: `GET /files/<token>` streams the file with no session
+  (`no-store`, download only); owner routes create and revoke.
+- [x] 3.4 UI: "Create direct link" shows the warning first, then the link
+  once with a copy button; "Revoke direct link" asks for a reason.
+- [x] 3.5 Tests at service, HTTP and UI level, every guard removed fails a
+  test, independent review, browser check, full suite.
+
+What an owner gets:
+
+- A direct link downloads one uploaded file without signing in, so it does
+  not check task access. Only an App Owner can create one, and only after a
+  warning that says so. A file has at most one active link.
+- The link is shown once. Astra keeps only a fingerprint of it, so a lost
+  link is replaced by revoking it and creating a new one.
+- Any App Owner can revoke a link, with a reason of up to 500 characters.
+  Removing the file ends its link.
+- The task history shows when a link was created, revoked and used.
+- The link never reaches a log. Astra's request log, Waitress's own log,
+  Caddy's access log and Caddy's own log write `/files/[redacted]` or
+  `/files/redacted`. Only the exact path `/files/<token>` is served, so no
+  other spelling of it can both work and be logged.
+
+How it was checked:
+
+- Tests: the full suite result is in the commit message. New tests are
+  `DirectLinkTests`, `WaitressLogTests` (a real Waitress server) and the direct
+  link tests in `HttpTests`, `WsgiStreamingTests` and `GuardUnitTests`
+  (`tests/test_hosted_attachments.py`), `tests/test_hosted_attachments_ui.py`,
+  `DirectLinkMigrationTests` (`tests/test_db.py`) and the log filter checks in
+  `tests/test_deploy_config.py`.
+- Roles: the service and HTTP tests refuse a manager, a member, a viewer, a
+  chairman, the task's assignee and an outsider for both creating and
+  revoking, and allow a secondary owner.
+- Guard removal: 147 guards were removed one at a time in a complete
+  throwaway copy of the final code, after the untouched copy had passed. Each
+  removal made at least one test fail. Two guards in the browser code were
+  found untested on the way and got tests.
+- Independent review: an agent that did not write the code read the diff
+  without editing it, three times. Round 1 found one blocker (Waitress wrote
+  the link to its own log) and ten smaller items. Round 2 found no blocker and
+  three items: a tab or line break inside the path was still served, Caddy's
+  own log had no filter, and a second click while a request was on its way
+  could replace the panel showing the link. All were fixed with tests.
+  Round 3 read those fixes, confirmed all three and found no blocker; it
+  asked for one more check in the runbook step, which was added.
+- Browser: checked on a local server as an App Owner: the warning, cancel,
+  confirm, the link shown once, copy, a redraw that keeps the link, Done,
+  revoke with a reason, keyboard focus, the buttons switched off while a link
+  waits, the history labels, and the server log showing `/files/[redacted]`.
+  Not checked in a browser: any role other than App Owner (covered by tests).
+- Unverified: the Caddy log filters have not run inside a real Caddy. The
+  pattern is tested with Python's regular expressions only. Stage 9 of
+  `DEPLOYMENT_RUNBOOK.md` has the check to run on the server before any direct
+  link is created there.
+
+Questions for Aly (none blocks acceptance; today's behaviour is stated first):
+
+1. A link has no expiry and no download limit, and every download adds a
+   history row. A chat app that previews links counts as a download. Should a
+   link expire, or have a cap?
+2. Caddy logs every direct link request as `/files/redacted`, so the access
+   log cannot say which link was used, and the task history has no client
+   address. Should the history record the address?
+3. A link keeps working after the owner who created it is demoted or
+   deactivated, and after its project is closed. Should any of those end it?
+4. A download through a link is recorded under the owner who created the
+   link, because nobody is signed in. Is that the right name to show?
+5. Restoring an older backup brings back a link that was revoked after that
+   backup. Accept this, or add "revoke every link" to the restore steps?
+
+Small items left as they are: a reason made only of invisible characters is
+accepted; after Done or a revoke the keyboard focus returns to the top of the
+page; while one link request is on its way, a click on a link button of
+another task does nothing and says nothing; a refused request with a
+misspelt path (a 404) can still put the token it carried into the
+development server's log; a JSON body nested about 100,000 levels deep gives
+a 500 on any JSON route (older than this slice).
+
+A correction to earlier guard checks: the throwaway copy used for them lacked
+the repository's root files, so one test in `tests/test_deploy_config.py`
+always failed there and a "caught" result from that module proved nothing.
+The copy is now complete and is tested untouched first. The three slice 2
+guards this affected (the default server ceiling, Waitress's cap, the
+Caddyfile's shipped limit) were checked again and each still fails a test
+when removed.
+
+### Slice 4: object storage backend and verified migration (Owner Items 6-7)
+
+In progress. The steps, refined while building:
+
+- [ ] 4.1 `object_storage.S3Storage`: OCI Object Storage through its
+  S3-compatible API, signed with the standard library (no new dependency),
+  behind the same methods as the folder backend. `ASTRA_STORAGE_BACKEND`
+  (`folder` or `s3`) chooses the one active backend; the bucket, region,
+  endpoint and Customer Secret Key are settings Aly places on the server.
+- [ ] 4.2 A test bucket that checks every signature; the storage tests run
+  against both backends.
+- [ ] 4.3 Each upload's row records the backend holding it (schema v26), so a
+  change of backend strands nothing. `astra storage-migrate --to <backend>`
+  copies each file, checks size and SHA-256, reads the copy back, and only
+  then switches the row. The old copy is kept, so the same command toward the
+  old backend is the rollback. `astra storage-prune` deletes old copies after
+  verifying the current ones. `astra storage-check` proves a backend first.
+- [ ] 4.4 Runbook stage 11.5: Aly's steps for the bucket and the key, the
+  outbound network decision, the switch, the rollback and a drill.
+- [ ] 4.5 Tests, guards, independent review, full suite, push.
 
 ## Current handover — 2026-10-24 (start here)
 

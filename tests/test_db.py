@@ -1628,6 +1628,93 @@ class AttachmentSettingsMigrationTests(unittest.TestCase):
             connection.close()
 
 
+class DirectLinkMigrationTests(unittest.TestCase):
+    """MXY7BG slice 3: v25 adds attachment_links: a hashed token, one active link per file."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "astra-v24.sqlite3"
+
+    @staticmethod
+    def deny_links_table(action, arg1, arg2, *_):
+        if action == sqlite3.SQLITE_CREATE_TABLE and arg1 == "attachment_links":
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    def at_v24(self):
+        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.set_authorizer(self.deny_links_table)
+        with self.assertRaises(sqlite3.DatabaseError):
+            db.migrate(connection)
+        connection.set_authorizer(None)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 24)
+        connection.execute(
+            "INSERT INTO users(id,email,display_name,password_hash,global_role,created_at,is_primary_owner)"
+            " VALUES('owner-1','o@example.org','Owner','x','owner','2026-01-01T00:00:00Z',1)")
+        connection.execute("INSERT INTO projects(id,name,created_at,created_by) VALUES('p1','P','2026-01-01','owner-1')")
+        connection.execute("INSERT INTO tasks(id,project_id,title,created_at,updated_at,created_by)"
+                           " VALUES('t1','p1','T','2026-01-01','2026-01-01','owner-1')")
+        for attachment in ("att-1", "att-2"):
+            connection.execute(
+                "INSERT INTO task_attachments(id,task_id,path,display_name,added_by,added_at,kind,storage_key,"
+                "size_bytes,sha256) VALUES(?,'t1','','a.pdf','owner-1','2026-01-01','file',?,5,'x')",
+                (attachment, "key-" + attachment))
+        return connection
+
+    @staticmethod
+    def link(connection, link_id, attachment, token_hash, revoked=False):
+        ending = ("owner-1", "2026-01-02", "done") if revoked else (None, None, None)
+        connection.execute(
+            "INSERT INTO attachment_links(id,attachment_id,task_id,token_hash,created_by,created_at,"
+            "revoked_by,revoked_at,revoke_reason) VALUES(?,?,'t1',?,'owner-1','2026-01-01',?,?,?)",
+            (link_id, attachment, token_hash) + ending)
+
+    def test_v25_allows_one_active_link_per_file_and_matches_a_fresh_schema(self):
+        connection = self.at_v24()
+        try:
+            db.migrate(connection)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+            self.link(connection, "l1", "att-1", "h1")
+            with self.assertRaises(sqlite3.IntegrityError):  # a second active link to the same file
+                self.link(connection, "l2", "att-1", "h2")
+            with self.assertRaises(sqlite3.IntegrityError):  # a token is never stored twice
+                self.link(connection, "l2", "att-2", "h1")
+            with self.assertRaises(sqlite3.IntegrityError):  # a link belongs to a real attachment
+                self.link(connection, "l2", "missing", "h2")
+            # Revoked links stay on record beside the active one.
+            self.link(connection, "l2", "att-1", "h2", revoked=True)
+            self.link(connection, "l3", "att-1", "h3", revoked=True)
+            self.link(connection, "l4", "att-2", "h4")
+            connection.execute("DELETE FROM task_attachments WHERE id='att-1'")
+            self.assertEqual([row["id"] for row in connection.execute("SELECT id FROM attachment_links ORDER BY id")],
+                             ["l4"])
+            fresh = db.connect(Path(self.temp.name) / "fresh.sqlite3")
+            try:
+                self.assertEqual(schema_signature(connection), schema_signature(fresh))
+            finally:
+                fresh.close()
+        finally:
+            connection.close()
+
+    def test_a_failed_v25_step_rolls_back_then_retries(self):
+        connection = self.at_v24()
+        try:
+            before = full_catalog(connection)
+            connection.set_authorizer(self.deny_links_table)
+            with self.assertRaises(sqlite3.DatabaseError):
+                db.migrate(connection)
+            connection.set_authorizer(None)
+            self.assertEqual(full_catalog(connection), before)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 24)
+            db.migrate(connection)
+            self.assertIn("token_hash", table_columns(connection, "attachment_links"))
+        finally:
+            connection.close()
+
+
 class ForcedPasswordChangeMigrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

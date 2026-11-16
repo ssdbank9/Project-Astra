@@ -2057,7 +2057,7 @@ const GOVERNED=["submitted","completed","on_hold","reopened"];
 // ARZWV7: a closed task is a fixed record; a Manager may only ask to move it back into ordinary work
 // (service.py REOPEN_ONLY_STATUSES / REOPEN_EQUIVALENT_STATUSES). UI hints only — the server decides.
 const BACK_TO_WORK=["draft","assigned","in_progress","delayed"];
-const EVENT_LABELS={reviewer_added:"Reviewer added",reviewer_removed:"Reviewer removed",board_move_blocked:"Board move refused",dependency_override:"Dependency overridden",wip_limit_override:"Work-in-progress limit overridden",task_lock_forced:"Lock forced open",gantt_move_blocked:"Date drag refused",schedule_impact_confirmed:"Date change with consequences confirmed",import_committed:"Import committed",import_key_assigned:"Import key assigned",task_created:"Task created",task_updated:"Task updated",dependency_added:"Dependency added",dependency_removed:"Dependency removed",task_submitted:"Work submitted",submission_accepted:"Submission accepted",changes_requested:"Changes requested",task_reopened:"Task reopened",task_on_hold:"Put on hold",criticality_changed:"Criticality changed",parent_changed:"Parent changed",schedule_proposed:"Schedule change proposed",schedule_revised:"Schedule revised",schedule_proposal_rejected:"Schedule proposal rejected",attachment_added:"Attachment linked",attachment_removed:"Attachment link removed"};
+const EVENT_LABELS={reviewer_added:"Reviewer added",reviewer_removed:"Reviewer removed",board_move_blocked:"Board move refused",dependency_override:"Dependency overridden",wip_limit_override:"Work-in-progress limit overridden",task_lock_forced:"Lock forced open",gantt_move_blocked:"Date drag refused",schedule_impact_confirmed:"Date change with consequences confirmed",import_committed:"Import committed",import_key_assigned:"Import key assigned",task_created:"Task created",task_updated:"Task updated",dependency_added:"Dependency added",dependency_removed:"Dependency removed",task_submitted:"Work submitted",submission_accepted:"Submission accepted",changes_requested:"Changes requested",task_reopened:"Task reopened",task_on_hold:"Put on hold",criticality_changed:"Criticality changed",parent_changed:"Parent changed",schedule_proposed:"Schedule change proposed",schedule_revised:"Schedule revised",schedule_proposal_rejected:"Schedule proposal rejected",attachment_added:"Attachment linked",attachment_removed:"Attachment link removed",attachment_downloaded:"File downloaded",attachment_download_blocked:"Download refused",direct_link_created:"Direct link created",direct_link_revoked:"Direct link revoked",attachment_direct_download:"Downloaded through a direct link"};
 const DIFF_FIELDS=[["title","Title"],["status","Status"],["criticality","Criticality"],["start_date","Start date"],["due_date","Due date"],["progress","Progress"],["description","Description"]];
 let detailTaskId=null,detailLoadVersion=0;
 
@@ -2526,9 +2526,14 @@ function buildAttachments(task){
       :`<button type="button" class="link" data-mark-fr-att="${escapeHtml(a.id)}">Mark as final result</button>`;
     const removeCtl=canManageFiles
       ?`<button type="button" class="link" data-remove-attachment="${escapeHtml(a.id)}">Remove</button>`:"";
+    // MXY7BG Items 15-16: only the App Owner creates or revokes a permanent direct link; the
+    // page shows that one exists, since when and by whom, never the link itself.
+    const linkCtl=a.kind!=="file"?"":a.direct_link
+      ?`<br><small class="muted">Direct link active since ${escapeHtml(new Date(a.direct_link.created_at).toLocaleString())} by ${escapeHtml(a.direct_link.created_by_name||"")}</small>${canManageFiles?` <button type="button" class="link" data-revoke-link="${escapeHtml(a.direct_link.id)}" data-att-name="${escapeHtml(a.display_name)}">Revoke direct link</button>`:""}`
+      :canManageFiles?` <button type="button" class="link" data-direct-link="${escapeHtml(a.id)}" data-att-name="${escapeHtml(a.display_name)}">Create direct link</button>`:"";
     return `<li>${attachmentLine(task,a)}${missing}
       ${removeCtl}
-      ${frCtl}
+      ${frCtl}${linkCtl}
       <br><small>Added by ${escapeHtml(a.added_by_name||"")} · ${escapeHtml(new Date(a.added_at).toLocaleString())}</small>${note}</li>`;
   }).join("")||"<li>No attachments linked.</li>";
   const pathForm=task.permissions?.can_link_paths?`<form id="attachment-form"><h4>Link a file on this computer</h4>
@@ -2548,7 +2553,80 @@ function buildAttachments(task){
     ${pathForm}<div class="error" id="attachment-error"></div>`:`<p class="blocked-text">Read/download only. File and final-result management is App Owner-only.</p><div class="error" id="attachment-error"></div>`;
   return `<div class="attachments"><h3>Attachments</h3>
     <ul>${rows}</ul>
+    <div id="direct-link-panel" class="direct-link-panel" hidden></div>
     ${form}</div>`;
+}
+// MXY7BG Items 15-16: creating a direct link is a two-step act (warning, then confirm); the
+// link is shown once with a copy button, because Astra keeps only its hash. Until the owner
+// presses Done it is kept for its task: the other link buttons are off, and a redraw of the task
+// (an upload, coming back to it) shows it again, so it is not lost before it has been copied.
+const shownDirectLinks=new Map();
+function directLinkPanel(html){const panel=document.querySelector("#direct-link-panel");if(!panel)return null;panel.innerHTML=html;panel.hidden=!html;return panel}
+function closeDirectLinkPanel(trigger){directLinkPanel("");trigger?.focus?.()}
+function setDirectLinkButtons(off){
+  document.querySelectorAll("#detail-body [data-direct-link]").forEach(b=>{b.disabled=off});
+  document.querySelectorAll("#detail-body [data-revoke-link]").forEach(b=>{b.disabled=off});
+}
+function showDirectLink(task,focus){
+  const shown=shownDirectLinks.get(task.id);
+  const panel=shown&&directLinkPanel(`<h4 id="direct-link-title" tabindex="-1">Direct link to ${escapeHtml(shown.name)}</h4>
+      <p class="fine">Copy it now, then press Done. Astra keeps only a fingerprint of this link and cannot show it again; create a new one if it is lost. Anyone with it can download the file until it is revoked.</p>
+      <p><code class="direct-link-url" id="direct-link-url">${escapeHtml(shown.url)}</code></p>
+      <div class="actions"><button type="button" id="direct-link-copy">Copy link</button><button type="button" class="quiet" id="direct-link-done">Done</button></div>
+      <p id="direct-link-status" class="form-hint" role="status"></p>`);
+  if(!panel)return;
+  setDirectLinkButtons(true);
+  panel.querySelector("#direct-link-copy").addEventListener("click",async()=>{try{await navigator.clipboard.writeText(shown.url);panel.querySelector("#direct-link-status").textContent="Copied."}catch{panel.querySelector("#direct-link-status").textContent="Select the link and copy it yourself."}});
+  panel.querySelector("#direct-link-done").addEventListener("click",async()=>{
+    shownDirectLinks.delete(task.id);
+    if(detailTaskId!==task.id)return;
+    directLinkPanel("");setDirectLinkButtons(false);await openDetail(task.id);
+  });
+  if(focus)panel.querySelector("#direct-link-title").focus();
+}
+let directLinkBusy=false;
+async function createDirectLink(task,attachmentId,name,confirm,trigger){
+  // One request at a time, with the link buttons off while it is on its way: a second answer
+  // could otherwise replace the panel that shows the first link.
+  if(directLinkBusy)return;
+  directLinkBusy=true;setDirectLinkButtons(true);
+  clearFeedback(document.querySelector("#attachment-error"));
+  try{
+    const {link}=await api(taskApi(task.id,`/attachments/${encodeURIComponent(attachmentId)}/direct-link`),{method:"POST",body:JSON.stringify(confirm?{confirm}:{})});
+    shownDirectLinks.set(task.id,{linkId:link.id,name,url:`${location.origin}${link.url}`});
+    if(detailTaskId===task.id)showDirectLink(task,true);
+  }catch(x){
+    // An answer belongs to the task it was asked on: another task's panel is left alone.
+    if(detailTaskId!==task.id)return;
+    if(x.status===409&&x.confirm){
+      const panel=directLinkPanel(`<h4 id="direct-link-title" tabindex="-1">Create a direct link to ${escapeHtml(name)}?</h4>
+        <p>${escapeHtml(x.message)}</p><ul class="fine">${(x.impact||[]).map(i=>`<li>${escapeHtml(i)}</li>`).join("")}</ul>
+        <div class="actions"><button type="button" id="direct-link-confirm">Create the link</button><button type="button" class="quiet" id="direct-link-cancel">Cancel</button></div>`);
+      if(!panel)return;
+      panel.querySelector("#direct-link-confirm").addEventListener("click",()=>createDirectLink(task,attachmentId,name,x.confirm,trigger));
+      panel.querySelector("#direct-link-cancel").addEventListener("click",()=>closeDirectLinkPanel(trigger));
+      panel.querySelector("#direct-link-title").focus();
+      return;
+    }
+    const err=document.querySelector("#attachment-error");if(err)err.textContent=x.message;
+  }finally{
+    directLinkBusy=false;
+    if(detailTaskId===task.id&&!shownDirectLinks.has(task.id))setDirectLinkButtons(false);
+  }
+}
+function askRevokeDirectLink(task,linkId,name,trigger){
+  const panel=directLinkPanel(`<form id="revoke-link-form"><h4>Revoke the direct link to ${escapeHtml(name)}</h4>
+    <p class="fine">Downloads through the link stop at once. The reason is recorded on the task and every App Owner is told.</p>
+    <label>Reason<input name="reason" id="revoke-link-reason" maxlength="500" required></label>
+    <div class="actions"><button>Revoke</button><button type="button" class="quiet" id="revoke-link-cancel">Cancel</button></div></form>`);
+  if(!panel)return;
+  panel.querySelector("#revoke-link-cancel").addEventListener("click",()=>closeDirectLinkPanel(trigger));
+  panel.querySelector("#revoke-link-form").addEventListener("submit",async e=>{
+    e.preventDefault();const err=document.querySelector("#attachment-error");clearFeedback(err);
+    try{await api("/api/direct-links",{method:"DELETE",body:JSON.stringify({task_id:task.id,link_id:linkId,reason:e.target.elements.reason.value})});if(detailTaskId===task.id)await openDetail(task.id)}
+    catch(x){err.textContent=x.message}
+  });
+  panel.querySelector("#revoke-link-reason").focus();
 }
 
 // MXY7BG: the installation's upload limit (Owner Item 8, set by the App Owner in People and
@@ -2598,6 +2676,18 @@ async function wireAttachments(task){
     try{await api(taskApi(task.id,"/attachments"),{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});if(detailTaskId===task.id)await openDetail(task.id)}
     catch(x){err.textContent=x.message}
   });
+  document.querySelectorAll("#detail-body [data-direct-link]").forEach(b=>b.addEventListener("click",()=>createDirectLink(task,b.dataset.directLink,b.dataset.attName,undefined,b)));
+  document.querySelectorAll("#detail-body [data-revoke-link]").forEach(b=>b.addEventListener("click",()=>askRevokeDirectLink(task,b.dataset.revokeLink,b.dataset.attName,b)));
+  // A link still waiting to be copied comes back with the redrawn task. It is dropped when the
+  // viewer can no longer manage files, or when the link is gone from the file. This redraw may
+  // hold data read before the link was made, so "gone" takes a second, fresh look.
+  const shown=shownDirectLinks.get(task.id);
+  if(shown){
+    if(!task.permissions?.can_manage_files)shownDirectLinks.delete(task.id);
+    else if((task.attachments||[]).some(a=>a.direct_link?.id===shown.linkId))showDirectLink(task);
+    else if(shown.rechecked)shownDirectLinks.delete(task.id);
+    else if(detailTaskId===task.id){shown.rechecked=true;openDetail(task.id)}
+  }
   document.querySelectorAll("#detail-body [data-remove-attachment]").forEach(b=>b.addEventListener("click",async()=>{
     try{await api("/api/task-attachments",{method:"DELETE",body:JSON.stringify({task_id:task.id,attachment_id:b.dataset.removeAttachment})});if(detailTaskId===task.id)await openDetail(task.id)}
     catch(x){document.querySelector("#attachment-error").textContent=x.message}

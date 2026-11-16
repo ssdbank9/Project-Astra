@@ -7,6 +7,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 from email.message import Message
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
@@ -155,6 +156,15 @@ class AstraRoutes:
         self._service = AstraService(self.db)
         try:
             path = urlparse(self.path).path
+            parts = path.split("/")
+            # MXY7BG Item 15: a permanent direct link, no session by the owner's decision. It is
+            # served only when the path Astra is given is exactly /files/<token>: urlparse drops
+            # tabs and line breaks, and a spelling it repaired here (a percent-encoded tab, for
+            # one) would slip past the log redaction. Waitress removes raw control bytes itself
+            # before it builds or logs the path, so those arrive, and are logged, already clean.
+            direct = _DIRECT_LINK_PATH.fullmatch(self.path.split("?", 1)[0])
+            if direct:
+                return self._download_direct(direct.group(1))
             if path == "/api/me":
                 user, csrf = self._require_user()
                 return self._json({"user": user, "csrf": csrf})
@@ -174,7 +184,6 @@ class AstraRoutes:
                 if not task_id:
                     raise ValueError("task_id is required.")
                 return self._json({"dependencies": self.service.get_task_dependencies(user, task_id)})
-            parts = path.split("/")
             if (len(parts) == 7 and path.startswith("/api/tasks/") and parts[4] == "attachments"
                     and parts[6] == "download"):
                 user, _ = self._require_user()
@@ -569,6 +578,11 @@ class AstraRoutes:
                     user, str(payload.get("task_id", "")), str(payload.get("user_id", "")), str(payload.get("role", ""))
                 )
                 return self._json({"ok": True})
+            if (len(path.split("/")) == 7 and path.startswith("/api/tasks/") and path.split("/")[4] == "attachments"
+                    and path.endswith("/direct-link")):
+                link = self.service.create_direct_link(user, path.split("/")[3], path.split("/")[5],
+                                                       confirm=payload.get("confirm"))
+                return self._json({"link": link}, HTTPStatus.CREATED)
             if path.startswith("/api/tasks/") and path.endswith("/links") and path.count("/") == 4:
                 attachment = self.service.add_task_link(
                     user, path.split("/")[3], payload.get("url"),
@@ -673,6 +687,10 @@ class AstraRoutes:
             user, csrf = self._require_user()
             if self.headers.get("X-CSRF-Token") != csrf:
                 raise Forbidden("Invalid request token.")
+            if path == "/api/direct-links":
+                self.service.revoke_direct_link(user, payload.get("task_id", ""), payload.get("link_id", ""),
+                                                payload.get("reason", ""))
+                return self._json({"ok": True})
             if path == "/api/task-dependencies":
                 self.service.remove_task_dependency(
                     user,
@@ -828,7 +846,12 @@ class AstraRoutes:
     def _download_file(self, user: dict, task_id: str, attachment_id: str):
         # MXY7BG Item 14: streamed through Astra after the access recheck, never inline and
         # never cached, whatever the file claims to be.
-        meta, handle = self.service.open_task_file(user, task_id, attachment_id)
+        self._send_file(*self.service.open_task_file(user, task_id, attachment_id))
+
+    def _download_direct(self, token: str):
+        self._send_file(*self.service.open_direct_link(token))
+
+    def _send_file(self, meta: dict, handle):
         try:
             size = os.fstat(handle.fileno()).st_size
             self.send_response(HTTPStatus.OK)
@@ -1010,6 +1033,10 @@ class AstraHandler(AstraRoutes, BaseHTTPRequestHandler):
         # method here to invoke the development server's standard HTML error.
         return BaseHTTPRequestHandler.send_error(self, code, message, explain)
 
+    def log_message(self, format_string, *args):
+        # MXY7BG Item 15: the request log never carries a direct link's token.
+        super().log_message("%s", _without_link_tokens(format_string % args))
+
 
 class AstraServer(ThreadingHTTPServer):
     def __init__(self, address):
@@ -1077,10 +1104,51 @@ class _WSGIHandler(AstraRoutes):
         self._wsgi_stream = _FileChunks(handle)
 
     def log_message(self, format_string, *args):
-        logging.getLogger("astra.http").info(format_string, *args)
+        logging.getLogger("astra.http").info("%s", _without_link_tokens(format_string % args))
 
     def log_error(self, format_string, *args):
-        logging.getLogger("astra.http").error(format_string, *args)
+        logging.getLogger("astra.http").error("%s", _without_link_tokens(format_string % args))
+
+
+# MXY7BG Item 15: a direct link's token is the whole credential, so it never reaches a log.
+# Everything after /files/ goes, not one path segment (/files//<token> must not leak it either),
+# and /files/ is matched in every spelling a server decodes to it: percent-encoded letters or
+# slashes, in either case.
+_FILES = r"((?:/|%2f)(?:f|%[46]6)(?:i|%[46]9)(?:l|%[46]c)(?:e|%[46]5)(?:s|%[57]3)(?:/|%2f))"
+# A log line is one line: everything up to the next space or quote goes, so a tab or a line
+# break a client put inside the path hides nothing. A traceback has many lines: there the
+# token ends at any white space.
+_DIRECT_LINK_TOKEN = re.compile(_FILES + r"[^ \"']+", re.IGNORECASE)
+_DIRECT_LINK_TOKEN_IN_TEXT = re.compile(_FILES + r"[^\s\"']+", re.IGNORECASE)
+_DIRECT_LINK_PATH = re.compile(r"/files/([A-Za-z0-9_-]{20,128})")
+
+
+def _without_link_tokens(message: str, many_lines: bool = False) -> str:
+    pattern = _DIRECT_LINK_TOKEN_IN_TEXT if many_lines else _DIRECT_LINK_TOKEN
+    return pattern.sub(lambda found: found.group(1) + "[redacted]", message)
+
+
+class _LinkTokenLogFilter(logging.Filter):
+    """Waitress writes the request path to its own log (a client that goes away, a failure
+    while serving); this keeps a direct link's token out of those lines and their tracebacks."""
+
+    def filter(self, record):
+        try:
+            message = record.getMessage()
+            cleaned = _without_link_tokens(message)
+            if cleaned != message:
+                record.msg, record.args = cleaned, None
+            if record.exc_info and not record.exc_text:
+                record.exc_text = _without_link_tokens(
+                    logging.Formatter().formatException(record.exc_info), many_lines=True)
+        except Exception:  # a malformed record is logging's to report, not a reason to lose it
+            pass
+        return True
+
+
+# A logger's filters are not applied to its children, so each logger Waitress writes to gets one.
+for _name in ("waitress", "waitress.queue"):
+    logging.getLogger(_name).addFilter(_LinkTokenLogFilter())
 
 
 class _FileChunks:
