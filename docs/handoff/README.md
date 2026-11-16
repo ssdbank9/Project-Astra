@@ -18,13 +18,248 @@ Status at `c7505d1` (plus this commit):
   overwrite each other (both audited); `attachment_settings` and
   `attachment_links` are not in the backup required-table list.
 - Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
-  plain JS: in progress in its own session (Aly's stack decision is in
-  `DECISIONS_LOG.md`).
+  plain JS: built, tested, reviewed and pushed on 2026-11-16; it waits for
+  Aly's acceptance. Status, the ticked feature checklist and the judgment
+  calls for Aly are in "Gantt chart replica — 2026-11-16" below.
 - Waiting for Aly's acceptance from before the board was retired: B3Y1XY
   (password reset fixes), Z9JCZ6, MTEDTM, AX572Q and the six tested tickets
   recorded in `DECISIONS_LOG.md` on 2026-11-08; 0RHNMG is a duplicate of
   JRNDC8 once B3Y1XY is accepted. Acceptance is now a line from Aly in chat,
   recorded here.
+
+## Gantt chart replica — 2026-11-16
+
+Aly's instruction (2026-11-09): "review shadcnstudio.com see the gantt chart and dependencies
+they have developed using react, tailwind css and shadcn/ui. Lets replicate the exact same
+thing", in plain JavaScript ("Lets keep our JS for now if everything functions as shadcn ui";
+`DECISIONS_LOG.md`). The block replicated is `gantt-chart-04` (the one with dependency arrows).
+
+Status: built, tested, reviewed, pushed in this commit. It waits for Aly's acceptance in chat.
+Nothing on the checklist needed React. The contract is
+`docs/design/gantt-steps-contract.md`.
+
+What was checked, and how:
+
+- Tests: the full suite, result in the commit message. New and rewritten Gantt tests:
+  `tests/test_gantt_zoom.py`, `tests/test_gantt_dependencies.py`, `tests/test_gantt_range.py`,
+  `tests/test_gantt_new_step.py`, `GanttExpandAndOverflowTests` in
+  `tests/test_frontend_gaps_views.py`, `AstraGanttDragDriverTests` in `tests/test_web.py`.
+- Authorization stays in `service.py`. A drag still goes through
+  `POST /api/tasks/{id}/reschedule` (unchanged: lease, revision, impact confirmation, Undo,
+  audit). New Step goes through the existing `POST /api/tasks`; `create_task` now also takes
+  `predecessor_task_ids` and `is_milestone` (it already took `progress`), behind the same
+  `can_manage_project` check. Service and HTTP tests cover App Owner, manager, member, viewer
+  and outsider for creating a step (`NewStepServiceTests`, `NewStepHttpTests`) and, on the
+  endpoints the chart already used, for moving a bar and for adding or removing a
+  dependency (`ScheduleRoleServiceTests`, `ScheduleRoleHttpTests`): a member, a viewer and
+  an outsider are refused and nothing is written.
+- Guard removal: 36 guards were removed one at a time in throwaway copies (23 before the
+  review, 16 after it, three of them repeated); each removal made at least one test fail.
+- Independent review: a second agent read the whole diff without editing it. It found no
+  high-severity defect and nine smaller ones; all nine were fixed, each with a test:
+  1. Enter in the New Step sheet pressed Discard (the first submit button). Discard is now a
+     plain button; Create is the sheet's only submit button.
+  2. The chart's focus rings were a faint grey (about 1.5:1). They are now Astra's teal
+     `--focus` ring with a white gap, tested at 3:1 or better on white and on muted rows.
+  3. The old focus-ring test could not fail; the new one checks the colour and the contrast.
+  4. Dragging a bar that runs past the month edge drew one thing and saved another. A dragged
+     bar is now placed from the dates it would get, cut to the month as the chart cuts it.
+  5. An arrow kinked when the gap between bars was 12 to 24px; it now always runs one way.
+  6. A step could be made to depend on its own phase (always a conflict). The sheet no longer
+     offers it and `create_task` refuses it.
+  7. `create_task` linked to a predecessor someone else had locked; it now refuses, as
+     `add_task_dependency` does.
+  8. A double click on Create posted twice, and a failed reload after creating wrote its error
+     into the closed sheet. One request at a time; a failed reload is a toast.
+  9. Filter choices survived a change of page with no box left to untick; focus in the Filter
+     popover was lost on a redraw; the owner and the dependency count were not spoken. All fixed.
+- Browser: checked in the in-app browser against `tests/ui_fixture_server.py` at 1440, 768
+  and 375 px wide: month and week, previous / next / Today, zoom, fold and unfold, Filter,
+  Dependencies switch, hover highlight, drag with the Undo toast, and a milestone created
+  through New Step under a phase with a predecessor. Not checked in a browser: a signed-in
+  viewer or member (one test owner exists in the fixture; those roles are covered by tests).
+
+### Feature checklist (from the catalogue of the block, every item ticked)
+
+References are `file:line` at this commit, then the test that fails without it. `app.js`,
+`style.css` and `index.html` are in `src/astra/static/`; `zoom`, `deps`, `range`, `step`,
+`views` and `web` stand for `tests/test_gantt_zoom.py`, `test_gantt_dependencies.py`,
+`test_gantt_range.py`, `test_gantt_new_step.py`, `test_frontend_gaps_views.py` and
+`test_web.py`.
+
+1. Layout
+   - [x] Card with border and 10px radius; the chart scrolls inside it. `style.css:807`,
+     `style.css:849`. Test: zoom `test_the_chart_scrolls_inside_its_card_in_both_directions`.
+     Adapted: the block fills the viewport; Astra's card sits under the page's filters, so
+     its height is `max(360px, 100dvh - 15rem)`.
+   - [x] Toolbar: title, previous / next group, Today, Week | Month select, Dependencies
+     switch, Filter, New Step. `index.html:127`, `app.js:374`.
+     Tests: zoom `test_the_toolbar_has_the_controls_of_the_block_and_astras_own`, range
+     `test_previous_and_next_are_grouped_and_today_is_its_own_button`.
+   - [x] One scroller, both directions, hidden scrollbars, with the pinned pane and the
+     timeline side by side. `style.css:849`, `style.css:851`.
+     Test: zoom `test_the_step_pane_stays_put_while_the_days_scroll_sideways`.
+   - [x] Left pane 192 / 288 / 560 px with columns Step, Owner, Status, Dates, Length that
+     drop out when narrow. `app.js:136` (`GX_PANE`), `style.css:852`.
+     Tests: zoom `test_the_pane_width_follows_the_width_of_the_card`,
+     `test_the_pane_has_the_five_columns_of_the_block`. Adapted: the width follows the
+     card's width through `data-pane`, not CSS container queries.
+   - [x] Phase row: chevron, name, code badge, `done/total · %`, the whole row folds.
+     `app.js:271`, `app.js:349`. Tests: zoom
+     `test_a_project_is_the_top_phase_and_a_task_with_steps_is_a_phase_under_it`, views
+     `GanttExpandAndOverflowTests` (13 tests).
+   - [x] Step row: indent guide, status icon, name, link count, avatar, status badge, dates,
+     length. `app.js:281`. Tests: zoom
+     `test_the_pane_row_shows_the_owner_the_status_the_dates_and_the_length`,
+     `test_a_step_that_waits_for_others_shows_how_many`.
+   - [x] Timeline header: ISO week groups over day cells, weekends shaded, today as a pill,
+     "Mon 9" cells in the week view. `app.js:258`. Tests: zoom
+     `test_the_header_groups_days_into_iso_weeks_with_their_date_range`,
+     `test_today_is_a_pill_in_the_header_and_a_marked_column`,
+     `test_saturday_and_sunday_are_marked_in_the_header_and_the_grid`,
+     `test_the_week_view_shows_monday_to_sunday_of_todays_week`.
+   - [x] Timeline body: column layer, arrow layer that takes no clicks, 48px rows with bars.
+     `app.js:301`, `style.css:908`. Tests: deps
+     `test_the_layer_covers_every_day_and_every_row`,
+     `test_the_arrow_layer_never_takes_a_click_from_a_bar`, zoom
+     `test_a_row_is_48_pixels_tall_like_the_arrow_geometry_assumes`.
+   - [x] Phase summary bar with its percentage. `app.js:277`. Test: zoom
+     `test_a_phase_draws_a_summary_bar_over_the_dates_of_its_steps`.
+   - [x] Zoom in / zoom out buttons at the bottom right. `index.html:150`,
+     `style.css:942`. Test: zoom `test_zoom_steps_through_five_day_widths_and_stops_at_each_end`.
+2. Scale, zoom, navigation
+   - [x] Month view, 48px days, zoom 32 / 48 / 64 / 88 / 120, bars cut to the month.
+     `app.js:159`, `app.js:266`. Tests: zoom
+     `test_the_month_view_draws_one_cell_per_day_at_the_default_width`,
+     `test_the_zoom_button_at_an_end_is_disabled`,
+     `test_a_bar_that_starts_before_or_ends_after_the_period_is_cut_and_loses_that_grip`.
+   - [x] Week view: seven columns that fill the width, "Week of Nov 9, 2026".
+     `app.js:162`. Tests: zoom `test_the_week_view_shows_monday_to_sunday_of_todays_week`,
+     `test_a_week_day_never_gets_narrower_than_48_pixels`, range `test_a_week_runs_from_monday_to_sunday`.
+   - [x] Previous / next by one period, Today, scroll position kept. `app.js:168`,
+     `app.js:505`. Tests: range `test_next_and_previous_step_one_month_and_today_comes_back`,
+     `test_in_the_week_view_the_buttons_step_one_week`,
+     `test_the_chosen_period_is_kept_across_redraws_of_the_same_projects`.
+   - [x] Bar and milestone geometry. `app.js:266`, `app.js:284`.
+     Tests: zoom `test_a_bar_sits_on_its_start_day_and_is_as_wide_as_its_days`,
+     `test_a_milestone_is_a_flag_centred_on_its_day`.
+3. Bars
+   - [x] Task bar: `role=button`, focus stop, "Name · Status · 70%", status tint, progress
+     fill, icon, name, percentage, avatar, grab cursor, focus ring. `app.js:290`,
+     `style.css:919`. Tests: zoom `test_a_bar_names_its_step_status_and_progress`,
+     `test_a_draggable_bar_shows_the_grab_cursor_and_its_grips_resize`,
+     `test_the_bars_focus_ring_is_visible`.
+   - [x] Resize grips at both ends, whole days, Dates and Length live. `app.js:1285`,
+     `app.js:333`. Tests: web `test_the_end_grip_changes_the_due_date_and_never_passes_the_start`,
+     `test_the_start_grip_changes_the_start_date_and_never_passes_the_due_date`, deps
+     `test_a_resized_bar_updates_its_dates_and_length_while_the_pointer_is_down`.
+   - [x] Drag to move by whole days; successors are not pushed. Same code. Tests: web
+     `test_a_drag_starts_after_5px_and_snaps_to_whole_days`,
+     `test_dropping_a_bar_posts_the_new_dates_under_a_drag_lease_and_lets_the_server_redraw`.
+   - [x] Milestone: 28px circle with a flag and a label, draggable, no grips.
+     `app.js:284`, `style.css:938`. Tests: zoom
+     `test_a_milestone_is_a_flag_centred_on_its_day`,
+     `test_only_open_dated_bars_of_a_project_the_user_manages_can_be_dragged`.
+   - [x] A click on a bar does nothing; the tooltip is the `title`. `app.js:2051`.
+     Test: views `test_a_click_on_a_bar_opens_nothing_and_folds_nothing`.
+   - [x] Bars are in the tab order with a focus ring; arrow keys do not move them. Tests:
+     deps `test_keyboard_focus_on_a_bar_highlights_its_arrows_like_the_pointer_does`,
+     `test_space_on_a_bar_does_not_scroll_the_page`.
+4. Status model
+   - [x] Five statuses with their icons and colours. `app.js:180`,
+     `style.css:802`. Tests: zoom `test_astras_statuses_fold_into_the_five_colours_of_the_block`,
+     `test_each_status_sets_one_colour_variable_from_a_root_token`.
+   - [x] Phase progress "0/5 · 40%". Test: zoom `test_a_phase_counts_its_finished_steps_and_averages_their_progress`.
+5. Dependencies
+   - [x] Finish-to-start predecessors, shown as a count with a link icon. Data:
+     `task_dependencies` through `GET /api/tasks`. Test: zoom `test_a_step_that_waits_for_others_shows_how_many`.
+   - [x] Dependencies switch, on by default. `index.html:140`, `app.js:322`.
+     Tests: deps `test_the_switch_clears_the_arrows_and_remembers_the_choice`,
+     `test_the_switch_is_a_real_checkbox_with_the_switch_role_and_starts_on`.
+   - [x] SVG arrows with three states and their arrowheads. `app.js:298`,
+     `style.css:909`. Tests: deps `test_there_is_an_arrowhead_for_each_of_the_three_states`,
+     `test_each_state_takes_its_colour_from_a_token`.
+   - [x] Orthogonal routing with 6px corners, forward and round-the-row. `app.js:308`.
+     Tests: deps `test_a_forward_arrow_leaves_the_right_edge_turns_12px_out_and_enters_the_left_edge`,
+     `test_with_less_room_the_line_goes_round_between_the_rows_and_comes_in_from_the_left`,
+     `test_a_successor_that_starts_earlier_is_reached_round_the_predecessors_row`.
+   - [x] Active while hovered or dragged; conflict wins. Tests: deps
+     `test_hovering_a_bar_turns_the_arrows_at_both_its_ends_active`,
+     `test_a_conflict_stays_red_under_the_pointer`.
+   - [x] Conflict when the successor starts on or before the day the predecessor ends,
+     live while dragging. Tests: deps
+     `test_a_step_that_starts_on_or_before_the_day_its_prerequisite_ends_is_a_conflict`,
+     `test_a_dragged_bar_takes_its_arrows_along_and_shows_the_conflict_it_would_cause`.
+   - [x] Folding a phase hides the arrows of its steps. Test: deps
+     `test_collapsing_a_phase_drops_the_arrows_of_the_steps_inside_it`.
+   - [x] Links are created in the New Step sheet's "Depends on" list; existing links are
+     edited in the task panel as before. `app.js:394`, `service.py:1455`.
+     Tests: step `test_create_posts_one_task_with_its_predecessors`,
+     `test_each_predecessor_is_one_finish_to_start_row_and_one_audit_event`.
+6. Filter and New Step
+   - [x] Filter popover by status and owner with counts. `app.js:358`.
+     Tests: zoom `test_the_popover_lists_the_five_statuses_and_the_owners_with_counts`,
+     `test_unticking_a_status_hides_its_steps_and_marks_the_button`,
+     `test_unticking_an_owner_hides_that_persons_steps`.
+   - [x] New Step sheet from the right with the block's fields. `index.html:223`,
+     `app.js:420`. Tests: step `NewStepSheetTests` (13 tests),
+     `NewStepMarkupTests`, `NewStepServiceTests`, `NewStepHttpTests`.
+7. Visual tokens
+   - [x] The block's neutral palette and status hues as `--gx-*` tokens in `:root`.
+     `style.css:98`. Tests: zoom `test_each_status_sets_one_colour_variable_from_a_root_token`,
+     `tests/test_frontend_integrity.py` `test_colours_outside_root_use_tokens`.
+   - [x] 12px secondary text, 14px names, tabular numerals. Astra keeps its Inter typeface
+     (the block uses Geist).
+   - [x] Dark mode: not applicable. Astra has no dark mode; the catalogue's line about
+     "existing dark tokens" was wrong.
+8. Not in the block, and not built: day or quarter zoom, drag-to-connect handles, keyboard
+   nudging of bars, critical path colouring, baselines, auto-pushing successors, bar menus.
+
+### Judgment calls for Aly to confirm or reverse
+
+Removed from the chart, because the block has no such thing:
+
+- step segments inside a parent bar, the `+N` list and the "n steps need dates" chip;
+- project start and target flags, the rich tooltip, critical-path colouring, both legends;
+- drop zones and row handles for reordering in the chart (the Move task dialog stays in the
+  Schedule table);
+- fit, week, month and quarter zoom levels (replaced by Week | Month and the day-width zoom);
+- dragging a parent task's own bar (a parent is now a phase with a summary bar);
+- a click on a bar opening the task (the step name in the pane opens it).
+
+Kept from Astra although the block has no such thing:
+
+- the Schedule table switch (still the default at phone width), the Plan select and the
+  due-date bands above the chart;
+- the drag tip beside the pointer, the Undo toast and the impact confirmation;
+- an "open" button on a phase that is a task, screen-reader status text, and arrows that
+  highlight on keyboard focus as well as on hover;
+- Astra's 44px touch targets below 1024px, also on the chart's toolbar.
+
+Choices where the block gives no answer:
+
+- A project is always the top phase; a task with sub-tasks is a phase under it.
+- Astra's statuses map onto the five colours as the contract's table says; "Blocked" also
+  means waiting on an unfinished predecessor, so a plan with many links shows many red
+  badges.
+- The chart opens on the month of the work nearest today when today's month is empty.
+- The sheet's Status offers the four statuses a manager may create (Draft, Assigned, In
+  progress, Delayed); a milestone's one date is stored as its due date.
+- Zoom is off in the week view (unverified against the block).
+- Unverified against the block, taken from the observed DOM: the 32px toolbar buttons, the
+  line between the two header rows, the alpha of a milestone's border.
+- One colour differs from the block on purpose: the grey of secondary text is a step
+  darker (`--gx-muted-fg`, lightness 0.52 instead of 0.556), so 12px text reaches 4.5:1 on
+  the muted rows as well as on white.
+- Focus rings in the chart are Astra's teal ring, not the block's soft grey halo (which was
+  about 1.5:1 on white). The idle arrow keeps the block's soft grey; it is decoration, and an
+  arrow turns dark when its bar has focus.
+- Bars keep `role="button"` with nothing on Enter, as in the block; the step name in the pane
+  opens the task.
+
+Follow-up for Aly to decide, outside this change: the task form and the project form have the
+same "Enter presses Cancel" order of buttons that the New Step sheet had (`index.html`,
+`#task-form` and `#project-form`).
 
 ## MXY7BG slices 3 and 4 — 2026-11-16
 

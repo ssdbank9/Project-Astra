@@ -93,6 +93,14 @@
   --palette-40: #fafbfc;
   --palette-41: #172a4650;
   --palette-42: #b7c1cf;
+  /* Gantt (shadcnstudio gantt-chart-04 replica): the block's own neutral palette and status hues.
+     One change: --gx-muted-fg is 0.52 lightness, not the block's 0.556, so 12px text reaches 4.5:1 on --gx-muted too. */
+  --gx-bg: oklch(1 0 0); --gx-fg: oklch(0.145 0 0); --gx-muted: oklch(0.97 0 0); --gx-muted-fg: oklch(0.52 0 0);
+  --gx-border: oklch(0.922 0 0); --gx-primary: oklch(0.205 0 0); --gx-primary-fg: oklch(0.985 0 0); --gx-ring: oklch(0.708 0 0);
+  --gx-destructive: oklch(0.577 0.245 27.325); --gx-green: oklch(0.627 0.194 149.214); --gx-sky: oklch(0.588 0.158 241.966);
+  --gx-amber: oklch(0.666 0.179 58.318); --gx-zinc: oklch(0.442 0.017 285.786); --gx-overlay: oklch(0 0 0 / .5);
+  --gx-shadow-xs: 0 1px 2px 0 oklch(0 0 0 / .05); --gx-shadow-md: 0 4px 6px -1px oklch(0 0 0 / .1), 0 2px 4px -2px oklch(0 0 0 / .1);
+  --gx-shadow-lg: 0 10px 15px -3px oklch(0 0 0 / .1), 0 4px 6px -4px oklch(0 0 0 / .1);
 }
 * { box-sizing: border-box; }
 body { margin: 0; font-size: var(--fs-body); line-height: var(--lh-body); background: var(--canvas); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
@@ -238,7 +246,6 @@ main { grid-column: 2; width: 100%; max-width: 1480px; margin: 0 auto; padding: 
 .tabs a[aria-current="page"] { border-bottom-color: var(--teal); color: var(--chip-teal); }
 .tabs a:focus-visible { outline-offset: -2px; }
 #project-gantt-slot .view-toggle { display: none; }
-.gantt-row:not(.gantt-head):hover { background: var(--surface-2); }
 .overview .facts { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .progress-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 8px; font-size: 13px; }
 .progress-line label { margin: 0; }
@@ -276,19 +283,11 @@ body.board-dragging, body.board-dragging * { cursor: grabbing; user-select: none
 .lock-chip { font-weight: 650; }
 .lock-banner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: var(--space-2) 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--amber); border-radius: var(--radius-sm); background: var(--chip-amber-bg); color: var(--ink); font-size: var(--fs-small); }
 .lock-banner span { flex: 1 1 220px; }
-.bar[data-drag] { cursor: grab; touch-action: pan-y; }
-.bar-grip { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 3; }  /* above a lane-2 step (z-index 1), which would otherwise cover the grip on a wide bar */
-.bar-grip.start { left: 0; }
-.bar-grip.end { right: 0; }
-.bar[data-drag]:hover .bar-grip, .bar.is-dragging .bar-grip { background: var(--palette-8); }
-.bar.is-dragging { z-index: 6; cursor: grabbing; box-shadow: 0 0 0 2px var(--focus), var(--shadow-2); }
 body.bar-dragging, body.bar-dragging * { cursor: grabbing; user-select: none; }
-body.bar-dragging #step-tip { display: none; }
 .drag-tip { position: fixed; top: 0; left: 0; z-index: 76; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--ink); color: var(--palette-6); font-size: var(--fs-small); font-weight: 600; pointer-events: none; box-shadow: var(--shadow-2); white-space: nowrap; }
 .drag-tip[hidden] { display: none; }
 .impact-list { margin: 0 0 var(--space-2); padding-left: 1.2em; }
 .impact-list li { margin: 4px 0; }
-@media (max-width: 760px) { .bar-grip { display: none; } .bar[data-drag] { cursor: pointer; } }
 /* XV92JJ: bulk selection and work-in-progress limits */
 .board-card .bulk-pick { position: absolute; top: 12px; right: 10px; width: 18px; height: 18px; margin: 0; accent-color: var(--teal); cursor: pointer; }
 .board-card:has(.bulk-pick) .card-title { padding-right: 26px; }
@@ -437,10 +436,6 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-strong); border-bottom-widt
 .panel-title h2 { margin: 0 auto 0 0; }
 #as-of { color: var(--muted); font-size: var(--fs-small); }
 #clear-filters { margin-left: 4px; font-size: 13px; }
-.legend { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: .82rem; margin: 12px 0 18px; }
-.legend i { width: 16px; height: 8px; border-radius: 4px; margin-left: 8px; }
-.legend .key { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }  /* a swatch never wraps away from its label */
-.legend .key i { margin-left: 0; }
 .overdue { background: var(--red); }
 .soon { background: var(--amber); }
 .scheduled { background: var(--blue); }
@@ -458,44 +453,6 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-strong); border-bottom-widt
 .band.scheduled { border-left-color: var(--blue); }
 .band.undated { border-left-color: var(--gray); }
 .next-action { color: var(--teal); font-weight: 600; }
-#gantt { position: relative; overflow: auto; scrollbar-gutter: stable; border-top: 1px solid var(--palette-9); max-height: calc(100vh - 150px); min-height: 280px; }  /* its own scroll area, so the date header and the task columns stay pinned in both directions */
-#gantt { --side-1: 260px; --side-2: 210px; --side-total: 470px; --pin-total: 470px; }
-.gantt-row { display: grid; grid-template-columns: var(--side-1) var(--side-2) var(--tl-w, minmax(700px, 1fr)); min-width: max-content; min-height: 48px; border-bottom: 1px solid var(--line-2); align-items: center; }
-.task-name { padding: 8px; font-weight: 650; }
-.task-meta { position: relative; color: var(--muted); font-size: .82rem; padding: 8px; }
-.task-meta .blocked-text { color: var(--purple); font-weight: 700; }
-.timeline { position: relative; height: 38px; background-image: linear-gradient(to right, var(--line-2) 1px, var(--transparent) 1px); background-size: var(--grid-px, calc(100% / 12)) 100%; background-position: var(--grid-off, 0) 0; }
-.timeline.tall { height: 58px; }
-.bar { position: absolute; top: 8px; height: 22px; border-radius: 5px; min-width: 8px; color: var(--surface); font-size: .72rem; padding: 2px 6px; overflow: hidden; white-space: nowrap; }
-.bar.today { background: var(--amber); color: var(--ink); }
-.bar.closed { background: var(--gray); color: var(--ink); }
-button.bar.plain { display: flex; align-items: center; margin: 0; border: 0; font-weight: 650; text-align: left; cursor: pointer; }
-.bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bar.overdue { background: var(--red); }
-.bar.soon { background: var(--amber); color: var(--ink); }
-.bar.scheduled { background: var(--blue); }
-.bar.blocked { background: var(--purple); }
-.bar.undated { position: static; display: inline-block; background: var(--gray); color: var(--ink); margin: 7px; }
-.bar.critical { background: var(--chip-red); box-shadow: 0 0 0 2px var(--palette-10); }
-.legend i.critical { background: var(--chip-red); }
-.legend i.proj-start-key { background: var(--palette-11); }
-.legend i.proj-target-key { background: var(--red); }
-.cp-text { color: var(--chip-red); font-weight: 700; }
-.gantt-head { position: sticky; top: 0; z-index: 7; background: var(--palette-6); min-height: 72px; border-bottom: 2px solid var(--palette-12); }  /* 72px: a flag row above the two header tiers */
-.gantt-head-cap { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-.gantt-head .timeline { background: var(--palette-13); height: 44px; }
-.axis { position: relative; }
-.axis-tick { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; font-size: 11px; color: var(--palette-14); padding-left: 6px; border-left: 1px solid var(--palette-12); white-space: nowrap; }
-.axis-tick b { font-weight: 800; margin-right: 3px; }
-.today-flag { position: absolute; top: 3px; transform: translateX(-50%); background: var(--teal); color: var(--palette-6); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 5px; white-space: nowrap; z-index: 1; }
-.today-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--teal); z-index: 1; pointer-events: none; } /* decorative: never intercepts a step's hover or click */
-/* 5WZ4A8: project schedule markers on the timeline */
-.proj-line { position: absolute; top: 0; bottom: 0; width: 0; z-index: 1; pointer-events: none; }
-.proj-line.start { border-left: 2px dashed var(--palette-11); }
-.proj-line.target { border-left: 2px dashed var(--red); }
-.proj-flag { position: absolute; top: 20px; transform: translateX(-50%); color: var(--palette-6); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 5px; white-space: nowrap; z-index: 2; }
-.proj-flag.start { background: var(--palette-11); }
-.proj-flag.target { background: var(--red); }  /* var(--surface) on --red is 5.2:1; the old red was 4.36:1 */
 .empty { padding: 36px; text-align: center; color: var(--muted); }
 dialog { border: 0; border-radius: 14px; padding: 0; box-shadow: var(--shadow-3); width: min(560px, 92vw); color: var(--ink); }
 dialog::backdrop { background: var(--palette-15); }
@@ -712,38 +669,11 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 }
 /* end C9KPH6 */
 
-/* D73AQW: visible, colour-coded task steps inside the parent bar ------------------------- */
+/* D73AQW: the colour-coded step swatches (Schedule table, sub-task list) ------------------ */
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .muted { color: var(--muted); font-weight: 500; }
-.view-controls { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 18px; }
-.view-controls .legend { margin: 12px 0; flex-wrap: wrap; row-gap: 6px; }
 .view-toggle { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; margin: 0; min-height: 44px; padding: 0 4px; }
 .view-toggle input { width: 18px; height: 18px; margin: 0; }
-.bar:focus-visible, .step:focus-visible, .track:focus-visible, .expand:focus-visible, .step-more:focus-visible, .chip:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; z-index: 4; }
-/* The parent bar is a light "track" tinted by state; steps sit inside it. */
-.bar.track { top: 7px; height: 24px; padding: 0; border-radius: 6px; overflow: visible; color: inherit; cursor: pointer; background: var(--chip-gray-bg); border: 1px solid var(--gray); box-shadow: none; }
-.bar.track.overdue { background: var(--palette-29); border-color: var(--red); }
-.bar.track.soon, .bar.track.today { background: var(--palette-30); border-color: var(--amber); }
-.bar.track.scheduled { background: var(--palette-31); border-color: var(--blue); }
-.bar.track.blocked { background: var(--palette-32); border-color: var(--purple); }
-.bar.track.closed { background: var(--chip-gray-bg); border-color: var(--gray); }
-.bar.track.critical { background: var(--palette-33); border-color: var(--crit); box-shadow: 0 0 0 2px var(--palette-34); }
-.bar.track.derived { background: var(--canvas); border-style: dashed; border-color: var(--gray); }
-.bar.track.lanes-2 { height: 44px; }
-.bar.track.is-expanded .step { opacity: .82; }
-/* One step segment: tint fill, edge-coloured border and bottom stripe, dark text, index label always. */
-.step { position: absolute; top: 2px; height: 18px; min-width: 8px; margin: 0; padding: 0 5px; border: 1px solid var(--edge, var(--gray)); border-radius: 3px; background: var(--tint, var(--palette-2)); box-shadow: inset 0 -3px 0 var(--edge, var(--gray)); color: var(--ink); font-size: .7rem; font-weight: 700; line-height: 16px; text-align: left; cursor: pointer; overflow: visible; transition: transform .12s ease, box-shadow .12s ease; }
-.step::before { content: ""; position: absolute; left: 0; right: 0; top: -13px; bottom: -13px; } /* 44px hit area */
-.step:hover { transform: translateY(-1px); z-index: 2; }
-.bar.track.lanes-2 .step.lane-2 { top: 23px; z-index: 1; }
-/* Two-lane track (44px): keep each hit area inside its own lane so a later lane-1 step never
-   paints over the visible top of a lane-2 step (lane 1 owns 0-23px, lane 2 owns 20-44px). */
-.bar.track.lanes-2 .step:not(.lane-2)::before { top: -13px; bottom: -3px; }
-.bar.track.lanes-2 .step.lane-2::before { top: -3px; bottom: -13px; }
-.step-label { display: flex; align-items: center; gap: 4px; height: 100%; overflow: hidden; white-space: nowrap; }
-.step .idx { flex: none; }
-.step .ttl { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
-.step .own { flex: none; margin-left: auto; font-style: normal; font-size: .62rem; font-weight: 800; background: var(--ink); color: var(--palette-6); border-radius: 999px; padding: 0 5px; line-height: 14px; }
 .step-c1, .sw.step-c1 { --hue: var(--step-1); --tint: var(--step-1-tint); --edge: var(--step-1-edge); }
 .step-c2, .sw.step-c2 { --hue: var(--step-2); --tint: var(--step-2-tint); --edge: var(--step-2-edge); }
 .step-c3, .sw.step-c3 { --hue: var(--step-3); --tint: var(--step-3-tint); --edge: var(--step-3-edge); }
@@ -751,51 +681,8 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 .step-c5, .sw.step-c5 { --hue: var(--step-5); --tint: var(--step-5-tint); --edge: var(--step-5-edge); }
 .step-c6, .sw.step-c6 { --hue: var(--step-6); --tint: var(--step-6-tint); --edge: var(--step-6-edge); }
 .step-c7, .sw.step-c7 { --hue: var(--step-7); --tint: var(--step-7-tint); --edge: var(--step-7-edge); }
-/* GF-10: the 8th+ step repeats the hue with a DOUBLED bottom stripe; on-hold keeps the diagonal
-   hatching, so both can show on one segment and neither is mistaken for the other. */
-.step.wrap, .sw.wrap { box-shadow: inset 0 -3px 0 var(--edge), inset 0 -4px 0 var(--tint), inset 0 -6px 0 var(--edge); }
-.step.done { filter: saturate(.45); color: var(--palette-35); }
-.step.hold { background-image: repeating-linear-gradient(135deg, var(--transparent) 0 4px, var(--palette-36) 4px 6px); }
-.step.crit { box-shadow: inset 0 -3px 0 var(--edge), 0 0 0 1.5px var(--crit); }
-.step.crit.wrap { box-shadow: inset 0 -3px 0 var(--edge), inset 0 -4px 0 var(--tint), inset 0 -6px 0 var(--edge), 0 0 0 1.5px var(--crit); }
-/* GF-2: a step that runs past its parent's dates overhangs onto a dashed neutral extension. */
-.track-ext { position: absolute; top: -1px; height: 24px; border: 1px dashed var(--gray); background: var(--canvas); pointer-events: none; }
-.track-ext.after { border-left: 0; border-radius: 0 6px 6px 0; }
-.track-ext.before { border-right: 0; border-radius: 6px 0 0 6px; }
-.bar.track.lanes-2 .track-ext { height: 44px; }
-.task-meta .overrun-text { color: var(--palette-37); font-weight: 600; }
-.step.solo { top: 8px; height: 22px; line-height: 22px; font-size: .74rem; }
-/* GF-1/GF-7: +N sits just outside the track (right edge, or left edge with .flip when the track ends
-   near the timeline's end) with the same 44px hit area as a step, so it never covers a drawn step. */
-.step-more { position: absolute; left: 100%; margin: 0 0 0 4px; top: 2px; height: 18px; padding: 0 7px; border-radius: 3px; background: var(--ink); color: var(--palette-6); font-size: .66rem; font-weight: 800; line-height: 18px; z-index: 2; }
-.step-more.flip { left: auto; right: 100%; margin: 0 4px 0 0; }
-.task-meta .step-more { position: relative; left: auto; top: auto; margin: 2px 0 0; }
-.task-meta .step-more::before { left: -4px; right: -4px; top: -4px; bottom: -4px; } /* 26px, clear of the meta text lines */
-.step-more::before { content: ""; position: absolute; left: 0; right: 0; top: -13px; bottom: -13px; }
-.step-more-list { position: absolute; top: 100%; z-index: 6; background: var(--palette-6); border: 1px solid var(--palette-38); border-radius: 8px; box-shadow: 0 10px 30px var(--palette-39); padding: 8px 12px; min-width: 320px; font-size: .8rem; }
-.step-more-list p { margin: 2px 0 6px; font-size: .74rem; }
-.step-more-list ul { list-style: none; margin: 0; padding: 0; }
-.step-more-list li { padding: 6px 0; border-bottom: 1px solid var(--line-2); }
-.step-more-list li:last-child { border-bottom: 0; }
-/* Chips live in the meta column (static flow), never on the timeline (GF-1). */
-.chip { position: relative; display: inline-flex; align-items: center; height: 18px; line-height: 16px; margin: 2px 0 0; padding: 0 8px; border-radius: 999px; font-size: .68rem; font-weight: 700; border: 1px dashed var(--gray); background: var(--palette-6); color: var(--palette-35); white-space: nowrap; }
-.chip.step-undated { cursor: pointer; }
-.chip.step-undated::before { content: ""; position: absolute; left: -4px; right: -4px; top: -4px; bottom: -4px; } /* 26px hit area */
+.sw.wrap { box-shadow: inset 0 -3px 0 var(--edge), inset 0 -4px 0 var(--tint), inset 0 -6px 0 var(--edge); }
 .sw { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 1px solid var(--edge, var(--gray)); border-radius: 4px; background: var(--tint, var(--palette-2)); box-shadow: inset 0 -3px 0 var(--edge, var(--gray)); color: var(--ink); font-size: .68rem; font-weight: 800; font-style: normal; vertical-align: middle; }
-.legend i.sw { width: 18px; height: 18px; border-radius: 4px; margin: 0 3px 0 6px; }
-.step-legend { flex-wrap: wrap; margin: 14px 0 0; row-gap: 6px; }
-.legend-cap { color: var(--palette-35); }
-.name-wrap { display: flex; align-items: flex-start; gap: 4px; }
-.expand { flex: none; width: 32px; height: 44px; margin: -8px 0 0 -6px; padding: 0; background: none; color: var(--palette-35); border-radius: 6px; font-size: 1rem; line-height: 1; transition: background .12s ease; }
-.expand:hover { background: var(--chip-gray-bg); }
-.step-rows .gantt-row { background: var(--palette-40); }
-.step-rows .task-name { padding-left: 44px; }
-.step-kicker { color: var(--palette-35); font-size: .78rem; font-weight: 700; }
-/* Shared tooltip: text only, dark surface, no title attribute. */
-#step-tip { position: fixed; z-index: 50; max-width: 320px; background: var(--ink); color: var(--palette-6); padding: 10px 12px; border-radius: 8px; font-size: .8rem; line-height: 1.4; box-shadow: 0 12px 30px var(--palette-41); display: flex; flex-direction: column; gap: 2px; }
-#step-tip[hidden] { display: none; }
-#step-tip .tip-head { font-weight: 700; }
-#step-tip .tip-hint { color: var(--palette-42); font-size: .72rem; margin-top: 4px; }
 .parent-link { margin: 0 0 8px; }
 .subtasks li .sw { margin-right: 2px; }
 /* Schedule table: the structured twin of the Gantt (same rows, same filters). */
@@ -810,7 +697,6 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 /* 4T4DEA: reduced motion switches off every transition and animation, not only the Gantt's. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
-  .step:hover { transform: none; }
 }
 @media (max-width: 760px) {
   .shell { grid-template-columns: minmax(0, 1fr); padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
@@ -850,9 +736,6 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   .bands { grid-template-columns: repeat(3, 1fr); }
   .toolbar { gap: 10px 12px; padding: 12px; }
   .toolbar label { flex: 1 1 140px; min-width: 0; }
-  #gantt { --side-1: 200px; --side-2: 170px; --side-total: 370px; --pin-total: 200px; }
-  .gantt-row { grid-template-columns: var(--side-1) var(--side-2) var(--tl-w, minmax(600px, 1fr)); }
-  .step-legend, .view-controls .legend { font-size: .76rem; }
   .sched-table { font-size: .78rem; }
   .sched-table th, .sched-table td { padding: 8px 6px; }
 }
@@ -898,22 +781,19 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
   .cal-month { display: none; }
   .cal-agenda { display: block; }
   .cal-scope { margin-left: 0; }
+  /* The 44px touch targets also apply to the Gantt's controls. */
+  .gx-icon-btn, .gx-open { min-width: 44px; }
+  .gx-sheet-foot button { height: auto; }
 }
 
-/* JM7CFP: explicit task-row drop targets; all colors reuse semantic tokens. */
-.task-row-handle { display:block; margin-top:var(--space-2); cursor:grab; }
-.task-drop-zones { display:none; position:absolute; top:calc(100% + var(--space-1)); left:0; z-index:4; gap:var(--space-1); background:var(--surface); border-radius:var(--radius); }
-.task-row-dragging .task-drop-zones { display:flex; }
+/* JM7CFP: the reviewed task Move dialog; all colors reuse semantic tokens. */
+.task-row-handle { display:block; margin-top:var(--space-2); cursor:pointer; }
 .schedule-preview-table { max-height:18rem; overflow:auto; }
 .schedule-preview-table table { width:100%; border-collapse:collapse; }
 .schedule-preview-table th, .schedule-preview-table td { text-align:left; padding:var(--space-2); border-bottom:1px solid var(--line); vertical-align:top; }
 .schedule-preview-dates { display:grid; gap:var(--space-1); white-space:nowrap; }
 .task-move-dialog .schedule-deadline-choice { display:flex; flex-direction:row; align-items:flex-start; gap:var(--space-2); }
 .task-move-dialog .schedule-deadline-choice input { width:auto; flex:none; margin:0; }
-.proj-line.scheduled-start, .proj-line.scheduled-finish { border-left:2px dotted var(--teal); }
-.proj-flag.scheduled-start, .proj-flag.scheduled-finish { background:var(--teal); top:0; }
-.task-drop-zone { font-size:var(--fs-small); border:1px dashed var(--line-strong); }
-.task-drop-over { outline:2px solid var(--focus); outline-offset:-2px; background:var(--teal-soft); }
 .task-move-dialog { max-width:560px; }
 
 .error.message-success { color: var(--teal-dark); }
@@ -921,47 +801,186 @@ button.link { background: none; color: var(--teal); padding: 0; font-size: .8rem
 
 .admin-sections { position: sticky; top: -26px; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; background: var(--surface); }
 
-/* Zoomable Gantt (Asana and monday style). The timeline column is a fixed width when zoomed, so the chart scrolls
-   sideways while the task name and meta columns stay put; the header has two tiers (month over week, or quarter
-   over month) and a flag row above them for the project markers and Today. */
-#gantt .gantt-row > .task-name, #gantt .gantt-row > .task-meta { position: sticky; z-index: 4; background: var(--surface); align-self: stretch; align-content: center; }   /* the full row height, or bars and arrows show through above and below the text */
-#gantt .gantt-row > .task-name { left: 0; }
-#gantt .gantt-row > .task-meta { left: var(--side-1); border-right: 1px solid var(--line-2); }
-#gantt .step-rows .gantt-row > .task-name, #gantt .step-rows .gantt-row > .task-meta { background: var(--palette-40); }
-#gantt .gantt-row:not(.gantt-head):hover > .task-name, #gantt .gantt-row:not(.gantt-head):hover > .task-meta { background: var(--surface-2); }
-#gantt .gantt-head > .gantt-head-cap { background: var(--palette-6); z-index: 8; display: flex; align-items: center; }   /* stretched, so the date ticks cannot show behind them */
-#gantt.no-grid .timeline { background-image: none; }
-.gantt-head .timeline { height: 72px; }
-.axis-tick.tier-1 { top: 24px; bottom: auto; height: 24px; overflow: hidden; color: var(--ink); border-left: 1px solid var(--palette-12); border-bottom: 1px solid var(--line-2); }
-.axis-tick.tier-2 { top: 48px; bottom: 0; overflow: hidden; padding-left: 3px; border-left: 1px solid var(--line-2); flex-direction: column; align-items: flex-start; justify-content: center; line-height: 1.05; }
-.axis-tick.tier-2 b { margin-right: 0; }
-.axis-tick.tier-2 i { font-style: normal; font-size: 9px; }
-.axis-tick.tier-2.weekend { background: var(--surface-2); }
-.gantt-head .proj-flag { top: 2px; }
-.gantt-head .today-flag { z-index: 3; }   /* in the flag row above the tiers, so it never covers a date */
-.zoom-group { display: inline-flex; border: 1px solid var(--palette-9); border-radius: 8px; overflow: hidden; }
-.zoom-btn { border: 0; border-right: 1px solid var(--palette-9); border-radius: 0; background: var(--surface); color: var(--ink); padding: 6px 12px; font: inherit; font-size: .82rem; cursor: pointer; min-height: 32px; }
-.zoom-btn:last-child { border-right: 0; }
-.zoom-btn[aria-pressed="true"] { background: var(--teal); color: var(--palette-6); font-weight: 700; }
-.zoom-btn.today-btn { font-weight: 650; }
-.bar.milestone { top: 50%; left: 0; width: 16px; height: 16px; min-width: 16px; padding: 0; border: 0; border-radius: 3px; transform: translate(-50%, -50%) rotate(45deg); overflow: visible; cursor: pointer; }
-.bar.milestone.closed { background: var(--gray); }
-.ms-label { position: absolute; top: 50%; transform: translateY(-50%); margin-left: 14px; font-size: .72rem; font-weight: 650; color: var(--ink); white-space: nowrap; pointer-events: none; }
-
-/* Below about 1100px two pinned columns would leave almost no room for the timeline, so only the task name stays pinned
-   (the meta column scrolls away with the chart). */
-@media (max-width: 1100px) {
-  #gantt .gantt-row > .task-meta { position: relative; left: auto; z-index: auto; border-right: 0; background: transparent; }
-  #gantt .step-rows .gantt-row > .task-meta { background: transparent; }
+/* Gantt: a replica of shadcnstudio's gantt-chart-04 block (phases, steps, dependency arrows).
+   The block's own neutral palette lives in :root as --gx-*; a status sets --gx-c and every tint,
+   border and icon of that row or bar is mixed from it. Positions and widths come from app.js
+   (gxPlace) through the CSSOM, never from a style attribute. */
+.gx-s-completed { --gx-c: var(--gx-green); }
+.gx-s-progress { --gx-c: var(--gx-sky); }
+.gx-s-risk { --gx-c: var(--gx-amber); }
+.gx-s-blocked { --gx-c: var(--gx-destructive); }
+.gx-s-queued { --gx-c: var(--gx-zinc); }
+.gx-card { position: relative; display: flex; flex-direction: column; overflow: hidden; background: var(--gx-bg); color: var(--gx-fg); border: 1px solid var(--gx-border); border-radius: 10px; font-size: 14px; }
+.gx-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 16px; border-bottom: 1px solid var(--gx-border); }
+.gx-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.gx-card .gx-title { margin: 0 4px 0 0; color: var(--gx-fg); font-size: 14px; font-weight: 600; letter-spacing: normal; text-transform: none; white-space: nowrap; }
+.gx-icon { flex: none; width: 16px; height: 16px; }
+.gx-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px solid var(--gx-border); border-radius: 8px; background: var(--gx-bg); color: var(--gx-fg); font-size: 14px; font-weight: 500; white-space: nowrap; box-shadow: var(--gx-shadow-xs); }
+.gx-btn:hover { background: var(--gx-muted); }
+.gx-btn:disabled { opacity: .5; cursor: default; pointer-events: none; }
+.gx-btn:focus-visible, .gx-select:focus-visible { outline: 0; border-color: var(--gx-ring); box-shadow: 0 0 0 2px var(--gx-bg), 0 0 0 4px var(--focus); }
+.gx-btn.is-on { background: var(--gx-muted); }
+.gx-icon-btn { width: 32px; padding: 0; }
+.gx-primary { border-color: var(--gx-primary); background: var(--gx-primary); color: var(--gx-primary-fg); }
+.gx-primary:hover { background: color-mix(in oklch, var(--gx-primary) 90%, var(--gx-bg)); }
+.gx-group { display: inline-flex; border-radius: 8px; box-shadow: var(--gx-shadow-xs); }
+.gx-group .gx-btn { position: relative; border-radius: 0; box-shadow: none; }
+.gx-group .gx-btn:first-child { border-radius: 8px 0 0 8px; }
+.gx-group .gx-btn:last-child { border-radius: 0 8px 8px 0; }
+.gx-group .gx-btn + .gx-btn { margin-left: -1px; }
+.gx-group .gx-btn:focus-visible, .gx-zoom .gx-btn:focus-visible { z-index: 1; box-shadow: 0 0 0 2px var(--gx-bg), 0 0 0 4px var(--focus); }
+.gx-select { width: 96px; height: 32px; padding: 0 8px; border: 1px solid var(--gx-border); border-radius: 8px; background: var(--gx-bg); color: var(--gx-fg); font-size: 14px; font-weight: 400; text-transform: capitalize; box-shadow: var(--gx-shadow-xs); }
+#gantt-plan { width: auto; max-width: 168px; text-transform: none; }
+.gx-plan, .gx-switch, .gx-toolbar .view-toggle { flex-direction: row; align-items: center; gap: 8px; margin: 0; padding: 0; min-height: 32px; color: var(--gx-fg); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.gx-toolbar .view-toggle input { width: 16px; height: 16px; accent-color: var(--gx-primary); }
+.gx-switch { position: relative; cursor: pointer; }
+.gx-switch input { position: absolute; left: 0; top: 50%; width: 28px; height: 16px; margin: -8px 0 0; padding: 0; opacity: 0; cursor: pointer; }
+.gx-switch-track { position: relative; flex: none; width: 28px; height: 16px; border-radius: 999px; background: var(--gx-border); transition: background-color var(--dur-2) ease; }
+.gx-switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--gx-bg); box-shadow: var(--gx-shadow-xs); transition: transform var(--dur-2) ease; }
+.gx-switch input:checked + .gx-switch-track { background: var(--gx-primary); }
+.gx-switch input:checked + .gx-switch-track::after { transform: translateX(12px); }
+.gx-switch input:focus-visible + .gx-switch-track { box-shadow: 0 0 0 2px var(--gx-bg), 0 0 0 4px var(--focus); }
+.gx-pop-wrap { position: relative; }
+.gx-pop { position: absolute; top: calc(100% + 4px); right: 0; z-index: 50; width: 192px; max-width: calc(100vw - 32px); max-height: 320px; overflow: auto; padding: 6px; border: 1px solid var(--gx-border); border-radius: 8px; background: var(--gx-bg); box-shadow: var(--gx-shadow-md); }
+.gx-pop-head { margin: 0; padding: 6px 8px 4px; color: var(--gx-muted-fg); font-size: 12px; font-weight: 500; }
+.gx-pop-row, .gx-dep-row { flex-direction: row; align-items: center; gap: 8px; margin: 0; padding: 6px 8px; border-radius: 6px; color: var(--gx-fg); font-size: 14px; font-weight: 400; cursor: pointer; }
+.gx-pop-row:hover, .gx-dep-row:hover { background: var(--gx-muted); }
+.gx-pop-row input, .gx-dep-row input { flex: none; width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--gx-primary); }
+.gx-pop-row .gx-avatar { width: 20px; height: 20px; }
+.gx-pop-label, .gx-dep-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gx-count { flex: none; color: var(--gx-muted-fg); font-size: 12px; font-variant-numeric: tabular-nums; }
+.gx-pop-empty, .gx-dep-empty { margin: 0; padding: 6px 8px; color: var(--gx-muted-fg); font-size: 12px; }
+/* One scroller for both directions; the Step pane sticks to its left edge and both headers to its top. */
+/* isolation: the pinned pane and headers stack inside the chart only, never over the app's top bar or the phone's bottom navigation. */
+#gantt { position: relative; isolation: isolate; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; min-height: 240px; max-height: max(360px, calc(100dvh - 15rem)); }
+#gantt::-webkit-scrollbar { display: none; }
+.gx-inner { display: flex; min-width: max-content; }
+.gx-pane { position: sticky; left: 0; z-index: 30; flex: none; width: var(--gx-pane); background: var(--gx-bg); border-right: 1px solid var(--gx-border); }
+.gx-pane-head { position: sticky; top: 0; z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; column-gap: 12px; height: 56px; padding: 0 12px 0 20px; background: var(--gx-bg); border-bottom: 1px solid var(--gx-border); color: var(--gx-muted-fg); font-size: 12px; font-weight: 500; }
+.gx-row { position: relative; display: flex; align-items: center; height: 48px; border-bottom: 1px solid var(--gx-border); }
+.gx-d1 { --gx-pi: 16px; }
+.gx-d2 { --gx-pi: 32px; --gx-si: 16px; }
+.gx-d3 { --gx-pi: 48px; --gx-si: 32px; }
+.gx-d4 { --gx-pi: 64px; --gx-si: 48px; }
+.gx-phase { background: var(--gx-muted); }
+.gx-pane .gx-phase { gap: 8px; padding: 0 12px 0 calc(12px + var(--gx-pi, 0px)); cursor: pointer; }
+.gx-pane .gx-phase:hover { background: color-mix(in oklch, var(--gx-muted) 80%, var(--gx-bg)); }
+.gx-phase-toggle { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; height: 100%; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--gx-fg); font-size: 14px; font-weight: 600; text-align: left; }
+.gx-chevron { color: var(--gx-muted-fg); transition: transform var(--dur-2) ease; }
+.gx-phase-toggle[aria-expanded="true"] .gx-chevron { transform: rotate(90deg); }
+.gx-phase-name, .gx-name-text, .gx-bar-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gx-code { flex: none; padding: 1px 6px; border: 1px solid var(--gx-border); border-radius: 6px; color: var(--gx-fg); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; font-weight: 500; line-height: 16px; white-space: nowrap; }
+.gx-open { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--gx-muted-fg); opacity: 0; }
+.gx-open:hover { background: var(--gx-border); color: var(--gx-fg); }
+.gx-phase:hover .gx-open, .gx-open:focus-visible { opacity: 1; }
+@media (hover: none) { .gx-open { opacity: 1; } }
+.gx-stat { flex: none; color: var(--gx-muted-fg); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gx-pane .gx-step { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 12px; padding: 0 12px 0 calc(20px + var(--gx-si, 0px)); background: var(--gx-bg); }
+.gx-guide { position: absolute; top: 0; bottom: 0; left: calc(26px + var(--gx-si, 0px)); width: 1px; background: var(--gx-border); }
+.gx-name { display: flex; align-items: center; gap: 8px; min-width: 0; height: 32px; margin-left: 15px; padding: 0 8px; border: 0; border-radius: 6px; background: none; color: var(--gx-fg); font-size: 14px; font-weight: 500; text-align: left; }
+.gx-name:hover { background: var(--gx-muted); }
+.gx-phase-toggle:focus-visible, .gx-open:focus-visible, .gx-name:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--gx-bg), 0 0 0 4px var(--focus); }
+.gx-status { width: 14px; height: 14px; color: var(--gx-c); }
+.gx-links { display: inline-flex; flex: none; align-items: center; gap: 2px; color: var(--gx-muted-fg); font-size: 12px; font-weight: 400; }
+.gx-links .gx-icon { width: 12px; height: 12px; }
+.gx-avatar { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: var(--gx-muted); box-shadow: 0 0 0 1px var(--gx-border); color: var(--gx-fg); font-size: 10px; font-weight: 500; line-height: 1; }
+.gx-badge { display: inline-flex; align-items: center; justify-self: start; gap: 6px; max-width: 100%; height: 22px; padding: 0 8px; overflow: hidden; border: 1px solid var(--gx-border); border-radius: 6px; color: var(--gx-fg); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.gx-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--gx-c); }
+.gx-row .gx-col-dates, .gx-row .gx-col-len { color: var(--gx-muted-fg); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gx-col-len { text-align: right; }
+.gx-none { padding: 24px 20px; color: var(--gx-muted-fg); font-size: 14px; }
+/* Columns of the Step pane by its width: 192px shows the step only, 288px adds the owner, 560px all five. */
+#gantt[data-pane="sm"] :is(.gx-col-owner, .gx-col-status, .gx-col-dates, .gx-col-len, .gx-code, .gx-stat-pct, .gx-links) { display: none; }
+#gantt[data-pane="md"] :is(.gx-col-status, .gx-col-dates, .gx-col-len, .gx-stat-pct, .gx-links) { display: none; }
+#gantt[data-pane="md"] :is(.gx-pane-head, .gx-pane .gx-step) { grid-template-columns: minmax(0, 1fr) 36px; }
+#gantt[data-pane="lg"] :is(.gx-pane-head, .gx-pane .gx-step) { grid-template-columns: minmax(0, 1fr) 36px 112px 112px 40px; }
+.gx-time { flex: none; width: calc(var(--gx-days) * var(--gx-day)); }
+.gx-time-head { position: sticky; top: 0; z-index: 20; display: flex; flex-direction: column; height: 56px; background: var(--gx-bg); border-bottom: 1px solid var(--gx-border); }
+.gx-weeks, .gx-days { display: flex; flex: 1 1 0; min-height: 0; }
+.gx-weeks { border-bottom: 1px solid var(--gx-border); }
+.gx-week { display: flex; flex: none; align-items: center; overflow: hidden; padding: 0 12px; border-right: 1px solid var(--gx-border); color: var(--gx-muted-fg); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.gx-week > span { overflow: hidden; text-overflow: ellipsis; }
+.gx-day { display: flex; flex: none; align-items: center; justify-content: center; gap: 4px; width: var(--gx-day); border-right: 1px solid var(--gx-border); color: var(--gx-fg); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.gx-day.we { background: color-mix(in oklch, var(--gx-muted) 40%, var(--gx-bg)); }
+.gx-day i { color: var(--gx-muted-fg); font-style: normal; }
+.gx-today-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--gx-primary); color: var(--gx-primary-fg); font-weight: 500; }
+/* Timeline body, back to front: day columns, rows (a phase row is opaque), arrows, bars. */
+.gx-body { position: relative; isolation: isolate; }
+.gx-cols { position: absolute; inset: 0; display: flex; pointer-events: none; }
+.gx-col { position: relative; flex: none; width: var(--gx-day); border-right: 1px solid var(--gx-border); }
+.gx-col.we { background: color-mix(in oklch, var(--gx-muted) 30%, transparent); }
+.gx-col.today::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: color-mix(in oklch, var(--gx-primary) 40%, transparent); }
+.gx-time .gx-row { overflow: hidden; }
+.gx-deps { position: absolute; top: 0; left: 0; z-index: 1; overflow: visible; pointer-events: none; }
+.gx-dep { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.gx-dep-idle { stroke: color-mix(in oklch, var(--gx-muted-fg) 50%, transparent); }
+.gx-dep-active { stroke: var(--gx-primary); }
+.gx-dep-conflict { stroke: var(--gx-destructive); }
+.gx-head-idle { fill: color-mix(in oklch, var(--gx-muted-fg) 60%, transparent); }
+.gx-head-active { fill: var(--gx-primary); }
+.gx-head-conflict { fill: var(--gx-destructive); }
+.gx-sum { position: absolute; top: 21px; height: 6px; overflow: hidden; border-radius: 999px; background: color-mix(in oklch, var(--gx-primary) 20%, transparent); }
+.gx-sum-fill { display: block; height: 100%; border-radius: 999px; background: var(--gx-primary); }
+.gx-sum-pct { position: absolute; top: 50%; transform: translateY(-50%); color: var(--gx-muted-fg); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.gx-bar { position: absolute; top: 8px; z-index: 2; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; overflow: hidden; border: 1px solid color-mix(in oklch, var(--gx-c) 40%, transparent); border-radius: 6px; background: var(--gx-bg); background-clip: padding-box; box-shadow: var(--gx-shadow-xs); color: var(--gx-fg); font-size: 12px; font-weight: 500; white-space: nowrap; user-select: none; }
+.gx-bar::before { content: ""; position: absolute; inset: 0; background: color-mix(in oklch, var(--gx-c) 10%, transparent); pointer-events: none; }
+.gx-fill { position: absolute; top: 0; bottom: 0; left: 0; background: color-mix(in oklch, var(--gx-c) 20%, transparent); pointer-events: none; }
+.gx-bar > :is(.gx-icon, .gx-bar-name, .gx-bar-pct, .gx-avatar) { position: relative; }
+.gx-bar-name { flex: 1 1 auto; }
+.gx-bar-pct { flex: none; color: var(--gx-muted-fg); font-variant-numeric: tabular-nums; }
+.gx-bar .gx-avatar { margin-right: -4px; background: var(--gx-bg); }
+.gx-bar.cut-start { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.gx-bar.cut-end { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.gx-bar[data-drag], .gx-ms[data-drag] { cursor: grab; touch-action: pan-y; }
+.gx-bar[data-drag]:active, .gx-ms[data-drag]:active { cursor: grabbing; }
+.gx-bar:hover, .gx-ms:hover { z-index: 3; }
+.gx-bar:focus-visible, .gx-ms:focus-visible { z-index: 3; outline: 0; box-shadow: 0 0 0 2px var(--gx-bg), 0 0 0 4px var(--focus); }
+.gx-bar.is-dragging, .gx-ms.is-dragging { z-index: 4; cursor: grabbing; box-shadow: var(--gx-shadow-md); }
+.gx-grip { position: absolute; top: 4px; bottom: 4px; z-index: 1; display: flex; align-items: center; justify-content: center; width: 8px; cursor: ew-resize; opacity: 0; transition: opacity var(--dur-2) ease; }
+.gx-grip::after { content: ""; width: 2px; height: 16px; border-radius: 1px; background: color-mix(in oklch, var(--gx-fg) 40%, transparent); }
+.gx-grip.start { left: 0; }
+.gx-grip.end { right: 0; }
+.gx-bar:hover .gx-grip, .gx-bar.is-dragging .gx-grip { opacity: 1; }
+.gx-ms { position: absolute; top: 10px; z-index: 2; display: flex; align-items: center; justify-content: center; height: 28px; border: 1px solid color-mix(in oklch, var(--gx-c) 40%, transparent); border-radius: 50%; background: color-mix(in oklch, var(--gx-c) 10%, var(--gx-bg)); background-clip: padding-box; user-select: none; }
+.gx-ms.gx-s-queued { border-color: var(--gx-border); }
+.gx-ms .gx-icon { width: 14px; height: 14px; color: var(--gx-c); }
+.gx-ms-label { position: absolute; left: 100%; margin-left: 20px; padding: 2px 8px; border-radius: 6px; background: var(--gx-muted); color: var(--gx-fg); font-size: 12px; font-weight: 500; white-space: nowrap; pointer-events: none; }
+.gx-zoom { position: absolute; right: 12px; bottom: 12px; z-index: 5; display: flex; flex-direction: column; border-radius: 8px; box-shadow: var(--gx-shadow-xs); }
+.gx-zoom .gx-btn { position: relative; border-radius: 0; box-shadow: none; }
+.gx-zoom .gx-btn:first-child { border-radius: 8px 8px 0 0; }
+.gx-zoom .gx-btn:last-child { border-radius: 0 0 8px 8px; }
+.gx-zoom .gx-btn + .gx-btn { margin-top: -1px; }
+.gx-zoom .gx-btn:disabled { background: var(--gx-bg); opacity: 1; color: color-mix(in oklch, var(--gx-fg) 40%, transparent); }
+.gx-card #schedule-table { padding: 0 16px 12px; border-top: 0; }
+/* New Step: a sheet on the right edge. */
+dialog.gx-sheet { position: fixed; inset: 0 0 0 auto; width: min(448px, 100vw); max-width: 448px; height: 100dvh; max-height: 100dvh; margin: 0; border-left: 1px solid var(--gx-border); border-radius: 0; background: var(--gx-bg); color: var(--gx-fg); box-shadow: var(--gx-shadow-lg); }
+dialog.gx-sheet::backdrop { background: var(--gx-overlay); }
+dialog.gx-sheet[open] { animation: gx-sheet-in var(--dur-3) var(--ease-enter); }
+@keyframes gx-sheet-in { from { transform: translateX(100%); } }
+.gx-sheet form { display: flex; flex-direction: column; height: 100%; padding: 0; }
+.gx-sheet-head { display: flex; flex-direction: column; gap: 4px; padding: 16px; }
+.gx-sheet-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.gx-sheet-head p { margin: 0; color: var(--gx-muted-fg); font-size: 14px; }
+.gx-sheet-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 16px 16px; }
+.gx-sheet-body label { margin: 0 0 14px; color: var(--gx-fg); font-size: 14px; font-weight: 500; }
+.gx-sheet-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 12px; }
+/* The people picker puts its status line after the Owner field: it takes a full row, and no room while empty. */
+.gx-sheet-grid .field-hint { grid-column: 1 / -1; margin: -8px 0 12px; }
+.gx-sheet-grid .field-hint:empty { display: none; }
+.gx-sheet-body :is(input, select, textarea) { border-color: var(--gx-border); border-radius: 8px; color: var(--gx-fg); box-shadow: var(--gx-shadow-xs); }
+.gx-sheet-body :is(input, select, textarea):focus-visible { outline: 0; border-color: var(--gx-ring); box-shadow: 0 0 0 2px var(--gx-bg), 0 0 0 4px var(--focus); }
+.gx-deps-field { min-width: 0; margin: 0 0 14px; padding: 0; border: 0; }
+.gx-deps-field legend { margin-bottom: 6px; padding: 0; font-size: 14px; font-weight: 500; }
+.gx-dep-list { max-height: 112px; overflow: auto; padding: 4px; border: 1px solid var(--gx-border); border-radius: 8px; }
+.gx-sheet-body .gx-dep-row { margin: 0; font-weight: 400; }
+.gx-sheet-body .gx-dep-row input { box-shadow: none; }
+.gx-sheet-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 16px; border-top: 1px solid var(--gx-border); }
+.gx-sheet-foot button { height: 36px; padding: 0 16px; border: 1px solid var(--gx-primary); border-radius: 8px; background: var(--gx-primary); color: var(--gx-primary-fg); font-size: 14px; font-weight: 500; box-shadow: var(--gx-shadow-xs); }
+.gx-sheet-foot button:not(.quiet):hover { background: color-mix(in oklch, var(--gx-primary) 90%, var(--gx-bg)); }
+.gx-sheet-foot button.quiet { border-color: var(--gx-border); background: var(--gx-bg); color: var(--gx-fg); }
+.gx-sheet-foot button.quiet:hover { background: var(--gx-muted); }
+.gx-sheet-foot button:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--gx-bg), 0 0 0 4px var(--focus); }
+@media (min-width: 640px) {
+  .gx-card .gx-title { font-size: 16px; }
+  .gx-switch { font-size: 14px; }
 }
-@media (min-width: 761px) and (max-width: 1100px) {   /* only the name column is pinned here; phones keep their own 200px from the 760px block above */
-  #gantt { --pin-total: 260px; }
-}
-.proj-flag.edge-l, .today-flag.edge-l { transform: none; }
-.proj-flag.edge-r, .today-flag.edge-r { transform: translateX(-100%); }
-.dep-layer { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 2; overflow: visible; }  /* under the pinned columns (4) and the header (7) */
-.dep-line { fill: none; stroke: var(--gray); stroke-width: 1.5; }
-.dep-line.critical { stroke: var(--crit); stroke-width: 2; }
-.dep-head { fill: var(--gray); }
-.dep-head.critical { fill: var(--crit); }
-.ms-label.edge-r { transform: translate(-100%, calc(-50% - 14px)); margin-left: 8px; }   /* above the diamond: the incoming arrow runs along its left side */

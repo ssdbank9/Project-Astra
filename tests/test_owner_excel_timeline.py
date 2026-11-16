@@ -135,9 +135,9 @@ class TimelineOrderUiTests(unittest.TestCase):
         source=(Path(__file__).parents[1]/'src/astra/static/app.js').read_text(encoding='utf-8')
         functions=[]
         for start,end in [('function stepOrder(', 'function stepHue('),
-                          ('function groupSteps(', 'function dateExtent('),
-                          ('function timelineOrder(', 'let timelineTaskDrag'),
-                          ('function timelineTaskOrder(', 'function clearTaskDrop(')]:
+                          ('function groupSteps(', '// GF-6: a re-render'),
+                          ('function timelineOrder(', 'function timelineTaskOrder('),
+                          ('function timelineTaskOrder(', 'async function reviewTaskDrop(')]:
             functions.append(source[source.index(start):source.index(end)])
         script='''
 const assert=require('node:assert/strict');

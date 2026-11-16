@@ -1446,17 +1446,38 @@ class AstraService:
         if start_date and due_date and due_date < start_date:
             raise ValueError("Due date cannot be earlier than start date.")
         parent_task_id = payload.get("parent_task_id") or None
+        # The Gantt's New Step form sends is_milestone and a list of predecessors; the older
+        # single predecessor_task_id field still works and is folded into the same list.
         predecessor_task_id = payload.get("predecessor_task_id") or None
+        listed = payload.get("predecessor_task_ids")
+        if listed is None:
+            listed = []
+        if not isinstance(listed, list) or not all(isinstance(item, str) and item for item in listed):
+            raise ValueError("Predecessors must be a list of task ids.")
+        predecessor_ids = list(dict.fromkeys(([str(predecessor_task_id)] if predecessor_task_id else []) + listed))
+        is_milestone = payload.get("is_milestone", False)
+        if not isinstance(is_milestone, bool):
+            raise ValueError("Milestone must be true or false.")
         if parent_task_id:
             parent = self.get_task(actor, parent_task_id)
             if parent["project_id"] != project_id:
                 raise ValueError("A parent task must belong to the same project.")
         owner_user_id = self._validate_assignee(project_id, payload.get("owner_user_id") or None,
                                                 subtask=bool(parent_task_id))
-        if predecessor_task_id:
-            predecessor = self.get_task(actor, predecessor_task_id)
+        for predecessor_id in predecessor_ids:
+            predecessor = self.get_task(actor, predecessor_id)
             if predecessor["project_id"] != project_id:
                 raise ValueError("A predecessor task must belong to the same project.")
+        if parent_task_id and predecessor_ids:
+            # A step cannot wait for the task it belongs to, or one above it: that task's dates
+            # span the step, so the link could never be met.
+            above, cursor = set(), parent_task_id
+            while cursor and cursor not in above:
+                above.add(cursor)
+                row = self.db.execute("SELECT parent_task_id FROM tasks WHERE id=?", (cursor,)).fetchone()
+                cursor = row["parent_task_id"] if row else None
+            if above & set(predecessor_ids):
+                raise ValueError("A step cannot depend on the task it belongs to.")
         task_id = new_id()
         timestamp = now_text()
         with self._schedule_transaction(actor, project_id):
@@ -1468,35 +1489,43 @@ class AstraService:
             if self.db.execute('SELECT status FROM projects WHERE id=?', (project_id,)).fetchone()['status'] == 'closed':
                 raise Forbidden('Reopen the project before adding tasks.')
             owner_user_id = self._validate_assignee(project_id, owner_user_id, subtask=bool(parent_task_id))
+            # Review 12b M1, as in add_task_dependency: a new link changes what a predecessor's lock holder is moving.
+            for predecessor_id in predecessor_ids:
+                self._assert_task_unlocked(predecessor_id, actor["id"])
             from . import workplan
-            for linked_id in (parent_task_id, predecessor_task_id):
+            for linked_id in (parent_task_id, *predecessor_ids):
                 if linked_id and not workplan.compatible(workplan.plan(self.get_task(actor, linked_id)), "Shared"):
                     raise ValueError("A Shared task cannot be linked to an alternative plan task.")
             self.db.execute(
                 """INSERT INTO tasks(id,project_id,parent_task_id,title,description,owner_user_id,status,criticality,
-                   start_date,due_date,progress,created_at,created_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   start_date,due_date,progress,created_at,created_by,updated_at,is_milestone)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (task_id, project_id, parent_task_id, title, str(payload.get("description", "")).strip(),
                  owner_user_id, status, criticality, start_date, due_date,
-                 self._progress(payload.get("progress")), timestamp, actor["id"], timestamp),
+                 self._progress(payload.get("progress")), timestamp, actor["id"], timestamp,
+                 1 if is_milestone else 0),
             )
             self._ensure_baseline(task_id)
             task = self.get_task(actor, task_id)
             self._event(task_id, actor["id"], "task_created", None, task, payload.get("reason"))
             self._write_audit_events(task_id, actor["id"], self._wip_entry_gate(
                 actor, project_id, task_id, None, payload.get("override_wip") is True))
-            if predecessor_task_id:
+            for predecessor_id in predecessor_ids:
                 self.db.execute(
                     "INSERT INTO task_dependencies VALUES(?,?,?)",
-                    (predecessor_task_id, task_id, "finish_to_start"),
+                    (predecessor_id, task_id, "finish_to_start"),
                 )
                 self._event(
                     task_id,
                     actor["id"],
                     "dependency_added",
                     None,
-                    {"predecessor_task_id": predecessor_task_id, "dependency_type": "finish_to_start"},
+                    {"predecessor_task_id": predecessor_id, "dependency_type": "finish_to_start"},
                     None,
                 )
+            if predecessor_ids:
+                # Read again so the returned task reflects the dependencies just written.
+                task = self.get_task(actor, task_id)
         return task
 
     # 9MK29X: update_task is a fixed sequence of named steps. The order is load-bearing

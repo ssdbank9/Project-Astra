@@ -72,19 +72,14 @@ function renderBands(tasks){
     `<div class="band ${cls}"><strong>${count}</strong><span>${escapeHtml(label)}</span></div>`).join("");
 }
 function fmtTick(d){return d.toLocaleDateString(undefined,{month:"short",day:"numeric"})}
-// D73AQW: a task's steps are its subtasks. They render as colour-coded segments inside the
-// parent bar (hue = step index, Okabe-Ito order), expand to child rows on request, share one
-// tooltip on hover and focus, and click through to the step's own record. Colour is never the
-// only carrier: every segment shows its index, the legend pairs index with colour, and the
-// Schedule table twin shows the same rows as text.
+// D73AQW: a task's steps are its subtasks. In the Schedule table and the task panel's sub-task
+// list each step has a numbered swatch (hue = step index, Okabe-Ito order); colour is never the
+// only carrier, the number is always beside it. The chart itself (2026-11) colours by status.
 const STEP_HUES=7;
 const CLOSED_STATUSES=["completed","cancelled","abandoned"];
 const STATUS_LABELS={draft:"Draft",assigned:"Assigned",in_progress:"In progress",submitted:"Submitted",changes_requested:"Changes requested",completed:"Completed",on_hold:"On hold",delayed:"Delayed",cancelled:"Cancelled",abandoned:"Abandoned",reopened:"Reopened"};
-const tipMeta=new Map();
-// localStorage holds per-viewer conveniences only (expanded parents, chart/table choice).
+// localStorage holds per-viewer conveniences only (collapsed phases, chart/table choice, day width).
 const storage={get(k,f){try{const v=localStorage.getItem(k);return v==null?f:JSON.parse(v)}catch(e){return f}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
-const storedExpanded=storage.get("astra.gantt.expanded",[]);
-const expandedParents=new Set(Array.isArray(storedExpanded)?storedExpanded:[]);
 const phoneMQ=window.matchMedia?window.matchMedia("(max-width: 760px)"):{matches:false};
 // 3C1Z74 review M1: below 1024px (and at 200% zoom) the task panel covers the screen, so everything behind it
 // is made inert while it is open: Tab stays in the panel and nothing hidden behind it can take focus.
@@ -104,22 +99,6 @@ function initials(name){return (name||"").split(/\s+/).filter(Boolean).slice(0,2
 function dueText(t){if(t.due_state==="undated")return "No due date";if(t.due_state==="closed")return "Closed";const d=t.days_to_due;if(d==null)return "";if(d<0)return `${-d} day${d===-1?"":"s"} overdue`;if(d===0)return "Due today";return `Due in ${d} day${d===1?"":"s"}`}
 function stepOrder(children){return children.slice().sort((a,b)=>{const da=a.start_date||a.due_date||"9999",db=b.start_date||b.due_date||"9999";return da<db?-1:da>db?1:String(a.title||"").localeCompare(String(b.title||""))})}
 function stepHue(idx){return ((idx-1)%STEP_HUES)+1}
-function stepDays(t){const s=t.start_date||t.due_date,e=t.due_date||t.start_date;return Math.round((Date.parse(e)-Date.parse(s))/86400000)+1}
-function stateClass(t){return t.is_critical_path?"critical":(t.is_blocked?"blocked":t.due_state)}
-function tipLines(t,idx,total,extra){
-  const head=idx?`Step ${idx} of ${total} · ${t.title}`:t.title;
-  const owner=`Owner: ${t.owner_name||"Unassigned"}`;
-  const dated=t.start_date||t.due_date;
-  const n=dated?stepDays(t):0;
-  const when=dated?`${fmtDay(t.start_date||t.due_date)} → ${fmtDay(t.due_date||t.start_date)} · ${n} day${n===1?"":"s"}`:"No dates yet";
-  const st=[statusLabel(t.status),dueText(t),t.criticality||"Unrated"];
-  if(t.is_critical_path)st.push("Critical path");if(t.is_blocked)st.push("Blocked");
-  return [head,owner,when,st.filter(Boolean).join(" · "),...(extra||[]),"Click for details & history"];
-}
-// Registers the tooltip text for an element and returns its data-tip + aria-label attributes.
-// GF-8: the label is short (position and name); the detail lives in the tooltip, which is
-// linked by aria-describedby only while it is visible, so nothing is read twice.
-function tipAttrs(t,idx,total,extra){const lines=tipLines(t,idx,total,extra);tipMeta.set(t.id,lines);const label=idx?`Step ${idx} of ${total}, ${t.title}`:(total?`${t.title}, ${total} step${total===1?"":"s"}`:t.title);return `data-tip="${escapeHtml(t.id)}" aria-label="${escapeHtml(label)}"`}
 function groupSteps(tasks){
   const visible=new Set(tasks.map(t=>t.id));
   // Step index comes from ALL children of a parent (state.tasks), so a step keeps its
@@ -137,20 +116,11 @@ function groupSteps(tasks){
   top.splice(0,top.length,...timelineOrder(top));
   return {top,childrenOf,stepIndex,visible,hasSteps:childrenOf.size>0};
 }
-function dateExtent(t,kids){
-  const vals=[];const add=x=>{if(x.start_date||x.due_date){vals.push(Date.parse(x.start_date||x.due_date),Date.parse(x.due_date||x.start_date))}};
-  add(t);kids.forEach(add);
-  return vals.length?{start:Math.min(...vals),end:Math.max(...vals)}:null;
-}
-// CSP is style-src 'self', so inline style attributes are dropped by the browser. Positions
-// travel as data-x / data-w percentages and are applied through the CSSOM after insertion.
-function applyGeometry(root){root.querySelectorAll("[data-x]").forEach(n=>{n.style.left=`${n.dataset.x}%`;if(n.dataset.w!=null)n.style.width=`${n.dataset.w}%`})}
 // GF-6: a re-render (resize, filter, view change) replaces the chart's DOM. If focus was inside it,
 // remember which control held it (kind + id attribute) and put focus back on its replacement.
-const FOCUS_ATTRS=["data-detail","data-more","data-expand"],FOCUS_KINDS=["step","track","chip","link","expand","step-more"];
+const FOCUS_ATTRS=["data-detail","data-phase","data-bar"],FOCUS_KINDS=["gx-name","gx-open","gx-phase-toggle","gx-bar","gx-ms","link"];
 function focusKeyIn(root){const a=document.activeElement;if(!a||!root.contains(a))return null;const attr=FOCUS_ATTRS.find(x=>a.hasAttribute(x));if(!attr)return null;const kind=FOCUS_KINDS.find(k=>a.classList.contains(k));return `${kind?"."+kind:""}[${attr}="${CSS.escape(a.getAttribute(attr))}"]`}
 function restoreFocus(root,sel){if(!sel)return;const n=root.querySelector(sel);if(n&&!n.closest("[hidden]"))n.focus({preventScroll:true})}
-const GRIPS='<i class="bar-grip start" data-edge="start" aria-hidden="true"></i><i class="bar-grip end" data-edge="end" aria-hidden="true"></i>';
 function projectSchedule(p,selected=""){
   const forecasts=p.schedule_forecasts||{};
   if(selected&&forecasts[selected])return forecasts[selected];
@@ -158,312 +128,349 @@ function projectSchedule(p,selected=""){
   const all=Object.values(forecasts),starts=all.map(f=>f.start_date).filter(Boolean).sort(),finishes=all.map(f=>f.finish_date).filter(Boolean).sort();
   return {start_date:starts[0]||null,finish_date:finishes.at(-1)||null,undated_count:all.some(f=>f.undated_count)?1:0};
 }
-// Zoom, as Asana and monday offer it: a fixed pixels-per-day scale, so a long plan scrolls sideways
-// under a two-tier header (month over week, or quarter over month) instead of being squeezed into
-// the window. Fit keeps the whole plan in view; the others keep every label readable.
-const GANTT_ZOOMS=["fit","week","month","quarter"],ZOOM_PPD={week:22,month:6,quarter:2};
-function ganttCssPx(name){try{return parseInt(getComputedStyle(document.querySelector("#gantt")).getPropertyValue(name))||470}catch(e){return 470}}
-function ganttSidePx(){return ganttCssPx("--side-total")}   // the width of the name and meta columns together: where the timeline starts
-function ganttPinPx(){return ganttCssPx("--pin-total")}     // the part of it that stays pinned while the chart scrolls
-function ganttZoomChoice(){const z=storage.get("astra.gantt.zoom","auto");return GANTT_ZOOMS.includes(z)?z:"auto"}
-function ganttScale(days,avail){
-  days=Math.max(1,days);avail=Math.max(1,avail);
-  const fit=avail/days,choice=ganttZoomChoice();
-  const zoom=choice==="auto"?(fit>=4?"fit":"month"):choice;
-  const px=zoom==="fit"?avail:Math.max(avail,Math.round(ZOOM_PPD[zoom]*days));
-  return {zoom,choice,px,ppd:px/days,avail,scroll:px>avail+1};
+// The Gantt follows shadcnstudio's gantt-chart-04 block (phase and step plan with dependencies),
+// rebuilt in plain JS: a sticky Step pane beside a day grid for one month or one week, status
+// coloured bars that move and resize by whole days, milestones, phase summaries and finish-to-start
+// arrows. Positions travel as data-l / data-w pixels and are applied through the CSSOM (gxPlace),
+// because the CSP drops inline style attributes. docs/handoff/README.md maps every feature to its code.
+const GX_DAY=86400000,GX_ROW=48,GX_WIDTHS=[32,48,64,88,120],GX_PANE={sm:192,md:288,lg:560};
+const MONTH_SHORT=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const MONTH_LONG=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DOW_SHORT=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const GX_STATUS={completed:"Completed",progress:"In Progress",risk:"At Risk",blocked:"Blocked",queued:"Queued"};
+const GX_ICON_OF={completed:"check",progress:"loader",risk:"alert",blocked:"ban",queued:"dashed"};
+const GX_ICONS={
+  chevron:'<path d="m9 18 6-6-6-6"/>',
+  check:'<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  loader:'<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+  alert:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  ban:'<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  dashed:'<path d="M10.1 2.182a10 10 0 0 1 3.8 0"/><path d="M13.9 21.818a10 10 0 0 1-3.8 0"/><path d="M17.609 3.721a10 10 0 0 1 2.69 2.7"/><path d="M2.182 13.9a10 10 0 0 1 0-3.8"/><path d="M20.279 17.609a10 10 0 0 1-2.7 2.69"/><path d="M21.818 10.1a10 10 0 0 1 0 3.8"/><path d="M3.721 6.391a10 10 0 0 1 2.7-2.69"/><path d="M6.391 20.279a10 10 0 0 1-2.69-2.7"/>',
+  link:'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>',
+  open:'<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>'
+};
+function gxIcon(name,cls=""){return `<svg class="gx-icon${cls?" "+cls:""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${GX_ICONS[name]}</svg>`}
+// What the chart remembers between renders. anchor is a date inside the shown period; scope is the
+// set of projects it was chosen for, so a different page starts at its own work again.
+const gx={anchor:null,scope:null,hiddenStatus:new Set(),hiddenOwner:new Set(),hover:null,focus:null,geo:new Map(),edges:[],popOpen:false};
+const gxIso=ms=>new Date(ms).toISOString().slice(0,10);
+function gxMode(){return storage.get("astra.gantt.period","month")==="week"?"week":"month"}
+function gxZoom(){const i=storage.get("astra.gantt.dayw",1);return Number.isInteger(i)&&i>=0&&i<GX_WIDTHS.length?i:1}
+function gxCollapsed(){const v=storage.get("astra.gantt.collapsed",[]);return new Set(Array.isArray(v)?v:[])}
+// The shown period: a calendar month, or a Monday to Sunday week. All dates are UTC days.
+function gxPeriod(anchor,mode){
+  const d=new Date(Date.parse(anchor));
+  if(mode==="week"){const start=d.getTime()-((d.getUTCDay()+6)%7)*GX_DAY,s=new Date(start);return {mode,start,days:7,title:`Week of ${MONTH_SHORT[s.getUTCMonth()]} ${s.getUTCDate()}, ${s.getUTCFullYear()}`}}
+  const y=d.getUTCFullYear(),m=d.getUTCMonth();
+  return {mode,start:Date.UTC(y,m,1),days:new Date(Date.UTC(y,m+1,0)).getUTCDate(),title:`${MONTH_LONG[m]} ${y}`};
 }
-const MONTH_SHORT=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],DOW_LETTER="SMTWTFS";
-function ganttAxis(lo,hi,span,sc){
-  if(!Number.isFinite(lo)||!Number.isFinite(hi)||!(hi>lo))return "";   // a bad date must not turn the month loops into an endless one
-  const D=86400000,ppd=sc.ppd,out=[],pct=d=>(d-lo)/span*100;
-  const tick=(tier,from,to,label,cls="")=>{const x=pct(from),w=pct(to)-x;if(w<=0)return;out.push(`<span class="axis-tick tier-${tier}${cls?" "+cls:""}" data-x="${x}" data-w="${w}">${label}</span>`)};
-  const first=new Date(lo);
-  if(ppd>=2.5){   // top tier: months
-    for(let y=first.getUTCFullYear(),m=first.getUTCMonth();;m++){
-      const ms=Date.UTC(y,m,1),me=Date.UTC(y,m+1,1);if(ms>hi)break;
-      const from=Math.max(ms,lo),to=Math.min(me,hi),px=(to-from)/D*ppd,d=new Date(ms);
-      const name=MONTH_SHORT[d.getUTCMonth()],label=px>=64?`<b>${name}</b> ${d.getUTCFullYear()}`:(px>=22?`<b>${name}</b>`:"");
-      tick(1,from,to,label);
-    }
-  }else{          // zoomed far out: quarters on top
-    for(let y=first.getUTCFullYear(),q=Math.floor(first.getUTCMonth()/3);;q++){
-      const qs=Date.UTC(y,q*3,1),qe=Date.UTC(y,q*3+3,1);if(qs>hi)break;
-      const from=Math.max(qs,lo),to=Math.min(qe,hi),px=(to-from)/D*ppd,d=new Date(qs);
-      const n=Math.floor(d.getUTCMonth()/3)+1,label=px>=70?`<b>Q${n}</b> ${d.getUTCFullYear()}`:(px>=22?`<b>Q${n}</b>`:"");
-      tick(1,from,to,label);
-    }
-  }
-  if(ppd>=16){    // bottom tier: every day
-    for(let t=Math.floor(lo/D)*D;t<=hi;t+=D){const d=new Date(t),dow=d.getUTCDay();tick(2,Math.max(t,lo),Math.min(t+D,hi),`<b>${d.getUTCDate()}</b>${ppd>=20?`<i>${DOW_LETTER[dow]}</i>`:""}`,dow===0||dow===6?"weekend":"")}
-  }else if(ppd>=3){   // every Monday
-    let t=Math.floor(lo/D)*D;while(new Date(t).getUTCDay()!==1)t+=D;
-    for(;t<=hi;t+=7*D){const to=Math.min(t+7*D,hi);tick(2,Math.max(t,lo),to,(to-Math.max(t,lo))/D*ppd>=14?`<b>${new Date(t).getUTCDate()}</b>`:"")}
-  }else if(ppd>=0.8){ // month initials under the quarters
-    for(let y=first.getUTCFullYear(),m=first.getUTCMonth();;m++){
-      const ms=Date.UTC(y,m,1),me=Date.UTC(y,m+1,1);if(ms>hi)break;
-      const from=Math.max(ms,lo),to=Math.min(me,hi);tick(2,from,to,(to-from)/D*ppd>=24?MONTH_SHORT[new Date(ms).getUTCMonth()]:"");
-    }
-  }
-  return out.join("");
+function gxShift(anchor,mode,dir){const d=new Date(Date.parse(anchor));return gxIso(mode==="week"?d.getTime()+dir*7*GX_DAY:Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+dir,1))}
+// ISO 8601 week number: the week belongs to the year of its Thursday.
+function gxWeek(ms){const dow=(new Date(ms).getUTCDay()+6)%7,thu=new Date(ms+(3-dow)*GX_DAY);return Math.floor((thu.getTime()-Date.UTC(thu.getUTCFullYear(),0,1))/GX_DAY/7)+1}
+function gxDay(ms){const d=new Date(ms);return `${MONTH_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}`}
+function gxRange(s,e){if(s===e)return gxDay(s);const a=new Date(s),b=new Date(e);return a.getUTCMonth()===b.getUTCMonth()&&a.getUTCFullYear()===b.getUTCFullYear()?`${gxDay(s)} – ${b.getUTCDate()}`:`${gxDay(s)} – ${gxDay(e)}`}
+// A task's drawn days. A milestone is one day (its due date); a task with one date is one day.
+function gxSpan(t){const s=t.is_milestone?(t.due_date||t.start_date):(t.start_date||t.due_date);if(!s)return null;const e=t.is_milestone?s:(t.due_date||t.start_date);return {s,e:e<s?s:e}}
+function gxDates(t){const p=gxSpan(t);return p?gxRange(Date.parse(p.s),Date.parse(p.e)):"—"}
+function gxLen(t){const p=gxSpan(t);return !p||t.is_milestone?"—":`${Math.round((Date.parse(p.e)-Date.parse(p.s))/GX_DAY)+1}d`}
+function gxProgress(t){return t.status==="completed"?100:Math.max(0,Math.min(100,Math.round(+t.progress||0)))}
+// Astra's eleven statuses and its blocked / overdue flags fold into the block's five colours.
+// The pane's badge keeps Astra's own status name in its title.
+function gxStatus(t){
+  if(t.status==="completed")return "completed";
+  if(t.is_blocked||t.status==="on_hold")return "blocked";
+  if(t.status==="cancelled"||t.status==="abandoned")return "queued";
+  if(t.due_state==="overdue"||t.status==="delayed")return "risk";
+  if(["in_progress","submitted","reopened","changes_requested"].includes(t.status))return "progress";
+  return "queued";
 }
-// Week gridlines line up with the Monday ticks; below 3 px a day they would only be noise.
-function applyGanttScale(el,sc,lo,todayPct){
-  const D=86400000;
-  if(sc.scroll)el.style.setProperty("--tl-w",`${sc.px}px`);else el.style.removeProperty("--tl-w");
-  const grid=sc.ppd>=3;el.classList.toggle("no-grid",!grid);
-  if(grid){let t=Math.floor(lo/D)*D;while(new Date(t).getUTCDay()!==1)t+=D;
-    el.style.setProperty("--grid-px",`${7*sc.ppd}px`);el.style.setProperty("--grid-off",`${(t-lo)/D*sc.ppd}px`)}
-  el.dataset.todayPx=todayPct==null?"":String(Math.round(todayPct/100*sc.px));
-  document.querySelectorAll("[data-zoom]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.zoom===sc.zoom)));
+function gxCode(name){const w=String(name||"").replace(/[^A-Za-z0-9 ]+/g," ").split(/\s+/).filter(Boolean);return ((w.length>1?w.slice(0,4).map(x=>x[0]).join(""):(w[0]||"").slice(0,3)).toUpperCase())||"PH"}
+// Phase codes: a project is its initials (REL); a task that has steps is that code and its number
+// among the project's parent tasks (REL-01). Numbered over state.tasks so filters never renumber.
+function gxCodes(){
+  const parents=new Set(state.tasks.map(t=>t.parent_task_id).filter(Boolean)),byProject=new Map(),codes=new Map();
+  for(const t of state.tasks)if(parents.has(t.id)){if(!byProject.has(t.project_id))byProject.set(t.project_id,[]);byProject.get(t.project_id).push(t)}
+  for(const [pid,list] of byProject){const p=(state.projects||[]).find(x=>x.id===pid),base=gxCode(p?p.name:list[0].project_name);stepOrder(list).forEach((t,i)=>codes.set(t.id,`${base}-${String(i+1).padStart(2,"0")}`))}
+  return codes;
 }
-function ganttScrollToToday(smooth){
-  const el=document.querySelector("#gantt"),x=el.dataset.todayPx;
-  if(x===""||x==null){if(smooth)showToast("Today is outside this timeline.");el.scrollLeft=0;return}
-  const left=Math.max(0,+x-(el.clientWidth-ganttPinPx())*.25);
-  const calm=typeof matchMedia==="function"&&matchMedia("(prefers-reduced-motion: reduce)").matches;   // script scrolling ignores the CSS setting
-  if(smooth&&el.scrollTo)el.scrollTo({left,behavior:calm?"auto":"smooth"});else el.scrollLeft=left;
-}
-// The chart's range. Inside one project it starts on that project's first day (the earliest of its agreed start,
-// its scheduled start and every task date) and runs to its last, so moving a start date moves the chart's start with
-// it. On the dashboard, with several projects, it starts on the first day of the earliest month and ends with the
-// latest month. The end is exclusive, so the last day's bar fits; a range is never shorter than two weeks.
-function ganttRange(vals,single){
-  const D=86400000;
-  vals=vals.filter(Number.isFinite);   // an unreadable date is ignored, not allowed to poison the range
-  if(!vals.length){const t=Date.parse(ganttToday());return {start:t,end:t+30*D}}
-  const lo=Math.min(...vals),hi=Math.max(...vals);
-  if(single)return {start:lo,end:Math.max(hi+D,lo+14*D)};
-  const a=new Date(lo),b=new Date(hi);
-  return {start:Date.UTC(a.getUTCFullYear(),a.getUTCMonth(),1),end:Date.UTC(b.getUTCFullYear(),b.getUTCMonth()+1,1)};
-}
-// Dependency arrows, as Asana and monday draw them: one elbow line from the right edge of a prerequisite's bar to the
-// left edge of the task that waits for it, drawn only when both bars are on screen (a collapsed workstream shows its
-// steps as chips, and those get arrows too). Links between two bars in the same row are skipped, and links on the
-// critical path are drawn in the critical colour. The layer sits under the pinned columns and the header.
-function ganttDepPairs(tasks){
-  const seen=new Set(),out=[],byId=new Map(tasks.map(t=>[t.id,t]));
-  for(const t of tasks)for(const p of t.predecessors||[]){
-    const key=`${p.task_id}>${t.id}`;if(seen.has(key))continue;seen.add(key);
-    const from=byId.get(p.task_id);
-    out.push({from:p.task_id,to:t.id,blocking:!!p.blocking,critical:!!(from&&from.is_critical_path&&t.is_critical_path)});
-  }
-  return out;
-}
-function ganttDepPath(x1,y1,x2,y2){
-  const r=6,f=n=>Math.round(n*10)/10;
-  if(Math.abs(y2-y1)<1)return `M${f(x1)} ${f(y1)}H${f(x2)}`;
-  if(x2-x1>=2*r+4)return `M${f(x1)} ${f(y1)}H${f(x1+r)}V${f(y2)}H${f(x2)}`;   // room to drop beside the prerequisite
-  const ym=(y1+y2)/2;                                                       // successor starts right after it: step around
-  return `M${f(x1)} ${f(y1)}H${f(x1+r)}V${f(ym)}H${f(x2-r)}V${f(y2)}H${f(x2)}`;
-}
-function ganttDepMarkup(pairs,measure,width,height){
-  const paths=[];
-  for(const pair of pairs){
-    const a=measure(pair.from),b=measure(pair.to);
-    if(!a||!b||a.row===b.row)continue;
-    const x1=a.right,y1=(a.top+a.bottom)/2,x2=b.left,y2=(b.top+b.bottom)/2;
-    if(![x1,y1,x2,y2].every(Number.isFinite))continue;
-    const cls=pair.critical?"dep-line critical":"dep-line";
-    paths.push(`<path class="${cls}" d="${ganttDepPath(x1,y1,x2,y2)}" marker-end="url(#${pair.critical?"dep-arrow-critical":"dep-arrow"})" data-from="${escapeHtml(pair.from)}" data-to="${escapeHtml(pair.to)}"/>`);
-  }
-  if(!paths.length)return "";
-  const head=id=>`<marker id="${id}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" class="dep-head${id.endsWith("critical")?" critical":""}"/></marker>`;
-  return `<svg class="dep-layer" width="${Math.ceil(width)}" height="${Math.ceil(height)}" aria-hidden="true" focusable="false"><defs>${head("dep-arrow")}${head("dep-arrow-critical")}</defs>${paths.join("")}</svg>`;
-}
-// Measures the visible bar of a task relative to the chart's scrolling content. A step row's own bar wins over the
-// chip the same step shows inside its parent's track.
-function ganttMeasurer(el){
-  const box=el.getBoundingClientRect(),dx=el.scrollLeft||0,dy=el.scrollTop||0,cache=new Map();
-  const ox=box.left+(el.clientLeft||0),oy=box.top+(el.clientTop||0);   // the layer sits inside the chart's border, not on it
-  return id=>{
-    if(cache.has(id))return cache.get(id);
-    const nodes=[...el.querySelectorAll(`[data-detail="${CSS.escape(id)}"]`)].filter(n=>n.closest&&n.closest(".timeline")&&!n.closest(".step-more-list")&&n.offsetParent!==null);
-    const node=nodes.find(n=>n.closest(".step-row"))||nodes[0];
-    let out=null;
-    if(node){const r=node.getBoundingClientRect();out={left:r.left-ox+dx,right:r.right-ox+dx,top:r.top-oy+dy,bottom:r.bottom-oy+dy,row:node.closest(".gantt-row")}}
-    cache.set(id,out);return out;
+function gxPhaseCode(t,codes){if(t.parent_task_id&&codes.has(t.parent_task_id))return codes.get(t.parent_task_id);const p=(state.projects||[]).find(x=>x.id===t.project_id);return gxCode(p?p.name:t.project_name)}
+function gxExtent(list){let s=null,e=null;for(const t of list){const p=gxSpan(t);if(!p)continue;if(s==null||p.s<s)s=p.s;if(e==null||p.e>e)e=p.e}return s==null?null:{s,e}}
+// Rows, top to bottom: a phase row per project, then its tasks; a task that has steps is itself a
+// phase row with its steps under it. The Filter popover hides steps here, in the browser; a phase
+// with no step left is hidden with them. Phase totals count every step, whatever the popover hides.
+function gxModel(groups){
+  const {top,childrenOf}=groups,rows=[],collapsed=gxCollapsed(),codes=gxCodes();
+  const pass=t=>!gx.hiddenStatus.has(gxStatus(t))&&!gx.hiddenOwner.has(t.owner_user_id||"");
+  const leavesOf=t=>{const kids=childrenOf.get(t.id);return kids&&kids.length?kids.flatMap(leavesOf):[t]};
+  const walk=(t,depth)=>{
+    const kids=childrenOf.get(t.id)||[];
+    if(!kids.length){if(pass(t))rows.push({kind:"step",t,depth});return}
+    const leaves=kids.flatMap(leavesOf);if(!leaves.some(pass))return;
+    const key="t:"+t.id,open=!collapsed.has(key);
+    rows.push({kind:"phase",key,t,name:t.title,code:codes.get(t.id)||"",depth,open,leaves,ext:gxExtent([t,...leaves])});
+    if(open)kids.forEach(k=>walk(k,depth+1));
   };
+  const byProject=new Map(),order=(state.projects||[]).map(p=>p.id),rank=id=>{const i=order.indexOf(id);return i<0?order.length:i};
+  for(const t of top){if(!byProject.has(t.project_id))byProject.set(t.project_id,[]);byProject.get(t.project_id).push(t)}
+  const all=[];
+  for(const pid of [...byProject.keys()].sort((a,b)=>rank(a)-rank(b))){
+    const list=byProject.get(pid),leaves=list.flatMap(leavesOf);all.push(...leaves);
+    if(!leaves.some(pass))continue;
+    const p=(state.projects||[]).find(x=>x.id===pid),name=p?p.name:(list[0].project_name||"Project"),key="p:"+pid,open=!collapsed.has(key);
+    rows.push({kind:"phase",key,name,code:gxCode(name),depth:0,open,leaves,ext:gxExtent(leaves)});
+    if(open)list.forEach(t=>walk(t,1));
+  }
+  return {rows,leaves:all};
 }
-function drawGanttDependencies(){
-  const el=document.querySelector("#gantt");
-  el.querySelectorAll(".dep-layer").forEach(n=>n.remove());
-  if(el.hidden||storage.get("astra.gantt.deps",true)===false)return;
-  const markup=ganttDepMarkup(ganttDepPairs(ganttShown),ganttMeasurer(el),el.scrollWidth,el.scrollHeight);
-  if(markup)el.insertAdjacentHTML("beforeend",markup);
+// The period to open on: today's, when any work falls in it; otherwise the period of the dated work
+// nearest today, so a plan that starts next quarter does not open on an empty month.
+function gxAnchor(tasks,mode,el){
+  const scope=[...new Set(tasks.map(t=>t.project_id))].sort().join(",");
+  if(gx.anchor&&gx.scope===scope)return gx.anchor;
+  gx.scope=scope;el.scrollLeft=0;
+  // Other projects mean other people: a filter chosen for the last page could hide steps with no box left to untick.
+  gx.hiddenStatus.clear();gx.hiddenOwner.clear();
+  const today=ganttToday(),p=gxPeriod(today,mode),from=gxIso(p.start),to=gxIso(p.start+(p.days-1)*GX_DAY);
+  let best=null,gap=Infinity;
+  for(const t of tasks){
+    const span=gxSpan(t);if(!span)continue;
+    if(span.s<=to&&span.e>=from)return gx.anchor=today;
+    const near=span.e<from?span.e:span.s,d=Math.abs(Date.parse(near)-Date.parse(today));
+    if(d<gap){gap=d;best=near}
+  }
+  return gx.anchor=best||today;
 }
-let ganttShown=[],depTimer=0;
-// A timer, not requestAnimationFrame: a background tab never runs that, and measuring forces the layout it needs anyway.
-function scheduleGanttDependencies(){clearTimeout(depTimer);depTimer=setTimeout(drawGanttDependencies,0)}
-if(typeof document!=="undefined"&&document.fonts&&document.fonts.ready)document.fonts.ready.then(scheduleGanttDependencies);   // row heights settle once the font arrives
-function renderGantt(tasks,retried=false){
-  const allTasks=tasks;
+function gxPlace(root){
+  root.querySelectorAll("[data-l]").forEach(n=>{n.style.left=`${n.dataset.l}px`});
+  root.querySelectorAll("[data-w]").forEach(n=>{n.style.width=`${n.dataset.w}px`});
+  root.querySelectorAll("[data-pc]").forEach(n=>{n.style.width=`${n.dataset.pc}%`});
+}
+function gxAvatar(t,cls=""){return `<span class="gx-avatar${cls?" "+cls:""}" title="${escapeHtml(t.owner_name||"Unassigned")}" role="img" aria-label="Owner: ${escapeHtml(t.owner_name||"Unassigned")}">${escapeHtml(initials(t.owner_name)||"–")}</span>`}
+function gxRender(el,groups,period){
+  const mode=period.mode,cw=el.clientWidth||window.innerWidth||1280,size=cw<640?"sm":cw<1024?"md":"lg",paneW=GX_PANE[size];
+  // Month view: a fixed day width from the zoom steps. Week view: seven days share the room left.
+  const dw=mode==="week"?Math.max(48,Math.floor((cw-paneW)/7)):GX_WIDTHS[gxZoom()];
+  el.dataset.pane=size;el.dataset.mode=mode;el.dataset.day=dw;
+  el.style.setProperty("--gx-day",`${dw}px`);el.style.setProperty("--gx-pane",`${paneW}px`);el.style.setProperty("--gx-days",period.days);
+  const {rows,leaves}=gxModel(groups),todayMs=Date.parse(ganttToday());
+  gxFilterFill(leaves);
+  // Header: ISO week groups over one cell per day.
+  const days=[...Array(period.days)].map((_,i)=>{const ms=period.start+i*GX_DAY,d=new Date(ms),dow=(d.getUTCDay()+6)%7;return {ms,dow,n:d.getUTCDate(),we:dow>4,today:ms===todayMs}});
+  const weeks=[];for(const d of days){const w=gxWeek(d.ms),last=weeks[weeks.length-1];if(last&&last.w===w){last.n++;last.to=d.ms}else weeks.push({w,n:1,from:d.ms,to:d.ms})}
+  const weekRow=weeks.map(w=>`<span class="gx-week" data-w="${w.n*dw}"><span>W${w.w} · ${gxRange(w.from,w.to)}</span></span>`).join("");
+  const dayRow=days.map(d=>`<span class="gx-day${d.we?" we":""}${d.today?" today":""}"${d.today?' aria-current="date"':""}>${mode==="week"?`<i>${DOW_SHORT[d.dow]}</i> `:""}${d.today?`<b class="gx-today-pill">${d.n}</b>`:d.n}</span>`).join("");
+  const cols=days.map(d=>`<i class="gx-col${d.we?" we":""}${d.today?" today":""}"></i>`).join("");
+  const idx=v=>Math.round((Date.parse(v)-period.start)/GX_DAY);
+  // A bar is drawn only inside the shown period; cutS / cutE say which end runs past it.
+  const clip=(s,e)=>{const a=idx(s),b=idx(e);if(b<0||a>=period.days)return null;const ca=Math.max(0,a),cb=Math.min(period.days-1,b);return {l:ca*dw,w:(cb-ca+1)*dw,cutS:a<0,cutE:b>=period.days}};
+  gx.geo=new Map();gx.edges=[];gx.period={start:period.start,days:period.days,dw};
+  const pane=[],time=[];
+  rows.forEach((r,i)=>{
+    const d=`gx-d${Math.min(r.depth,4)}`;
+    if(r.kind==="phase"){
+      const total=r.leaves.length,done=r.leaves.filter(t=>t.status==="completed").length,pct=total?Math.round(r.leaves.reduce((n,t)=>n+gxProgress(t),0)/total):0;
+      const open=r.t?`<button type="button" class="gx-open" data-detail="${escapeHtml(r.t.id)}" aria-label="Open ${escapeHtml(r.name)}">${gxIcon("open")}</button>`:"";
+      pane.push(`<div class="gx-row gx-phase ${d}" data-phase-row="${escapeHtml(r.key)}"${r.t?` data-timeline-task="${escapeHtml(r.t.id)}"`:""}><button type="button" class="gx-phase-toggle" data-phase="${escapeHtml(r.key)}" aria-expanded="${r.open}">${gxIcon("chevron","gx-chevron")}<span class="sr-only">${r.open?"Collapse":"Expand"} phase</span><span class="gx-phase-name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>${r.code?`<span class="gx-code">${escapeHtml(r.code)}</span>`:""}</button>${open}<span class="gx-stat">${done}/${total}<span class="gx-stat-pct"> · ${pct}%</span></span></div>`);
+      const c=r.ext&&clip(r.ext.s,r.ext.e);
+      if(c&&r.t)gx.geo.set(r.t.id,{l:c.l,w:c.w,row:i,s:r.ext.s,e:r.ext.e});
+      time.push(`<div class="gx-row gx-phase">${c?`<div class="gx-sum" data-l="${c.l}" data-w="${c.w}" role="img" aria-label="${escapeHtml(r.name)} · ${pct}%"><i class="gx-sum-fill" data-pc="${pct}"></i></div><span class="gx-sum-pct" data-l="${c.l+c.w+8}">${pct}%</span>`:""}</div>`);
+      return;
+    }
+    const t=r.t,st=gxStatus(t),pct=gxProgress(t),id=escapeHtml(t.id),deps=(t.predecessors||[]).length,icon=gxIcon(GX_ICON_OF[st],"gx-status");
+    pane.push(`<div class="gx-row gx-step ${d} gx-s-${st}" data-timeline-task="${id}"><span class="gx-guide" aria-hidden="true"></span><button type="button" class="gx-name" data-detail="${id}">${icon}<span class="gx-name-text" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span><span class="sr-only"> · ${GX_STATUS[st]}</span>${deps?`<span class="gx-links" title="Depends on ${deps} step${deps===1?"":"s"}">${gxIcon("link")}<span aria-hidden="true">${deps}</span><span class="sr-only"> · depends on ${deps} step${deps===1?"":"s"}</span></span>`:""}</button>${gxAvatar(t,"gx-col-owner")}<span class="gx-badge gx-col-status" title="${escapeHtml(statusLabel(t.status))}"><i class="gx-dot"></i>${GX_STATUS[st]}</span><span class="gx-col-dates" data-dates="${id}">${gxDates(t)}</span><span class="gx-col-len" data-len="${id}">${gxLen(t)}</span></div>`);
+    const span=gxSpan(t),c=span&&clip(span.s,span.e),label=escapeHtml(`${t.title} · ${GX_STATUS[st]} · ${pct}%`),drag=canDragBar(t)?` data-drag="${id}"`:"";
+    let bar="";
+    if(c&&t.is_milestone){
+      const l=c.l+(dw-28)/2;gx.geo.set(t.id,{l,w:28,row:i,s:span.s,e:span.e});
+      bar=`<div class="gx-ms gx-s-${st}" role="button" tabindex="0" data-bar="${id}"${drag} data-l="${l}" data-w="28" title="${label}" aria-label="${label}">${gxIcon("flag")}<span class="gx-ms-label">${escapeHtml(t.title)}</span></div>`;
+    }else if(c){
+      gx.geo.set(t.id,{l:c.l,w:c.w,row:i,s:span.s,e:span.e});
+      const grips=drag?`${c.cutS?"":'<i class="gx-grip start" data-edge="start" aria-hidden="true"></i>'}${c.cutE?"":'<i class="gx-grip end" data-edge="end" aria-hidden="true"></i>'}`:"";
+      bar=`<div class="gx-bar gx-s-${st}${c.cutS?" cut-start":""}${c.cutE?" cut-end":""}" role="button" tabindex="0" data-bar="${id}"${drag} data-l="${c.l}" data-w="${c.w}" title="${label}" aria-label="${label}"><i class="gx-fill" data-pc="${pct}"></i>${icon}<span class="gx-bar-name">${escapeHtml(t.title)}</span><span class="gx-bar-pct">${pct}%</span>${gxAvatar(t)}${grips}</div>`;
+    }
+    time.push(`<div class="gx-row gx-step">${bar}</div>`);
+  });
+  // An arrow needs both ends drawn: a step hidden by a filter, a collapsed phase or the edge of the
+  // period takes its arrows with it.
+  for(const r of rows){const t=r.t;if(!t||!gx.geo.has(t.id))continue;for(const p of t.predecessors||[])if(gx.geo.has(p.task_id)&&p.task_id!==t.id)gx.edges.push([p.task_id,t.id])}
+  const none=rows.length?"":`<div class="gx-none">No steps match the filter.</div>`;
+  const marker=(id,size,cls)=>`<marker id="${id}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="${size}" markerHeight="${size}" markerUnits="userSpaceOnUse" orient="auto"><path class="${cls}" d="M0 0.5 L7 4 L0 7.5 Z"/></marker>`;
+  el.innerHTML=`<div class="gx-inner"><div class="gx-pane"><div class="gx-pane-head"><span class="gx-col-step">Step</span><span class="gx-col-owner">Owner</span><span class="gx-col-status">Status</span><span class="gx-col-dates">Dates</span><span class="gx-col-len">Length</span></div>${pane.join("")}${none}</div>`
+    +`<div class="gx-time"><div class="gx-time-head"><div class="gx-weeks">${weekRow}</div><div class="gx-days">${dayRow}</div></div>`
+    +`<div class="gx-body"><div class="gx-cols" aria-hidden="true">${cols}</div><svg class="gx-deps" width="${period.days*dw}" height="${rows.length*GX_ROW}" aria-hidden="true" focusable="false"><defs>${marker("gx-arrow",7,"gx-head-idle")}${marker("gx-arrow-active",8,"gx-head-active")}${marker("gx-arrow-conflict",7,"gx-head-conflict")}</defs><g class="gx-deps-paths"></g></svg>${time.join("")}</div></div></div>`;
+  gxPlace(el);
+  gxDrawDeps();
+}
+// One arrow, finish to start, with 6px corners. Forward: out of the predecessor's right edge, down
+// (or up) a vertical 12px to its right, into the successor's left edge. When the successor starts
+// too close or earlier, the line goes round under the predecessor's row and comes in from the left.
+function gxPath(a,b){
+  const sx=a.l+a.w,sy=a.row*GX_ROW+GX_ROW/2,ex=b.l-1,ey=b.row*GX_ROW+GX_ROW/2;
+  if(ex-sx>=24){
+    if(ey===sy)return `M ${sx} ${sy} L ${ex} ${ey}`;
+    const d=ey>sy?1:-1,x=sx+12;
+    return `M ${sx} ${sy} L ${sx+6} ${sy} Q ${x} ${sy} ${x} ${sy+6*d} L ${x} ${ey-6*d} Q ${x} ${ey} ${x+6} ${ey} L ${ex} ${ey}`;
+  }
+  // bx never lies right of x-12, so the line between the rows always runs leftwards (no kink for a 12-24px gap).
+  const d1=ey>=sy?1:-1,my=sy+GX_ROW/2*d1,d2=ey>my?1:-1,x=sx+12,bx=Math.min(ex-12,x-12);
+  return `M ${sx} ${sy} L ${sx+6} ${sy} Q ${x} ${sy} ${x} ${sy+6*d1} L ${x} ${my-6*d1} Q ${x} ${my} ${x-6} ${my} L ${bx+6} ${my} Q ${bx} ${my} ${bx} ${my+6*d2} L ${bx} ${ey-6*d2} Q ${bx} ${ey} ${bx+6} ${ey} L ${ex} ${ey}`;
+}
+// Draws every arrow. `over` is the bar being dragged, with the place and dates it would get, so a
+// conflict shows while the pointer is still down. Conflict (the successor starts on or before the
+// day its predecessor ends) beats active (the pointer or focus is on either end).
+function gxDrawDeps(over){
+  const g=document.querySelector("#gantt .gx-deps-paths");if(!g)return;
+  if(storage.get("astra.gantt.deps",true)===false){g.innerHTML="";return}
+  const at=id=>over&&over.id===id?over:gx.geo.get(id),hot=new Set([gx.hover,gx.focus,over&&over.id].filter(Boolean));
+  g.innerHTML=gx.edges.map(([from,to])=>{
+    const a=at(from),b=at(to),st=b.s<=a.e?"conflict":hot.has(from)||hot.has(to)?"active":"idle";
+    return `<path class="gx-dep gx-dep-${st}" data-from="${escapeHtml(from)}" data-to="${escapeHtml(to)}" d="${gxPath(a,b)}" marker-end="url(#gx-arrow${st==="idle"?"":"-"+st})"/>`;
+  }).join("");
+}
+// While a bar is dragged or resized the Dates and Length cells of its row and its arrows follow it.
+// Called with no place (l == null) to put the row back as the server has it.
+function gxDragLive(t,dates,l,w){
+  const el=document.querySelector("#gantt"),next={...t,start_date:dates.start_date,due_date:dates.due_date},sel=`="${CSS.escape(t.id)}"]`;
+  const d=el.querySelector(`[data-dates${sel}`),n=el.querySelector(`[data-len${sel}`);
+  if(d)d.textContent=gxDates(next);if(n)n.textContent=gxLen(next);
+  const span=gxSpan(next),geo=gx.geo.get(t.id);
+  gxDrawDeps(l==null||!geo||!span?null:{...geo,id:t.id,l,w,s:span.s,e:span.e});
+}
+// Where a bar with these dates sits in the drawn period, cut at its edges (a milestone is its 28px flag).
+function gxBarBox(t,next){
+  const p=gx.period;if(!p)return null;
+  const idx=v=>Math.round((Date.parse(v)-p.start)/GX_DAY),last=p.days-1,clamp=i=>Math.min(Math.max(i,0),last);
+  const s=next.start_date||next.due_date,e=next.due_date||s;if(!s)return null;
+  const a=clamp(idx(s)),b=clamp(idx(e));
+  if(t.is_milestone)return {left:b*p.dw+(p.dw-28)/2,width:28};
+  return {left:a*p.dw,width:(Math.max(a,b)-a+1)*p.dw};
+}
+function gxTogglePhase(key){
+  const c=gxCollapsed(),open=c.has(key);if(open)c.delete(key);else c.add(key);
+  storage.set("astra.gantt.collapsed",[...c]);
+  const id=key.slice(2),name=(key.startsWith("t:")?state.tasks.find(t=>t.id===id)?.title:(state.projects||[]).find(p=>p.id===id)?.name)||"Phase";
+  announce(`${name} ${open?"expanded":"collapsed"}.`);
+  refreshGantt();
+}
+// Filter popover: a tick box per status and per owner, with the number of steps each has. Everything
+// is ticked to begin with; unticking hides those steps and their arrows in this browser only.
+function gxFilterFill(leaves){
+  const pop=document.querySelector("#gantt-filter"),btn=document.querySelector("#gantt-filter-btn");if(!pop||!btn)return;
+  // The rows are rebuilt on every redraw (a resize too): a box that had focus gets it back.
+  const a=document.activeElement,ds=a&&pop.contains(a)?a.dataset||{}:{},held=ds.fstatus!=null?["data-fstatus",ds.fstatus]:ds.fowner!=null?["data-fowner",ds.fowner]:null;
+  const count=new Map(),owners=new Map();
+  for(const t of leaves){const s=gxStatus(t),o=t.owner_user_id||"";count.set(s,(count.get(s)||0)+1);const cur=owners.get(o)||{name:o?(t.owner_name||"Unknown"):"Unassigned",n:0};cur.n++;owners.set(o,cur)}
+  const row=(attr,key,on,mark,label,n)=>`<label class="gx-pop-row"><input type="checkbox" ${attr}="${escapeHtml(key)}"${on?" checked":""}>${mark}<span class="gx-pop-label">${escapeHtml(label)}</span><span class="gx-count">${n}</span></label>`;
+  pop.innerHTML='<p class="gx-pop-head">Status</p>'+Object.keys(GX_STATUS).map(k=>row("data-fstatus",k,!gx.hiddenStatus.has(k),`<i class="gx-dot gx-s-${k}"></i>`,GX_STATUS[k],count.get(k)||0)).join("")
+    +'<p class="gx-pop-head">Owner</p>'+([...owners].sort((a,b)=>(!a[0])-(!b[0])||a[1].name.localeCompare(b[1].name)).map(([id,o])=>row("data-fowner",id,!gx.hiddenOwner.has(id),`<span class="gx-avatar">${escapeHtml(initials(id?o.name:"")||"–")}</span>`,o.name,o.n)).join("")||'<p class="gx-pop-empty">No steps yet.</p>');
+  const active=gx.hiddenStatus.size+gx.hiddenOwner.size>0;
+  btn.classList.toggle("is-on",active);btn.setAttribute("aria-label",active?"Filter (some steps are hidden)":"Filter");
+  if(held)pop.querySelector(`[${held[0]}="${CSS.escape(held[1])}"]`)?.focus();
+}
+function gxCloseFilter(refocus){const pop=document.querySelector("#gantt-filter"),btn=document.querySelector("#gantt-filter-btn");if(!pop||!gx.popOpen)return;gx.popOpen=false;pop.hidden=true;btn.setAttribute("aria-expanded","false");if(refocus)btn.focus()}
+// Toolbar state for this render. The period controls, the switch, the popover and the zoom buttons
+// belong to the chart, so the Schedule table hides them.
+function gxToolbar(showTable,period){
+  const q=s=>document.querySelector(s),zi=gxZoom(),week=period.mode==="week";
+  q("#gantt-title").textContent=showTable?"Schedule":period.title;
+  q("#gantt-period").value=period.mode;
+  for(const s of ["#gantt-nav","#gantt-today","#gantt-period","#gantt-filter-btn","#gantt-zoom"])q(s).hidden=showTable;
+  const depBox=q("#gantt-deps"),depLabel=depBox.closest("label");depBox.checked=storage.get("astra.gantt.deps",true)!==false;if(depLabel)depLabel.hidden=showTable;
+  if(showTable)gxCloseFilter(false);
+  // Zoom changes the day width of the month view; a week always fills the width it has.
+  q('#gantt-zoom [data-zoom="in"]').disabled=week||zi>=GX_WIDTHS.length-1;
+  q('#gantt-zoom [data-zoom="out"]').disabled=week||zi<=0;
+  q("#gantt-new-step").hidden=!gxSheetProjects().length;
+}
+// New Step: the block's sheet. The step is created by the same POST /api/tasks as every other task,
+// so service.py decides who may add it, where, and with which predecessors.
+function gxSheetProjects(){const r=currentRoute();return (state.projects||[]).filter(p=>canCaptureProject(p)&&(r.name!=="project"||p.id===r.id))}
+function gxSheetField(name){return document.querySelector(`#step-form [name="${name}"]`)}
+function gxSheetPhase(){
+  const v=gxSheetField("phase").value,parent=v.startsWith("t:")?state.tasks.find(t=>t.id===v.slice(2)):null;
+  return {pid:parent?parent.project_id:v.slice(2),parent};
+}
+function gxSheetSync(){
+  const {pid,parent}=gxSheetPhase(),codes=gxCodes();
+  fillAssignees(pid,gxSheetField("owner_user_id"),"",parent?"subtask":"task");
+  // A step cannot wait for the phase it sits in, or a phase above it: that bar spans the step, so the
+  // link would always be a conflict. service.py refuses it too.
+  const above=new Set();for(let p=parent;p&&!above.has(p.id);p=p.parent_task_id?state.tasks.find(x=>x.id===p.parent_task_id):null)above.add(p.id);
+  const list=timelineOrder(stepOrder(state.tasks.filter(t=>t.project_id===pid&&!above.has(t.id)&&!["cancelled","abandoned"].includes(t.status))));
+  document.querySelector("#step-deps").innerHTML=list.map(t=>`<label class="gx-dep-row"><input type="checkbox" name="dep" value="${escapeHtml(t.id)}"><span class="gx-dep-name">${escapeHtml(t.title)}</span><span class="gx-code">${escapeHtml(gxPhaseCode(t,codes))}</span></label>`).join("")||'<p class="gx-dep-empty">No other steps in this project yet.</p>';
+}
+function gxSheetType(){
+  const milestone=gxSheetField("type").value==="milestone";
+  document.querySelector("#step-form [data-end-field]").hidden=milestone;
+  document.querySelector("#step-form [data-start-label]").textContent=milestone?"Date":"Start";
+}
+function gxOpenSheet(){
+  const projects=gxSheetProjects();
+  if(!projects.length){showToast("You can add steps only to an open project you manage.");return}
+  const form=document.querySelector("#step-form"),codes=gxCodes();
+  form.reset();form.querySelector(".error").textContent="";
+  gxSheetField("phase").innerHTML=projects.map(p=>`<option value="p:${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`
+    +stepOrder(state.tasks.filter(t=>t.project_id===p.id&&codes.has(t.id)&&!CLOSED_STATUSES.includes(t.status))).map(t=>`<option value="t:${escapeHtml(t.id)}">${escapeHtml(p.name)} › ${escapeHtml(t.title)} (${escapeHtml(codes.get(t.id))})</option>`).join("")).join("");
+  const want=currentRoute().name==="portfolio"?document.querySelector("#project-filter").value:"";
+  if(want&&projects.some(p=>p.id===want))gxSheetField("phase").value="p:"+want;
+  gxSheetType();gxSheetSync();
+  document.querySelector("#step-sheet").showModal();
+}
+async function gxSubmitStep(e){
+  e.preventDefault();
+  const form=e.target,dialog=form.closest("dialog"),error=form.querySelector(".error");
+  // One request at a time: a double click on Create must not create the step twice.
+  if(gx.sheetBusy)return;
+  error.textContent="";
+  const f=n=>gxSheetField(n).value,{pid,parent}=gxSheetPhase(),milestone=f("type")==="milestone";
+  const payload={title:f("title").trim(),project_id:pid,status:f("status"),is_milestone:milestone,description:f("description"),
+    predecessor_task_ids:[...form.querySelectorAll('[name="dep"]')].filter(i=>i.checked).map(i=>i.value)};
+  if(parent)payload.parent_task_id=parent.id;
+  if(f("owner_user_id"))payload.owner_user_id=f("owner_user_id");
+  // A milestone is one day: its date is the due date, as everywhere else in Astra.
+  if(milestone){if(f("start_date"))payload.due_date=f("start_date")}
+  else{if(f("start_date"))payload.start_date=f("start_date");if(f("due_date"))payload.due_date=f("due_date")}
+  if(f("progress")!=="")payload.progress=Number(f("progress"));
+  let out;gx.sheetBusy=true;if(e.submitter)e.submitter.disabled=true;
+  try{out=await withConfirms({title:payload.title||"the new step"},COLUMN_OF_STATUS[payload.status]||"draft",more=>api("/api/tasks",{method:"POST",body:JSON.stringify({...payload,...more})}))}
+  catch(err){error.textContent=err.message;return}
+  finally{gx.sheetBusy=false;if(e.submitter)e.submitter.disabled=false}
+  if(!out)return;
+  const {task}=out;form.reset();dialog.close();
+  // The step exists now: a failed reload is the page's to report, not the closed sheet's.
+  try{await load()}catch(err){showToast(`“${payload.title}” was added, but the page could not reload: ${err.message}`,null,null,true);return}
+  if(task&&currentRoute().name==="portfolio"&&!visibleTasks().some(t=>t.id===task.id))showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnPortfolio);
+  else if(task)announce(`“${task.title}” was added.`);
+}
+function renderGantt(tasks){
   const planSelect=document.querySelector("#gantt-plan");
   const previous=planSelect.value;
   const names=[...new Set(tasks.map(t=>t.plan_option||"Shared"))].sort();
   planSelect.innerHTML='<option value="">All plans</option>'+names.map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
   if(names.includes(previous))planSelect.value=previous;
   planSelect.hidden=names.every(name=>name==="Shared");
+  const planLabel=planSelect.closest("label");if(planLabel)planLabel.hidden=planSelect.hidden;
   planSelect.onchange=()=>refreshGantt();
   if(planSelect.value)tasks=tasks.filter(t=>(t.plan_option||"Shared")==="Shared"||t.plan_option===planSelect.value).map(t=>({...t,is_critical_path:(t.critical_for_plans||[]).includes(planSelect.value)}));
   const el=document.querySelector("#gantt"),tableEl=document.querySelector("#schedule-table");
   const focusKey=focusKeyIn(el);
-  tipMeta.clear();hideTip();
   const showTable=currentView()==="table";
   document.querySelector("#view-table").checked=showTable;
   el.hidden=showTable;tableEl.hidden=!showTable;
-  document.querySelector("#gantt-zoom").hidden=showTable;
-  const depBox=document.querySelector("#gantt-deps"),depLabel=depBox.closest("label");depBox.checked=storage.get("astra.gantt.deps",true)!==false;if(depLabel)depLabel.hidden=showTable;
+  const period=gxPeriod(gxAnchor(tasks,gxMode(),el),gxMode());
+  gxToolbar(showTable,period);
   renderBands(tasks);
   const groups=groupSteps(tasks);
-  document.querySelector("#step-legend").hidden=!groups.hasSteps;
-  if(!tasks.length){const empty='<div class="empty">No tasks match these filters. Undated or unassigned work will appear here rather than being hidden.</div>';el.innerHTML=empty;tableEl.innerHTML=empty;return}
+  gx.geo=new Map();gx.edges=[];
+  if(!tasks.length){const empty='<div class="empty">No tasks match these filters. Undated or unassigned work will appear here rather than being hidden.</div>';el.innerHTML=empty;tableEl.innerHTML=empty;gxFilterFill([]);return}
   if(showTable){renderScheduleTable(groups,tableEl);el.innerHTML="";return}
   tableEl.innerHTML="";
-  const {top,childrenOf,stepIndex,visible}=groups;
-  ganttShown=tasks;
-  const dated=tasks.filter(t=>t.start_date||t.due_date);
-  // 5WZ4A8: project start/target markers for each project shown in the view.
-  const projIds=[...new Set(tasks.map(t=>t.project_id))];
-  const singleProject=projIds.length===1;
-  const projMarkers=[];
-  for(const pid of projIds){
-    const proj=(state.projects||[]).find(p=>p.id===pid);
-    if(!proj)continue;
-    const label=n=>singleProject?n:`${proj.name}: ${n}`;
-    if(proj.start_date)projMarkers.push({date:Date.parse(proj.start_date),kind:"start",label:label("Agreed start")});
-    if(proj.target_date)projMarkers.push({date:Date.parse(proj.target_date),kind:"target",label:label("Agreed deadline")});
-    const schedule=projectSchedule(proj,planSelect.value),multiple=Object.keys(proj.schedule_forecasts||{}).some(n=>n!=="Shared");
-    if(schedule.start_date)projMarkers.push({date:Date.parse(schedule.start_date),kind:"scheduled-start",label:label("Scheduled start")});
-    if(schedule.finish_date)projMarkers.push({date:Date.parse(schedule.finish_date),kind:"scheduled-finish",label:label(!planSelect.value&&multiple?"Latest plan finish":"Scheduled finish")});
-  }
-  const dateVals=[...dated.map(t=>Date.parse(t.start_date||t.due_date)),...dated.map(t=>Date.parse(t.due_date||t.start_date)),...projMarkers.map(m=>m.date)];
-  // The rule follows the page, not the number of projects: a project page starts on the project's first day,
-  // the dashboard (portfolio) on the first day of the earliest month, even when only one project exists.
-  const range=ganttRange(dateVals,currentRoute().name==="project");
-  const min=new Date(range.start),max=new Date(range.end);
-  const span=Math.max(1,max-min);el.dataset.span=String(span);el.dataset.start=String(min.getTime());
-  const pct=d=>(d-min)/span*100;
-  const usedWidth=+el.clientWidth||1180;
-  const sc=ganttScale(span/86400000,Math.max(700,usedWidth-ganttSidePx()));el.dataset.scale=sc.zoom;
-  const inRange=x=>x>=0&&x<=100;
-  const edge=x=>x<4?" edge-l":(x>96?" edge-r":"");   // a flag at either end of the chart is anchored to that end, not centred on it
-  const markerFlags=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-flag ${m.kind}${edge(x)}" data-x="${x}">${escapeHtml(m.label)}</span>`:""}).join("");
-  const markerLines=projMarkers.map(m=>{const x=pct(m.date);return inRange(x)?`<span class="proj-line ${m.kind}" data-x="${x}"></span>`:""}).join("");
-  // Task dates parse as UTC midnight, so ticks and the today line are in UTC too; today is the server's.
-  const todayPct=pct(Date.parse(ganttToday()));const showToday=todayPct>=0&&todayPct<=100;
-  const axis=ganttAxis(min.getTime(),max.getTime(),span,sc);
-  const todayFlag=showToday?`<span class="today-flag${edge(todayPct)}" data-x="${todayPct}">Today</span>`:"";
-  const header=`<div class="gantt-row gantt-head"><div class="task-name gantt-head-cap">Project / task</div><div class="task-meta gantt-head-cap">Owner · due · next action</div><div class="timeline axis two-tier">${axis}${markerLines}${markerFlags}${todayFlag}</div></div>`;
-  const todayLine=showToday?`<span class="today-line" data-x="${todayPct}"></span>`:"";
-  // Pixel estimate of the timeline column (grid: 260px name, 210px meta, rest timeline).
-  const tlw=sc.px;   // the timeline column's real width, which decides what each step can show
-  const stepButton=(k,g)=>{
-    const m=stepIndex.get(k.id);const closed=CLOSED_STATUSES.includes(k.status);
-    const cls=["step",`step-c${stepHue(m.idx)}`,m.idx>STEP_HUES?"wrap":"",g.lane?"lane-2":"",closed?"done":"",k.status==="on_hold"?"hold":"",k.is_critical_path?"crit":"",g.solo?"solo":""].filter(Boolean).join(" ");
-    const glyph=k.status==="completed"?"✓":(closed?"×":(k.status==="on_hold"?"∥":""));
-    const showTitle=g.px>=72,showOwner=g.px>=110&&k.owner_name;
-    const ttl=showTitle?`<span class="ttl">${glyph?glyph+" ":""}${escapeHtml(k.title)}</span>`:(glyph?`<span class="ttl">${glyph}</span>`:"");
-    const own=showOwner?`<i class="own" aria-hidden="true">${escapeHtml(initials(k.owner_name))}</i>`:"";
-    return `<button type="button" class="${cls}" data-detail="${escapeHtml(k.id)}" data-idx="${m.idx}" tabindex="${g.solo?0:-1}" ${tipAttrs(k,m.idx,m.total)} data-x="${g.x}" data-w="${g.w}"><span class="step-label"><b class="idx">${m.idx}</b>${ttl}${own}</span></button>`;
-  };
-  const stepListItem=k=>{const m=stepIndex.get(k.id);return `<li><button type="button" class="link" data-detail="${escapeHtml(k.id)}"><i class="sw step-c${stepHue(m.idx)}${m.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${m.idx}</i> Step ${m.idx} · ${escapeHtml(k.title)}</button> <span class="muted">${escapeHtml(k.owner_name||"Unassigned")} · ${escapeHtml(k.start_date||"—")} → ${escapeHtml(k.due_date||"—")} · ${escapeHtml(statusLabel(k.status))}</span></li>`};
-  const row=(t,depth)=>{
-    const id=escapeHtml(t.id);
-    const kids=childrenOf.get(t.id)||[];
-    const meta=stepIndex.get(t.id);
-    const isStep=depth>0&&!!meta;
-    const expanded=expandedParents.has(t.id);
-    const ownDates=!!(t.start_date||t.due_date);
-    // GF-2: a dated parent's track is sized and tinted from its OWN dates. Steps that run past them
-    // overhang onto a dashed neutral extension and are named in the tooltip and the meta column.
-    // Only a parent without dates takes its extent from its steps (the dashed "derived" track).
-    const ext=ownDates?dateExtent(t,[]):dateExtent(t,kids);
-    const undatedKids=kids.filter(k=>!k.start_date&&!k.due_date),nUndated=undatedKids.length;
-    // GF-1/GF-16: the "n steps need dates" chip lives in the meta column, never on the timeline, so
-    // it can never cover a step and shows whether or not the parent itself has dates.
-    const undatedChip=nUndated?`<br><button type="button" class="chip step-undated" data-detail="${id}" aria-label="${nUndated} step${nUndated===1?"":"s"} of ${escapeHtml(t.title)} need${nUndated===1?"s":""} dates; open the task">${nUndated} step${nUndated===1?"":"s"} need${nUndated===1?"s":""} dates</button>`:"";
-    let bar,tall=false,derived="",overrunText="",metaMore="";
-    if(!ext){bar=`<span class="bar undated">Date required</span>`}
-    else{
-      const left=Math.max(0,pct(ext.start)),width=Math.max(.8,(ext.end-ext.start+86400000)/span*100);
-      // A parent with no dates of its own gets a dashed "derived" track (its extent comes
-      // from its steps) rather than the static grey "Date required" chip styling.
-      const cls=kids.length&&!ownDates?"derived":stateClass(t);
-      if(kids.length){
-        const datedKids=kids.filter(k=>k.start_date||k.due_date);
-        const barPx=width/100*tlw,maxLanes=barPx>=160?2:1;
-        const laneEnd=[],drawn=[],overflow=[],overruns=[];
-        let extStart=ext.start,extEnd=ext.end;
-        for(const k of datedKids){
-          const ks=Date.parse(k.start_date||k.due_date),ke=Date.parse(k.due_date||k.start_date);
-          if(ownDates){
-            const idx=stepIndex.get(k.id).idx;
-            if(ks<ext.start){const d=Math.round((ext.start-ks)/86400000);overruns.push(`Step ${idx} starts ${d} day${d===1?"":"s"} before the parent`);extStart=Math.min(extStart,ks)}
-            if(ke>ext.end){const d=Math.round((ke-ext.end)/86400000);overruns.push(`Step ${idx} ends ${d} day${d===1?"":"s"} after the parent`);extEnd=Math.max(extEnd,ke)}
-          }
-          const wPct=(ke-ks+86400000)/span*100,px=wPct/100*tlw;
-          if(px<8){overflow.push(k);continue}
-          let lane=-1;for(let i=0;i<maxLanes;i++){if(laneEnd[i]==null||laneEnd[i]<ks){lane=i;break}}
-          if(lane<0){overflow.push(k);continue}
-          laneEnd[lane]=ke;
-          // Track-relative geometry; a step outside the parent's dates overhangs (x<0 or x+w>100).
-          drawn.push({k,g:{lane,px,x:(pct(ks)-left)/width*100,w:wPct/width*100}});
-        }
-        tall=laneEnd.length>1;
-        const extBefore=extStart<ext.start?`<i class="track-ext before" data-x="${(pct(extStart)-left)/width*100}" data-w="${(pct(ext.start)-pct(extStart))/width*100}"></i>`:"";
-        const extAfter=extEnd>ext.end?`<i class="track-ext after" data-x="100" data-w="${(pct(extEnd)-pct(ext.end))/width*100}"></i>`:"";
-        if(overruns.length)overrunText=overruns.map(o=>`<br><span class="overrun-text">${escapeHtml(o)}</span>`).join("");
-        const segs=drawn.map(({k,g})=>stepButton(k,g)).join("");
-        // GF-1/GF-7: +N sits just outside the track's right edge, or its left edge when the track ends
-        // near the timeline's end, or in the meta column when the track spans the whole timeline, so
-        // neither it nor its 44px hit area can ever cover a drawn step.
-        const need=40/tlw*100,place=100-(left+width)>=need?"":(left>=need?" flip":" in-meta");
-        const moreBtn=overflow.length?`<button type="button" class="step-more${place}" data-more="${id}" aria-expanded="false" aria-controls="more-${id}" aria-label="${overflow.length} more step${overflow.length===1?"":"s"} not drawn at this scale (too small or overlapping); open the list">+${overflow.length}</button>`:"";
-        const more=place===" in-meta"?"":moreBtn;
-        const moreList=overflow.length?`<div class="step-more-list" id="more-${id}" data-x="${place===" in-meta"?0:Math.min(left,68)}" hidden><p class="muted">${overflow.length} more step${overflow.length===1?"":"s"} not drawn at this scale (too small or overlapping)</p><ul>${overflow.map(stepListItem).join("")}</ul></div>`:"";
-        // In the meta column the list follows its button, so the disclosure stays adjacent in Tab order.
-        if(place===" in-meta")metaMore=`<br>${moreBtn}${moreList}`;
-        if(!ownDates)derived=`<br><span class="chip derived">Dates from steps</span>`;
-        const drag=ownDates&&canDragBar(t)?` data-drag="${id}"`:"",grips=drag&&width/100*tlw>=24?GRIPS:"";
-        bar=`<div class="bar track ${cls}${tall?" lanes-2":""}${expanded?" is-expanded":""}" role="group" tabindex="0" data-detail="${id}"${drag} ${tipAttrs(t,null,kids.length,overruns)} data-x="${left}" data-w="${width}">${extBefore}${extAfter}${segs}${more}${grips}</div>${place===" in-meta"?"":moreList}`;
-      }
-      else if(isStep){bar=stepButton(t,{lane:0,px:width/100*tlw,x:left,w:Math.min(100-left,width),solo:true})}
-      else if(t.is_milestone){
-        // A milestone is a point in time: a diamond on its due date with its name beside it, as Asana and monday draw it.
-        const x=pct(Date.parse(t.due_date||t.start_date))+43200000/span*100;
-        const drag=canDragBar(t)?` data-drag="${id}"`:"",side=x>92?" edge-r":"";   // near the chart's end the name goes to the left of the diamond
-        bar=`<button type="button" class="bar milestone ${cls}" data-detail="${id}"${drag} ${tipAttrs(t,null,0)} data-x="${x}"><span class="sr-only">Milestone: ${escapeHtml(t.title)}</span></button><span class="ms-label${side}" data-x="${x}" aria-hidden="true">${escapeHtml(t.title)}</span>`}
-      else{const drag=canDragBar(t)&&!isStep?` data-drag="${id}"`:"";
-        // Review 12b L8: a bar narrower than about 24px has no grips, so its middle still moves it.
-        bar=`<button type="button" class="bar plain ${cls}" data-detail="${id}"${drag} ${tipAttrs(t,null,0)} data-x="${left}" data-w="${width}"><span class="bar-label">${escapeHtml(t.title)}</span>${drag&&width/100*tlw>=24?GRIPS:""}</button>`}
-    }
-    const blocked=t.is_blocked?`<br><span class="blocked-text">Blocked by ${escapeHtml(t.blocked_by.map(item=>item.title).join(", "))}</span>`:"";
-    const cp=t.is_critical_path?`<br><span class="cp-text">On critical path</span>`:"";
-    const expandBtn=kids.length?`<button type="button" class="expand" data-expand="${id}" aria-expanded="${expanded}" aria-controls="steps-${id}" aria-label="${expanded?"Hide":"Show"} ${kids.length} step${kids.length===1?"":"s"} of ${escapeHtml(t.title)}">${expanded?"▾":"▸"}</button>`:"";
-    const swatch=isStep?`<i class="sw step-c${stepHue(meta.idx)}${meta.idx>STEP_HUES?" wrap":""}" aria-hidden="true">${meta.idx}</i> `:"";
-    const nameTop=isStep?`<span class="step-kicker">${swatch}Step ${meta.idx} of ${meta.total}</span>`:escapeHtml(t.project_name);
-    const move=timelineMoveButton(t,true);
-    const zones=move?`<div class="task-drop-zones" aria-label="Task drop targets">${[["above","Above"],["below","Below"],["after","After this task"],["concurrent","Run concurrently"]].map(([mode,title])=>`<button type="button" class="task-drop-zone quiet" data-drop-mode="${mode}" data-drop-target="${id}">${title}</button>`).join("")}</div>`:"";
-    const name=`<div class="task-name${isStep?" is-step":""}"><div class="name-wrap">${expandBtn}<div>${nameTop}<br><small>${escapeHtml(t.title)}</small>${kids.length?`<br><small class="muted">${kids.length} step${kids.length===1?"":"s"}</small>`:""}<br><button type="button" class="link" data-detail="${id}">Details &amp; history</button>${move}</div></div></div>`;
-    const metaCol=`<div class="task-meta">${escapeHtml(t.owner_name||"Unassigned")}<br>${escapeHtml(t.due_date||"No due date")} · ${critLabel(t.criticality)}${derived}${undatedChip}${metaMore}${overrunText}${blocked}${cp}<br><span class="next-action">Next: ${escapeHtml(t.next_action||"—")}</span></div>`;
-    const html=`<div class="gantt-row${isStep?" step-row":""}">${name}${metaCol}<div class="timeline${tall?" tall":""}" data-timeline-task="${id}">${markerLines}${todayLine}${bar}${zones}</div></div>`;
-    if(!kids.length)return html;
-    return html+`<div class="step-rows" id="steps-${id}" role="group" aria-label="Steps of ${escapeHtml(t.title)}"${expanded?"":" hidden"}>${kids.map(k=>row(k,depth+1)).join("")}</div>`;
-  };
-  el.innerHTML=header+top.map(t=>row(t,0)).join("");
-  applyGeometry(el);
-  // A vertical scrollbar that came with the rows narrows the chart: measure once more so the scale matches the screen.
-  if(!retried&&Math.abs((+el.clientWidth||usedWidth)-usedWidth)>1)return renderGantt(allTasks,true);
-  applyGanttScale(el,sc,min.getTime(),showToday?todayPct:null);
-  const scrollKey=`${sc.zoom}|${projIds.join(",")}`;   // open at the start on a new zoom or project, never on a refresh after a drag
-  if(el.dataset.scrollKey!==scrollKey){el.dataset.scrollKey=scrollKey;el.scrollLeft=0}
+  gxRender(el,groups,period);
   restoreFocus(el,focusKey);
-  drawGanttDependencies();
-  scheduleGanttDependencies();
 }
 function canMoveTimelineTask(t){const p=(state.projects||[]).find(x=>x.id===t.project_id);return !!(p&&p.status!=="closed"&&canMoveOnBoard(t.project_id)&&!CLOSED_STATUSES.includes(t.status))}
-function timelineMoveButton(t,draggable=false){return canMoveTimelineTask(t)?`<button type="button" class="quiet task-row-handle"${draggable?' draggable="true"':""} data-task-move="${escapeHtml(t.id)}" aria-label="Move task ${escapeHtml(t.title)}">Move task</button>`:""}
+function timelineMoveButton(t){return canMoveTimelineTask(t)?`<button type="button" class="quiet task-row-handle" data-task-move="${escapeHtml(t.id)}" aria-label="Move task ${escapeHtml(t.title)}">Move task</button>`:""}
 function renderScheduleTable(groups,tableEl){
   const {top,childrenOf,stepIndex}=groups,scope=bulkScope();
   let steps=0;const rows=[];
@@ -482,68 +489,45 @@ function renderScheduleTable(groups,tableEl){
   const head=(scope?'<th scope="col" class="pick"><input type="checkbox" data-pick-all aria-label="Select every task in this list"></th>':"")+["Project","Task","Step #","Step","Owner","Start","Due","Status","Criticality","Due state","Critical path"].map(h=>`<th scope="col">${h}</th>`).join("");
   tableEl.innerHTML=`<table class="sched-table"><caption>Schedule table · ${top.length} task${top.length===1?"":"s"}, ${steps} step${steps===1?"":"s"} · same filters as the Gantt · ${escapeHtml(asOf)}</caption><thead><tr>${head}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
-// Shared tooltip (WCAG 1.4.13: hoverable, persistent, dismissible). Shown on hover after a
-// short delay and on keyboard focus; never the title attribute.
-const tipEl=document.querySelector("#step-tip");
-let tipTimer=null,tipFor=null;
-function placeTip(target){const r=target.getBoundingClientRect();const tw=tipEl.offsetWidth,th=tipEl.offsetHeight;const left=Math.min(Math.max(8,r.left),Math.max(8,window.innerWidth-tw-8));let top=r.bottom+8;if(top+th>window.innerHeight-8)top=r.top-th-8;tipEl.style.left=`${left}px`;tipEl.style.top=`${Math.max(8,top)}px`}
-function showTip(target){const lines=tipMeta.get(target.dataset.tip);if(!lines)return;clearTimeout(tipTimer);tipTimer=null;if(tipFor&&tipFor!==target)tipFor.removeAttribute("aria-describedby");tipFor=target;tipEl.innerHTML=lines.map((l,i)=>`<span class="${i===0?"tip-head":(i===lines.length-1?"tip-hint":"")}">${escapeHtml(l)}</span>`).join("");tipEl.hidden=false;target.setAttribute("aria-describedby","step-tip");placeTip(target)}
-function hideTip(){clearTimeout(tipTimer);tipTimer=null;if(tipFor){tipFor.removeAttribute("aria-describedby");tipFor=null}if(tipEl)tipEl.hidden=true}
+// Shared tooltip: the chart has none of its own any more. As in the block it follows, a bar says
+// what it is through its title and aria-label ("Name · Status · 70%").
 function announce(msg){const live=document.querySelector("#gantt-live");if(!live)return;live.textContent="";setTimeout(()=>{live.textContent=msg},30)}
-// GF-6: when the list being closed holds focus (Escape on a link), focus returns to its +N button.
-function closeMoreLists(){document.querySelectorAll(".step-more-list:not([hidden])").forEach(l=>{const held=l.contains(document.activeElement);l.hidden=true;const b=document.querySelector(`[aria-controls="${CSS.escape(l.id)}"]`);if(b){b.setAttribute("aria-expanded","false");if(held)b.focus()}})}
-function toggleSteps(id){
-  const btn=document.querySelector(`[data-expand="${CSS.escape(id)}"]`),rows=document.getElementById(`steps-${id}`);
-  if(!btn||!rows)return;
-  const open=rows.hidden;rows.hidden=!open;
-  btn.setAttribute("aria-expanded",String(open));btn.textContent=open?"▾":"▸";
-  btn.setAttribute("aria-label",(btn.getAttribute("aria-label")||"").replace(/^(Show|Hide)/,open?"Hide":"Show"));
-  if(open)expandedParents.add(id);else expandedParents.delete(id);
-  storage.set("astra.gantt.expanded",[...expandedParents]);
-  btn.closest(".gantt-row")?.querySelector(".track")?.classList.toggle("is-expanded",open);
-  const n=rows.querySelectorAll(":scope > .gantt-row").length;
-  announce(open?`Steps expanded, ${n} row${n===1?"":"s"}`:"Steps collapsed");
-  scheduleGanttDependencies();
-}
-function toggleMore(btn){const list=document.getElementById(btn.getAttribute("aria-controls"));if(!list)return;const open=list.hidden;closeMoreLists();if(open){list.hidden=false;btn.setAttribute("aria-expanded","true");hideTip()}}
 (function wireGantt(){
-  const gantt=document.querySelector("#gantt");
-  // The +N button and its list are DOM children of the track but not part of it: they never raise
-  // the track's tooltip (GF-8).
-  const isMore=n=>!!(n&&n.closest&&n.closest(".step-more,.step-more-list"));
-  gantt.addEventListener("mouseover",e=>{if(isMore(e.target))return;const t=e.target.closest("[data-tip]");if(!t||t===tipFor)return;clearTimeout(tipTimer);tipTimer=setTimeout(()=>showTip(t),150)});
-  gantt.addEventListener("mouseout",e=>{const t=e.target.closest("[data-tip]");if(!t)return;const to=e.relatedTarget;if(to&&((t.contains(to)&&!isMore(to))||tipEl.contains(to)))return;clearTimeout(tipTimer);tipTimer=setTimeout(()=>{if(!tipEl.matches(":hover"))hideTip()},120)});
-  tipEl.addEventListener("mouseleave",()=>hideTip());
-  // GF-8: only the focused element itself carries a tooltip (never an ancestor track when focus lands
-  // on +N), and losing focus clears the tooltip and aria-describedby of that same element.
-  gantt.addEventListener("focusin",e=>{if(e.target.matches("[data-tip]"))showTip(e.target)});
-  gantt.addEventListener("focusout",e=>{if(e.target.matches("[data-tip]")&&e.target===tipFor)hideTip()});
-  // Roving focus inside a parent bar: the bar is the tab stop, arrows move between its steps.
-  gantt.addEventListener("keydown",e=>{
-    if(e.key==="Escape"){hideTip();closeMoreLists();return}
-    const track=e.target.closest(".track");
-    if(!track)return;
-    const steps=[...track.querySelectorAll(".step")];
-    const cur=e.target.closest(".step");
-    let i=cur?steps.indexOf(cur):-1;
-    if(["ArrowRight","ArrowLeft","Home","End"].includes(e.key)){
-      if(!steps.length)return;
-      if(e.key==="ArrowRight")i=Math.min(steps.length-1,i+1);
-      else if(e.key==="ArrowLeft")i=i<0?steps.length-1:Math.max(0,i-1);
-      else if(e.key==="Home")i=0;else i=steps.length-1;
-      e.preventDefault();steps[i].focus();return;
-    }
-    if((e.key==="Enter"||e.key===" ")&&e.target===track){e.preventDefault();hideTip();openDetail(track.dataset.detail)}
+  const gantt=document.querySelector("#gantt"),q=s=>document.querySelector(s);
+  // Arrows touching the bar under the pointer, or the bar that has keyboard focus, turn active.
+  const hot=(key,id)=>{if(gx[key]===id)return;gx[key]=id;if(!gdrag.active)gxDrawDeps()};
+  gantt.addEventListener("mouseover",e=>{const b=e.target.closest("[data-bar]");hot("hover",b?b.dataset.bar:null)});
+  gantt.addEventListener("mouseleave",()=>hot("hover",null));
+  gantt.addEventListener("focusin",e=>{const b=e.target.closest("[data-bar]");hot("focus",b?b.dataset.bar:null)});
+  gantt.addEventListener("focusout",()=>hot("focus",null));
+  // A bar is a focus stop and nothing more (the block opens no dialog from it): Space must not scroll the page.
+  gantt.addEventListener("keydown",e=>{if(e.key===" "&&e.target.closest("[data-bar]"))e.preventDefault()});
+  const step=dir=>{gx.anchor=gxShift(gx.anchor||ganttToday(),gxMode(),dir);refreshGantt()};
+  q("#gantt-prev").onclick=()=>step(-1);
+  q("#gantt-next").onclick=()=>step(1);
+  q("#gantt-today").onclick=()=>{gx.anchor=ganttToday();refreshGantt()};
+  q("#gantt-period").onchange=e=>{storage.set("astra.gantt.period",e.target.value==="week"?"week":"month");refreshGantt()};
+  q("#gantt-zoom").addEventListener("click",e=>{const b=e.target.closest("[data-zoom]");if(!b||b.disabled)return;
+    const i=Math.max(0,Math.min(GX_WIDTHS.length-1,gxZoom()+(b.dataset.zoom==="in"?1:-1)));storage.set("astra.gantt.dayw",i);refreshGantt();
+    announce(`Day width ${GX_WIDTHS[i]} pixels.`)});
+  q("#gantt-deps").onchange=e=>{storage.set("astra.gantt.deps",e.target.checked);gxDrawDeps()};
+  const pop=q("#gantt-filter"),popBtn=q("#gantt-filter-btn");
+  popBtn.onclick=()=>{if(gx.popOpen){gxCloseFilter(false);return}gx.popOpen=true;pop.hidden=false;popBtn.setAttribute("aria-expanded","true");pop.querySelector("input")?.focus()};
+  pop.addEventListener("change",e=>{
+    const box=e.target,status=box.dataset.fstatus,set=status!=null?gx.hiddenStatus:gx.hiddenOwner,key=status!=null?status:box.dataset.fowner;
+    if(key==null)return;
+    if(box.checked)set.delete(key);else set.add(key);
+    refreshGantt();
+    // The popover's rows were rebuilt with new counts: give focus back to the same box.
+    pop.querySelector(`[${status!=null?"data-fstatus":"data-fowner"}="${CSS.escape(key)}"]`)?.focus();
   });
-  // Escape must also close a hover-only tooltip or an open +N list while focus is still on body,
-  // so it is bound on document; the #gantt keydown branch above keeps the focused-step case.
-  document.addEventListener("keydown",e=>{if(e.key==="Escape"){hideTip();closeMoreLists()}});
-  document.addEventListener("click",e=>{if(!e.target.closest(".step-more,.step-more-list"))closeMoreLists()});
-  window.addEventListener("scroll",()=>{if(tipFor)placeTip(tipFor)},true);
+  document.addEventListener("click",e=>{if(!e.target.closest(".gx-pop-wrap"))gxCloseFilter(false)});
+  document.addEventListener("keydown",e=>{if(e.key==="Escape"&&gx.popOpen&&!gdrag.active){e.preventDefault();gxCloseFilter(true)}});
+  q("#gantt-new-step").onclick=gxOpenSheet;
+  q("#step-discard").onclick=()=>q("#step-sheet").close();
+  q("#step-form").addEventListener("submit",gxSubmitStep);
+  q("#step-form").addEventListener("change",e=>{if(e.target.name==="phase")gxSheetSync();else if(e.target.name==="type")gxSheetType()});
   document.querySelector("#view-table").onchange=e=>{storage.set("astra.gantt.view",e.target.checked?"table":"chart");render()};
-  document.querySelector("#gantt-zoom").addEventListener("click",e=>{const b=e.target.closest("[data-zoom]");if(!b)return;storage.set("astra.gantt.zoom",b.dataset.zoom);refreshGantt()});
-  document.querySelector("#gantt-today").onclick=()=>ganttScrollToToday(true);
-  document.querySelector("#gantt-deps").onchange=e=>{storage.set("astra.gantt.deps",e.target.checked);drawGanttDependencies()};
   if(phoneMQ.addEventListener)phoneMQ.addEventListener("change",()=>{if(state.user)refreshGantt()});
   let resizeTimer;window.addEventListener("resize",()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(state.user)refreshGantt()},150)});
 })();
@@ -1256,7 +1240,8 @@ function showDragTip(x,y,text){const tip=document.querySelector("#drag-tip");tip
 function endBarDrag(){
   const g=gdrag;if(!g.bar)return null;
   g.bar.classList.remove("is-dragging");document.body.classList.remove("bar-dragging");document.querySelector("#drag-tip").hidden=true;
-  g.bar.style.left=`${g.x0}%`;g.bar.style.width=`${g.w0}%`;
+  g.bar.style.left=`${g.l0}px`;g.bar.style.width=`${g.w0}px`;
+  if(g.active)gxDragLive(g.t,g.t,null);
   const done={...g};gdrag.bar=null;gdrag.active=false;return done;
 }
 // Review 12b L8: the tip and toast count the change that will be applied, not the pointer's days.
@@ -1292,24 +1277,25 @@ async function rescheduleTask(t,dates,days){
 const ganttEl=document.querySelector("#gantt");
 ganttEl.addEventListener("pointerdown",e=>{
   const bar=e.target.closest("[data-drag]");
-  if(!bar||e.button>0||e.pointerType==="touch"||e.target.closest(".step,.step-more"))return;
+  if(!bar||e.button>0||e.pointerType==="touch")return;
   const t=state.tasks.find(x=>x.id===bar.dataset.drag);if(!t||!canDragBar(t))return;
-  const tl=bar.closest(".timeline");
   Object.assign(gdrag,{bar,t,x:e.clientX,pointer:e.pointerId,edge:e.target.closest("[data-edge]")?.dataset.edge||null,
-    x0:+bar.dataset.x,w0:+bar.dataset.w,dayPct:DAY/(+ganttEl.dataset.span)*100,px:tl.getBoundingClientRect().width,days:0,active:false,lease:null});
+    l0:+bar.dataset.l,w0:+bar.dataset.w,dw:+ganttEl.dataset.day,days:0,active:false,lease:null});
 });
 document.addEventListener("pointermove",e=>{
   const g=gdrag;if(!g.bar||e.pointerId!==g.pointer)return;
   const dx=e.clientX-g.x;
-  if(!g.active){if(Math.abs(dx)<5)return;g.active=true;hideTip();g.bar.classList.add("is-dragging");document.body.classList.add("bar-dragging");
+  if(!g.active){if(Math.abs(dx)<5)return;g.active=true;g.bar.classList.add("is-dragging");document.body.classList.add("bar-dragging");
     try{g.bar.setPointerCapture(g.pointer)}catch{};g.lease=takeLease(g.t.id,"drag")}
   e.preventDefault();
-  g.days=Math.round(dx/(g.px*g.dayPct/100));
-  const d=g.days*g.dayPct;let left=g.x0,width=g.w0;
-  if(g.edge==="start"){const cut=Math.min(d,g.w0-g.dayPct);left=g.x0+cut;width=g.w0-cut}
-  else if(g.edge==="end")width=Math.max(g.dayPct,g.w0+d);else left=g.x0+d;
-  g.bar.style.left=`${left}%`;g.bar.style.width=`${width}%`;
-  g.next=barDates(g.t,g.edge,g.days);showDragTip(e.clientX,e.clientY,dateTip(g.t,g.next,appliedDays(g.t,g.next)));
+  // Whole days only: the bar snaps to the day grid, and the row's Dates, Length and arrows follow it.
+  g.days=Math.round(dx/g.dw);
+  g.next=barDates(g.t,g.edge,g.days);
+  // The bar is placed from the dates it would get, cut to the shown period as gxRender cuts it, so a
+  // bar that runs past an edge, or has a due date only, shows exactly what the drop will save.
+  const box=gxBarBox(g.t,g.next)||{left:g.l0,width:g.w0},left=box.left,width=box.width;
+  g.bar.style.left=`${left}px`;g.bar.style.width=`${width}px`;
+  gxDragLive(g.t,g.next,left,width);showDragTip(e.clientX,e.clientY,dateTip(g.t,g.next,appliedDays(g.t,g.next)));
 });
 document.addEventListener("pointerup",async e=>{
   if(!gdrag.bar||e.pointerId!==gdrag.pointer)return;
@@ -2062,16 +2048,12 @@ const DIFF_FIELDS=[["title","Title"],["status","Status"],["criticality","Critica
 let detailTaskId=null,detailLoadVersion=0;
 
 document.querySelector("#gantt").addEventListener("click",e=>{
-  const ex=e.target.closest("[data-expand]");if(ex){toggleSteps(ex.dataset.expand);return}
-  const more=e.target.closest("[data-more]");if(more){toggleMore(more);return}
+  // The name in the Step pane (and a phase's open button) opens the task; the rest of a phase row
+  // folds or unfolds it. A click on a bar does nothing: the bar is for dragging.
   const b=e.target.closest("[data-detail]");
-  if(b){
-    // GF-6: a link inside a +N list hands focus to its +N button first, so closing the dialog
-    // returns focus to a visible control instead of body.
-    const list=b.closest(".step-more-list");
-    if(list){const btn=document.querySelector(`[aria-controls="${CSS.escape(list.id)}"]`);if(btn)btn.focus()}
-    hideTip();closeMoreLists();openDetail(b.dataset.detail);
-  }
+  if(b){openDetail(b.dataset.detail);return}
+  const phase=e.target.closest(".gx-pane [data-phase-row]");
+  if(phase)gxTogglePhase(phase.dataset.phaseRow);
 });
 document.querySelector("#schedule-table").addEventListener("click",e=>{const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail)});
 
@@ -3424,7 +3406,6 @@ function timelineOrder(tasks){
   const positions=new Map();
   return tasks.map(task=>{const index=positions.get(task.project_id)||0;positions.set(task.project_id,index+1);return projects.get(task.project_id)[index]});
 }
-let timelineTaskDrag=null;
 function timelineTaskOrder(projectId){
   const tasks=state.tasks.filter(t=>t.project_id===projectId),byId=new Map(tasks.map(t=>[t.id,t])),groups=groupSteps(tasks),ids=[];
   const walk=t=>{ids.push(t.id);(groups.childrenOf.get(t.id)||[]).forEach(walk)};
@@ -3442,7 +3423,6 @@ function timelineTaskOrder(projectId){
   }
   return ids;
 }
-function clearTaskDrop(){document.querySelectorAll(".task-drop-over").forEach(e=>e.classList.remove("task-drop-over"));document.body.classList.remove("task-row-dragging")}
 async function reviewTaskDrop(t,mode,target,start){
   const order=mode==="above"||mode==="below",duration=Math.max(1,t.start_date&&t.due_date?Math.round((Date.parse(t.due_date)-Date.parse(t.start_date))/DAY)+1:1);
   const payload={mode,expected_revision:t.revision,...(target?{target_task_id:target.id,target_revision:target.revision}:{}),order_event_id:t.timeline_order_event_id??null,...(order?{initial_task_order:timelineTaskOrder(t.project_id)}:{}),...(mode==="date"?{start_date:start,due_date:iso(Date.parse(start)+(duration-1)*DAY)}:{}),update_deadline:false};
@@ -3461,13 +3441,8 @@ async function reviewTaskDrop(t,mode,target,start){
   generation++;d.close();d.remove();if(saved){showToast("Linked tasks and project schedule saved. Critical paths recalculated.");await load()}
 }
 const taskTimeline=document.querySelector("#gantt");
-taskTimeline.addEventListener("dragstart",e=>{const handle=e.target.closest("[data-task-move]");if(!handle)return;const t=state.tasks.find(x=>x.id===handle.dataset.taskMove);if(!t||!canMoveOnBoard(t.project_id)){e.preventDefault();return}timelineTaskDrag=t.id;e.dataTransfer.setData("text/plain",t.id);e.dataTransfer.effectAllowed="move";document.body.classList.add("task-row-dragging");hideTip()});
-taskTimeline.addEventListener("dragover",e=>{if(!timelineTaskDrag)return;const zone=e.target.closest("[data-drop-mode],[data-timeline-task]");if(!zone)return;e.preventDefault();e.dataTransfer.dropEffect="move";document.querySelectorAll(".task-drop-over").forEach(x=>x.classList.remove("task-drop-over"));zone.classList.add("task-drop-over")});
-taskTimeline.addEventListener("drop",e=>{if(!timelineTaskDrag)return;const t=state.tasks.find(x=>x.id===timelineTaskDrag),zone=e.target.closest("[data-drop-mode],[data-timeline-task]");e.preventDefault();timelineTaskDrag=null;clearTaskDrop();if(!t||!zone)return;
-  if(zone.dataset.dropMode){const target=state.tasks.find(x=>x.id===zone.dataset.dropTarget);if(!target||target.id===t.id)return;const mode=zone.dataset.dropMode,start=mode==="after"&&target.due_date?iso(Date.parse(target.due_date)+DAY):target.start_date||target.due_date;reviewTaskDrop(t,mode,target,start)}
-  else{const host=document.querySelector("#gantt"),rect=zone.getBoundingClientRect(),portion=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));reviewTaskDrop(t,"date",null,iso(+host.dataset.start+portion*(+host.dataset.span)))}
-});
-taskTimeline.addEventListener("dragend",()=>{timelineTaskDrag=null;clearTaskDrop()});
+// The chart follows the shadcnstudio block: it has no row drag handles or drop zones. A task is moved
+// through the reviewed Move dialog below, opened from the Schedule table.
 // Keyboard and touch use the same reviewed service action, without a drag gesture.
 function openTimelineTaskMove(e){const handle=e.target.closest("[data-task-move]");if(!handle)return;const t=state.tasks.find(x=>x.id===handle.dataset.taskMove);if(!t||!canMoveTimelineTask(t))return;const d=document.createElement("dialog");d.innerHTML=`<form><h2>Move ${escapeHtml(t.title)}</h2><label>Action<select name="mode"><option value="date">Place on timeline</option><option value="above">Move above</option><option value="below">Move below</option><option value="after">After another task finishes</option><option value="concurrent">Run concurrently</option></select></label><label>Related task<select name="target"><option value="">Choose task</option>${state.tasks.filter(x=>x.project_id===t.project_id&&x.id!==t.id).map(x=>`<option value="${escapeHtml(x.id)}">${escapeHtml(x.title)} (${escapeHtml(x.plan_option||"Shared")})</option>`).join("")}</select></label><label>Start for timeline placement<input name="start" type="date" value="${escapeHtml(t.start_date||ganttToday())}"></label><div class="error" role="alert"></div><div class="actions"><button type="button" data-cancel class="quiet">Cancel</button><button type="submit">Review move</button></div></form>`;document.body.appendChild(d);d.showModal();const close=()=>{d.close();d.remove()};d.addEventListener("cancel",()=>d.remove(),{once:true});d.querySelector("[data-cancel]").onclick=close;d.querySelector("form").onsubmit=ev=>{ev.preventDefault();const f=ev.currentTarget,mode=f.elements.mode.value,target=state.tasks.find(x=>x.id===f.elements.target.value);if(mode!=="date"&&!target){f.querySelector(".error").textContent="Choose a related task.";return}const start=mode==="date"?f.elements.start.value:mode==="after"&&target.due_date?iso(Date.parse(target.due_date)+DAY):target?.start_date||target?.due_date;close();reviewTaskDrop(t,mode,target,start)}}
 taskTimeline.addEventListener("click",openTimelineTaskMove);
