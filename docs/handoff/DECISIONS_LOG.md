@@ -180,6 +180,35 @@ Sources:
   line from Aly in chat recorded there. The jaira sections of `AGENTS.md`,
   `CLAUDE.md` and `AGENT_START_PROMPT.md` were replaced accordingly.
 
+### 2026-11-16 — MXY7BG slices 3 and 4 accepted (chat with Claude)
+
+- Aly, 2026-11-09: "Do not create jaira this time. create small actionable
+  steps to get to the desired results. also work on slices 3 and 4", then
+  "go". The steps are in `docs/handoff/README.md`, "MXY7BG slices 3 and 4".
+- Asked "Do you accept slices 3 and 4?", Aly answered: "Accept both". Slice 3
+  (App Owner-only audited permanent direct links, Owner Items 15-16,
+  `5220018`) and slice 4 (object storage backend and verified migration,
+  Items 6-7, `877bde1`) are accepted as built.
+- What the acceptance does not cover. Aly was not asked these and has not
+  answered them; all of them stay open in the README section:
+  - Slice 3, five questions: link expiry or a download cap; the client
+    address in the history; whether a link ends when its creator is demoted
+    or deactivated or the project closes; whether a download through a link
+    is shown under the owner who created it; whether restoring an older
+    backup may bring back a revoked link.
+  - Slice 4, six decisions: whether to use object storage at all; the
+    outbound network rule; how the bucket is backed up (Item 6's backup and
+    recovery is tested for the folder and only documented for the bucket);
+    whether the mixed window between switching the setting and finishing
+    `storage-migrate` is acceptable under Item 7; old copies staying until
+    `storage-prune` is run by hand; whether each file should record its
+    bucket.
+  - Review. The last two small slice 4 fixes were tested and guard-checked
+    but not read again by a reviewer.
+  - Deployment. Nothing is provisioned or deployed. The Caddy log filters
+    have not run in a real Caddy and the object storage code has not run
+    against a real OCI tenancy (runbook stages 9 and 11.5).
+
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
 These are choices Claude made and reported; Aly has not overruled them. They

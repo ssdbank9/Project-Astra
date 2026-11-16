@@ -7,14 +7,16 @@ below that mentions tickets, lanes or board counts is to be acted on through
 jaira any more; `.jaira/` is read-only history. From now on this file carries
 status and open work, updated in the same commit as the work.
 
-Status at `575f2fa` (plus this commit):
+Status at `877bde1` (plus this commit):
 
 - MXY7BG hosted attachments: slice 1 (`18c4e54`) and slice 2 (`8fdd9d5`) are
   pushed and reviewed. Slice 3 (App Owner-only audited permanent direct
-  links, Owner Items 15-16, `5220018`) is built, tested and reviewed and waits
-  for Aly's acceptance, and so does slice 4 (OCI Object Storage backend and a verified
-  backend migration with rollback, Items 6-7). Both are in "MXY7BG slices 3
-  and 4" below. Nothing of slice 4 is provisioned or deployed. Nits left: two owners saving the attachment settings at once
+  links, Owner Items 15-16, `5220018`) and slice 4 (OCI Object Storage backend
+  and a verified backend migration with rollback, Items 6-7, `877bde1`) were
+  accepted by Aly on 2026-11-16 ("Accept both"). Both are in "MXY7BG slices 3
+  and 4" below. Acceptance is of the built work only: nothing is provisioned
+  or deployed, and the questions and decisions listed for Aly in that section
+  are still open. Nits left: two owners saving the attachment settings at once
   overwrite each other (both audited); `attachment_settings` and
   `attachment_links` are not in the backup required-table list.
 - Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
@@ -269,9 +271,10 @@ below; a step is ticked in the commit that pushes it.
 
 ### Slice 3: App Owner-only permanent direct links (Owner Items 15-16)
 
-Status: built, tested, reviewed and pushed in `5220018` (on the branch since
-the merge `575f2fa`; full suite there: 1299 tests, OK, 2 skipped on Windows).
-It waits for Aly's acceptance in chat. Nothing is deployed.
+Status: accepted by Aly on 2026-11-16 ("Accept both"). Built, tested, reviewed
+and pushed in `5220018` (on the branch since the merge `575f2fa`; full suite
+there: 1299 tests, OK, 2 skipped on Windows). Nothing is deployed, and the
+questions for Aly below are still open.
 
 - [x] 3.1 Schema v25 `attachment_links`: one active link per uploaded file,
   the token stored only as a SHA-256 hash, who created and who revoked it,
@@ -304,7 +307,8 @@ What an owner gets:
 
 How it was checked:
 
-- Tests: the full suite result is in the commit message. New tests are
+- Tests: full suite at the merge `575f2fa`: `Ran 1299 tests`,
+  `OK (skipped=2)`. New tests are
   `DirectLinkTests`, `WaitressLogTests` (a real Waitress server) and the direct
   link tests in `HttpTests`, `WsgiStreamingTests` and `GuardUnitTests`
   (`tests/test_hosted_attachments.py`), `tests/test_hosted_attachments_ui.py`,
@@ -368,9 +372,11 @@ when removed.
 
 ### Slice 4: object storage backend and verified migration (Owner Items 6-7)
 
-Status: built, tested, reviewed and pushed in this commit. It waits for Aly's
-acceptance in chat. Nothing is provisioned or deployed: no bucket, no key, no
-change on any server. The code has never talked to a real OCI tenancy.
+Status: accepted by Aly on 2026-11-16 ("Accept both"). Built, tested, reviewed
+and pushed in `877bde1` (full suite: 1379 tests, OK, 2 skipped on Windows).
+The decisions for Aly below are still open. Nothing is provisioned or
+deployed: no bucket, no key, no change on any server. The code has never
+talked to a real OCI tenancy.
 
 - [x] 4.1 `object_storage.S3Storage`: OCI Object Storage through its
   S3-compatible API, signed with the standard library (no new dependency),
@@ -424,7 +430,8 @@ What it does:
 
 How it was checked:
 
-- Tests: the full suite result is in the commit message. New:
+- Tests: full suite on the code of `877bde1`: `Ran 1379 tests`,
+  `OK (skipped=2)`. New:
   `tests/test_object_storage.py` (request signing against the two worked
   examples in the Amazon S3 reference, settings, both backends, the service
   and both web servers on object storage, the migration, rollback, prune, the
