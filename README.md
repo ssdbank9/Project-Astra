@@ -144,11 +144,15 @@ This first vertical slice provides:
   attempts counted separately, and the 5th notice in each says further attempts of that
   kind are in history only for now (every attempt is still audited, including an import refused for lack of a target project);
 - portfolio and per-project Gantt views with overdue and upcoming highlighting;
-- task steps (subtasks) drawn as numbered, colour-coded segments inside the parent's Gantt
-  bar: a shared tooltip on hover and keyboard focus, a chevron that expands the step rows,
-  a `+N` disclosure for steps not drawn at this scale, an "n steps need dates" chip, a dashed
-  extension where a step runs past its parent's dates, and a Schedule table twin with the
-  same rows as text, which is the default at phone width;
+- a Gantt chart modelled on the shadcnstudio "gantt-chart-04" block, in plain JavaScript: a
+  Step pane (Step, Owner, Status, Dates, Length) beside a day grid with ISO week headers and a
+  today marker; each project, and each task that has steps (subtasks), is a phase that folds,
+  with a summary bar and its `done/total` steps; bars show status, progress and owner, and a
+  milestone is a flag; Week and Month periods with previous, next and Today, and zoom in the
+  month view; finish-to-start arrows that turn dark on hover or focus and red on a conflict,
+  with a Dependencies switch; a Filter by status and owner; a New Step sheet that creates a
+  task or milestone with its predecessors; and a Schedule table twin with the same rows as
+  text, which is the default at phone width (`docs/design/gantt-steps-contract.md`);
 - one visual system: the Inter typeface (4.001, SIL Open Font License) is served by Astra
   itself from `src/astra/static/fonts`, so the page makes no third-party requests and the
   Content-Security-Policy allows fonts from Astra only; every control shows a keyboard focus
@@ -162,7 +166,7 @@ This first vertical slice provides:
   until it is closed (the same happens at 200% zoom on a laptop). Each screen has
   one heading 1 (the page title, which takes focus when the screen changes, so screen readers
   announce it), a "Skip to content" link, navigation, main and panel landmarks, a name on
-  every control, and text contrast of 4.5:1 or better, including the Gantt project flags.
+  every control, and text contrast of 4.5:1 or better.
   The browser tab shows a small Astra icon (`static/favicon.svg`);
 - a navigation shell: a left rail (Home, My Work, Inbox, Projects, Capture; a bottom bar on
   phones) and a top bar with the page title, search (`Ctrl K`, or `Cmd K` on a Mac) and an
@@ -244,7 +248,8 @@ This first vertical slice provides:
   `POST /api/tasks/<id>/lock` (`kind` drag|edit|bulk), `/lock/renew` and `/lock/release`
   (`token`), and `/lock/force` (owners, optional `reason`);
 - Gantt date drag for owners and the project's managers: drag a bar to move both dates, or its
-  left or right end to change the start or the due date, with a live tip of the new dates. The
+  left or right end to change the start or the due date, in whole days, with a live tip of the
+  new dates while the row's Dates, Length and dependency arrows follow the bar. The
   task panel's date fields remain the keyboard and phone route (phones and touch never drag
   bars). The server validates the dates (real dates, start not after due) and refuses with the
   reason; a refused permission is recorded as `gantt_move_blocked`. An ordinary move applies at once with a
@@ -302,7 +307,7 @@ This first vertical slice provides:
   "Show" choice (my tasks, or all tasks you can see; `&scope=all`); a day with more than 3
   tasks shows 3 and "+N more", which opens the rest in place. Below 1024px (phones and
   tablets) the month is an agenda of the days that have work. Every row and calendar item opens the task panel.
-  "Today" on Home, in My Work, on the calendar and on the Gantt's today line is the server's
+  "Today" on Home, in My Work, on the calendar and on the Gantt's today marker is the server's
   date in the app's timezone (Asia/Karachi, sent with `/api/tasks`; each project also carries
   its own `today`), and each task's days until due are counted in its project's timezone, so
   a browser in another timezone never moves work to another day. The portfolio timeline says

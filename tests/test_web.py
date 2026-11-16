@@ -2641,10 +2641,11 @@ class AstraGovernedDragWebTests(unittest.TestCase):
 class AstraStaticAssetTests(unittest.TestCase):
     """D73AQW adversarial-review follow-ups pinned on the shipped static files.
 
-    The Gantt is rendered client-side, so these tests read app.js / style.css / index.html
-    as text: the colour tokens are recomputed as WCAG contrast ratios and the structural
-    fixes (chip and +N placement, parent-sized track, focus return, short labels, wrap
-    texture, legend wording) are asserted on the source that produces them.
+    These tests read app.js / style.css / index.html as text: the step colour tokens (still used
+    by the swatches of the Schedule table and the sub-task list) are recomputed as WCAG contrast
+    ratios, and the focus return, the accessible names and the docs are asserted on the source.
+    The chart itself was replaced in 2026-11 (the shadcnstudio gantt-chart-04 replica); its
+    behaviour is tested in test_gantt_zoom.py, test_gantt_dependencies.py and test_gantt_range.py.
     """
 
     @classmethod
@@ -2658,97 +2659,68 @@ class AstraStaticAssetTests(unittest.TestCase):
     def _tokens(self, suffix):
         return dict(re.findall(rf"--step-(\d){suffix}:\s*({HEX})", self.css))
 
-    def test_step_edge_tokens_reach_3_to_1_on_tint_tracks_and_white(self):
-        # GF-3: the stripe and border are drawn from a per-hue edge token; every edge must separate
-        # a segment from its own tint, from every track tint and from white at >= 3:1 (WCAG 1.4.11).
+    def test_step_edge_tokens_reach_3_to_1_on_their_tint_and_white(self):
+        # GF-3: a swatch's border is drawn from a per-hue edge token; every edge must separate the
+        # swatch from its own tint and from white at >= 3:1 (WCAG 1.4.11).
         hues, tints, edges = self._tokens(""), self._tokens("-tint"), self._tokens("-edge")
         self.assertEqual(sorted(hues), list("1234567"))
         self.assertEqual(sorted(tints), list("1234567"))
         self.assertEqual(sorted(edges), list("1234567"))
-        tokens = dict(re.findall(rf"(--[\w-]+):\s*({HEX})", self.css.split("}\n* { box-sizing")[0]))
-        track_rules = [tokens[name] for name in re.findall(r"\.bar\.track[^\{]*\{[^}]*?background:\s*var\((--[\w-]+)\)", self.css)]
-        self.assertGreaterEqual(len(track_rules), 8, "default, overdue, soon/today, scheduled, blocked, closed, critical, derived")
         ink = re.search(rf"--ink:\s*({HEX})", self.css).group(1)
-        done_token = re.search(r"\.step\.done \{[^}]*color:\s*var\((--[\w-]+)\)", self.css).group(1)
-        done_text = tokens[done_token]
         for i in "1234567":
             self.assertGreaterEqual(contrast_ratio(edges[i], tints[i]), 3.0, f"edge {i} vs tint {i}")
-            for background in track_rules + ["#FFFFFF"]:
-                self.assertGreaterEqual(contrast_ratio(edges[i], background), 3.0, f"edge {i} vs {background}")
+            self.assertGreaterEqual(contrast_ratio(edges[i], "#FFFFFF"), 3.0, f"edge {i} vs white")
             self.assertGreaterEqual(contrast_ratio(ink, tints[i]), 4.5, f"ink on tint {i}")
-            self.assertGreaterEqual(contrast_ratio(done_text, tints[i]), 4.5, f"done text on tint {i}")
-        # The segment and swatch draw border and stripe from --edge and no longer carry the white ring.
-        self.assertRegex(self.css, r"\.step \{[^}]*border: 1px solid var\(--edge, var\(--gray\)\)[^}]*box-shadow: inset 0 -3px 0 var\(--edge, var\(--gray\)\);")
         self.assertRegex(self.css, r"\.sw \{[^}]*border: 1px solid var\(--edge, var\(--gray\)\)")
         self.assertNotIn("inset 0 0 0 1px #fff", self.css)
         for i in "1234567":
             self.assertIn(f".step-c{i}, .sw.step-c{i} {{ --hue: var(--step-{i}); --tint: var(--step-{i}-tint); --edge: var(--step-{i}-edge); }}", self.css)
 
-    def test_undated_chip_and_more_button_never_cover_a_step(self):
-        # GF-1 / GF-16: the chip is built before the dated branch and rendered in the meta column
-        # (no timeline position), so an all-undated parent gets it too and no step sits under it.
-        self.assertLess(self.js.index('class="chip step-undated"'), self.js.index("if(!ext){bar="))
-        self.assertNotIn('class="chip step-undated" data-detail="${id}" data-x=', self.js)
-        self.assertIn("${derived}${undatedChip}${metaMore}${overrunText}", self.js)
-        self.assertRegex(self.css, r"\.chip \{ position: relative; display: inline-flex;")
-        # +N sits outside the track (right, left with .flip, or in the meta column), never pinned inside it.
-        self.assertRegex(self.css, r"\.step-more \{ position: absolute; left: 100%;")
-        self.assertNotRegex(self.css, r"\.step-more \{[^}]*right: 2px")
-        self.assertRegex(self.css, r"\.step-more\.flip \{ left: auto; right: 100%;")
-        self.assertIn('place=100-(left+width)>=need?"":(left>=need?" flip":" in-meta")', self.js)
-        self.assertIn('if(place===" in-meta")metaMore=`<br>${moreBtn}${moreList}`;', self.js)
-        # GF-7: the same 44px hit area as a step; decorative marker lines never intercept the pointer.
-        self.assertIn('.step-more::before { content: ""; position: absolute; left: 0; right: 0; top: -13px; bottom: -13px; }', self.css)
-        self.assertRegex(self.css, r"\.today-line \{[^}]*pointer-events: none")
-        self.assertRegex(self.css, r"\.proj-line \{[^}]*pointer-events: none")
-
-    def test_track_is_sized_from_the_parents_own_dates_and_names_overruns(self):
-        # GF-2: a dated parent's track comes from its own dates; steps outside them overhang onto a
-        # dashed neutral extension and are named in the parent's tooltip and meta column.
-        self.assertIn("const ext=ownDates?dateExtent(t,[]):dateExtent(t,kids);", self.js)
-        self.assertIn('class="track-ext before"', self.js)
-        self.assertIn('class="track-ext after" data-x="100"', self.js)
-        self.assertIn('overruns.push(`Step ${idx} ends ${d} day${d===1?"":"s"} after the parent`)', self.js)
-        self.assertIn('overruns.push(`Step ${idx} starts ${d} day${d===1?"":"s"} before the parent`)', self.js)
-        self.assertIn("tipAttrs(t,null,kids.length,overruns)", self.js)
-        self.assertIn('<span class="overrun-text">', self.js)
-        # Steps are no longer clamped into the track, so an overhang is drawn rather than clipped.
-        self.assertNotIn("x:Math.max(0,(pct(ks)-left)/width*100)", self.js)
-        self.assertNotIn("w:Math.min(100-x,wPct/width*100)", self.js)
-        self.assertRegex(self.css, r"\.track-ext \{[^}]*border: 1px dashed var\(--gray\)[^}]*pointer-events: none")
+    def test_the_old_chart_and_its_helpers_are_gone(self):
+        # 2026-11: step chips, the +N list, the parent track, project flags, the tooltip and the
+        # fit / week / month / quarter zoom were replaced; no dead code or dead rule stays behind.
+        for gone in ("function ganttScale(", "function ganttAxis(", "function dateExtent(", "function ganttDepPairs(", "function drawGanttDependencies(",
+                     "step-more-list", "tipAttrs(", "showTip(", "track-ext", "today-line", "proj-flag", "astra.gantt.zoom", "astra.gantt.expanded"):
+            self.assertNotIn(gone, self.js, gone)
+        for gone in (".gantt-row", ".bar.track", ".step-more {", ".today-line", ".proj-line", ".proj-flag", ".track-ext", "#step-tip", ".legend"):
+            self.assertNotIn(gone, self.css, gone)
+        for gone in ('id="step-tip"', 'class="legend', 'data-zoom="fit"', 'data-zoom="quarter"'):
+            self.assertNotIn(gone, self.html, gone)
 
     def test_focus_returns_to_a_visible_control(self):
-        # GF-6: Escape in a +N list, a dialog opened from a list link, and any re-render.
-        self.assertIn("const held=l.contains(document.activeElement)", self.js)
-        self.assertIn('if(b){b.setAttribute("aria-expanded","false");if(held)b.focus()}', self.js)
-        self.assertIn('const list=b.closest(".step-more-list");', self.js)
+        # GF-6: Escape in the Filter popover gives focus back to its button, and any re-render
+        # gives it back to the control that had it (a bar, a step name, a phase toggle).
+        self.assertIn('if(e.key==="Escape"&&gx.popOpen&&!gdrag.active){e.preventDefault();gxCloseFilter(true)}', self.js)
+        self.assertIn('btn.setAttribute("aria-expanded","false");if(refocus)btn.focus()}', self.js)
+        self.assertIn('FOCUS_ATTRS=["data-detail","data-phase","data-bar"]', self.js)
+        self.assertIn('FOCUS_KINDS=["gx-name","gx-open","gx-phase-toggle","gx-bar","gx-ms","link"]', self.js)
         self.assertIn("const focusKey=focusKeyIn(el);", self.js)
         self.assertIn("restoreFocus(el,focusKey);", self.js)
         self.assertIn('n.focus({preventScroll:true})', self.js)
 
-    def test_step_labels_are_short_and_tooltip_follows_the_focused_element(self):
-        # GF-8: aria-label carries position and name only; the tooltip text is linked through
-        # aria-describedby while visible and cleared when that same element loses focus.
-        self.assertIn("`Step ${idx} of ${total}, ${t.title}`", self.js)
+    def test_a_bar_names_itself_and_the_decorative_parts_are_hidden_from_assistive_tech(self):
+        # GF-8, on the 2026-11 chart: a bar's accessible name is its title, status and progress; the
+        # status is also text in the pane row, never colour alone; icons, grips and the grid are hidden.
+        self.assertIn("label=escapeHtml(`${t.title} · ${GX_STATUS[st]} · ${pct}%`)", self.js)
+        self.assertIn('title="${label}" aria-label="${label}"', self.js)
+        self.assertIn('<span class="sr-only"> · ${GX_STATUS[st]}</span>', self.js)
         self.assertNotIn("Press Enter for details", self.js)
-        self.assertIn('gantt.addEventListener("focusin",e=>{if(e.target.matches("[data-tip]"))showTip(e.target)});', self.js)
-        self.assertIn('gantt.addEventListener("focusout",e=>{if(e.target.matches("[data-tip]")&&e.target===tipFor)hideTip()});', self.js)
-        self.assertIn('if(isMore(e.target))return;', self.js)
+        self.assertIn('<i class="gx-grip start" data-edge="start" aria-hidden="true"></i>', self.js)
+        self.assertIn('<div class="gx-cols" aria-hidden="true">', self.js)
+        self.assertIn('stroke-linejoin="round" aria-hidden="true">${GX_ICONS[name]}</svg>', self.js)
+        self.assertRegex(self.js, r'<svg class="gx-deps"[^>]*aria-hidden="true" focusable="false">')
 
-    def test_wrap_texture_legend_and_docs_agree(self):
-        # GF-10: 8+ steps use a doubled stripe, on-hold keeps the hatching, so both can show at once.
-        self.assertIn(".step.wrap, .sw.wrap { box-shadow: inset 0 -3px 0 var(--edge), inset 0 -4px 0 var(--tint), inset 0 -6px 0 var(--edge); }", self.css)
-        self.assertNotRegex(self.css, r"\.step\.wrap[^}]*repeating-linear-gradient")
-        self.assertRegex(self.css, r"\.step\.hold \{[^}]*repeating-linear-gradient")
-        # list item, name-column kicker, Schedule table and detail-dialog subtasks all carry it
-        self.assertEqual(self.js.count('>STEP_HUES?" wrap":""}'), 4)
-        # DTJ-06: legend, contract and README describe the shipped behaviour.
-        self.assertIn("+N not drawn at this scale (too small or overlapping)", self.html)
-        self.assertNotIn("too small to draw", self.html)
-        self.assertIn("8+ repeats the colours with a doubled stripe", self.html)
-        self.assertIn("not drawn at this scale (too small or overlapping)", self.contract)
+    def test_wrap_texture_and_docs_agree(self):
+        # GF-10: the 8th and later steps repeat the seven colours with a doubled stripe.
+        self.assertIn(".sw.wrap { box-shadow: inset 0 -3px 0 var(--edge), inset 0 -4px 0 var(--tint), inset 0 -6px 0 var(--edge); }", self.css)
+        # the Schedule table and the task panel's sub-task list carry the swatch
+        self.assertEqual(self.js.count('>STEP_HUES?" wrap":""}'), 2)
+        # DTJ-06: the contract and the README describe the shipped chart.
         self.assertIn("--step-1-edge", self.contract)
-        for phrase in ("steps", "tooltip", "chevron", "Schedule table", "phone width"):
+        self.assertIn("gantt-chart-04", self.contract)
+        for phrase in ("Completed", "In Progress", "At Risk", "Blocked", "Queued", "finish to start", "conflict"):
+            self.assertIn(phrase, self.contract)
+        for phrase in ("steps", "phase", "Dependencies", "New Step", "Schedule table", "phone width"):
             self.assertIn(phrase, self.readme)
         # 3M2AYA review 8 L2: only the primary is offered a reset on the primary's row.
         rule = re.search(r"function canResetPassword\(u,viewerIsPrimary\)\{return ([^}]*)\}", self.js)
@@ -2869,9 +2841,10 @@ class AstraFoundationStaticTests(unittest.TestCase):
         # Lock #11 review L3: each legend swatch is wrapped with its label so it never wraps away from it,
         # and the sign-in card is a main landmark named by its heading.
         html = (STATIC / "index.html").read_text(encoding="utf-8")
-        self.assertIn('<span class="key"><i class="proj-target-key"></i>Project target</span>', html)
-        self.assertEqual(html.count('<span class="key">'), 8)
-        self.assertRegex(self.css, r"\.legend \.key \{[^}]*white-space: nowrap;")
+        # 2026-11: the chart has no legend any more; the Filter popover names each status next to its dot.
+        self.assertNotIn('<span class="key">', html)
+        self.assertRegex(self.css, r"(?m)^\.gx-pop-row, \.gx-dep-row \{[^}]*flex-direction: row;")
+        self.assertRegex(self.css, r"(?m)^\.gx-pop-label, \.gx-dep-name \{[^}]*white-space: nowrap;")
         self.assertIn('<main id="login" class="login-card" aria-labelledby="login-title">', html)
         self.assertIn('<h1 id="login-title">Project command centre</h1>', html)
         self.assertNotIn('<section id="login"', html)
@@ -2880,9 +2853,9 @@ class AstraFoundationStaticTests(unittest.TestCase):
         # 3C1Z74: the target flag was white on #d1495b (4.36:1); it now uses --red.
         root = self.css[self.css.index(":root {"):self.css.index("}\n* { box-sizing")]
         tok = dict(re.findall(rf"--([a-z0-9-]+):\s*({HEX})", root, flags=re.I))
-        self.assertIn(".proj-flag.target { background: var(--red); }", self.css)
+        # 2026-11: the project flags left with the old chart; --red is still the one red for white text.
+        self.assertNotIn(".proj-flag", self.css)
         self.assertGreaterEqual(contrast_ratio("#FFFFFF", tok["red"]), 4.5)
-        self.assertGreaterEqual(contrast_ratio("#FFFFFF", "#7a5af5"), 4.5)  # .proj-flag.start
         self.assertNotIn("#d1495b", self.css.lower())
         self.assertIn(".brand { font-weight: 800; letter-spacing: .18em; color: var(--teal-dark); }", self.css)
 
@@ -3010,7 +2983,10 @@ if(mode==="board"){
   // Lock #11 review L2: a project's Timeline uses that project's today and timezone.
   a.state.today="2026-09-25";a.state.timezone="Asia/Karachi";
   a.state.projects=[{id:U1,name:"P",status:"active",entities:[],start_date:"2026-09-26",target_date:"2026-10-30",today:"2026-09-26",timezone:"Pacific/Auckland"}];
-  try{a.renderProject(a.parseRoute("#/project/"+U1+"/timeline"));out.timelineAsOf=document.querySelector("#as-of").textContent;out.timelineGantt=document.querySelector("#gantt").innerHTML}catch(e){out.timelineError=String(e.stack)}
+  try{a.renderProject(a.parseRoute("#/project/"+U1+"/timeline"));out.timelineAsOf=document.querySelector("#as-of").textContent;out.timelineGantt=document.querySelector("#gantt").innerHTML;
+    // The chart opens on the month of the nearest work; Today brings it to the project's own day.
+    const hash0=location.hash;location.hash="#/project/"+U1+"/timeline";document.querySelector("#gantt-today").onclick();
+    out.timelineToday=[document.querySelector("#gantt-title").textContent,document.querySelector("#gantt").innerHTML];location.hash=hash0}catch(e){out.timelineError=String(e.stack)}
   a.state.projects=[{id:U1,name:"P",status:"active",entities:[]}];
   // Review L8: an unknown tab shows Overview and the link is rewritten to say so.
   location.hash="#/project/"+U1+"/nope?divide=owner";calls.splice(0);
@@ -3086,7 +3062,7 @@ if(mode==="gantt"){
   a.state.tasks=tasks;a.state.viewOverride="chart";
   a.renderGantt(tasks);out.canDrag=document.querySelector("#gantt").innerHTML;
   a.state.projects[0].can_manage=false;a.renderGantt(tasks);out.cannotDrag=document.querySelector("#gantt").innerHTML;a.state.projects[0].can_manage=true;
-  out.span=document.querySelector("#gantt").dataset.span;
+  out.day=document.querySelector("#gantt").dataset.day;
   const t=tasks[0];
   out.dates={move:barDates(t,null,3),start:barDates(t,"start",2),startClamp:barDates(t,"start",9),end:barDates(t,"end",-1),endClamp:barDates(t,"end",-9),
     noStart:barDates({...t,start_date:null},null,2),growStart:barDates({...t,start_date:null},"start",-2)};
@@ -3132,10 +3108,14 @@ if(mode==="gantt"){
   try{await api(taskApi("g1"),{method:"POST",body:"{}"})}catch(err){out.lockMessage=[err.message,lockTime(held)]}
   globalThis.setTimeout=realST;
   // Review 12b L9: touch and phones never start a bar drag; a mouse on a wide screen does.
-  const barStub={dataset:{drag:"g1",x:"10",w:"4"},closest:sel=>sel===".timeline"?{getBoundingClientRect:()=>({width:700})}:null};
-  const down=pointerType=>{a.gdrag.bar=null;document.querySelector("#gantt")._listeners.pointerdown[0]({target:{closest:sel=>sel==="[data-drag]"?barStub:null},button:0,pointerType,clientX:5,pointerId:1});return !!a.gdrag.bar};
-  document.querySelector("#gantt").dataset.span="8380800000";
-  out.startDrag={mouse:down("mouse"),touch:down("touch")};const setPhone=v=>Object.defineProperty(a.phoneMQ,"matches",{value:v,configurable:true,writable:true});
+  // g1 runs 5 to 8 Oct: at 48px a day its bar starts at 192px and is 192px wide.
+  const ganttEl=document.querySelector("#gantt");
+  const mkBar=()=>{const cls=new Set();return {dataset:{drag:"g1",bar:"g1",l:"192",w:"192"},style:{left:"192px",width:"192px"},_cls:cls,
+    classList:{add:c=>cls.add(c),remove:c=>cls.delete(c),contains:c=>cls.has(c)},setPointerCapture(){},closest:()=>null}};
+  let bar=mkBar();
+  const down=(pointerType,edge,button=0)=>{a.gdrag.bar=null;a.gdrag.active=false;
+    ganttEl._listeners.pointerdown[0]({target:{closest:sel=>sel==="[data-drag]"?bar:sel==="[data-edge]"&&edge?{dataset:{edge}}:null},button,pointerType,clientX:500,clientY:300,pointerId:1});return !!a.gdrag.bar};
+  out.startDrag={mouse:down("mouse"),touch:down("touch"),rightButton:down("mouse",null,2)};const setPhone=v=>Object.defineProperty(a.phoneMQ,"matches",{value:v,configurable:true,writable:true});
   setPhone(true);out.startDrag.phone=down("mouse");setPhone(false);a.gdrag.bar=null;
   // The impact dialog escapes what it lists.
   const dlg=document.querySelector("#move-dialog");dlg.showModal=()=>{};
@@ -3143,11 +3123,41 @@ if(mode==="gantt"){
   out.banner=lockBanner(held,"",true);out.bannerNoForce=lockBanner(held,"",false);
   out.chipOther=boardCard(T({id:"c1",title:"Card",lock:held}),[],true);
   out.chipMine=boardCard(T({id:"c2",title:"Card",lock:{...held,holder_user_id:"u1"}}),[],true);
-  // Review 12d L2: Escape cancels a bar drag, puts the bar back and sends nothing.
-  const bar={classList:{remove(){},add(){}},style:{left:"55%",width:"9%"}};
-  Object.assign(a.gdrag,{bar,active:true,x0:10,w0:4,t,lease:null});posts.splice(0);
-  keydown("Escape",document.body);
+  // 2026-11 chart: a drag snaps to whole days; the bar, its row's Dates and Length and the tip follow the
+  // pointer; the drop posts the new dates to /reschedule under a drag lease.
+  const move=(x,id=1)=>{const e={clientX:x,clientY:300,pointerId:id,prevented:false,preventDefault(){this.prevented=true}};(docListeners.pointermove||[]).forEach(f=>f(e));return e.prevented};
+  const up=async(id=1)=>{for(const f of docListeners.pointerup||[])await f({pointerId:id});await flush()};
+  const cell=k=>document.querySelector(`[data-${k}="g1"]`).textContent;
+  const live=()=>[bar.style.left,bar.style.width,cell("dates"),cell("len"),document.querySelector("#drag-tip").textContent,bar._cls.has("is-dragging")];
+  const sent=()=>posts.splice(0).filter(p=>p[0]!=="load").map(p=>[p[0].replace("/api/tasks/g1",""),p[1]]);
+  reply=u=>u.endsWith("/lock")?{body:{lock:{token:"tokM",seconds:60}}}:u.endsWith("/reschedule")?{body:{task:t,undo:{event_id:"ev11",seconds:15}}}:null;
+  posts.splice(0);bar=mkBar();down("mouse");
+  out.drag={small:[move(503),a.gdrag.active,bar.style.left],otherPointer:[move(700,2),a.gdrag.active]};
+  out.drag.prevented=move(570);out.drag.oneDay=live();
+  move(600);out.drag.twoDays=live();out.drag.body=document.body._classes();
+  await up(2);out.drag.otherPointerUp=!!a.gdrag.bar;
+  await up();out.drag.dropPosts=sent();out.drag.afterDrop=[bar.style.left,bar.style.width,a.gdrag.bar,document.body._classes(),document.querySelector("#drag-tip").hidden,bar._cls.has("is-dragging")];
+  out.drag.dropLive=document.querySelector("#gantt-live").textContent;
+  bar=mkBar();down("mouse","end");move(452);out.drag.endMinusOne=live();move(100);out.drag.endClamp=live();await up();out.drag.endPosts=sent().filter(p=>p[0]==="/reschedule");
+  bar=mkBar();down("mouse","start");move(596);out.drag.startPlusTwo=live();move(1000);out.drag.startClamp=live();await up();out.drag.startPosts=sent().filter(p=>p[0]==="/reschedule");
+  bar=mkBar();down("mouse");move(510);out.drag.noChange=[a.gdrag.active,bar.style.left];await up();out.drag.noChangePosts=sent().map(p=>p[0]);
+  bar=mkBar();down("mouse");await up();out.drag.clickPosts=sent();
+  // Review 2026-11: a bar cut at the start of the month is placed from the dates it would get, cut the same
+  // way the chart cuts it (it was 3 days wide, Oct 1 to 3, for Sep 28 to Oct 3).
+  const cutTask=T({id:"g4",title:"Cut",start_date:"2026-09-28",due_date:"2026-10-03"});a.state.tasks.push(cutTask);
+  const cutCell=k=>document.querySelector(`[data-${k}="g4"]`).textContent;
+  const cutBar=()=>{const b=mkBar();b.dataset={drag:"g4",bar:"g4",l:"0",w:"144"};b.style={left:"0px",width:"144px"};return b};
+  bar=cutBar();down("mouse");move(548);out.drag.cutMove=[bar.style.left,bar.style.width,cutCell("dates"),cutCell("len")];
+  keydown("Escape",document.body);await flush();
+  bar=cutBar();down("mouse","end");move(404);out.drag.cutEnd=[bar.style.left,bar.style.width,cutCell("dates")];
+  move(260);out.drag.cutEndOut=[bar.style.left,bar.style.width,cutCell("dates")];
+  keydown("Escape",document.body);await flush();a.state.tasks.pop();posts.splice(0);
+  // Review 12d L2: Escape cancels a bar drag, puts the bar and its row back and sends nothing.
+  bar=mkBar();down("mouse");move(600);out.drag.beforeEscape=live();posts.splice(0);
+  out.drag.escapePrevented=keydown("Escape",document.body);await flush();
   out.escape=[a.gdrag.bar,a.gdrag.active,bar.style.left,bar.style.width,posts.filter(p=>p[0].endsWith("/reschedule")).length];
+  out.drag.afterEscape=[cell("dates"),cell("len"),bar._cls.has("is-dragging"),document.body._classes()];
+  move(900);out.drag.moveAfterEscape=bar.style.left;posts.splice(0);
   // An edit form left idle for a minute lets its lease go instead of renewing it.
   reply=()=>null;posts.splice(0);
   const idle={token:"tokI",kind:"edit",last:Date.now()-61000,timer:null};a.leases.set("g9",idle);
@@ -3699,12 +3709,12 @@ class AstraProjectPageTests(unittest.TestCase):
         self.assertNotIn("timelineError", self.out)
         self.assertTrue(self.out["timelineAsOf"].endswith("(Pacific/Auckland)"), self.out["timelineAsOf"])
         self.assertIn("26", self.out["timelineAsOf"])
-        gantt = self.out["timelineGantt"]
-        today = re.findall(r'class="today-line" data-x="([^"]+)"', gantt)
-        start = re.findall(r'class="proj-line start" data-x="([^"]+)"', gantt)
-        self.assertTrue(today)
-        self.assertEqual(len(set(today)), 1)  # one line, drawn in every row
-        self.assertAlmostEqual(float(today[0]), float(start[0]), places=6)  # the project's 26 Sep, not the app's 25th
+        title, gantt = self.out["timelineToday"]
+        self.assertEqual(title, "September 2026")
+        # The today pill and the marked column are the project's 26 Sep, not the app's 25th.
+        self.assertEqual(re.findall(r'<span class="gx-day[^"]*today" aria-current="date"><b class="gx-today-pill">(\d+)</b>', gantt), ["26"])   # a Saturday
+        cols = re.findall(r'<i class="gx-col([^"]*)"></i>', gantt)
+        self.assertEqual([i + 1 for i, c in enumerate(cols) if "today" in c.split()], [26])
         self.assertIn('mountGantt(document.querySelector("#gantt-panel"),null);state.ganttDay=null;', (STATIC / "app.js").read_text(encoding="utf-8"))
 
     def test_an_unknown_project_tab_is_rewritten_to_overview(self):
@@ -3847,11 +3857,59 @@ class AstraGanttDragDriverTests(unittest.TestCase):
     def test_only_open_dated_bars_of_a_managed_project_are_draggable(self):
         self.assertEqual(self.out["canDrag"].count('data-drag="g1"'), 1)
         self.assertEqual(self.out["canDrag"].count("data-drag="), 1)  # not the closed or the undated task
-        self.assertIn('<i class="bar-grip start" data-edge="start" aria-hidden="true"></i>', self.out["canDrag"])
+        self.assertIn('<i class="gx-grip start" data-edge="start" aria-hidden="true"></i>', self.out["canDrag"])
+        self.assertIn('<i class="gx-grip end" data-edge="end" aria-hidden="true"></i>', self.out["canDrag"])
         self.assertNotIn("data-drag", self.out["cannotDrag"])
-        self.assertNotIn("bar-grip", self.out["cannotDrag"])
+        self.assertNotIn("gx-grip", self.out["cannotDrag"])
+        self.assertIn('data-bar="g1"', self.out["cannotDrag"])   # the bar is still drawn for someone who may not move it
         self.assertNotIn("style=", self.out["canDrag"])
-        self.assertGreater(int(self.out["span"]), 0)
+        self.assertEqual(int(self.out["day"]), 48)
+        self.assertRegex(self.out["canDrag"], r'data-bar="g1" data-drag="g1" data-l="192" data-w="192"')
+
+    def test_a_drag_starts_after_5px_and_snaps_to_whole_days(self):
+        d = self.out["drag"]
+        self.assertEqual(d["small"], [False, False, "192px"])            # 3px: a click, not a drag
+        self.assertEqual(d["otherPointer"], [False, False])              # another pointer never moves the bar
+        self.assertTrue(d["prevented"])
+        self.assertEqual(d["oneDay"], ["240px", "192px", "Oct 6 – 9", "4d", "Start Oct 6 · Due Oct 9 (+1 day)", True])     # 70px at 48px a day
+        self.assertEqual(d["twoDays"], ["288px", "192px", "Oct 7 – 10", "4d", "Start Oct 7 · Due Oct 10 (+2 days)", True])
+        self.assertEqual(d["body"], ["bar-dragging"])
+
+    def test_dropping_a_bar_posts_the_new_dates_under_a_drag_lease_and_lets_the_server_redraw(self):
+        d = self.out["drag"]
+        self.assertTrue(d["otherPointerUp"])                              # another pointer lifting does not drop the bar
+        self.assertEqual(d["dropPosts"], [["/lock", {"kind": "drag"}],
+                                          ["/reschedule", {"start_date": "2026-10-07", "due_date": "2026-10-10", "expected_revision": 3}],
+                                          ["/lock/release", {"token": "tokM"}]])
+        # The preview is undone; the chart is redrawn from what the server stored.
+        self.assertEqual(d["afterDrop"], ["192px", "192px", None, [], True, False])
+        self.assertIn("Moved “Move <me>”: Start Oct 7 · Due Oct 10 (+2 days).", d["dropLive"])
+
+    def test_the_end_grip_changes_the_due_date_and_never_passes_the_start(self):
+        d = self.out["drag"]
+        self.assertEqual(d["endMinusOne"], ["192px", "144px", "Oct 5 – 7", "3d", "Due Oct 7 (-1 day)", True])
+        self.assertEqual(d["endClamp"], ["192px", "48px", "Oct 5", "1d", "Due Oct 5 (-3 days)", True])   # one day is the least
+        self.assertEqual(d["endPosts"], [["/reschedule", {"start_date": "2026-10-05", "due_date": "2026-10-05", "expected_revision": 3}]])
+
+    def test_the_start_grip_changes_the_start_date_and_never_passes_the_due_date(self):
+        d = self.out["drag"]
+        self.assertEqual(d["startPlusTwo"], ["288px", "96px", "Oct 7 – 8", "2d", "Start Oct 7 (+2 days)", True])
+        self.assertEqual(d["startClamp"], ["336px", "48px", "Oct 8", "1d", "Start Oct 8 (+3 days)", True])
+        self.assertEqual(d["startPosts"], [["/reschedule", {"start_date": "2026-10-08", "due_date": "2026-10-08", "expected_revision": 3}]])
+
+    def test_a_bar_cut_at_the_month_edge_is_placed_from_the_dates_it_would_get(self):
+        d = self.out["drag"]
+        # Sep 28 - Oct 3 moved a day later: Sep 29 - Oct 4, drawn Oct 1 to 4 (the old code slid it right instead).
+        self.assertEqual(d["cutMove"], ["0px", "192px", "Sep 29 – Oct 4", "6d"])
+        self.assertEqual(d["cutEnd"], ["0px", "48px", "Sep 28 – Oct 1"])
+        # Pulled back into September, the due date stops at the start (Sep 28) and the bar keeps one day at the edge.
+        self.assertEqual(d["cutEndOut"], ["0px", "48px", "Sep 28"])
+
+    def test_a_drag_that_ends_where_it_began_or_a_plain_click_changes_nothing(self):
+        d = self.out["drag"]
+        self.assertEqual(d["noChange"], [True, "192px"])                  # 10px: a drag, but less than half a day
+        self.assertEqual(d["noChangePosts"], ["/lock", "/lock/release"])
+        self.assertEqual(d["clickPosts"], [])
 
     def test_moving_and_resizing_shift_the_right_dates_and_never_invert_them(self):
         d = self.out["dates"]
@@ -3890,7 +3948,11 @@ class AstraGanttDragDriverTests(unittest.TestCase):
         self.assertEqual(self.out["refusedLease"], [False, "Sara <K>"])
 
     def test_review_12d_escape_puts_the_bar_back_and_an_idle_form_lets_go(self):
-        self.assertEqual(self.out["escape"], [None, False, "10%", "4%", 0])
+        self.assertEqual(self.out["drag"]["beforeEscape"][:4], ["288px", "192px", "Oct 7 – 10", "4d"])
+        self.assertTrue(self.out["drag"]["escapePrevented"])
+        self.assertEqual(self.out["escape"], [None, False, "192px", "192px", 0])
+        self.assertEqual(self.out["drag"]["afterEscape"], ["Oct 5 – 8", "4d", False, []])
+        self.assertEqual(self.out["drag"]["moveAfterEscape"], "192px")    # the pointer no longer holds the bar
         self.assertEqual(self.out["idle"], [False, [["/api/tasks/g9/lock/release", {"token": "tokI"}]]])
 
     def test_review_12b_leases_tip_lock_time_touch_and_escaping(self):
@@ -3902,7 +3964,7 @@ class AstraGanttDragDriverTests(unittest.TestCase):
         message, local = self.out["lockMessage"]
         self.assertIn(f"runs out at {local} unless", message)
         self.assertNotIn("UTC", message)
-        self.assertEqual(self.out["startDrag"], {"mouse": True, "touch": False, "phone": False})
+        self.assertEqual(self.out["startDrag"], {"mouse": True, "touch": False, "rightButton": False, "phone": False})
         self.assertIn("&lt;img src=x onerror=&quot;globalThis.__xss=3&quot;&gt;", self.out["impactDialog"])
         self.assertNotIn("<img", self.out["impactDialog"])
 
@@ -4130,11 +4192,9 @@ class AstraMyWorkInboxTests(unittest.TestCase):
         # 3C1Z74: the browser says 24 Sep (Pago Pago); the server's today is 25 Sep, the project's start.
         self.assertNotIn("ganttError", self.out)
         gantt = self.out["gantt"]
-        today = re.findall(r'class="today-line" data-x="([^"]+)"', gantt)
-        start = re.findall(r'class="proj-line start" data-x="([^"]+)"', gantt)
-        self.assertEqual(len(today), 1)
-        self.assertTrue(start)
-        self.assertAlmostEqual(float(today[0]), float(start[0]), places=6)
+        self.assertEqual(re.findall(r'<span class="gx-day today" aria-current="date"><b class="gx-today-pill">(\d+)</b>', gantt), ["25"])
+        cols = re.findall(r'<i class="gx-col([^"]*)"></i>', gantt)
+        self.assertEqual([i + 1 for i, c in enumerate(cols) if "today" in c.split()], [25])
         self.assertIn("25", self.out["asOf"])
         self.assertIn("2026", self.out["asOf"])
         self.assertTrue(self.out["asOf"].startswith("Due dates as of "))

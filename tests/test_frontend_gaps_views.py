@@ -119,39 +119,49 @@ GANTT_PROBE = r'''
 globalThis.runProbe=async function(input,H){
   const out={};
   state.user={id:"u1",display_name:"Pat",global_role:"member"};
-  state.projects=[{id:"proj",name:"P",status:"active",can_manage:false}];
+  state.projects=[{id:"proj",name:"Plan P",status:"active",can_manage:false}];
   state.today="2026-06-01";
-  const T=o=>({project_id:"proj",project_name:"P",owner_name:"Sara",status:"in_progress",due_state:"scheduled",days_to_due:5,
-    criticality:"high",is_blocked:false,is_critical_path:false,...o});
-  // The timeline runs Jan 1 to Dec 31 (371 days with padding) at about 710px, so one day is about 1.9px.
+  const T=o=>({project_id:"proj",project_name:"Plan P",owner_name:"Sara",status:"in_progress",due_state:"scheduled",days_to_due:5,
+    criticality:"high",is_blocked:false,is_critical_path:false,predecessors:[],...o});
   const tasks=[
-    T({id:"p1",title:"Parent one",start_date:"2026-01-01",due_date:"2026-12-31"}),
-    T({id:"s1",parent_task_id:"p1",title:"One day step",start_date:"2026-02-01",due_date:"2026-02-01"}),
-    T({id:"s2",parent_task_id:"p1",title:"Four day step",start_date:"2026-03-01",due_date:"2026-03-04"}),
-    T({id:"s3",parent_task_id:"p1",title:"Five day step",start_date:"2026-04-01",due_date:"2026-04-05"}),
-    T({id:"p2",title:"Parent two",start_date:"2026-01-01",due_date:"2026-12-31"}),
-    T({id:"s4",parent_task_id:"p2",title:"Month step",start_date:"2026-05-01",due_date:"2026-05-30"}),
+    T({id:"p1",title:"Parent one",start_date:"2026-06-01",due_date:"2026-06-12",timeline_order:1}),
+    T({id:"s1",parent_task_id:"p1",title:"Step one",start_date:"2026-06-01",due_date:"2026-06-03",status:"completed"}),
+    T({id:"s2",parent_task_id:"p1",title:"Step two",start_date:"2026-06-04",due_date:"2026-06-12",progress:50}),
+    T({id:"p2",title:"Parent two",start_date:"2026-06-15",due_date:"2026-06-19",timeline_order:2}),
+    T({id:"s4",parent_task_id:"p2",title:"Step four",start_date:"2026-06-15",due_date:"2026-06-19"}),
+    T({id:"solo",title:"Solo task",start_date:"2026-06-22",due_date:"2026-06-23",timeline_order:3}),
   ];
   state.tasks=tasks;
   const gantt=document.querySelector("#gantt"),table=document.querySelector("#schedule-table");
-  const stepsHidden=id=>{const n=document.getElementById("steps-"+id);return n?n.hidden:null};
-  const click=async id=>{
-    const btn=document.querySelector(`[data-expand="${id}"]`);
-    for(const f of gantt._l.click||[])await f({target:{closest:s=>s==="[data-expand]"?btn:null}});
-    return btn;
-  };
+  refreshGantt=()=>renderGantt(tasks);
+  const opened=[];openDetail=id=>{opened.push(id)};
+  const snap=()=>({
+    rows:[...gantt.innerHTML.matchAll(/data-timeline-task="([^"]+)"/g)].map(m=>m[1]),
+    open:Object.fromEntries([...gantt.innerHTML.matchAll(/data-phase="([^"]+)" aria-expanded="(\w+)"/g)].map(m=>[m[1],m[2]])),
+    labels:[...gantt.innerHTML.matchAll(/<span class="sr-only">(\w+) phase<\/span>/g)].map(m=>m[1]),
+    sums:(gantt.innerHTML.match(/class="gx-sum"/g)||[]).length,
+    stats:[...gantt.innerHTML.matchAll(/<span class="gx-stat">([^<]*)</g)].map(m=>m[1]),
+    html:gantt.innerHTML});
+  // A click anywhere on a phase's pane row folds or unfolds it; a click on its open button opens the task instead.
+  const click=(key,detail)=>{for(const f of gantt._l.click||[])f({target:{closest:s=>s==="[data-detail]"?(detail?{dataset:{detail}}:null):s===".gx-pane [data-phase-row]"?{dataset:{phaseRow:key}}:null}})};
   renderGantt(tasks);
   out.view={ganttHidden:gantt.hidden,tableHidden:table.hidden,ganttHtml:gantt.innerHTML,tableHtml:table.innerHTML};
-  out.initial={p1:stepsHidden("p1"),p2:stepsHidden("p2"),html:gantt.innerHTML};
+  out.initial=snap();
   if(input.click){
     out.steps=[];
-    for(const id of input.click){
-      const btn=await click(id);
-      out.steps.push({id,writes:H.lsWrites.slice(),hidden:{p1:stepsHidden("p1"),p2:stepsHidden("p2")},
-        expanded:btn.getAttribute("aria-expanded"),label:btn.getAttribute("aria-label")});
+    for(const key of input.click){
+      click(key);await new Promise(r=>setTimeout(r,50));
+      out.steps.push({key,writes:H.lsWrites.slice(),said:H.store["#gantt-live"].textContent,...snap()});
     }
     renderGantt(tasks);
-    out.rerender={p1:stepsHidden("p1"),p2:stepsHidden("p2"),html:gantt.innerHTML};
+    out.rerender=snap();
+    const before=H.lsWrites.length;
+    click("t:p2","p2");
+    out.openButton={opened:opened.slice(),writes:H.lsWrites.length-before,rows:snap().rows};
+    // A click on a bar (or anywhere else in the grid) is neither of those: as in the block, it does nothing.
+    opened.length=0;const before2=H.lsWrites.length;
+    for(const f of gantt._l.click||[])f({target:{closest:s=>s==="[data-bar]"?{dataset:{bar:"s2"}}:null}});
+    out.barClick={opened:opened.slice(),writes:H.lsWrites.length-before2,rows:snap().rows};
   }
   return out;
 };
@@ -305,7 +315,6 @@ globalThis.runProbe=async function(input,H){
 
 
 # These tests read steps at the fit-to-window scale (about 1.9 px a day); the zoomed scales are tested in test_gantt_zoom.py.
-FIT_ZOOM = {'astra.gantt.zoom': '"fit"'}
 
 
 def run_probe(probe, payload=None, static=None):
@@ -369,80 +378,97 @@ def rows(fragment):
     return [r for r in fragment.split('<li>')[1:]]
 
 
-def parent_row(html, task_id):
-    """The Gantt row of one parent task: its name, meta and timeline columns, without its step rows."""
-    timeline = html.index('data-timeline-task="' + task_id + '"')
-    head = html.rfind('<div class="gantt-row', 0, timeline)   # the name and meta columns come first
-    end = html.index('<div class="step-rows" id="steps-' + task_id + '"', timeline)
-    return html[head:end]
+def collapsed_writes(step):
+    """What one step of the collapse probe saved under the Gantt's key, oldest first."""
+    return [json.loads(v) for k, v in step['writes'] if k == 'astra.gantt.collapsed']
 
 
 @unittest.skipUnless(shutil.which('node'), 'Node required for actual frontend driver')
 class GanttExpandAndOverflowTests(unittest.TestCase):
-    """D73AQW: remembered expand state, the +N overflow chip and the phone default."""
+    """D73AQW, on the 2026-11 chart: phases fold and remember it; the phone default is the Schedule table."""
+
+    ALL = ['p1', 's1', 's2', 'p2', 's4', 'solo']
 
     @classmethod
     def setUpClass(cls):
-        cls.first = run_probe(GANTT_PROBE, {'click': ['p1', 'p2', 'p1'], 'storage': FIT_ZOOM})
+        cls.first = run_probe(GANTT_PROBE, {'click': ['t:p1', 't:p2', 't:p1']})
         writes = cls.first['steps'][-1]['writes']
         # A reload: a new page load that starts from what the first run saved.
-        cls.reload = run_probe(GANTT_PROBE, {'storage': {**FIT_ZOOM, **dict(writes[-1:])}})
-        cls.phone = run_probe(GANTT_PROBE, {'phone': True, 'storage': FIT_ZOOM})
-        cls.phone_chart = run_probe(GANTT_PROBE, {'phone': True, 'storage': {**FIT_ZOOM, 'astra.gantt.view': '"chart"'}})
+        cls.reload = run_probe(GANTT_PROBE, {'storage': dict(writes[-1:])})
+        cls.project = run_probe(GANTT_PROBE, {'click': ['p:proj']})
+        cls.bogus = run_probe(GANTT_PROBE, {'storage': {'astra.gantt.collapsed': '"t:p1"'}})
+        cls.phone = run_probe(GANTT_PROBE, {'phone': True})
+        cls.phone_chart = run_probe(GANTT_PROBE, {'phone': True, 'storage': {'astra.gantt.view': '"chart"'}})
 
-    def test_steps_start_collapsed_when_nothing_was_remembered(self):
-        self.assertEqual((self.first['initial']['p1'], self.first['initial']['p2']), (True, True))
+    def test_every_phase_starts_open_when_nothing_was_remembered(self):
+        initial = self.first['initial']
+        self.assertEqual(initial['open'], {'p:proj': 'true', 't:p1': 'true', 't:p2': 'true'})
+        self.assertEqual(initial['rows'], self.ALL)
+        self.assertEqual(initial['labels'], ['Collapse', 'Collapse', 'Collapse'])
 
-    def test_toggling_a_parent_saves_the_set_of_open_parents_under_the_gantt_key(self):
-        writes = [[json.loads(v) for k, v in s['writes'] if k == 'astra.gantt.expanded'] for s in self.first['steps']]
-        self.assertEqual([w[-1] for w in writes], [['p1'], ['p1', 'p2'], ['p2']])
+    def test_toggling_a_phase_saves_the_set_of_folded_phases_under_the_gantt_key(self):
+        self.assertEqual([collapsed_writes(s)[-1] for s in self.first['steps']], [['t:p1'], ['t:p1', 't:p2'], ['t:p2']])
 
-    def test_each_parent_opens_and_closes_on_its_own(self):
-        hidden = [(s['hidden']['p1'], s['hidden']['p2']) for s in self.first['steps']]
-        self.assertEqual(hidden, [(False, True), (False, False), (True, False)])
-        self.assertEqual([s['expanded'] for s in self.first['steps']], ['true', 'true', 'false'])
-        self.assertIn('Hide', self.first['steps'][0]['label'])
-        self.assertIn('Show', self.first['steps'][2]['label'])
+    def test_each_phase_folds_and_unfolds_on_its_own(self):
+        rows = [s['rows'] for s in self.first['steps']]
+        self.assertEqual(rows, [['p1', 'p2', 's4', 'solo'], ['p1', 'p2', 'solo'], ['p1', 's1', 's2', 'p2', 'solo']])
+        self.assertEqual([(s['open']['t:p1'], s['open']['t:p2']) for s in self.first['steps']],
+                         [('false', 'true'), ('false', 'false'), ('true', 'false')])
+        self.assertEqual(self.first['steps'][0]['labels'], ['Collapse', 'Expand', 'Collapse'])
 
-    def test_a_redraw_keeps_each_parent_as_the_user_left_it(self):
+    def test_a_folded_phase_keeps_its_own_row_its_totals_and_its_summary_bar(self):
+        folded = self.first['steps'][1]
+        self.assertEqual(folded['stats'], self.first['initial']['stats'])
+        self.assertEqual(folded['stats'], ['1/4', '1/2', '0/1'])
+        self.assertEqual(folded['sums'], 3)
+
+    def test_folding_is_announced_with_the_name_of_the_phase(self):
+        self.assertEqual([s['said'] for s in self.first['steps']],
+                         ['Parent one collapsed.', 'Parent two collapsed.', 'Parent one expanded.'])
+        self.assertEqual(self.project['steps'][0]['said'], 'Plan P collapsed.')
+
+    def test_a_redraw_keeps_each_phase_as_the_user_left_it(self):
         redraw = self.first['rerender']
-        self.assertEqual((redraw['p1'], redraw['p2']), (True, False))
-        self.assertIn('data-expand="p2" aria-expanded="true"', redraw['html'])
-        self.assertIn('data-expand="p1" aria-expanded="false"', redraw['html'])
+        self.assertEqual(redraw['rows'], ['p1', 's1', 's2', 'p2', 'solo'])
+        self.assertIn('data-phase="t:p2" aria-expanded="false"', redraw['html'])
+        self.assertIn('data-phase="t:p1" aria-expanded="true"', redraw['html'])
 
-    def test_a_reload_restores_the_saved_parents_from_local_storage(self):
+    def test_a_reload_restores_the_folded_phases_from_local_storage(self):
         initial = self.reload['initial']
-        self.assertEqual((initial['p1'], initial['p2']), (True, False))
-        self.assertIn('data-expand="p2" aria-expanded="true"', initial['html'])
+        self.assertEqual(initial['rows'], ['p1', 's1', 's2', 'p2', 'solo'])
+        self.assertEqual(initial['open'], {'p:proj': 'true', 't:p1': 'true', 't:p2': 'false'})
 
-    def test_a_step_narrower_than_8px_folds_into_the_plus_n_chip(self):
-        html = self.first['initial']['html']
-        row = parent_row(html, 'p1')
-        self.assertIn('data-more="p1"', row)
-        self.assertRegex(row, r'data-more="p1"[^>]*>\+2</button>')  # the 1 day (1.9px) and 4 day (7.6px) steps
-        drawn = {a['data-detail'] for a in _Tags(row).find('button') if 'step' in (a.get('class') or '').split()}
-        self.assertEqual(drawn, {'s3'})  # the 5 day step (9.6px) is still drawn
-        more_list = html.split('id="more-p1"', 1)[1].split('</ul>', 1)[0]
-        self.assertIn('One day step', more_list)
-        self.assertIn('Four day step', more_list)
-        self.assertNotIn('Five day step', more_list)
+    def test_folding_the_project_hides_everything_under_it(self):
+        step = self.project['steps'][0]
+        self.assertEqual(step['rows'], [])
+        self.assertEqual(step['open'], {'p:proj': 'false'})
+        self.assertEqual(collapsed_writes(step)[-1], ['p:proj'])
+        self.assertEqual((step['stats'], step['sums']), (['1/4'], 1))
 
-    def test_a_parent_whose_steps_are_all_wide_enough_has_no_chip(self):
-        row = parent_row(self.first['initial']['html'], 'p2')
-        self.assertNotIn('data-more=', row)
-        drawn = {a['data-detail'] for a in _Tags(row).find('button') if 'step' in (a.get('class') or '').split()}
-        self.assertEqual(drawn, {'s4'})
+    def test_the_open_button_of_a_phase_opens_the_task_and_does_not_fold_it(self):
+        clicked = self.first['openButton']
+        self.assertEqual(clicked['opened'], ['p2'])
+        self.assertEqual(clicked['writes'], 0)
+        self.assertEqual(clicked['rows'], self.first['rerender']['rows'])
+
+    def test_a_click_on_a_bar_opens_nothing_and_folds_nothing(self):
+        clicked = self.first['barClick']
+        self.assertEqual((clicked['opened'], clicked['writes']), ([], 0))
+        self.assertEqual(clicked['rows'], self.first['rerender']['rows'])
+
+    def test_a_saved_value_that_is_not_a_list_is_ignored(self):
+        self.assertEqual(self.bogus['initial']['rows'], self.ALL)
 
     def test_phone_width_opens_on_the_schedule_table_instead_of_the_chart(self):
         view = self.phone['view']
         self.assertTrue(view['ganttHidden'])
         self.assertFalse(view['tableHidden'])
         self.assertIn('class="sched-table"', view['tableHtml'])
-        self.assertNotIn('gantt-row', view['ganttHtml'])
+        self.assertNotIn('gx-row', view['ganttHtml'])
         desk = self.first['view']
         self.assertFalse(desk['ganttHidden'])
         self.assertTrue(desk['tableHidden'])
-        self.assertIn('gantt-row', desk['ganttHtml'])
+        self.assertIn('gx-row', desk['ganttHtml'])
 
     def test_a_saved_chart_choice_beats_the_phone_default(self):
         view = self.phone_chart['view']

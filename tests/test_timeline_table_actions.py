@@ -87,9 +87,9 @@ state.projects[0].can_manage=false;handlers.table.click(click);assert.equal(show
     def test_filtered_table_preserves_drawn_siblings_and_hidden_slots(self):
         source = self.source()
         renderer = source[source.index('function renderScheduleTable('):source.index('// Shared tooltip')]
-        group = source[source.index('function groupSteps('):source.index('function dateExtent(')]
-        order = source[source.index('function timelineOrder('):source.index('let timelineTaskDrag=')]
-        snapshot = source[source.index('function timelineTaskOrder('):source.index('function clearTaskDrop(')]
+        group = source[source.index('function groupSteps('):source.index('// GF-6: a re-render')]
+        order = source[source.index('function timelineOrder('):source.index('function timelineTaskOrder(')]
+        snapshot = source[source.index('function timelineTaskOrder('):source.index('async function reviewTaskDrop(')]
         step = re.search(r'^function stepOrder\([^\n]+', source, re.M).group(0)
         script = self.fixture() + '''
 const other={...parent,id:'other',title:'Other'};

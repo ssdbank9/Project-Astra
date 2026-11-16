@@ -122,23 +122,36 @@
             </div>
           </div>
         <div id="gantt-host">
-        <div class="view-controls">
-          <div class="legend"><span class="key"><i class="overdue"></i>Overdue</span> <span class="key"><i class="soon"></i>Due in 7 days</span> <span class="key"><i class="scheduled"></i>Scheduled</span> <span class="key"><i class="blocked"></i>Blocked</span> <span class="key"><i class="undated"></i>Undated</span> <span class="key"><i class="critical"></i>Critical path</span> <span class="key"><i class="proj-start-key"></i>Project start</span> <span class="key"><i class="proj-target-key"></i>Project target</span></div>
-          <label class="inline view-toggle"><input type="checkbox" id="view-table"> Schedule table</label>
-          <label class="inline dep-toggle"><input type="checkbox" id="gantt-deps" checked> Dependencies</label>
-          <div class="zoom-group" id="gantt-zoom" role="group" aria-label="Timeline zoom">
-            <button type="button" class="zoom-btn" data-zoom="fit" aria-pressed="true">Fit</button>
-            <button type="button" class="zoom-btn" data-zoom="week" aria-pressed="false">Weeks</button>
-            <button type="button" class="zoom-btn" data-zoom="month" aria-pressed="false">Months</button>
-            <button type="button" class="zoom-btn" data-zoom="quarter" aria-pressed="false">Quarters</button>
-            <button type="button" class="zoom-btn today-btn" id="gantt-today">Today</button>
-          </div>
-          <label>Plan<select id="gantt-plan"><option value="">All plans</option></select></label>
-        </div>
         <div id="bands" class="bands"></div>
-        <div id="gantt"></div>
-        <div id="schedule-table" hidden></div>
-        <div class="legend step-legend" id="step-legend" hidden><span class="legend-cap">Steps inside a task bar (colour = step number):</span> <i class="sw step-c1" aria-hidden="true">1</i>Step 1 <i class="sw step-c2" aria-hidden="true">2</i>Step 2 <i class="sw step-c3" aria-hidden="true">3</i>Step 3 <i class="sw step-c4" aria-hidden="true">4</i>Step 4 <i class="sw step-c5" aria-hidden="true">5</i>Step 5 <i class="sw step-c6" aria-hidden="true">6</i>Step 6 <i class="sw step-c7" aria-hidden="true">7</i>Step 7 <span class="legend-cap">· 8+ repeats the colours with a doubled stripe · ✓ completed · × cancelled · ∥ on hold (hatched) · +N not drawn at this scale (too small or overlapping) · dashed track end = step runs past the parent's dates · dashed chip = steps need dates</span></div>
+        <div class="gx-card">
+          <div class="gx-toolbar">
+            <div class="gx-tools">
+              <h3 class="gx-title" id="gantt-title"></h3>
+              <div class="gx-group" id="gantt-nav" role="group" aria-label="Move the timeline">
+                <button type="button" class="gx-btn gx-icon-btn" id="gantt-prev" aria-label="Previous period"><svg class="gx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+                <button type="button" class="gx-btn gx-icon-btn" id="gantt-next" aria-label="Next period"><svg class="gx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+              </div>
+              <button type="button" class="gx-btn" id="gantt-today">Today</button>
+              <select class="gx-select" id="gantt-period" aria-label="Timeline view"><option value="week">Week</option><option value="month" selected>Month</option></select>
+            </div>
+            <div class="gx-tools gx-tools-end">
+              <label class="inline view-toggle"><input type="checkbox" id="view-table"> Schedule table</label>
+              <label class="gx-plan">Plan<select class="gx-select" id="gantt-plan"><option value="">All plans</option></select></label>
+              <label class="gx-switch"><input type="checkbox" role="switch" id="gantt-deps" checked><span class="gx-switch-track" aria-hidden="true"></span>Dependencies</label>
+              <div class="gx-pop-wrap">
+                <button type="button" class="gx-btn" id="gantt-filter-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="gantt-filter"><svg class="gx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z"/></svg>Filter</button>
+                <div class="gx-pop" id="gantt-filter" role="dialog" aria-label="Filter steps" hidden></div>
+              </div>
+              <button type="button" class="gx-btn gx-primary" id="gantt-new-step" hidden><svg class="gx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>New Step</button>
+            </div>
+          </div>
+          <div id="gantt"></div>
+          <div id="schedule-table" hidden></div>
+          <div class="gx-zoom" id="gantt-zoom" role="group" aria-label="Timeline zoom">
+            <button type="button" class="gx-btn gx-icon-btn" data-zoom="in" aria-label="Zoom in"><svg class="gx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
+            <button type="button" class="gx-btn gx-icon-btn" data-zoom="out" aria-label="Zoom out"><svg class="gx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+          </div>
+        </div>
           <div id="gantt-live" class="sr-only" aria-live="polite"></div>
         </div>
         </section>
@@ -207,7 +220,25 @@
   <div id="board-live" class="sr-only" aria-live="polite"></div>
   <div id="drag-tip" class="drag-tip" aria-hidden="true" hidden></div>
   <div id="bulk-bar" class="bulk-bar" role="region" aria-label="Bulk change" hidden></div>
-  <div id="step-tip" role="tooltip" hidden></div>
+  <dialog id="step-sheet" class="gx-sheet" aria-labelledby="step-sheet-title" aria-describedby="step-sheet-desc"><form method="dialog" id="step-form">
+    <div class="gx-sheet-head"><h2 id="step-sheet-title">New Step</h2><p id="step-sheet-desc">Add a step to the pipeline.</p></div>
+    <div class="gx-sheet-body">
+      <label>Name<input name="title" required></label>
+      <label>Phase<select name="phase" required></select></label>
+      <div class="gx-sheet-grid">
+        <label>Type<select name="type"><option value="task">Task</option><option value="milestone">Milestone</option></select></label>
+        <label>Owner<select name="owner_user_id"><option value="">Unassigned</option></select></label>
+        <label>Status<select name="status"><option value="draft">Draft</option><option value="assigned">Assigned</option><option value="in_progress">In progress</option><option value="delayed">Delayed</option></select></label>
+        <label>Progress (%)<input name="progress" type="number" min="0" max="100" step="1" value="0"></label>
+        <label><span data-start-label>Start</span><input name="start_date" type="date"></label>
+        <label data-end-field>End<input name="due_date" type="date"></label>
+      </div>
+      <fieldset class="gx-deps-field"><legend>Depends on</legend><div class="gx-dep-list" id="step-deps"></div></fieldset>
+      <label>Note<textarea name="description" rows="3" placeholder="What this step covers."></textarea></label>
+      <div class="error" role="alert"></div>
+    </div>
+    <div class="gx-sheet-foot"><button type="button" class="quiet" id="step-discard">Discard</button><button value="default">Create</button></div>
+  </form></dialog>
   <dialog id="password-change-dialog" aria-labelledby="password-change-title">
     <form id="password-change-form" method="dialog">
       <h2 id="password-change-title">Change my password</h2>
