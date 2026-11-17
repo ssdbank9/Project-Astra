@@ -251,6 +251,16 @@ Slice 4, file storage:
 11. Recording the bucket in each file's row: yes, built just before the first
     real use of a bucket, not now.
 
+### 2026-11-17 — question 4 change accepted (chat with Claude)
+
+- Aly told Claude to build the question 4 change ("Yes, build it"). It was
+  pushed in `7bf2f1a`: a download through a direct link shows no person in
+  the task history; the row is still stored under the owner who created the
+  link. Asked "Do you accept the question 4 change?", Aly answered "Accept".
+- Not covered by the acceptance, because Aly was not asked: a creator who is
+  no longer a manager still sees the link's history rows on a task they can
+  open (those rows now name nobody). It is recorded in the README, step 3.6.
+
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
 These are choices Claude made and reported; Aly has not overruled them. They

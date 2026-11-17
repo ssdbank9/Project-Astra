@@ -7,7 +7,7 @@ below that mentions tickets, lanes or board counts is to be acted on through
 jaira any more; `.jaira/` is read-only history. From now on this file carries
 status and open work, updated in the same commit as the work.
 
-Status at `ecd23a9` (plus this commit):
+Status at `7bf2f1a` (plus this commit):
 
 - MXY7BG hosted attachments: slice 1 (`18c4e54`) and slice 2 (`8fdd9d5`) are
   pushed and reviewed. Slice 3 (App Owner-only audited permanent direct
@@ -22,10 +22,10 @@ Status at `ecd23a9` (plus this commit):
   Claude's recommendations, which Aly took. Uploads stay in the server
   folder for now. The one change the answers ask for now, a download
   through a direct link showing no person in the task history, is built in
-  this commit (step 3.6) and waits for Aly's acceptance. Open work: each
-  file's row is to record its bucket before the first real use of a bucket.
-  Nits left: two owners saving the attachment
-  settings at once overwrite each other (both audited);
+  `7bf2f1a` (step 3.6) and was accepted by Aly on 2026-11-17 ("Accept").
+  Open work: each file's row is to record its bucket before the first real
+  use of a bucket. Nits left: two owners saving the attachment settings at
+  once overwrite each other (both audited);
   `attachment_settings` and `attachment_links` are not in the backup
   required-table list.
 - Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
@@ -284,7 +284,8 @@ Status: accepted by Aly on 2026-11-16 ("Accept both"). Built, tested, reviewed
 and pushed in `5220018` (on the branch since the merge `575f2fa`; full suite
 there: 1299 tests, OK, 2 skipped on Windows). Nothing is deployed. Aly
 answered the questions below on 2026-11-17; the one change they ask for
-(question 4) is built in step 3.6 and waits for Aly's acceptance.
+(question 4) is built in step 3.6 (`7bf2f1a`) and was accepted by Aly on
+2026-11-17.
 
 - [x] 3.1 Schema v25 `attachment_links`: one active link per uploaded file,
   the token stored only as a SHA-256 hash, who created and who revoked it,
@@ -300,7 +301,9 @@ answered the questions below on 2026-11-17; the one change they ask for
 - [x] 3.5 Tests at service, HTTP and UI level, every guard removed fails a
   test, independent review, browser check, full suite.
 - [x] 3.6 Question 4 (Aly, 2026-11-17, "Show no person"): a download through
-  a direct link shows no person in the task history. The row is still stored
+  a direct link shows no person in the task history. Pushed in `7bf2f1a`
+  (full suite: 1381 tests, OK, 2 skipped on Windows); accepted by Aly on
+  2026-11-17 ("Accept"). The row is still stored
   under the owner who created the link, because a history row needs a
   person, and the task history API and the page leave the person out. The
   creator stays named on the "Direct link created" row and, while the link
@@ -381,7 +384,8 @@ Questions for Aly, answered on 2026-11-17 (today's behaviour is stated first):
    link, because nobody is signed in. Is that the right name to show?
    Answer: show no person. The row is to say only that the file was
    downloaded through a direct link, with the creator named in the link's
-   own details. Built in step 3.6; it waits for Aly's acceptance.
+   own details. Built in step 3.6 (`7bf2f1a`); accepted by Aly on
+   2026-11-17.
 5. Restoring an older backup brings back a link that was revoked after that
    backup. Accept this, or add "revoke every link" to the restore steps?
    Answer: accept as is.
