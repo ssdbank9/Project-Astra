@@ -133,7 +133,7 @@ function projectSchedule(p,selected=""){
 // coloured bars that move and resize by whole days, milestones, phase summaries and finish-to-start
 // arrows. Positions travel as data-l / data-w pixels and are applied through the CSSOM (gxPlace),
 // because the CSP drops inline style attributes. docs/handoff/README.md maps every feature to its code.
-const GX_DAY=86400000,GX_ROW=48,GX_WIDTHS=[32,48,64,88,120],GX_PANE={sm:192,md:288,lg:560};
+const GX_DAY=86400000,GX_ROW=48,GX_WIDTHS=[32,40,48,64,88,120],GX_PANE={sm:192,md:288,lg:560};
 const MONTH_SHORT=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const MONTH_LONG=["January","February","March","April","May","June","July","August","September","October","November","December"];
 const DOW_SHORT=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -156,7 +156,8 @@ function gxIcon(name,cls=""){return `<svg class="gx-icon${cls?" "+cls:""}" viewB
 const gx={anchor:null,scope:null,hiddenStatus:new Set(),hiddenOwner:new Set(),hover:null,focus:null,geo:new Map(),edges:[],popOpen:false};
 const gxIso=ms=>new Date(ms).toISOString().slice(0,10);
 function gxMode(){return storage.get("astra.gantt.period","month")==="week"?"week":"month"}
-function gxZoom(){const i=storage.get("astra.gantt.dayw",1);return Number.isInteger(i)&&i>=0&&i<GX_WIDTHS.length?i:1}
+// The day width is kept as pixels, so a change to the list of steps never reads an old index.
+function gxZoom(){const w=storage.get("astra.gantt.daywidth",48),i=GX_WIDTHS.indexOf(w);return i<0?GX_WIDTHS.indexOf(48):i}
 function gxCollapsed(){const v=storage.get("astra.gantt.collapsed",[]);return new Set(Array.isArray(v)?v:[])}
 // The shown period: a calendar month, or a Monday to Sunday week. All dates are UTC days.
 function gxPeriod(anchor,mode){
@@ -283,11 +284,11 @@ function gxRender(el,groups,period){
     let bar="";
     if(c&&t.is_milestone){
       const l=c.l+(dw-28)/2;gx.geo.set(t.id,{l,w:28,row:i,s:span.s,e:span.e});
-      bar=`<div class="gx-ms gx-s-${st}" role="button" tabindex="0" data-bar="${id}"${drag} data-l="${l}" data-w="28" title="${label}" aria-label="${label}">${gxIcon("flag")}<span class="gx-ms-label">${escapeHtml(t.title)}</span></div>`;
+      bar=`<div class="gx-ms gx-s-${st}" role="button" tabindex="0" aria-haspopup="dialog" data-bar="${id}"${drag} data-l="${l}" data-w="28" title="${label}" aria-label="${label}">${gxIcon("flag")}<span class="gx-ms-label">${escapeHtml(t.title)}</span></div>`;
     }else if(c){
       gx.geo.set(t.id,{l:c.l,w:c.w,row:i,s:span.s,e:span.e});
       const grips=drag?`${c.cutS?"":'<i class="gx-grip start" data-edge="start" aria-hidden="true"></i>'}${c.cutE?"":'<i class="gx-grip end" data-edge="end" aria-hidden="true"></i>'}`:"";
-      bar=`<div class="gx-bar gx-s-${st}${c.cutS?" cut-start":""}${c.cutE?" cut-end":""}" role="button" tabindex="0" data-bar="${id}"${drag} data-l="${c.l}" data-w="${c.w}" title="${label}" aria-label="${label}"><i class="gx-fill" data-pc="${pct}"></i>${icon}<span class="gx-bar-name">${escapeHtml(t.title)}</span><span class="gx-bar-pct">${pct}%</span>${gxAvatar(t)}${grips}</div>`;
+      bar=`<div class="gx-bar gx-s-${st}${c.cutS?" cut-start":""}${c.cutE?" cut-end":""}" role="button" tabindex="0" aria-haspopup="dialog" data-bar="${id}"${drag} data-l="${c.l}" data-w="${c.w}" title="${label}" aria-label="${label}"><i class="gx-fill" data-pc="${pct}"></i>${icon}<span class="gx-bar-name">${escapeHtml(t.title)}</span><span class="gx-bar-pct">${pct}%</span>${gxAvatar(t)}${grips}</div>`;
     }
     time.push(`<div class="gx-row gx-step">${bar}</div>`);
   });
@@ -391,14 +392,20 @@ function gxSheetPhase(){
   const v=gxSheetField("phase").value,parent=v.startsWith("t:")?state.tasks.find(t=>t.id===v.slice(2)):null;
   return {pid:parent?parent.project_id:v.slice(2),parent};
 }
-function gxSheetSync(){
-  const {pid,parent}=gxSheetPhase(),codes=gxCodes();
-  fillAssignees(pid,gxSheetField("owner_user_id"),"",parent?"subtask":"task");
+function gxSheetSync(owner){
+  const {pid,parent}=gxSheetPhase(),codes=gxCodes(),edit=gxEditTask();
+  // Editing keeps the owner chosen (or the step's own on opening); a new step starts unassigned.
+  const pick=gxSheetField("owner_user_id"),keep=owner||(edit?[pick.value,pick.selectedOptions?.[0]?.textContent||""]:["",""]);
+  fillAssignees(pid,pick,keep[0]||"",parent?"subtask":"task",keep[1]||"");
   // A step cannot wait for the phase it sits in, or a phase above it: that bar spans the step, so the
   // link would always be a conflict. service.py refuses it too.
   const above=new Set();for(let p=parent;p&&!above.has(p.id);p=p.parent_task_id?state.tasks.find(x=>x.id===p.parent_task_id):null)above.add(p.id);
-  const list=timelineOrder(stepOrder(state.tasks.filter(t=>t.project_id===pid&&!above.has(t.id)&&!["cancelled","abandoned"].includes(t.status))));
-  document.querySelector("#step-deps").innerHTML=list.map(t=>`<label class="gx-dep-row"><input type="checkbox" name="dep" value="${escapeHtml(t.id)}"><span class="gx-dep-name">${escapeHtml(t.title)}</span><span class="gx-code">${escapeHtml(gxPhaseCode(t,codes))}</span></label>`).join("")||'<p class="gx-dep-empty">No other steps in this project yet.</p>';
+  // An edited step cannot wait for itself, a step inside it, or a step that already waits on it
+  // (directly or through others): the block leaves those out, and service.py refuses a loop.
+  const out=edit?new Set([edit.id,...gxSubtree(edit.id),...gxDownstream(edit.id)]):new Set();
+  const ticked=edit?gx.editChecked:new Set();
+  const list=timelineOrder(stepOrder(state.tasks.filter(t=>t.project_id===pid&&!above.has(t.id)&&!out.has(t.id)&&!["cancelled","abandoned"].includes(t.status))));
+  document.querySelector("#step-deps").innerHTML=list.map(t=>`<label class="gx-dep-row"><input type="checkbox" name="dep" value="${escapeHtml(t.id)}"${ticked.has(t.id)?" checked":""}><span class="gx-dep-name">${escapeHtml(t.title)}</span><span class="gx-code">${escapeHtml(gxPhaseCode(t,codes))}</span></label>`).join("")||'<p class="gx-dep-empty">No other steps in this project yet.</p>';
 }
 function gxSheetType(){
   const milestone=gxSheetField("type").value==="milestone";
@@ -410,6 +417,9 @@ function gxOpenSheet(){
   if(!projects.length){showToast("You can add steps only to an open project you manage.");return}
   const form=document.querySelector("#step-form"),codes=gxCodes();
   form.reset();form.querySelector(".error").textContent="";
+  gx.editId=null;gxSheetMode(null);
+  // As in the block, a new step starts and ends today.
+  gxSheetField("start_date").value=gxSheetField("due_date").value=appToday();
   gxSheetField("phase").innerHTML=projects.map(p=>`<option value="p:${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`
     +stepOrder(state.tasks.filter(t=>t.project_id===p.id&&codes.has(t.id)&&!CLOSED_STATUSES.includes(t.status))).map(t=>`<option value="t:${escapeHtml(t.id)}">${escapeHtml(p.name)} › ${escapeHtml(t.title)} (${escapeHtml(codes.get(t.id))})</option>`).join("")).join("");
   const want=currentRoute().name==="portfolio"?document.querySelector("#project-filter").value:"";
@@ -423,6 +433,9 @@ async function gxSubmitStep(e){
   // One request at a time: a double click on Create must not create the step twice.
   if(gx.sheetBusy)return;
   error.textContent="";
+  // Enter in the reason for cancelling answers that question: it cancels the step, it does not Save.
+  if(gx.editId&&!document.querySelector("#step-cancel-confirm").hidden)return gxCancelStep();
+  if(gx.editId)return gxSaveStep(form,dialog,error,e.submitter);
   const f=n=>gxSheetField(n).value,{pid,parent}=gxSheetPhase(),milestone=f("type")==="milestone";
   const payload={title:f("title").trim(),project_id:pid,status:f("status"),is_milestone:milestone,description:f("description"),
     predecessor_task_ids:[...form.querySelectorAll('[name="dep"]')].filter(i=>i.checked).map(i=>i.value)};
@@ -442,6 +455,153 @@ async function gxSubmitStep(e){
   try{await load()}catch(err){showToast(`“${payload.title}” was added, but the page could not reload: ${err.message}`,null,null,true);return}
   if(task&&currentRoute().name==="portfolio"&&!visibleTasks().some(t=>t.id===task.id))showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnPortfolio);
   else if(task)announce(`“${task.title}” was added.`);
+}
+// Edit Step: in the block a bar opens this sheet (a click, Enter or Space). Astra keeps the step name
+// for the full task panel and gives the sheet an "Open task" link. Every change goes through the same
+// service call the task panel uses (update, parent, dependencies), with the same confirmations, so
+// service.py decides; a step the user cannot change here, or a closed one, opens the task panel.
+const GX_NEW_STATUSES=["draft","assigned","in_progress","delayed"];
+const GX_SHEET_TEXT={null:["New Step","Add a step to the pipeline.","Create"],edit:["Edit Step","Update the schedule, status and links of this step.","Save"]};
+function gxEditTask(){return gx.editId?state.tasks.find(t=>t.id===gx.editId)||null:null}
+function gxEditable(t){const p=(state.projects||[]).find(x=>x.id===t.project_id);return !!(p&&canCaptureProject(p))&&!CLOSED_STATUSES.includes(t.status)&&t.status!=="submitted"}
+function gxOpenBar(id){const t=state.tasks.find(x=>x.id===id);if(!t)return;if(gxEditable(t))gxOpenEdit(t);else openDetail(id)}
+function gxSubtree(id){const seen=new Set(),todo=[id];while(todo.length){const cur=todo.pop();for(const x of state.tasks)if(x.parent_task_id===cur&&!seen.has(x.id)){seen.add(x.id);todo.push(x.id)}}return seen}
+function gxDownstream(id){const seen=new Set(),todo=[id];while(todo.length){const cur=todo.pop();for(const x of state.tasks)if(!seen.has(x.id)&&(x.predecessors||[]).some(p=>p.task_id===cur)){seen.add(x.id);todo.push(x.id)}}return seen}
+function gxTicked(){return new Set([...document.querySelectorAll('#step-deps [name="dep"]')].filter(b=>b.checked).map(b=>b.value))}
+function gxSheetMode(t){
+  const mode=t?"edit":null,[title,desc,submit]=GX_SHEET_TEXT[mode],q=s=>document.querySelector(s);
+  q("#step-sheet-title").textContent=title;q("#step-sheet-desc").textContent=desc;q("#step-submit").textContent=submit;
+  q("#step-open-task").hidden=q("#step-cancel-step").hidden=!t;q("#step-cancel-confirm").hidden=true;
+  // A step's type is set when it is made: the service has no change from task to milestone.
+  gxSheetField("type").disabled=!!t;
+  // Cancelling has its own button, with its own question; Abandoned stays in the task panel.
+  const statuses=t?STATUSES.filter(s=>!GOVERNED.includes(s)&&!["submitted","cancelled","abandoned"].includes(s)):GX_NEW_STATUSES;
+  if(t&&!statuses.includes(t.status))statuses.unshift(t.status);
+  gxSheetField("status").innerHTML=statuses.map(s=>`<option value="${s}">${escapeHtml(statusLabel(s))}</option>`).join("");
+  q("#step-reason-field").hidden=q("#step-reason-hint").hidden=true;
+  gxSheetField("reason").required=false;
+}
+function gxOpenEdit(t){
+  const form=document.querySelector("#step-form"),codes=gxCodes(),p=(state.projects||[]).find(x=>x.id===t.project_id),F=gxSheetField;
+  form.reset();form.querySelector(".error").textContent="";
+  gx.editId=t.id;gx.editChecked=new Set((t.predecessors||[]).map(x=>x.task_id));gxSheetMode(t);
+  // A step can move to the project itself or to another phase, never into itself or a step inside it.
+  const inside=new Set([t.id,...gxSubtree(t.id)]),parent=t.parent_task_id?state.tasks.find(x=>x.id===t.parent_task_id):null;
+  const phases=stepOrder(state.tasks.filter(x=>x.project_id===t.project_id&&codes.has(x.id)&&!inside.has(x.id)&&!CLOSED_STATUSES.includes(x.status)));
+  if(parent&&!phases.includes(parent))phases.push(parent);
+  const pname=p?p.name:t.project_name||"";
+  F("phase").innerHTML=`<option value="p:${escapeHtml(t.project_id)}">${escapeHtml(pname)}</option>`
+    +phases.map(x=>`<option value="t:${escapeHtml(x.id)}">${escapeHtml(pname)} › ${escapeHtml(x.title)}${codes.has(x.id)?` (${escapeHtml(codes.get(x.id))})`:""}</option>`).join("");
+  F("phase").value=parent?"t:"+parent.id:"p:"+t.project_id;
+  F("title").value=t.title||"";F("type").value=t.is_milestone?"milestone":"task";F("status").value=t.status;
+  if(t.is_milestone){F("start_date").value=t.due_date||""}else{F("start_date").value=t.start_date||"";F("due_date").value=t.due_date||""}
+  F("progress").value=t.progress==null?"":String(t.progress);F("description").value=t.description||"";
+  gxSheetType();gxSheetSync([t.owner_user_id||"",t.owner_name||""]);gxReasonSync();
+  const sheet=document.querySelector("#step-sheet");if(!sheet.open)sheet.showModal();
+}
+// What the sheet would send: only the fields that differ from the step, and the links to add or remove.
+function gxEditPlan(t){
+  const F=n=>gxSheetField(n).value,body={},milestone=!!t.is_milestone;
+  const title=F("title").trim();if(title!==t.title)body.title=title;
+  if((F("owner_user_id")||null)!==(t.owner_user_id||null))body.owner_user_id=F("owner_user_id")||null;
+  if(F("status")!==t.status)body.status=F("status");
+  // A milestone has one date, its due date; a start after it would be refused, so it moves with it.
+  const due=milestone?(F("start_date")||null):(F("due_date")||null);
+  const start=milestone?(t.start_date&&due&&t.start_date>due?due:(t.start_date||null)):(F("start_date")||null);
+  if(start!==(t.start_date||null))body.start_date=start;
+  if(due!==(t.due_date||null))body.due_date=due;
+  const pr=F("progress")===""?null:Number(F("progress"));if(pr!==(t.progress??null))body.progress=pr;
+  if(F("description")!==(t.description||""))body.description=F("description");
+  const {parent}=gxSheetPhase(),parentId=parent?parent.id:null;
+  const had=new Set((t.predecessors||[]).map(p=>p.task_id)),boxes=[...document.querySelectorAll('#step-deps [name="dep"]')];
+  const add=boxes.filter(b=>b.checked&&!had.has(b.value)).map(b=>b.value),drop=boxes.filter(b=>!b.checked&&had.has(b.value)).map(b=>b.value);
+  return {body,start,due,parentId,moveParent:parentId!==(t.parent_task_id||null),add,drop,
+    needsReason:"status" in body||"start_date" in body||"due_date" in body||drop.length>0};
+}
+function gxReasonSync(){
+  const t=gxEditTask();if(!t)return;
+  const need=gxEditPlan(t).needsReason;
+  document.querySelector("#step-reason-field").hidden=document.querySelector("#step-reason-hint").hidden=!need;
+  gxSheetField("reason").required=need;
+}
+async function gxSheetInput(e){
+  const t=gxEditTask();if(!t)return;
+  if(["start_date","due_date","status"].includes(e.target.name))gxReasonSync();
+  // As in the task panel, typing in the sheet takes an edit lease so no one else changes the step meanwhile.
+  if(leases.has(t.id))return touchLease(t.id);
+  if(gx.leaseAsked)return;gx.leaseAsked=true;
+  const got=await takeLease(t.id,"edit").catch(err=>({ok:false,err}));gx.leaseAsked=false;
+  if(got.ok&&gx.editId!==t.id){dropLease(t.id,"edit");return}   // the sheet closed meanwhile
+  if(!got.ok&&gx.editId===t.id)document.querySelector("#step-form").querySelector(".error").textContent=got.err&&got.err.lock?lockText(got.err.lock):(got.err&&got.err.message)||"This step is in use.";
+}
+function gxSheetClosed(){const id=gx.editId;gx.editId=null;if(id)dropLease(id,"edit")}
+async function gxSaveStep(form,dialog,error,submitter){
+  const t=gxEditTask();if(!t){dialog.close();return}
+  const plan=gxEditPlan(t),reason=gxSheetField("reason").value.trim();
+  if(!Object.keys(plan.body).length&&!plan.moveParent&&!plan.add.length&&!plan.drop.length){dialog.close();return}
+  if(plan.needsReason&&!reason){gxReasonSync();error.textContent="Give a reason: it is needed to change the dates or the status, or to remove a link.";gxSheetField("reason").focus();return}
+  gx.sheetBusy=true;if(submitter)submitter.disabled=true;
+  const done=[];let request=false;
+  try{
+    // The phase first: the owner is checked against where the step will sit (a sub-task or not).
+    let revision=t.revision;
+    if(plan.moveParent){
+      const out=await withConfirms(t,null,more=>api(taskApi(t.id,"/parent"),{method:"POST",body:JSON.stringify({parent_task_id:plan.parentId,...more})}));
+      if(!out)return;   // a confirmation was declined: nothing was saved
+      if(out.task&&Number.isInteger(out.task.revision))revision=out.task.revision;
+      done.push("phase");
+    }
+    if(Object.keys(plan.body).length){
+      const out=await withDependencyConfirm(t,plan.body.status||t.status,more=>api(taskApi(t.id),{method:"POST",body:JSON.stringify({...plan.body,reason,expected_revision:revision,...more})}),
+        {dates:{start_date:plan.start,due_date:plan.due}});
+      if(!out){if(done.length)throw new Error("The other changes were not saved.");return}   // declined: nothing more is saved
+      request=!!out.request;done.push("details");
+    }
+    for(const id of plan.add){await api("/api/task-dependencies",{method:"POST",body:JSON.stringify({predecessor_task_id:id,successor_task_id:t.id})});done.push("link")}
+    for(const id of plan.drop){await api("/api/task-dependencies",{method:"DELETE",body:JSON.stringify({predecessor_task_id:id,successor_task_id:t.id,reason})});done.push("link")}
+  }catch(err){
+    // Nothing saved: the sheet stays as it is. Part saved: the step is reloaded and shown again, so
+    // what the sheet shows is what is stored, with the refusal above it.
+    if(!done.length&&(err.status!==409||err.lock)){error.textContent=err.lock?lockText(err.lock):err.message;return}
+    try{await load()}catch{}
+    const fresh=state.tasks.find(x=>x.id===t.id);
+    if(fresh&&gxEditable(fresh)&&dialog.open){gxOpenEdit(fresh);form.querySelector(".error").textContent=(done.length?"Some changes were saved, but not all: ":"This step changed since it was opened; it has been reloaded. ")+err.message}
+    else{dialog.close();showToast(`“${t.title}”: ${err.message}`,null,null,true)}
+    return;
+  }finally{gx.sheetBusy=false;if(submitter)submitter.disabled=false}
+  dialog.close();
+  try{await load()}catch(err){showToast(`“${t.title}” was saved, but the page could not reload: ${err.message}`,null,null,true);return}
+  const said=request?"Owner request created for the status change; the step's live status is unchanged until it is decided.":`“${plan.body.title||t.title}” was saved.`;
+  if(request)showToast(said);announce(said);
+}
+function gxAskCancel(){
+  const t=gxEditTask();if(!t)return;
+  document.querySelector("#step-cancel-text").textContent=`Cancel “${t.title}”? It is closed as Cancelled; its history is kept, and it can be reopened from the task panel.`;
+  document.querySelector("#step-cancel-confirm").hidden=false;
+  gxSheetField("cancel_reason").value="";gxSheetField("cancel_reason").focus();
+}
+async function gxCancelStep(){
+  const t=gxEditTask(),dialog=document.querySelector("#step-sheet"),error=document.querySelector("#step-form").querySelector(".error");if(!t||gx.sheetBusy)return;
+  const reason=gxSheetField("cancel_reason").value.trim();
+  if(!reason){error.textContent="Give a reason for cancelling the step.";gxSheetField("cancel_reason").focus();return}
+  error.textContent="";gx.sheetBusy=true;
+  let out;
+  try{out=await withDependencyConfirm(t,"cancelled",more=>api(taskApi(t.id),{method:"POST",body:JSON.stringify({status:"cancelled",reason,expected_revision:t.revision,...more})}))}
+  catch(err){
+    if(err.status!==409||err.lock){error.textContent=err.lock?lockText(err.lock):err.message;return}
+    // The step changed since it was opened: show it as it is now, so a second try can succeed.
+    try{await load()}catch{}
+    const fresh=state.tasks.find(x=>x.id===t.id);
+    if(fresh&&gxEditable(fresh)&&dialog.open){gxOpenEdit(fresh);document.querySelector("#step-form").querySelector(".error").textContent="This step changed since it was opened; it has been reloaded. "+err.message}
+    else{dialog.close();showToast(`“${t.title}”: ${err.message}`,null,null,true)}
+    return;
+  }
+  finally{gx.sheetBusy=false}
+  if(!out)return;
+  dialog.close();
+  try{await load()}catch{}
+  const said=out.request?`Owner request created to cancel “${t.title}”; the step stays until it is decided.`:`“${t.title}” was cancelled.`;
+  showToast(said);announce(said);
 }
 function renderGantt(tasks){
   const planSelect=document.querySelector("#gantt-plan");
@@ -500,7 +660,7 @@ function announce(msg){const live=document.querySelector("#gantt-live");if(!live
   gantt.addEventListener("mouseleave",()=>hot("hover",null));
   gantt.addEventListener("focusin",e=>{const b=e.target.closest("[data-bar]");hot("focus",b?b.dataset.bar:null)});
   gantt.addEventListener("focusout",()=>hot("focus",null));
-  // A bar is a focus stop and nothing more (the block opens no dialog from it): Space must not scroll the page.
+  // Space on a bar opens Edit Step (or the task panel), as Enter does: it must not scroll the page.
   gantt.addEventListener("keydown",e=>{if(e.key===" "&&e.target.closest("[data-bar]"))e.preventDefault()});
   const step=dir=>{gx.anchor=gxShift(gx.anchor||ganttToday(),gxMode(),dir);refreshGantt()};
   q("#gantt-prev").onclick=()=>step(-1);
@@ -508,7 +668,7 @@ function announce(msg){const live=document.querySelector("#gantt-live");if(!live
   q("#gantt-today").onclick=()=>{gx.anchor=ganttToday();refreshGantt()};
   q("#gantt-period").onchange=e=>{storage.set("astra.gantt.period",e.target.value==="week"?"week":"month");refreshGantt()};
   q("#gantt-zoom").addEventListener("click",e=>{const b=e.target.closest("[data-zoom]");if(!b||b.disabled)return;
-    const i=Math.max(0,Math.min(GX_WIDTHS.length-1,gxZoom()+(b.dataset.zoom==="in"?1:-1)));storage.set("astra.gantt.dayw",i);refreshGantt();
+    const i=Math.max(0,Math.min(GX_WIDTHS.length-1,gxZoom()+(b.dataset.zoom==="in"?1:-1)));storage.set("astra.gantt.daywidth",GX_WIDTHS[i]);refreshGantt();
     announce(`Day width ${GX_WIDTHS[i]} pixels.`)});
   q("#gantt-deps").onchange=e=>{storage.set("astra.gantt.deps",e.target.checked);gxDrawDeps()};
   const pop=q("#gantt-filter"),popBtn=q("#gantt-filter-btn");
@@ -525,8 +685,19 @@ function announce(msg){const live=document.querySelector("#gantt-live");if(!live
   document.addEventListener("keydown",e=>{if(e.key==="Escape"&&gx.popOpen&&!gdrag.active){e.preventDefault();gxCloseFilter(true)}});
   q("#gantt-new-step").onclick=gxOpenSheet;
   q("#step-discard").onclick=()=>q("#step-sheet").close();
+  q("#step-close").onclick=()=>q("#step-sheet").close();
+  q("#step-open-task").onclick=()=>{const id=gx.editId;q("#step-sheet").close();if(id)openDetail(id)};
+  q("#step-cancel-step").onclick=gxAskCancel;
+  q("#step-cancel-keep").onclick=()=>{q("#step-cancel-confirm").hidden=true;q("#step-cancel-step").focus()};
+  q("#step-cancel-go").onclick=gxCancelStep;
+  q("#step-sheet").addEventListener("close",gxSheetClosed);
+  q("#step-form").addEventListener("input",gxSheetInput);
   q("#step-form").addEventListener("submit",gxSubmitStep);
-  q("#step-form").addEventListener("change",e=>{if(e.target.name==="phase")gxSheetSync();else if(e.target.name==="type")gxSheetType()});
+  q("#step-form").addEventListener("change",e=>{
+    if(e.target.name==="phase"){if(gx.editId)gx.editChecked=gxTicked();gxSheetSync()}
+    else if(e.target.name==="type")gxSheetType();
+    if(gx.editId){if(e.target.name==="dep")gx.editChecked=gxTicked();gxReasonSync()}
+  });
   document.querySelector("#view-table").onchange=e=>{storage.set("astra.gantt.view",e.target.checked?"table":"chart");render()};
   if(phoneMQ.addEventListener)phoneMQ.addEventListener("change",()=>{if(state.user)refreshGantt()});
   let resizeTimer;window.addEventListener("resize",()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(state.user)refreshGantt()},150)});
@@ -2048,12 +2219,19 @@ const DIFF_FIELDS=[["title","Title"],["status","Status"],["criticality","Critica
 let detailTaskId=null,detailLoadVersion=0;
 
 document.querySelector("#gantt").addEventListener("click",e=>{
-  // The name in the Step pane (and a phase's open button) opens the task; the rest of a phase row
-  // folds or unfolds it. A click on a bar does nothing: the bar is for dragging.
+  // The name in the Step pane (and a phase's open button) opens the task; a click on a bar opens Edit
+  // Step, as in the block (a drag is not a click); the rest of a phase row folds or unfolds it.
   const b=e.target.closest("[data-detail]");
   if(b){openDetail(b.dataset.detail);return}
+  const bar=e.target.closest("[data-bar]");
+  if(bar){gxOpenBar(bar.dataset.bar);return}
   const phase=e.target.closest(".gx-pane [data-phase-row]");
   if(phase)gxTogglePhase(phase.dataset.phaseRow);
+});
+document.querySelector("#gantt").addEventListener("keydown",e=>{
+  if((e.key!=="Enter"&&e.key!==" ")||e.repeat||gdrag.active)return;
+  const bar=e.target.closest?.("[data-bar]");if(!bar||bar!==e.target)return;
+  e.preventDefault();gxOpenBar(bar.dataset.bar);
 });
 document.querySelector("#schedule-table").addEventListener("click",e=>{const b=e.target.closest("[data-detail]");if(b)openDetail(b.dataset.detail)});
 

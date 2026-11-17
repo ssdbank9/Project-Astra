@@ -29,14 +29,72 @@ Status at `7bf2f1a` (plus this commit):
   `attachment_settings` and `attachment_links` are not in the backup
   required-table list.
 - Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
-  plain JS: built, tested, reviewed and pushed on 2026-11-16; it waits for
-  Aly's acceptance. Status, the ticked feature checklist and the judgment
-  calls for Aly are in "Gantt chart replica — 2026-11-16" below.
+  plain JS: built, tested, reviewed and pushed on 2026-11-16; on 2026-11-17 a
+  second side-by-side check in the browser found four gaps, now closed (Edit
+  Step, the 40px zoom step, the sheet's Close button and field order). It
+  waits for Aly's acceptance. See "Gantt gap review — 2026-11-17" and
+  "Gantt chart replica — 2026-11-16" below.
 - Waiting for Aly's acceptance from before the board was retired: B3Y1XY
   (password reset fixes), Z9JCZ6, MTEDTM, AX572Q and the six tested tickets
   recorded in `DECISIONS_LOG.md` on 2026-11-08; 0RHNMG is a duplicate of
   JRNDC8 once B3Y1XY is accepted. Acceptance is now a line from Aly in chat,
   recorded here.
+
+## Gantt gap review — 2026-11-17
+
+Aly asked: "review if the gatt does everything like shadcnstudio gantt, check using browser".
+The block (`gantt-chart-04`) and Astra's chart were opened side by side in the in-app browser
+and each behaviour was driven in both. Matching already: the toolbar, Week | Month, previous /
+next / Today, the Dependencies switch, the arrows (idle, hover, conflict), fold, Filter
+(status and owner with counts), the today pill and column, resize grips, milestones, the
+week view filling the width. Gaps found and closed:
+
+1. Edit Step. In the block a click on a bar, or Enter on it, opens an "Edit Step" sheet. The
+   catalogue of 2026-11-09 had this wrong ("a click on a bar does nothing"). Aly chose
+   (2026-11-17): build it, keep the step name for Astra's task panel, and turn the block's
+   Delete into Cancel step. The rules are in `docs/design/gantt-steps-contract.md`.
+2. Zoom: the block has a 40px step (32, 40, 48, 64, 88, 120); Astra had five widths.
+3. The New Step sheet had no Close (×) button.
+4. The New Step sheet had Progress before the dates and empty dates; the block puts Start
+   and End first and starts both today.
+
+Judgment calls for Aly:
+
+- Type cannot change in Edit Step: `update_task` cannot turn a task into a milestone.
+  Follow-up if wanted: a service change with its own tests.
+- Status in Edit Step offers the task panel's list without Submitted, Cancelled and
+  Abandoned: cancelling has its own button and question; Abandoned stays in the task panel.
+- A step that is closed or in review, or that the user cannot manage, opens the task panel
+  from its bar instead of the sheet.
+- A cancelled step stays on the chart (as before) unless "Open work only" is ticked; the
+  block's Delete removes it.
+- On a phone the chart is the Schedule table (as before), so Edit Step opens from bars at
+  tablet and desktop widths only; its layout was checked at 375px too.
+- The sheet's date fields are the browser's own, not the block's popover calendar.
+
+Checks:
+
+- Tests: `tests/test_gantt_edit_step.py` (new: the sheet probe, markup, and service and HTTP
+  role tests for cancelling and for moving a step to another phase: App Owner and manager
+  only, a manager's cancel becomes an Owner request, a member, a viewer and an outsider get
+  403 and nothing changes); zoom and New Step tests updated. Full-suite result in the
+  commit message.
+- Guard removal: 37 guards removed one at a time in a complete throwaway copy, after a
+  passing baseline; each made a test fail.
+- Independent review (a second agent, read-only) found one defect and five smaller points,
+  all fixed with tests: Enter in the reason for cancelling pressed Save; a lock held by
+  someone else reloaded the sheet and lost what was typed; a phase change was saved after the
+  owner, so the owner was checked against the old place; a lease granted after the sheet
+  closed was kept for a minute; the status list offered Cancelled beside Cancel step; a
+  stale cancel could never succeed on a second try. Bars now carry `aria-haspopup="dialog"`.
+  Left as they are: "Open task" and Cancel step do not warn about unsaved edits in the sheet.
+- Browser (in-app, `tests/ui_fixture_server.py`): a bar click and Enter open Edit Step
+  filled from the step; Save of progress; Save of a new due date asks for a reason and then
+  shows the consequences confirmation; a link added with a phase change, then removed with a
+  reason; Cancel step with its question; the edit lease taken on typing and let go on
+  Escape, with focus back on the bar; 40px zoom; New Step Close button and today's dates;
+  layout at 1440 and 375px. Not checked in a browser: a signed-in manager, member or viewer
+  (covered by tests).
 
 ## Gantt chart replica — 2026-11-16
 
@@ -236,7 +294,8 @@ Removed from the chart, because the block has no such thing:
   Schedule table);
 - fit, week, month and quarter zoom levels (replaced by Week | Month and the day-width zoom);
 - dragging a parent task's own bar (a parent is now a phase with a summary bar);
-- a click on a bar opening the task (the step name in the pane opens it).
+- a click on a bar opening the task (the step name in the pane opens it). Since 2026-11-17
+  a click on a bar opens Edit Step, as in the block.
 
 Kept from Astra although the block has no such thing:
 
@@ -265,8 +324,9 @@ Choices where the block gives no answer:
 - Focus rings in the chart are Astra's teal ring, not the block's soft grey halo (which was
   about 1.5:1 on white). The idle arrow keeps the block's soft grey; it is decoration, and an
   arrow turns dark when its bar has focus.
-- Bars keep `role="button"` with nothing on Enter, as in the block; the step name in the pane
-  opens the task.
+- Bars keep `role="button"`; since 2026-11-17 Enter and Space open Edit Step, as in the block
+  (this line said earlier that the block does nothing on Enter, which was wrong); the step
+  name in the pane opens the task.
 
 Follow-up for Aly to decide, outside this change: the task form and the project form have the
 same "Enter presses Cancel" order of buttons that the New Step sheet had (`index.html`,

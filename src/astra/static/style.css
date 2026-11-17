@@ -958,7 +958,10 @@ dialog.gx-sheet::backdrop { background: var(--gx-overlay); }
 dialog.gx-sheet[open] { animation: gx-sheet-in var(--dur-3) var(--ease-enter); }
 @keyframes gx-sheet-in { from { transform: translateX(100%); } }
 .gx-sheet form { display: flex; flex-direction: column; height: 100%; padding: 0; }
-.gx-sheet-head { display: flex; flex-direction: column; gap: 4px; padding: 16px; }
+.gx-sheet-head { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 16px 48px 16px 16px; }
+.gx-sheet-close { position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 28px; height: 28px; min-height: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--gx-muted-fg); font-size: 20px; line-height: 1; box-shadow: none; }
+.gx-sheet-close:hover { background: var(--gx-muted); color: var(--gx-fg); }
+.gx-sheet-close:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--gx-bg), 0 0 0 4px var(--focus); }
 .gx-sheet-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
 .gx-sheet-head p { margin: 0; color: var(--gx-muted-fg); font-size: 14px; }
 .gx-sheet-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 16px 16px; }
@@ -979,6 +982,16 @@ dialog.gx-sheet[open] { animation: gx-sheet-in var(--dur-3) var(--ease-enter); }
 .gx-sheet-foot button:not(.quiet):hover { background: color-mix(in oklch, var(--gx-primary) 90%, var(--gx-bg)); }
 .gx-sheet-foot button.quiet { border-color: var(--gx-border); background: var(--gx-bg); color: var(--gx-fg); }
 .gx-sheet-foot button.quiet:hover { background: var(--gx-muted); }
+/* Edit Step: Cancel step sits on the left, in the destructive colour, as the block's Delete does. */
+.gx-sheet-foot .gx-danger { margin-right: auto; }
+.gx-sheet .gx-danger, .gx-sheet .gx-danger.quiet { color: var(--gx-destructive); }
+.gx-sheet-open { align-self: flex-start; margin-top: 4px; font-size: 14px; }
+.gx-cancel-confirm { margin: 0 0 14px; padding: 12px; border: 1px solid color-mix(in oklch, var(--gx-destructive) 40%, var(--gx-bg)); border-radius: 8px; background: color-mix(in oklch, var(--gx-destructive) 6%, var(--gx-bg)); }
+.gx-cancel-confirm p { margin: 0 0 10px; font-size: 14px; }
+.gx-cancel-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.gx-cancel-actions button { height: 32px; padding: 0 12px; border: 1px solid var(--gx-border); border-radius: 8px; background: var(--gx-bg); color: var(--gx-fg); font-size: 14px; font-weight: 500; }
+.gx-cancel-actions .gx-danger { border-color: var(--gx-destructive); background: var(--gx-destructive); color: var(--gx-bg); }
+.gx-cancel-actions button:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--gx-bg), 0 0 0 4px var(--focus); }
 .gx-sheet-foot button:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--gx-bg), 0 0 0 4px var(--focus); }
 @media (min-width: 640px) {
   .gx-card .gx-title { font-size: 16px; }

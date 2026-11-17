@@ -73,16 +73,18 @@ globalThis.runProbe=async function(input,H){
   mem["astra.gantt.period"]="quarter";boot(tasks());out.storedBogus=g.dataset.mode;
   delete mem["astra.gantt.period"];
 
-  // ---- zoom: five day widths, month view only ----
+  // ---- zoom: six day widths, month view only ----
   boot(tasks());
   const zoomClick=k=>{for(const f of H.store["#gantt-zoom"]._l.click||[])f({target:{closest:s=>s==="[data-zoom]"?{dataset:{zoom:k},disabled:!!zoomBtn(k).disabled}:null}})};
   out.zoom=[];
-  for(const k of ["in","in","in","in","out","out","out","out","out"]){zoomClick(k);out.zoom.push([k,+g.dataset.day,mem["astra.gantt.dayw"],!!zoomBtn("in").disabled,!!zoomBtn("out").disabled])}
+  for(const k of ["in","in","in","in","out","out","out","out","out","out"]){zoomClick(k);out.zoom.push([k,+g.dataset.day,mem["astra.gantt.daywidth"],!!zoomBtn("in").disabled,!!zoomBtn("out").disabled])}
   await new Promise(r=>setTimeout(r,60));out.zoomSaid=H.store["#gantt-live"].textContent;
   for(const f of H.store["#gantt-zoom"]._l.click||[])f({target:{closest:()=>null}});out.zoomMiss=+g.dataset.day;
   out.zoomStored={};
-  for(const v of [0,4,"2",7,-1,1.5,null]){mem["astra.gantt.dayw"]=v;boot(tasks());out.zoomStored[String(v)]=+g.dataset.day}
-  delete mem["astra.gantt.dayw"];
+  for(const v of [32,40,120,"64",7,1,-1,1.5,null]){mem["astra.gantt.daywidth"]=v;boot(tasks());out.zoomStored[String(v)]=+g.dataset.day}
+  delete mem["astra.gantt.daywidth"];
+  // A width saved under the old key (an index into the old list) is not read.
+  mem["astra.gantt.dayw"]=4;boot(tasks());out.zoomOldKey=+g.dataset.day;delete mem["astra.gantt.dayw"];
 
   // ---- the pane follows the card's width ----
   out.pane={};
@@ -367,10 +369,12 @@ class GanttChartTests(unittest.TestCase):
         self.assertEqual(self.out['storedBogus'], 'month')
 
     # ---- zoom -----------------------------------------------------------------------------------
-    def test_zoom_steps_through_five_day_widths_and_stops_at_each_end(self):
+    def test_zoom_steps_through_the_blocks_six_day_widths_and_stops_at_each_end(self):
+        # shadcnstudio gantt-chart-04, observed 2026-11-17: 32, 40, 48, 64, 88 and 120px.
         self.assertEqual([z[:3] for z in self.out['zoom']],
-                         [['in', 64, 2], ['in', 88, 3], ['in', 120, 4], ['in', 120, 4],
-                          ['out', 88, 3], ['out', 64, 2], ['out', 48, 1], ['out', 32, 0], ['out', 32, 0]])
+                         [['in', 64, 64], ['in', 88, 88], ['in', 120, 120], ['in', 120, 120],
+                          ['out', 88, 88], ['out', 64, 64], ['out', 48, 48], ['out', 40, 40],
+                          ['out', 32, 32], ['out', 32, 32]])
         self.assertEqual(self.out['zoomMiss'], 32)
 
     def test_the_zoom_button_at_an_end_is_disabled(self):
@@ -389,7 +393,9 @@ class GanttChartTests(unittest.TestCase):
         self.assertEqual(self.out['zoomSaid'], 'Day width 32 pixels.')
 
     def test_a_stored_zoom_that_is_not_one_of_the_steps_falls_back_to_the_default(self):
-        self.assertEqual(self.out['zoomStored'], {'0': 32, '4': 120, '2': 48, '7': 48, '-1': 48, '1.5': 48, 'null': 48})
+        self.assertEqual(self.out['zoomStored'], {'32': 32, '40': 40, '120': 120, '64': 48, '7': 48, '1': 48,
+                                                  '-1': 48, '1.5': 48, 'null': 48})
+        self.assertEqual(self.out['zoomOldKey'], 48)
 
     # ---- who may drag and add -------------------------------------------------------------------
     def test_only_open_dated_bars_of_a_project_the_user_manages_can_be_dragged(self):

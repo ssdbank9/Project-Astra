@@ -469,7 +469,7 @@ globalThis.runProbe=async function(input,H){
   // ---- opening ----
   boot(tasks(),{projects:two});
   H.store["#gantt-new-step"].onclick();
-  out.open={shown:!!sheet.open,options:options(),toasts:toasts.slice()};
+  out.open={shown:!!sheet.open,options:options(),toasts:toasts.slice(),dates:[F("start_date").value,F("due_date").value]};
   F("phase").value="p:pr1";change("phase");await tick();
   out.project={deps:deps(),people:people.slice(-1)[0]};
   F("phase").value="t:par";change("phase");await tick();
@@ -525,6 +525,8 @@ globalThis.runProbe=async function(input,H){
   // ---- Discard ----
   fill({title:"Never mind"});document.querySelector("#step-discard").onclick();await tick();
   out.discard={calls:calls.splice(0).length,open:!!sheet.open};
+  H.store["#gantt-new-step"].onclick();fill({title:"Never mind"});document.querySelector("#step-close").onclick();await tick();
+  out.closeX={calls:calls.splice(0).length,open:!!sheet.open};
 
   // ---- on a project page only that project is offered ----
   location.hash="#/project/"+P2+"/timeline";
@@ -611,6 +613,12 @@ class NewStepSheetTests(unittest.TestCase):
     def test_discard_closes_the_sheet_and_sends_nothing(self):
         self.assertEqual(self.out['discard'], {'calls': 0, 'open': False})
 
+    def test_the_close_button_closes_the_sheet_and_sends_nothing(self):
+        self.assertEqual(self.out['closeX'], {'calls': 0, 'open': False})
+
+    def test_a_new_step_starts_and_ends_today_as_in_the_block(self):
+        self.assertEqual(self.out['open']['dates'], ['2026-06-10', '2026-06-10'])
+
     def test_on_a_project_page_only_that_project_is_offered(self):
         self.assertEqual(self.out['projectPage'], {'options': [['p:' + P2, 'Second plan']], 'newHidden': False})
 
@@ -637,12 +645,22 @@ class NewStepMarkupTests(unittest.TestCase):
         for name in ('title', 'phase', 'type', 'owner_user_id', 'status', 'progress', 'start_date', 'due_date', 'description'):
             self.assertIn(f'name="{name}"', sheet)
         self.assertIn('<legend>Depends on</legend>', sheet)
-        self.assertIn('<button type="button" class="quiet" id="step-discard">Discard</button><button value="default">Create</button>', sheet)
+        self.assertIn('<button type="button" class="quiet" id="step-discard">Discard</button><button value="default" id="step-submit">Create</button>', sheet)
         # Enter in a field submits with the form's first submit button: that must be Create, never Discard.
         buttons = __import__('re').findall(r'<button[^>]*>', sheet)
-        self.assertEqual([b for b in buttons if 'type="button"' not in b], ['<button value="default">'])
+        self.assertEqual([b for b in buttons if 'type="button"' not in b], ['<button value="default" id="step-submit">'])
         self.assertIn('<div class="error" role="alert"></div>', sheet)
         self.assertNotIn('style=', sheet)
+
+    def test_the_fields_come_in_the_blocks_order_and_the_sheet_has_a_close_button(self):
+        sheet = self.html[self.html.index('<dialog id="step-sheet"'):]
+        sheet = sheet[:sheet.index('</dialog>')]
+        names = __import__('re').findall(r'name="(\w+)"', sheet)
+        # Then the two reasons Edit Step asks for (hidden on a new step).
+        self.assertEqual(names, ['title', 'phase', 'type', 'owner_user_id', 'status', 'start_date', 'due_date',
+                                 'progress', 'description', 'reason', 'cancel_reason'])
+        self.assertIn('<button type="button" class="gx-sheet-close" id="step-close" aria-label="Close">', sheet)
+        self.assertIn('q("#step-close").onclick=()=>q("#step-sheet").close();', self.js)
 
     def test_only_statuses_a_manager_may_create_are_offered(self):
         sheet = self.html[self.html.index('<dialog id="step-sheet"'):]

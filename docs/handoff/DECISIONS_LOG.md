@@ -261,6 +261,18 @@ Slice 4, file storage:
   no longer a manager still sees the link's history rows on a task they can
   open (those rows now name nobody). It is recorded in the README, step 3.6.
 
+### 2026-11-17 — Gantt Edit Step (chat with Claude)
+
+Asked "review if the gatt does everything like shadcnstudio gantt, check using browser",
+Claude found that the block opens an "Edit Step" sheet from a bar and asked two questions.
+
+- Edit Step: Aly chose "Build it (Recommended)": a bar click or Enter opens Edit Step; saving
+  goes through the existing update and dependency service calls with the task panel's
+  confirmations; the step name keeps opening the full task panel, and the sheet has an
+  "Open task" link.
+- The block's Delete: Aly chose "Cancel the step": a "Cancel step" button sets the status to
+  Cancelled through the existing service, asking for confirmation first; the history is kept.
+
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
 These are choices Claude made and reported; Aly has not overruled them. They

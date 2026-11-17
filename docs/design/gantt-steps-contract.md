@@ -51,8 +51,9 @@ project (`REL-01`).
 - The chart opens on today's period when any work falls in it, otherwise on the period of
   the dated work nearest today. It keeps the period the user moved to until the page shows
   other projects.
-- Zoom in and zoom out step the day width of the month view through 32, 48, 64, 88 and 120
-  pixels (`astra.gantt.dayw`); the button at an end is disabled. A week always fills the
+- Zoom in and zoom out step the day width of the month view through 32, 40, 48, 64, 88 and
+  120 pixels, as the block does (re-observed 2026-11-17), kept as pixels
+  (`astra.gantt.daywidth`); the button at an end is disabled. A week always fills the
   width it has (at least 48px a day), so zoom is off in the week view.
 
 ## Status
@@ -102,10 +103,23 @@ words, and the badge's `title` keeps Astra's own status name.
 - Touch and phone widths never drag; they use the task panel's date fields.
 - New Step (shown to someone who may add a task to an open project) opens a sheet from the
   right: Name, Phase (a project or a task that has steps), Type (Task or Milestone), Owner,
-  Status, Progress, Start, End, Depends on, Note. Create posts one `POST /api/tasks` with
+  Status, Start and End (both today to begin with), Progress, Depends on, Note, and a Close
+  button. Create posts one `POST /api/tasks` with
   `predecessor_task_ids`, `is_milestone` and `progress`; a milestone sends its one date as
   the due date. A step cannot depend on the phase it sits in. Enter creates; a double click
   posts once. A refusal is shown in the sheet, which stays open.
+- Edit Step (added 2026-11-17, as in the block): a click on a bar, or Enter or Space on it,
+  opens the same sheet filled from the step, for a step the user may manage that is not
+  closed or in review; anyone else, or such a step, gets the task panel. It sends only what
+  changed, through the calls the task panel uses: `POST /api/tasks/{id}/parent` first (so
+  the owner is checked where the step will sit), then `POST /api/tasks/{id}` with the
+  revision and a reason when the dates or the status change, then `POST` / `DELETE
+  /api/task-dependencies` (a removal carries the reason). Confirmations are the panel's.
+  Depends on leaves out the step, steps inside it and steps that wait on it. Type cannot
+  change (the service has no such change). "Open task" opens the task panel. The block's
+  Delete is "Cancel step" (Aly, 2026-11-17): a question with a reason, then the status
+  Cancelled through the ordinary update; a manager's becomes an Owner request. Typing takes
+  the panel's edit lease; closing lets it go.
 - Filter hides steps by status and by owner in the browser only; counts sit beside each
   box, and the button is marked while anything is hidden. A phase with no step left is
   hidden with them; phase totals do not change.
@@ -124,7 +138,7 @@ words, and the badge's `title` keeps Astra's own status name.
 - Focus never drops to `body` (WCAG 2.4.3): a re-render gives focus back to the same bar,
   step name or phase toggle; Escape in the Filter popover gives it back to the Filter
   button. A bar is a focus stop that names itself ("Title · Status · 70%"); as in the block
-  it opens nothing, and the step name in the pane opens the task. Focus rings are Astra's
+  it opens Edit Step, and the step name in the pane opens the task. Focus rings are Astra's
   teal `--focus` ring (3:1 or better), not the block's faint grey halo.
 - `prefers-reduced-motion: reduce` removes the sheet's slide-in.
 

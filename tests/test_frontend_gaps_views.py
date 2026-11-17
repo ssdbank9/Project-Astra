@@ -451,9 +451,11 @@ class GanttExpandAndOverflowTests(unittest.TestCase):
         self.assertEqual(clicked['writes'], 0)
         self.assertEqual(clicked['rows'], self.first['rerender']['rows'])
 
-    def test_a_click_on_a_bar_opens_nothing_and_folds_nothing(self):
+    def test_a_click_on_a_bar_of_a_step_the_user_cannot_change_opens_its_task_and_folds_nothing(self):
+        # Since 2026-11-17 a bar opens Edit Step, as in the block, for a step the user may manage;
+        # this user may not (can_manage is false), so the task panel opens instead.
         clicked = self.first['barClick']
-        self.assertEqual((clicked['opened'], clicked['writes']), ([], 0))
+        self.assertEqual((clicked['opened'], clicked['writes']), (['s2'], 0))
         self.assertEqual(clicked['rows'], self.first['rerender']['rows'])
 
     def test_a_saved_value_that_is_not_a_list_is_ignored(self):
