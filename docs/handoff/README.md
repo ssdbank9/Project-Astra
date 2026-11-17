@@ -7,7 +7,7 @@ below that mentions tickets, lanes or board counts is to be acted on through
 jaira any more; `.jaira/` is read-only history. From now on this file carries
 status and open work, updated in the same commit as the work.
 
-Status at `877bde1` (plus this commit):
+Status at `e2a7541` (plus this commit):
 
 - MXY7BG hosted attachments: slice 1 (`18c4e54`) and slice 2 (`8fdd9d5`) are
   pushed and reviewed. Slice 3 (App Owner-only audited permanent direct
@@ -15,10 +15,18 @@ Status at `877bde1` (plus this commit):
   and a verified backend migration with rollback, Items 6-7, `877bde1`) were
   accepted by Aly on 2026-11-16 ("Accept both"). Both are in "MXY7BG slices 3
   and 4" below. Acceptance is of the built work only: nothing is provisioned
-  or deployed, and the questions and decisions listed for Aly in that section
-  are still open. Nits left: two owners saving the attachment settings at once
-  overwrite each other (both audited); `attachment_settings` and
-  `attachment_links` are not in the backup required-table list.
+  or deployed. Aly went through the eleven questions of that section on
+  2026-11-17 (under each question there, and in `DECISIONS_LOG.md`). Nine
+  are answered; the outbound network rule and the bucket backup are left
+  open until a bucket is taken up. The last five storage answers are
+  Claude's recommendations, which Aly took. Uploads stay in the server
+  folder for now. Open work from the answers: a download through a direct
+  link is to show no person in the task history (not started; waits for
+  Aly's go-ahead), and each file's row is to record its bucket before the
+  first real use of a bucket. Nits left: two owners saving the attachment
+  settings at once overwrite each other (both audited);
+  `attachment_settings` and `attachment_links` are not in the backup
+  required-table list.
 - Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
   plain JS: built, tested, reviewed and pushed on 2026-11-16; it waits for
   Aly's acceptance. Status, the ticked feature checklist and the judgment
@@ -273,8 +281,9 @@ below; a step is ticked in the commit that pushes it.
 
 Status: accepted by Aly on 2026-11-16 ("Accept both"). Built, tested, reviewed
 and pushed in `5220018` (on the branch since the merge `575f2fa`; full suite
-there: 1299 tests, OK, 2 skipped on Windows). Nothing is deployed, and the
-questions for Aly below are still open.
+there: 1299 tests, OK, 2 skipped on Windows). Nothing is deployed. Aly
+answered the questions below on 2026-11-17; the one change they ask for
+(question 4) is not built yet and waits for Aly's go-ahead.
 
 - [x] 3.1 Schema v25 `attachment_links`: one active link per uploaded file,
   the token stored only as a SHA-256 hash, who created and who revoked it,
@@ -339,20 +348,29 @@ How it was checked:
   `DEPLOYMENT_RUNBOOK.md` has the check to run on the server before any direct
   link is created there.
 
-Questions for Aly (none blocks acceptance; today's behaviour is stated first):
+Questions for Aly, answered on 2026-11-17 (today's behaviour is stated first):
 
 1. A link has no expiry and no download limit, and every download adds a
    history row. A chat app that previews links counts as a download. Should a
    link expire, or have a cap?
+   Answer: keep permanent. No expiry and no cap; a link ends when an App
+   Owner revokes it.
 2. Caddy logs every direct link request as `/files/redacted`, so the access
    log cannot say which link was used, and the task history has no client
    address. Should the history record the address?
+   Answer: keep as is. No address is recorded. Claude had recommended
+   recording it for App Owners only; Aly chose not to.
 3. A link keeps working after the owner who created it is demoted or
    deactivated, and after its project is closed. Should any of those end it?
+   Answer: none of them ends it.
 4. A download through a link is recorded under the owner who created the
    link, because nobody is signed in. Is that the right name to show?
+   Answer: show no person. The row is to say only that the file was
+   downloaded through a direct link, with the creator named in the link's
+   own details. New work, not started; it waits for Aly's go-ahead.
 5. Restoring an older backup brings back a link that was revoked after that
    backup. Accept this, or add "revoke every link" to the restore steps?
+   Answer: accept as is.
 
 Small items left as they are: a reason made only of invisible characters is
 accepted; after Done or a revoke the keyboard focus returns to the top of the
@@ -374,9 +392,10 @@ when removed.
 
 Status: accepted by Aly on 2026-11-16 ("Accept both"). Built, tested, reviewed
 and pushed in `877bde1` (full suite: 1379 tests, OK, 2 skipped on Windows).
-The decisions for Aly below are still open. Nothing is provisioned or
-deployed: no bucket, no key, no change on any server. The code has never
-talked to a real OCI tenancy.
+Aly went through the decisions below on 2026-11-17: uploads stay in the
+server folder for now, and decisions 2 and 3 are left open until a bucket is
+taken up. Nothing is provisioned or deployed: no bucket, no key, no change on
+any server. The code has never talked to a real OCI tenancy.
 
 - [x] 4.1 `object_storage.S3Storage`: OCI Object Storage through its
   S3-compatible API, signed with the standard library (no new dependency),
@@ -465,28 +484,41 @@ How it was checked:
   used to confirm the bucket refuses unsigned reads, the policy wording, and
   the service's outbound rule.
 
-Decisions for Aly:
+Decisions for Aly, gone through on 2026-11-17; 2 and 3 are left open until a
+bucket is taken up. Aly chose the answer to 1 himself.
+For 2 to 6 he asked for Claude's recommendation and then said "continue as
+per your recommendation"; the answers there are that recommendation.
 
 1. Whether uploads move to object storage at all. The folder stays the
    default until Aly says otherwise.
+   Answer: the folder for now. Object storage is decided later, after a
+   bucket drill and a chosen bucket backup.
 2. Outbound network for the Astra service: only Oracle's Object Storage
    address ranges, or all outbound traffic (runbook stage 11.5).
+   Answer: left open until a bucket is taken up; the recommendation for
+   then is Oracle's Object Storage address ranges only.
 3. How the bucket's contents are protected, since the server backup does not
    hold files kept in the bucket. Until Aly chooses and a restore has been
    tried once, files in the bucket have no tested backup, so Item 6's "same
    backup and recovery" is met for the folder and only documented for the
    bucket (runbook stage 11.5, with `storage-verify` as the check).
+   Answer: left open until a bucket is taken up; the recommendation for
+   then is versioning on the bucket and one tried restore before any real
+   file depends on it. Versioning on OCI is unverified here.
 4. Between switching the setting and finishing `storage-migrate`, new uploads
    are in the bucket and older ones still in the folder. No user or project
    chooses a destination, and `storage-status` shows the split. Is that
    window acceptable under Item 7?
+   Answer: accepted.
 5. Old copies stay until `storage-prune` is run by hand. After a prune, a
    rollback copies the files back from the bucket instead of switching to a
    kept copy.
+   Answer: keep as is. Old copies go only when `storage-prune` is run.
 6. Astra records that a file is in object storage, not in which bucket.
    Settings changed to another bucket the key can use are not detected
    (files read as not found until the settings are put back). Should each
    file's row also record its bucket, so that a wrong bucket is refused?
+   Answer: yes, built just before the first real use of a bucket, not now.
 
 Known limits, left as they are: a download that breaks before its first byte
 under Waitress answers a plain 500; a download is written to the history

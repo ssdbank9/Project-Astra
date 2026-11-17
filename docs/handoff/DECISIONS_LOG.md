@@ -209,6 +209,48 @@ Sources:
     have not run in a real Caddy and the object storage code has not run
     against a real OCI tenancy (runbook stages 9 and 11.5).
 
+### 2026-11-17 — the open questions on MXY7BG slices 3 and 4 (chat with Claude)
+
+Aly agreed to go through the eleven questions ("Yes, one by one"). Questions
+1 to 6 were put to him one at a time with options, and the option he chose is
+quoted. Before question 7 he asked "explain what is object storage", then
+"what do you rcommend". Claude recommended keeping the folder and gave a
+recommendation for each of questions 7 to 11. Aly: "continue as per your
+recommendation". So 7 to 11 are Claude's recommendations, taken by Aly in
+those words. Two of them, 7 and 8, leave the question open until a bucket is
+taken up.
+
+Slice 3, direct links:
+
+1. Expiry or a download cap: "Keep permanent (Recommended)". No expiry and no
+   cap; a link ends when an App Owner revokes it.
+2. The client address in the history: "Keep as is". No address is recorded.
+   The recommended option was to record it for App Owners only; Aly chose
+   not to.
+3. Whether the creator's demotion or deactivation or the project's closure
+   ends a link: "None, keep as is (Recommended)".
+4. The name shown for a download through a link: "Show no person". The row is
+   to say only that the file was downloaded through a direct link, with the
+   creator named in the link's own details. This is new work, not built yet;
+   it starts when Aly says so.
+5. A restore bringing back a revoked link: "Accept as is".
+
+Slice 4, file storage:
+
+6. Folder or bucket for the hosted Oracle deployment: "Folder for now
+   (Recommended)". Object storage is decided later, after a bucket drill and
+   a chosen bucket backup. Nothing is provisioned.
+7. Outbound network rule: left open until a bucket is taken up. Recommended
+   for then: only Oracle's Object Storage address ranges.
+8. Bucket backup: left open until a bucket is taken up. Recommended for then:
+   versioning on the bucket and one tried restore before any real file
+   depends on it. That OCI offers versioning as assumed is unverified here.
+9. The mixed window between switching the setting and finishing
+   `storage-migrate`: accepted under Item 7.
+10. Old copies kept until `storage-prune` is run by hand: keep as is.
+11. Recording the bucket in each file's row: yes, built just before the first
+    real use of a bucket, not now.
+
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
 These are choices Claude made and reported; Aly has not overruled them. They
