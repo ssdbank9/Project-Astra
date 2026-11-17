@@ -33,8 +33,8 @@ Status at `7bf2f1a` (plus this commit):
   second side-by-side check in the browser found four gaps, now closed (Edit
   Step, the 40px zoom step, the sheet's Close button and field order),
   pushed in `a0262d1` and accepted by Aly on 2026-11-17 ("Accept"). The
-  question asked was about `a0262d1` only; the replica itself (`f43c7ed`)
-  has had no acceptance of its own. See "Gantt gap review — 2026-11-17" and
+  replica itself (`f43c7ed`) was accepted by Aly on 2026-11-17 too
+  ("Accept f43c7ed"). See "Gantt gap review — 2026-11-17" and
   "Gantt chart replica — 2026-11-16" below.
 - Waiting for Aly's acceptance from before the board was retired: B3Y1XY
   (password reset fixes), Z9JCZ6, MTEDTM, AX572Q and the six tested tickets
@@ -109,7 +109,8 @@ they have developed using react, tailwind css and shadcn/ui. Lets replicate the 
 thing", in plain JavaScript ("Lets keep our JS for now if everything functions as shadcn ui";
 `DECISIONS_LOG.md`). The block replicated is `gantt-chart-04` (the one with dependency arrows).
 
-Status: built, tested, reviewed, pushed in this commit. It waits for Aly's acceptance in chat.
+Status: built, tested, reviewed and pushed in `f43c7ed`; accepted by Aly on 2026-11-17
+("Accept f43c7ed").
 Nothing on the checklist needed React. The contract is
 `docs/design/gantt-steps-contract.md`.
 
