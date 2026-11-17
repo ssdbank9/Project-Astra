@@ -183,7 +183,12 @@ globalThis.runProbe=async()=>{
   document.querySelector('#detail-body').innerHTML='';
   const direct={confirmHtml,confirmHidden,cancelled,linkHtml,linkHidden,copied,copiedStatus,failedStatus,reopened:mainReopened,revokeHtml,
     refused,cleared,createRefused,panelKept,calls:mainCalls,wired,createFocus,revokeFocus,otherTask,redrawn,afterDone,revokeCancelled,away,
-    labels:[EVENT_LABELS.direct_link_created,EVENT_LABELS.direct_link_revoked,EVENT_LABELS.attachment_direct_download]};
+    labels:[EVENT_LABELS.direct_link_created,EVENT_LABELS.direct_link_revoked,EVENT_LABELS.attachment_direct_download],
+    history:[
+      renderEvent({event_type:'attachment_direct_download',occurred_at:'2026-01-02T00:00:00Z',actor_name:'Owner <b>',reason:'via direct link'}),
+      renderEvent({event_type:'attachment_direct_download',occurred_at:'2026-01-02T00:00:00Z',actor_name:null,reason:'via direct link'}),
+      renderEvent({event_type:'direct_link_created',occurred_at:'2026-01-02T00:00:00Z',actor_name:'Owner <b>'}),
+      renderEvent({event_type:'attachment_downloaded',occurred_at:'2026-01-02T00:00:00Z',actor_name:null})]};
   document.querySelector=qs2;
   state.projects=[];state.entities=[];
   const qs=document.querySelector.bind(document);document.querySelector=s=>qs(s)||qs('#final-results-body');
@@ -360,6 +365,21 @@ class HostedAttachmentUiTests(unittest.TestCase):
     def test_the_task_history_names_the_direct_link_events(self):
         self.assertEqual(self.out['direct']['labels'],
                          ['Direct link created', 'Direct link revoked', 'Downloaded through a direct link'])
+
+    def test_a_download_through_a_direct_link_names_no_person(self):
+        # Aly, 2026-11-17 (question 4). Even a row that still carries a name shows none, and
+        # no "Unknown" stands in for it; other rows keep their name, or "Unknown" without one.
+        named_old, unnamed, created, other = self.out['direct']['history']
+        for row in (named_old, unnamed):
+            with self.subTest(row=row):
+                self.assertIn('<strong>Downloaded through a direct link</strong>', row)
+                self.assertNotIn('Owner', row)
+                self.assertNotIn('Unknown', row)
+                self.assertEqual(row.count(' · '), 1)  # the date only
+                self.assertIn('<em>Reason: via direct link</em>', row)
+        self.assertIn(' · Owner &lt;b&gt;</li>', created)
+        self.assertEqual(created.count(' · '), 2)
+        self.assertIn(' · Unknown</li>', other)
 
     def test_storage_commands_are_named_in_the_owner_history_as_server_commands(self):
         # MXY7BG slice 4: astra storage-migrate and storage-prune are audited like the other

@@ -446,6 +446,28 @@ class DirectLinkTests(Fixture):
         self.assertEqual(self.events("attachment_downloaded"), [])
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM notifications").fetchone()[0], notices)
 
+    def test_the_history_shows_a_download_through_a_link_with_no_person(self):
+        # Aly, 2026-11-17 (question 4): nobody is signed in, so the row names nobody. The
+        # creator stays named in the link's own details and on the "Direct link created" row.
+        attachment, _, token = self.link()
+        self.service.open_direct_link(token)[1].close()
+        self.service.open_task_file(self.owner, self.task["id"], attachment["id"])[1].close()
+        manager = self.user("manager", "manager")
+        chairman = self.user("chairman", None, "chairman")
+        for actor in (self.owner, manager, chairman):
+            with self.subTest(actor=actor["email"]):
+                events = {event["event_type"]: event for event in self.service.task_events(actor, self.task["id"])}
+                download = events["attachment_direct_download"]
+                self.assertEqual((download["actor_user_id"], download["actor_name"], download["reason"]),
+                                 (None, None, "via direct link"))
+                for kind in ("direct_link_created", "attachment_downloaded"):
+                    self.assertEqual((events[kind]["actor_user_id"], events[kind]["actor_name"]),
+                                     (self.owner["id"], "Owner"))
+                self.assertEqual(self.shown(actor, attachment)[0]["direct_link"]["created_by_name"], "Owner")
+        # The stored row keeps the creator: a history row needs a person, and the audit keeps it.
+        [stored] = self.events("attachment_direct_download")
+        self.assertEqual(stored["actor_user_id"], self.owner["id"])
+
     def test_a_wrong_or_malformed_token_finds_nothing_and_storage_is_never_asked(self):
         _, link, token = self.link()
         stored_hash = self.link_rows()[0]["token_hash"]
@@ -1125,6 +1147,12 @@ class HttpTests(unittest.TestCase):
         downloads = self.db.execute(
             "SELECT COUNT(*) FROM task_events WHERE event_type='attachment_direct_download'").fetchone()[0]
         self.assertEqual(downloads, 1)
+        # The task history over HTTP names nobody for that download (Aly, 2026-11-17).
+        response, body = self.call("GET", f"/api/tasks/{self.task['id']}/events", headers={"Cookie": owner[0]})
+        self.assertEqual(response.status, 200, body)
+        [shown] = [event for event in json.loads(body)["events"]
+                   if event["event_type"] == "attachment_direct_download"]
+        self.assertEqual((shown["actor_user_id"], shown["actor_name"]), (None, None))
         payload = {"task_id": self.task["id"], "link_id": link["id"], "reason": "sent to the wrong person"}
         self.assertEqual(self.revoke(owner, payload, csrf=False)[0].status, 403)
         self.assertEqual(self.revoke(viewer, payload)[0].status, 403)

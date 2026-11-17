@@ -2696,9 +2696,11 @@ function wireReviewers(task){
   }));
 }
 
+// Aly, 2026-11-17: a download through a direct link names no person; nobody was signed in.
+const NO_PERSON_EVENTS=new Set(["attachment_direct_download"]);
 function renderEvent(ev){
   const when=new Date(ev.occurred_at).toLocaleString();
-  const who=ev.actor_name||"Unknown";
+  const who=NO_PERSON_EVENTS.has(ev.event_type)?"":(ev.actor_name||"Unknown");
   const label=EVENT_LABELS[ev.event_type]||ev.event_type;
   let detail="";
   if(ev.event_type==="task_updated"){
@@ -2713,7 +2715,7 @@ function renderEvent(ev){
     const b=safeParse(ev.before_json);detail=`<br>Removed predecessor: ${escapeHtml(b.predecessor_task_id||"")}`;
   }
   const reason=ev.reason?`<br><em>Reason: ${escapeHtml(ev.reason)}</em>`:"";
-  return `<li><strong>${escapeHtml(label)}</strong> · ${escapeHtml(when)} · ${escapeHtml(who)}${reason}${detail}</li>`;
+  return `<li><strong>${escapeHtml(label)}</strong> · ${escapeHtml(when)}${who?` · ${escapeHtml(who)}`:""}${reason}${detail}</li>`;
 }
 
 function safeParse(text){try{return text?JSON.parse(text):{}}catch{return{}}}

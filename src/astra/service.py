@@ -4510,8 +4510,9 @@ class AstraService:
 
     def open_direct_link(self, token):
         """The file behind an active direct link, for anyone who holds the token (Item 15).
-        No session and no task check, by the owner's explicit decision; the download is
-        audited on the task under the owner who created the link."""
+        No session and no task check, by the owner's explicit decision. The download is
+        recorded on the task under the owner who created the link, and the task history
+        shows it with no person (NO_PERSON_EVENT_KINDS)."""
         if not isinstance(token, str) or not 20 <= len(token) <= 128:
             raise KeyError("File not found.")
         row = self.db.execute(
@@ -5620,6 +5621,13 @@ class AstraService:
         "attachment_added", "attachment_removed", "final_result_marked", "final_result_unmarked",
     )
 
+    # Aly, 2026-11-17 (question 4 on MXY7BG slice 3): nobody is signed in for a download
+    # through a direct link. The row is stored on the owner who created the link, because a
+    # history row needs a person, but it is shown with no person: the creator is named in the
+    # link's own details (the "Direct link created" row, and the attachment list while the link
+    # is active). The kind is listed again in app.js (NO_PERSON_EVENTS).
+    NO_PERSON_EVENT_KINDS = frozenset({"attachment_direct_download"})
+
     def _sees_full_history(self, actor: dict, project_id: str) -> bool:
         return actor["global_role"] == "chairman" or self.can_manage_project(actor, project_id)
 
@@ -5633,8 +5641,11 @@ class AstraService:
             sql += f" AND (e.event_type IN ({','.join('?' * len(limited_kinds))}) OR e.actor_user_id=?)"
             params.extend(limited_kinds)
             params.append(actor["id"])
-        rows = self.db.execute(sql + " ORDER BY e.occurred_at,e.id", params).fetchall()
-        return [dict(row) for row in rows]
+        rows = [dict(row) for row in self.db.execute(sql + " ORDER BY e.occurred_at,e.id", params).fetchall()]
+        for row in rows:
+            if row["event_type"] in self.NO_PERSON_EVENT_KINDS:
+                row["actor_user_id"] = row["actor_name"] = None
+        return rows
 
     def project_events(self, actor: dict, project_id: str) -> list[dict]:
         self.get_project(actor, project_id)

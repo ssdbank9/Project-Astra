@@ -7,7 +7,7 @@ below that mentions tickets, lanes or board counts is to be acted on through
 jaira any more; `.jaira/` is read-only history. From now on this file carries
 status and open work, updated in the same commit as the work.
 
-Status at `e2a7541` (plus this commit):
+Status at `ecd23a9` (plus this commit):
 
 - MXY7BG hosted attachments: slice 1 (`18c4e54`) and slice 2 (`8fdd9d5`) are
   pushed and reviewed. Slice 3 (App Owner-only audited permanent direct
@@ -20,10 +20,11 @@ Status at `e2a7541` (plus this commit):
   are answered; the outbound network rule and the bucket backup are left
   open until a bucket is taken up. The last five storage answers are
   Claude's recommendations, which Aly took. Uploads stay in the server
-  folder for now. Open work from the answers: a download through a direct
-  link is to show no person in the task history (not started; waits for
-  Aly's go-ahead), and each file's row is to record its bucket before the
-  first real use of a bucket. Nits left: two owners saving the attachment
+  folder for now. The one change the answers ask for now, a download
+  through a direct link showing no person in the task history, is built in
+  this commit (step 3.6) and waits for Aly's acceptance. Open work: each
+  file's row is to record its bucket before the first real use of a bucket.
+  Nits left: two owners saving the attachment
   settings at once overwrite each other (both audited);
   `attachment_settings` and `attachment_links` are not in the backup
   required-table list.
@@ -283,7 +284,7 @@ Status: accepted by Aly on 2026-11-16 ("Accept both"). Built, tested, reviewed
 and pushed in `5220018` (on the branch since the merge `575f2fa`; full suite
 there: 1299 tests, OK, 2 skipped on Windows). Nothing is deployed. Aly
 answered the questions below on 2026-11-17; the one change they ask for
-(question 4) is not built yet and waits for Aly's go-ahead.
+(question 4) is built in step 3.6 and waits for Aly's acceptance.
 
 - [x] 3.1 Schema v25 `attachment_links`: one active link per uploaded file,
   the token stored only as a SHA-256 hash, who created and who revoked it,
@@ -298,6 +299,18 @@ answered the questions below on 2026-11-17; the one change they ask for
   once with a copy button; "Revoke direct link" asks for a reason.
 - [x] 3.5 Tests at service, HTTP and UI level, every guard removed fails a
   test, independent review, browser check, full suite.
+- [x] 3.6 Question 4 (Aly, 2026-11-17, "Show no person"): a download through
+  a direct link shows no person in the task history. The row is still stored
+  under the owner who created the link, because a history row needs a
+  person, and the task history API and the page leave the person out. The
+  creator stays named on the "Direct link created" row and, while the link
+  is active, in the attachment list. Checked: service, HTTP and UI tests; 10
+  guards removed in a complete copy that passed untouched, each failing a
+  test; an independent read with no blocking finding; in a browser, the
+  existing link downloads of a local test task showed the date and reason
+  only, and other rows kept their names. Left as it was: a creator who is no
+  longer a manager still sees the link's history rows on a task they can
+  open (the rows count as theirs); the rows now name nobody.
 
 What an owner gets:
 
@@ -308,7 +321,8 @@ What an owner gets:
   link is replaced by revoking it and creating a new one.
 - Any App Owner can revoke a link, with a reason of up to 500 characters.
   Removing the file ends its link.
-- The task history shows when a link was created, revoked and used.
+- The task history shows when a link was created, revoked and used. A use
+  names no person (step 3.6).
 - The link never reaches a log. Astra's request log, Waitress's own log,
   Caddy's access log and Caddy's own log write `/files/[redacted]` or
   `/files/redacted`. Only the exact path `/files/<token>` is served, so no
@@ -367,7 +381,7 @@ Questions for Aly, answered on 2026-11-17 (today's behaviour is stated first):
    link, because nobody is signed in. Is that the right name to show?
    Answer: show no person. The row is to say only that the file was
    downloaded through a direct link, with the creator named in the link's
-   own details. New work, not started; it waits for Aly's go-ahead.
+   own details. Built in step 3.6; it waits for Aly's acceptance.
 5. Restoring an older backup brings back a link that was revoked after that
    backup. Accept this, or add "revoke every link" to the restore steps?
    Answer: accept as is.
