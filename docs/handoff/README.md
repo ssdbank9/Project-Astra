@@ -31,8 +31,10 @@ Status at `7bf2f1a` (plus this commit):
 - Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
   plain JS: built, tested, reviewed and pushed on 2026-11-16; on 2026-11-17 a
   second side-by-side check in the browser found four gaps, now closed (Edit
-  Step, the 40px zoom step, the sheet's Close button and field order). It
-  waits for Aly's acceptance. See "Gantt gap review — 2026-11-17" and
+  Step, the 40px zoom step, the sheet's Close button and field order),
+  pushed in `a0262d1` and accepted by Aly on 2026-11-17 ("Accept"). The
+  question asked was about `a0262d1` only; the replica itself (`f43c7ed`)
+  has had no acceptance of its own. See "Gantt gap review — 2026-11-17" and
   "Gantt chart replica — 2026-11-16" below.
 - Waiting for Aly's acceptance from before the board was retired: B3Y1XY
   (password reset fixes), Z9JCZ6, MTEDTM, AX572Q and the six tested tickets
@@ -41,6 +43,10 @@ Status at `7bf2f1a` (plus this commit):
   recorded here.
 
 ## Gantt gap review — 2026-11-17
+
+Status: pushed in `a0262d1`; accepted by Aly on 2026-11-17 ("Accept", answering "Do you
+accept the Gantt gap fixes in a0262d1?"). The judgment calls below stand unless Aly reverses
+one.
 
 Aly asked: "review if the gatt does everything like shadcnstudio gantt, check using browser".
 The block (`gantt-chart-04`) and Astra's chart were opened side by side in the in-app browser

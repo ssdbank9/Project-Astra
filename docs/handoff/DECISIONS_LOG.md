@@ -272,6 +272,8 @@ Claude found that the block opens an "Edit Step" sheet from a bar and asked two 
   "Open task" link.
 - The block's Delete: Aly chose "Cancel the step": a "Cancel step" button sets the status to
   Cancelled through the existing service, asking for confirmation first; the history is kept.
+- Asked "Do you accept the Gantt gap fixes in a0262d1?", Aly answered "Accept". The
+  question covered `a0262d1` only, not the replica in `f43c7ed`.
 
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
