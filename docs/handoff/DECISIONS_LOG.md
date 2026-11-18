@@ -277,6 +277,14 @@ Claude found that the block opens an "Edit Step" sheet from a bar and asked two 
 - Asked "Do you also accept the original Gantt replica in f43c7ed?", Aly answered
   "Accept f43c7ed".
 
+### 2026-11-18 — Enter in a form submits it (chat with Claude)
+
+Aly asked "Lets focus on the task open": the follow-up that Enter in Create project,
+close or reopen project, and Add a task pressed Cancel. Fixed in `ab03fb4` (Cancel is a
+plain button; Enter submits).
+
+- Asked "Do you accept the Enter fix in ab03fb4?", Aly answered "Accept".
+
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
 These are choices Claude made and reported; Aly has not overruled them. They

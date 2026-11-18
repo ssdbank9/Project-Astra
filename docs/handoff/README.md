@@ -64,7 +64,8 @@ that closes its dialog; Enter submits with Create, Continue or Add task. Escape 
   existing form, such as `#move-form`, whose Cancel is already a plain button), only
   `<button>` elements, visible labels (not an icon-only button), and it skips forms whose only
   fields are checkboxes.
-- Status: pushed in this commit; waits for Aly's acceptance in chat.
+- Status: pushed in `ab03fb4`; accepted by Aly on 2026-11-18 ("Accept", in answer to "Do
+  you accept the Enter fix in ab03fb4?").
 
 ## Gantt gap review — 2026-11-17
 
