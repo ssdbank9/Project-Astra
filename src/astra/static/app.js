@@ -1807,7 +1807,7 @@ function openProjectAction(action,pid){
 function reopenProject(pid){openProjectAction("reopen",pid)}
 function closeProject(pid){if(!pid){alert("Select a single project in the filter to close it.");return}openProjectAction("close",pid)}
 document.querySelector("#project-action-form").addEventListener("submit",async e=>{
-  e.preventDefault();const form=e.target,button=e.submitter;if(button?.value==="cancel"){form.closest("dialog").close();return}
+  e.preventDefault();const form=e.target;
   const action=form.dataset.action,pid=form.dataset.projectId,reason=form.elements.reason.value.trim();
   try{await api(action==="reopen"?`/api/projects/${pid}/reopen`:`/api/projects/${pid}/close`,{method:"POST",body:JSON.stringify(action==="reopen"?{reason}:{note:reason,exceptional:form.elements.exceptional.checked})});form.closest("dialog").close();await load();if(action==="reopen")showToast("Project reopened.")}
   catch(err){form.querySelector(".error").textContent=err.message}
@@ -2206,8 +2206,12 @@ async function fillAssignees(projectId,select,selectedId,purpose="task",currentN
     const retry=document.createElement("button");retry.type="button";retry.className="link";retry.textContent="Retry people";retry.addEventListener("click",()=>fillAssignees(projectId,select,selectedId,purpose,currentName));hint.appendChild(retry);return false;
   }
 }
-document.querySelector("#project-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{await api("/api/projects",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load()}catch(err){e.target.querySelector(".error").textContent=err.message}});
-document.querySelector("#task-form").addEventListener("submit",async e=>{e.preventDefault();const button=e.submitter;if(button?.value==="cancel"){e.target.closest("dialog").close();return}try{const data=Object.fromEntries(new FormData(e.target));const out=await withConfirms({title:data.title||"the new task"},COLUMN_OF_STATUS[data.status]||"draft",more=>api("/api/tasks",{method:"POST",body:JSON.stringify({...data,...more})}));if(!out)return;const {task}=out;e.target.reset();e.target.closest("dialog").close();await load();if(task&&currentRoute().name==="portfolio"&&!visibleTasks().some(t=>t.id===task.id))showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnPortfolio)}catch(err){e.target.querySelector(".error").textContent=err.message}});
+// Cancel in these forms is a plain button, so Enter in a field submits with the form's only submit
+// button (Create, Continue, Add task) and never closes the dialog unsaved.
+for(const [button,dialog] of [["#project-cancel","#project-dialog"],["#project-action-cancel","#project-action-dialog"],["#task-cancel","#task-dialog"]])
+  document.querySelector(button).onclick=()=>document.querySelector(dialog).close();
+document.querySelector("#project-form").addEventListener("submit",async e=>{e.preventDefault();try{await api("/api/projects",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});e.target.reset();e.target.closest("dialog").close();await load()}catch(err){e.target.querySelector(".error").textContent=err.message}});
+document.querySelector("#task-form").addEventListener("submit",async e=>{e.preventDefault();try{const data=Object.fromEntries(new FormData(e.target));const out=await withConfirms({title:data.title||"the new task"},COLUMN_OF_STATUS[data.status]||"draft",more=>api("/api/tasks",{method:"POST",body:JSON.stringify({...data,...more})}));if(!out)return;const {task}=out;e.target.reset();e.target.closest("dialog").close();await load();if(task&&currentRoute().name==="portfolio"&&!visibleTasks().some(t=>t.id===task.id))showToast(`“${task.title}” was added · the current filters hide it`,"Show it",showAllOnPortfolio)}catch(err){e.target.querySelector(".error").textContent=err.message}});
 const STATUSES=["draft","assigned","in_progress","submitted","changes_requested","completed","on_hold","delayed","cancelled","abandoned","reopened"];
 const CRITICALITIES=[["","Unrated"],["critical","Critical"],["high","High"],["normal","Normal"],["low","Low"]];
 const GOVERNED=["submitted","completed","on_hold","reopened"];

@@ -128,10 +128,11 @@ class FrontendCancelCoverageTests(unittest.TestCase):
         html = (STATIC / 'index.html').read_text(encoding='utf-8')
         for form_id in ('project-form', 'project-action-form', 'task-form'):
             form = html.split('id="' + form_id + '"', 1)[1].split('</form>', 1)[0]
-            cancels = [t for t in re.findall(r'<button[^>]*>', form) if 'value="cancel"' in t]
+            # Since 2026-11-18 Cancel is a plain button: it never submits, so it never validates.
+            cancels = [t for t in re.findall(r'<button[^>]*>', form) if 'cancel' in t]
             self.assertTrue(cancels, form_id + ' has no Cancel button')
             for tag in cancels:
-                self.assertIn('formnovalidate', tag, form_id)
+                self.assertIn('type="button"', tag, form_id)
 
 
 class FrontendTouchTargetTests(unittest.TestCase):

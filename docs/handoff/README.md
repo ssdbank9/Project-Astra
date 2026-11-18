@@ -42,6 +42,30 @@ Status at `7bf2f1a` (plus this commit):
   JRNDC8 once B3Y1XY is accepted. Acceptance is now a line from Aly in chat,
   recorded here.
 
+## Enter in a form submits it — 2026-11-18
+
+Aly: "Lets focus on the task open" (the follow-up above). Create project, close or reopen
+project, and Add a task had Cancel as the first submit button, so Enter in a field (Task
+title, project Name) closed the dialog and nothing was saved. Cancel is now a plain button
+that closes its dialog; Enter submits with Create, Continue or Add task. Escape still closes.
+
+- Tests: `tests/test_dialog_enter_submits.py` scans every form in `index.html` and every form
+  `app.js` writes, so a form with a field never has Cancel, Close, Discard or Keep as its
+  first submit button; a probe checks each Cancel closes its dialog and sends nothing. Two
+  older tests that required `formnovalidate` on these Cancels now require `type="button"`
+  (it never submits, so it never validates).
+- Guard removal: 6 guards removed one at a time in a complete throwaway copy after a passing
+  baseline; each made a test fail.
+- Browser (in-app, `tests/ui_fixture_server.py`): Enter in Task title added the task; Enter
+  in the project Name created the project; each Cancel closed its dialog and saved nothing.
+- Independent review (a second agent, read-only): nothing significant; nothing relied on the
+  removed Cancel branches, and Escape is unchanged. Known limits of the scan, none affecting
+  today's code: it reads only forms written out as `<form>…</form>` (not content put into an
+  existing form, such as `#move-form`, whose Cancel is already a plain button), only
+  `<button>` elements, visible labels (not an icon-only button), and it skips forms whose only
+  fields are checkboxes.
+- Status: pushed in this commit; waits for Aly's acceptance in chat.
+
 ## Gantt gap review — 2026-11-17
 
 Status: pushed in `a0262d1`; accepted by Aly on 2026-11-17 ("Accept", answering "Do you
@@ -337,7 +361,8 @@ Choices where the block gives no answer:
 
 Follow-up for Aly to decide, outside this change: the task form and the project form have the
 same "Enter presses Cancel" order of buttons that the New Step sheet had (`index.html`,
-`#task-form` and `#project-form`).
+`#task-form` and `#project-form`). Done on 2026-11-18 at Aly's request ("Lets focus on the task
+open"): see "Enter in a form submits it — 2026-11-18".
 
 ## MXY7BG slices 3 and 4 — 2026-11-16
 

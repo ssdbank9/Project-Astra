@@ -143,10 +143,12 @@ class FrontendIntegrityTests(unittest.TestCase):
 class FrontendControlTests(unittest.TestCase):
     def test_cancel_does_not_submit_or_validate_required_fields(self):
         html = (STATIC/'index.html').read_text(encoding='utf-8')
+        # Since 2026-11-18 Cancel is a plain button (type="button"): it neither submits nor validates,
+        # and Enter in a field submits with the form's own button (tests/test_dialog_enter_submits.py).
         for form_id in ('project-form','task-form'):
             form = html.split('id="'+form_id+'"',1)[1].split('</form>',1)[0]
-            cancel = next(t for t in re.findall(r'<button[^>]*>',form) if 'value="cancel"' in t)
-            self.assertIn('formnovalidate', cancel)
+            cancel = next(t for t in re.findall(r'<button[^>]*>',form) if 'cancel' in t)
+            self.assertIn('type="button"', cancel)
 
     def test_reviewer_controls_are_named(self):
         js = (STATIC/'app.js').read_text(encoding='utf-8')
