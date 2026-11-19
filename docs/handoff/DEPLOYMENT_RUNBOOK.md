@@ -52,8 +52,11 @@ Checklist:
   specific commit with synthetic data only.
 - [ ] A release tag exists (`git ls-remote --tags origin` shows `<tag>`), or you
   have the exact commit SHA to deploy.
-- [ ] Aly has chosen the DuckDNS name, the OCI home region, the Ubuntu version
-  and the backup approach (`OPEN_QUESTIONS.md` Q7 and Q10).
+- [ ] Aly has chosen the DuckDNS name, the OCI home region and the Ubuntu
+  version (`OPEN_QUESTIONS.md` Q7).
+- [x] Q10: Aly chose the off-site copy through a write-only pre-authenticated
+  request to a private bucket, with the bucket's lifecycle rules for retention
+  (2026-11-19), and `age` encryption.
 - [x] Q22: Aly selected Waitress for hosted use, with the built-in server kept
   for local development. Use the `--waitress` production entry point below.
 
@@ -630,117 +633,143 @@ echo 'age1...' | sudo tee /srv/astra/backup-recipient.txt
 sudo chown astra:astra /srv/astra/backup-recipient.txt
 ```
 
-**[AGENT]** Create `/usr/local/bin/astra-backup` (owner root, mode 755):
+**[AGENT]** Install the script and its units from the repository
+(`deploy/backup/astra-backup`, `deploy/systemd/astra-backup.service`,
+`deploy/systemd/astra-backup.timer`), and the folder they write:
 
-```sh
-#!/bin/sh
-set -eu
-umask 027
-STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-PLAIN=/srv/astra/backups/astra-$STAMP.sqlite3
-trap 'rm -f "$PLAIN"' EXIT
-test ! -e "$PLAIN.age"
-ASTRA_HOME=/srv/astra/data /opt/astra/app/.venv/bin/astra backup --to "$PLAIN"
-age -R /srv/astra/backup-recipient.txt -o "$PLAIN.age" "$PLAIN"
-rm -f "$PLAIN"
-echo "backup written: $PLAIN.age"
-# Uploaded files (MXY7BG), taken after the database: a stored file is written
-# once and never changed, so every file the database copy names is already there.
-if [ -d /srv/astra/data/uploads/objects ]; then
-  tar -C /srv/astra/data -cf - uploads/objects \
-    | age -R /srv/astra/backup-recipient.txt -o "/srv/astra/backups/uploads-$STAMP.tar.age"
-  echo "files written: /srv/astra/backups/uploads-$STAMP.tar.age"
-fi
+```bash
+sudo install -o root -g root -m 755 /opt/astra/app/deploy/backup/astra-backup /usr/local/bin/astra-backup
+sudo install -o root -g root -m 644 /opt/astra/app/deploy/systemd/astra-backup.service /etc/systemd/system/astra-backup.service
+sudo install -o root -g root -m 644 /opt/astra/app/deploy/systemd/astra-backup.timer /etc/systemd/system/astra-backup.timer
+sudo install -d -o astra -g astra -m 750 /srv/astra/backups
+sudo apt-get install -y age curl
+sudo systemctl daemon-reload
 ```
 
-Uploaded files live in `/srv/astra/data/uploads/objects` (under `ASTRA_HOME`,
-which the service may write). They are not in the SQLite backup, so the script
-saves them as a second encrypted file. One gap: a file removed in Astra between
-the two steps is missing from the copy, while the database copy still lists it.
-Restore both files from the same stamp. Nothing scans uploaded files for
-malware; Aly accepted that risk (Items 10-11 on 6G89SJ).
+What one run does (the comments at the top of the script say the same):
 
-Do not add age-based deletion here. The approved retention is 7 daily, 4 weekly
-and 3 monthly backups; the sample script does not implement or verify that
-schedule. Keep this timer disabled until a separate retention job has been
-implemented and tested against disposable backup files.
+1. A verified SQLite snapshot of the database (`astra backup`), encrypted with
+   `age` to Aly's public key as `astra-<stamp>.sqlite3.age`. The plaintext
+   snapshot is removed however the run ends, also when it is stopped
+   (`systemctl stop`, a reboot); one left by a power cut is removed at the next
+   run.
+2. Straight away, the encrypted database is copied off the server through the
+   write-only pre-authenticated request (11.2): to `daily/` every night, and to
+   `weekly/` and `monthly/` on the first good night of each ISO week and month
+   (UTC), so a failed or missed night only moves those to the next one. Which
+   week and month went up last is kept in `/var/lib/astra-backup`. A missing
+   or malformed request, or a refused upload, fails the run with
+   `NO OFF-SITE COPY` in the journal.
+3. The uploaded files in the server folder (`/srv/astra/data/uploads/objects`)
+   as `uploads-<stamp>.tar.age`. The database copy is taken first: a stored file
+   is written once and never changed, so every file the copy names is already
+   there. A file removed in Astra between the two steps is missing from the
+   archive while the database copy still lists it; restore both files from the
+   same stamp. If a file is added or removed while `tar` reads (status 1), the
+   archive is kept and the journal says so; the file is in the next night's.
+4. `astra backup-prune --dir /srv/astra/backups` keeps, on the server, the
+   newest backup of each of the 7 most recent days, 4 most recent ISO weeks and
+   3 most recent months that have one, with its uploads archive, and deletes
+   the rest. Days with a backup are counted, not calendar days, so nights the
+   backup failed never cost a good copy. As in restic's `--keep-monthly`, the
+   current week and month count among the 4 and the 3, so the oldest copy on
+   the server is the last one of the month before last. It deletes only files
+   with exactly those names and lists anything else as "Left alone"; a backup
+   stamped more than a day in the future (a wrong clock) is left alone and
+   holds no place. Run it by hand with `--dry-run` to see what it would delete.
 
-(`age -R` reads recipients from a file; verify the flag with `age --help`.)
+A failed step does not stop the ones after it (a refused upload still leaves
+the archive and the prune done), but the run still ends failed. One run at a
+time: a second one started meanwhile stops with "another backup is running".
+Every unfinished file is written as `.part` and only renamed when complete, so
+a failed run never leaves a file under a backup's name. Nothing scans uploaded
+files for malware; Aly accepted that risk (Items 10-11 on 6G89SJ).
 
-The units below are templates only. **Do not install or enable this timer yet.**
-The current script only writes one encrypted local copy; the approved off-box
-upload and tested 7/4/3 retention lifecycle are not implemented. Enabling it
-before those are ready can accumulate encrypted files indefinitely while giving
-no off-box recovery. Enable only after both controls are implemented and tested.
-`/etc/systemd/system/astra-backup.service`:
+Not in the off-site copy: the uploads archive stays on the server and in Aly's
+weekly desktop copy (11.3). A lost server loses the uploaded files newer than
+that desktop copy. Whether to send the archive off-site too is Aly's decision
+(it multiplies the bucket's size by the number of copies kept).
 
-```ini
-[Unit]
-Description=Astra nightly backup
-
-[Service]
-Type=oneshot
-User=astra
-Group=astra
-ExecStart=/usr/local/bin/astra-backup
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectHome=yes
-ProtectSystem=strict
-ReadWritePaths=/srv/astra/data /srv/astra/backups
-```
-
-`/etc/systemd/system/astra-backup.timer` (21:30 UTC is 02:30 in Aly's UTC+5):
-
-```ini
-[Unit]
-Description=Run the Astra backup every night
-
-[Timer]
-OnCalendar=*-*-* 21:30:00 UTC
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-After owner approval of the cloud access method and after both controls above
-pass disposable-file tests, install and enable the units. Until then, keep the
-timer disabled. Verification must confirm the journal shows a successful upload,
-the expected daily/weekly/monthly objects remain under the 7/4/3 policy, and no
-plain `.sqlite3` file remains in `/srv/astra/backups`.
+Checked before this was written (2026-11-19), in WSL Ubuntu 26.04 with the real
+`astra` command, a stand-in for `age` (not installed there) and a local HTTPS
+stand-in for the bucket, 53 checks: the database and archive are written and
+intact; the daily, weekly and monthly uploads land, and a refused weekly upload
+is caught up the next night; 90 older backups are pruned to the policy; a
+missing or malformed request (a space, `http://`, `[]` or `{}`), a refused
+upload, an `age` failure, a `tar` failure, a stopped run, a second run at the
+same time and an existing stamp each end as described without leaving a
+plaintext or unfinished file; the request URL never reaches the output, even
+with a `.curlrc` asking curl to be verbose. `systemd-analyze verify` passes on
+both units. Real `age`, the unit's sandbox at run time and a real OCI request
+are unverified until the drill below.
 
 ### 11.2 Off-box copy to OCI Object Storage **[ALY for the bucket and access]**
 
-Two ways; Aly picks (Q10):
+Aly chose the write-only pre-authenticated request (Q10, 2026-11-19). The
+server can add objects to the bucket but never read, list or delete them, so a
+stolen server cannot remove the off-site copies.
 
-- **Write-only pre-authenticated request (simplest).** Aly creates a private
-  bucket and a pre-authenticated request that only permits writing objects,
-  with an expiry date Aly will renew. The URL is stored on the VM in
-  `/srv/astra/backup-par-url` (owner astra, mode 600). Add to the end of
-  `astra-backup`:
+**[ALY]** In the OCI console (menu names may differ; check each step against
+Oracle's current documentation, unverified):
 
-  ```sh
-  PAR=$(cat /srv/astra/backup-par-url)
-  curl -fsS -X PUT --data-binary @"$PLAIN.age" "${PAR}daily/astra-$STAMP.sqlite3.age"
-  ```
+1. Create a bucket with visibility **Private**, in the home region.
+2. Add lifecycle rules: delete objects with prefix `daily/` after 7 days,
+   `weekly/` after 28 days and `monthly/` after 92 days. This is the off-site
+   7/4/3.
+3. Create a pre-authenticated request on the bucket that **permits object
+   writes** only (no reads, no listing), with an expiry date. Put a reminder in
+   your calendar to create a new one before it expires; an expired request
+   fails every night's run with `NO OFF-SITE COPY`.
+4. Copy the request's URL. It ends in `/o/`. It is a secret: anyone holding it
+   can add objects to the bucket.
 
-  On Sundays also upload to `weekly/`, and on the 1st of the month to
-  `monthly/`. Aly adds bucket lifecycle rules that delete `daily/` objects after
-  7 days, `weekly/` after 28 days and `monthly/` after 92 days, which gives the
-  7/4/3 retention without the VM ever deleting anything. (Pre-authenticated
-  request and lifecycle rule options: verify in the OCI console.)
-- **OCI CLI with instance principal.** More setup (dynamic group and policy),
-  lets a script list and prune. Only if Aly prefers it.
+**[ALY]** Put the URL on the server, typed or pasted so it never lands in the
+shell history or a chat:
 
-Verification: the object appears in the bucket after the nightly run; its size
-matches the local `.age` file.
+```bash
+sudo install -o astra -g astra -m 600 /dev/null /srv/astra/backup-par-url
+sudoedit /srv/astra/backup-par-url
+```
+
+The file holds the URL alone on one line. The script refuses anything that is
+not one `https://` URL ending in `/`, and hands the URL to `curl` on standard
+input, so it never appears in a process list or the journal.
+
+**[AGENT]** Run the backup once and read the journal:
+
+```bash
+sudo systemctl start astra-backup.service
+journalctl -u astra-backup -n 30 --no-pager
+ls -l /srv/astra/backups
+```
+
+Verification: the journal shows `off-site copy: daily/astra-<stamp>.sqlite3.age`
+(and `weekly/`, `monthly/` on the first run), and the unit ended without error;
+**[ALY]** sees that object in the bucket with the same size as the local
+`.age` file (`ls -l`); no `.sqlite3`, `.tar` or `.part` file is in
+`/srv/astra/backups`. Then the restore drill (11.4) from the object downloaded
+from the bucket. Only after both, enable the timer:
+
+```bash
+sudo systemctl enable --now astra-backup.timer
+systemctl list-timers astra-backup.timer --no-pager
+```
+
+The timer runs at 21:30 UTC (02:30 in Pakistan); `Persistent=true` runs a
+missed night once after the server starts. A month later, check that the
+bucket holds about 7 daily, 4 weekly and 1-3 monthly objects and the server
+at most 14 database backups.
 
 ### 11.3 Copy to Aly's desktop **[ALY, weekly]**
 
 ```powershell
-scp -i "$env:USERPROFILE\.ssh\astra_oci" "ubuntu@<ip>:/srv/astra/backups/astra-*.sqlite3.age" "$env:USERPROFILE\Documents\AstraBackups\"
+scp -i "$env:USERPROFILE\.ssh\astra_oci" "ubuntu@<ip>:/srv/astra/backups/*.age" "$env:USERPROFILE\Documents\AstraBackups\"
 ```
+
+This copies the database backups and the uploads archives; the archives are
+the only copy of uploaded files off the server. Copies on the desktop are not
+pruned: delete old ones by hand, keeping each database backup with the uploads
+archive of the same stamp.
 
 The files are encrypted, so a copy on the desktop reveals nothing without the
 key.
@@ -1050,9 +1079,14 @@ Backups and restore, for both backends:
 1. **External uptime check [ALY].** Use a free uptime-monitoring service of
    Aly's choice to request `https://<name>.duckdns.org/` every 5 minutes and
    alert Aly when it is not `200`. Use `GET`, not `HEAD`.
-2. **Backup heartbeat (optional).** If the chosen service offers a heartbeat
-   URL, add `curl -fsS <heartbeat-url>` as the last line of `astra-backup`, so a
-   missed backup raises an alert.
+2. **Backup heartbeat (required before go-live).** A failed backup only marks
+   its unit failed, which nobody sees. Use a monitoring service that offers a
+   heartbeat URL and alerts when a day passes without one, and add the URL in
+   a drop-in so the installed script stays the repository's:
+   `sudo systemctl edit astra-backup.service` with
+   `[Service]` and `ExecStartPost=/usr/bin/curl -fsS --max-time 30 <heartbeat-url>`.
+   It runs only after a successful backup, so a failed or missed night raises
+   an alert.
 3. **Disk space.** Check weekly with `df -h /` and `du -sh /srv/astra`. Keep
    the boot volume below 80%.
 4. **Logs.** `journalctl -u astra`, `journalctl -u caddy`,
@@ -1115,7 +1149,7 @@ answers `200`.
    ```
 
    If `sudo git diff --stat <old-tag> <new-tag> -- deploy/` lists a file,
-   reinstall that file the way stage 3, 7 or 9 does (the Caddyfile with its
+   reinstall that file the way stage 3, 7, 9 or 11 does (the Caddyfile with its
    `sed`), then `sudo systemctl daemon-reload` for the unit or validate and
    reload Caddy, and run `sudo sh /opt/astra/app/deploy/verify-host.sh`.
 
@@ -1175,7 +1209,8 @@ back.
 - [ ] The session cookie is `Secure`, `HttpOnly`, `SameSite=Strict`.
 - [ ] Port 8765 is not reachable from outside.
 - [ ] Astra and Caddy come back after a reboot.
-- [ ] A nightly encrypted backup exists on the VM and in Object Storage.
+- [ ] A nightly encrypted backup exists on the VM and in Object Storage, and
+  the backup heartbeat alerts when a night is missed (stage 12).
 - [ ] A restore drill passed in both directions, within 4 hours.
 - [ ] The uptime alert fires when Astra is stopped.
 - [ ] The OCI budget alert is set and the cost is zero.

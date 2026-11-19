@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .attachment_storage import BACKENDS, StorageError, active_backend, storage_named
 from .backup import create_backup, restore_backup
+from .backup_retention import KEEP_DAILY, KEEP_MONTHLY, KEEP_WEEKLY, prune_backups
 from .db import SchemaMigrationRefused, connect, database_path
 from .service import AstraService, Conflict, Forbidden
 from .web import serve, serve_waitress
@@ -50,6 +51,10 @@ def main(argv=None):
         "--to", required=True, metavar="FILE",
         help="New database file; existing files are never replaced",
     )
+    prune = commands.add_parser(
+        "backup-prune", help="Delete the server's older encrypted backups: keep 7 daily, 4 weekly, 3 monthly")
+    prune.add_argument("--dir", required=True, metavar="FOLDER", help="The backup folder (for example /srv/astra/backups)")
+    prune.add_argument("--dry-run", action="store_true", help="Only list what would be deleted")
     commands.add_parser("digest", help="Create today's App Owner summary if it is enabled and due")
     # MXY7BG slice 4 (Owner Items 6-7): the upload storage backend and its controlled migration.
     # The object storage key is read from the environment or --settings-file, never an argument.
@@ -267,6 +272,21 @@ def _run(args):
     elif args.command == "restore":
         destination = restore_backup(Path(args.source), Path(args.to))
         print(f"Database restored: {destination} (integrity_check: ok)")
+    elif args.command == "backup-prune":
+        plan, failed = prune_backups(Path(args.dir), dry_run=args.dry_run)
+        verb = "Would delete" if args.dry_run else "Deleted"
+        for name in plan.delete:
+            if name not in dict(failed):
+                print(f"{verb} {name}")
+        for name, why in plan.left_alone:
+            print(f"Left alone: {name} ({why})")
+        print(f"Backups kept: {len(plan.keep)} files (policy: {KEEP_DAILY} daily, {KEEP_WEEKLY} weekly, "
+              f"{KEEP_MONTHLY} monthly); {'to delete' if args.dry_run else 'deleted'}: "
+              f"{len(plan.delete) - len(failed)}.")
+        if failed:
+            for name, why in failed:
+                print(f"  FAILED to delete {name}: {why}")
+            raise SystemExit(1)
     elif args.command == "digest":
         db = _existing_database()
         try:

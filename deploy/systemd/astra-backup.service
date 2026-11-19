@@ -1,0 +1,35 @@
+[Unit]
+Description=Astra nightly backup (runbook stage 11)
+
+[Service]
+Type=oneshot
+User=astra
+Group=astra
+ExecStart=/usr/local/bin/astra-backup
+# /var/lib/astra-backup: the lock and which week and month went off-site last.
+StateDirectory=astra-backup
+StateDirectoryMode=0750
+TimeoutStartSec=2h
+UMask=0027
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+# The database folder is written only for SQLite's shared-memory file while reading.
+ReadWritePaths=/srv/astra/data /srv/astra/backups
+# Outbound HTTPS is needed for the off-site copy; Astra's own service stays without it.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

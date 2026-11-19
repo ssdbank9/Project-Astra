@@ -219,10 +219,142 @@ class DeployHostTests(unittest.TestCase):
     def test_runbook_installs_these_files_instead_of_its_own_copies(self):
         runbook = RUNBOOK.read_text(encoding="utf-8")
         for path in ("deploy/systemd/astra.service", "deploy/caddy/Caddyfile",
-                     "deploy/journald/astra.conf", "deploy/ssh/00-astra.conf", "deploy/verify-host.sh"):
+                     "deploy/journald/astra.conf", "deploy/ssh/00-astra.conf", "deploy/verify-host.sh",
+                     "deploy/backup/astra-backup", "deploy/systemd/astra-backup.service",
+                     "deploy/systemd/astra-backup.timer"):
             self.assertIn(path, runbook)
+        # The backup script is installed from deploy/, not pasted from an inline copy.
+        self.assertNotIn("age -R /srv/astra/backup-recipient.txt -o", runbook)
         self.assertNotIn("astra serve --waitress", runbook.replace("`astra serve --waitress`", ""))
         self.assertNotIn("reverse_proxy 127.0.0.1", runbook)
+
+
+BACKUP_SCRIPT = DEPLOY / "backup" / "astra-backup"
+BACKUP_UNIT = DEPLOY / "systemd" / "astra-backup.service"
+BACKUP_TIMER = DEPLOY / "systemd" / "astra-backup.timer"
+
+
+def script_lines():
+    """The backup script's commands, without comments or blank lines."""
+    return [line.strip() for line in BACKUP_SCRIPT.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")]
+
+
+class DeployBackupTests(unittest.TestCase):
+    """Runbook stage 11: the nightly backup, its 7/4/3 retention and the off-site copy through
+    Aly's write-only pre-authenticated request (Aly, 2026-11-19, Q10)."""
+
+    def test_the_script_leaves_nothing_readable_even_when_stopped(self):
+        lines = script_lines()
+        self.assertEqual(BACKUP_SCRIPT.read_text(encoding="utf-8").splitlines()[0], "#!/bin/sh")
+        self.assertIn("set -eu", lines)
+        self.assertIn("umask 027", lines)
+        # The plaintext snapshot and every unfinished file are removed however the run ends;
+        # dash runs no EXIT trap when killed, so a signal is turned into an exit first.
+        self.assertIn("""trap 'rm -f "$DB" "$DB.age.part" "$FILES.age.part" "$FILES.status"' EXIT""", lines)
+        self.assertIn("trap 'exit 1' HUP INT TERM", lines)
+        # What a power cut left behind is removed at the next run (under the lock).
+        self.assertIn('rm -f "$DIR"/astra-*.sqlite3 "$DIR"/uploads-*.tar "$DIR"/*.part "$DIR"/*.status', lines)
+        self.assertLess(lines.index('flock -n 9 || fail "another backup is running"'),
+                        lines.index('rm -f "$DIR"/astra-*.sqlite3 "$DIR"/uploads-*.tar "$DIR"/*.part "$DIR"/*.status'))
+
+    def test_an_unfinished_file_never_takes_a_backups_name(self):
+        lines = script_lines()
+        self.assertIn('age -R "$RECIPIENT" -o "$DB.age.part" "$DB"', lines)
+        self.assertIn('mv "$DB.age.part" "$DB.age"', lines)
+        self.assertIn('mv "$FILES.age.part" "$FILES.age"', lines)
+        self.assertLess(lines.index('rm -f "$DB"'), lines.index('mv "$DB.age.part" "$DB.age"'))
+        # tar's status is kept in a file (a pipeline reports only its last command); 0 or 1
+        # (a file changed while it read) keeps the archive, anything else does not.
+        self.assertIn('if { tar -C "$DATA" -cf - uploads/objects; echo $? > "$FILES.status"; } \\', lines)
+        self.assertIn('if [ "$TAR_STATUS" = 0 ] || [ "$TAR_STATUS" = 1 ]; then', lines)
+        for line in lines:
+            self.assertNotIn('-o "$DB.age"', line.replace('-o "$DB.age.part"', ""))
+
+    def test_the_off_site_copy_comes_first_and_a_failure_still_fails_the_run(self):
+        lines = script_lines()
+        offsite = "offsite || RESULT=1"
+        prune = '"$ASTRA" backup-prune --dir "$DIR" || RESULT=1'
+        self.assertIn(offsite, lines)
+        self.assertIn(prune, lines)
+        self.assertLess(lines.index('mv "$DB.age.part" "$DB.age"'), lines.index(offsite))
+        self.assertLess(lines.index(offsite), lines.index('if { tar -C "$DATA" -cf - uploads/objects; '
+                                                          'echo $? > "$FILES.status"; } \\'))
+        self.assertLess(lines.index(offsite), lines.index(prune))
+        self.assertEqual(lines[-1], 'exit "$RESULT"')
+        # One run at a time.
+        self.assertIn('exec 9> "$STATE/lock"', lines)
+        self.assertIn('flock -n 9 || fail "another backup is running"', lines)
+        # The CLI the script calls exists and keeps the approved counts.
+        from astra import backup_retention
+        self.assertEqual((backup_retention.KEEP_DAILY, backup_retention.KEEP_WEEKLY,
+                          backup_retention.KEEP_MONTHLY), (7, 4, 3))
+        self.assertIn('"backup-prune"', inspect.getsource(cli))
+
+    def test_the_off_site_copy_is_required_and_its_url_never_reaches_a_command_line(self):
+        text = BACKUP_SCRIPT.read_text(encoding="utf-8")
+        lines = script_lines()
+        commands = "\n".join(lines)
+        self.assertIn("PAR_FILE=${ASTRA_BACKUP_PAR_FILE:-/srv/astra/backup-par-url}", lines)
+        self.assertIn('test -s "$PAR_FILE" || { echo "astra-backup: NO OFF-SITE COPY: $PAR_FILE is missing or empty" '
+                      '>&2; return 1; }', lines)
+        # curl reads the URL from standard input (-K -), so `ps` never shows it; -q keeps a
+        # .curlrc out and --globoff keeps [] and {} from being expanded (or echoed in an error).
+        self.assertIn("""if printf 'url = "%s%s"\\n' "$PAR" "$1" \\""", lines)
+        self.assertIn("| curl -q --globoff --fail --silent --show-error --retry 3 --max-time 900 \\", lines)
+        self.assertIn('--upload-file "$DB.age" --config -; then', lines)
+        self.assertEqual(commands.count("curl "), 1)
+        self.assertNotRegex(commands, r'curl[^\n]*\$PAR')
+        # Only https, one URL, nothing that could break out of curl's quoted config value.
+        self.assertIn("*[[:space:]\\\"\\\\\\[\\]\\{\\}]*)", text)
+        self.assertIn("https://*/) ;;", text)
+        # Daily every night; weekly and monthly on the first good night of the ISO week and
+        # the month, remembered in the state folder; all from one clock reading.
+        self.assertIn("set -- $(date -u '+%Y%m%dT%H%M%SZ %G-W%V %Y-%m')", lines)
+        self.assertEqual(commands.count("date "), 1)
+        for line in ('upload "daily/$NAME" || return 1',
+                     'if [ "$(cat "$STATE/last-weekly" 2>/dev/null || true)" != "$WEEK" ]; then',
+                     'upload "weekly/$NAME" || return 1', 'echo "$WEEK" > "$STATE/last-weekly"',
+                     'if [ "$(cat "$STATE/last-monthly" 2>/dev/null || true)" != "$MONTH" ]; then',
+                     'upload "monthly/$NAME" || return 1', 'echo "$MONTH" > "$STATE/last-monthly"'):
+            self.assertIn(line, lines)
+        self.assertLess(lines.index('upload "weekly/$NAME" || return 1'),
+                        lines.index('echo "$WEEK" > "$STATE/last-weekly"'))
+        # Nothing on this server deletes or lists in the bucket.
+        self.assertNotRegex(text, r"-X\s*DELETE|--request\s+DELETE|\boci\b")
+
+    def test_the_script_is_valid_posix_shell(self):
+        sh = shutil.which("sh")
+        if sh is None:
+            self.skipTest("no POSIX sh on PATH")
+        result = subprocess.run([sh, "-n", str(BACKUP_SCRIPT)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_the_backup_unit_runs_unprivileged_and_writes_only_two_folders(self):
+        settings = {}
+        for line in BACKUP_UNIT.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith(("#", "[")):
+                key, _, value = line.partition("=")
+                settings.setdefault(key, []).append(value)
+        for key, value in (("Type", "oneshot"), ("User", "astra"), ("Group", "astra"),
+                           ("StateDirectory", "astra-backup"), ("TimeoutStartSec", "2h"),
+                           ("SystemCallFilter", "@system-service"),
+                           ("ExecStart", "/usr/local/bin/astra-backup"), ("NoNewPrivileges", "yes"),
+                           ("ProtectSystem", "strict"), ("ProtectHome", "yes"), ("PrivateTmp", "yes"),
+                           ("CapabilityBoundingSet", ""),
+                           ("ReadWritePaths", "/srv/astra/data /srv/astra/backups")):
+            self.assertEqual(settings.get(key), [value], key)
+        timer = BACKUP_TIMER.read_text(encoding="utf-8")
+        self.assertIn("\nOnCalendar=*-*-* 21:30:00 UTC\nPersistent=true\n", timer)
+        self.assertIn("\nWantedBy=timers.target\n", timer)
+
+    def test_the_runbook_no_longer_holds_the_timer_back_for_missing_retention(self):
+        runbook = RUNBOOK.read_text(encoding="utf-8")
+        self.assertNotIn("Do not install or enable this timer yet", runbook)
+        self.assertNotIn("Do not add age-based deletion here", runbook)
+        for needed in ("astra backup-prune", "/srv/astra/backup-par-url", "daily/", "weekly/", "monthly/"):
+            self.assertIn(needed, runbook)
 
 
 if __name__ == "__main__":

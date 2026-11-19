@@ -154,8 +154,11 @@ five matter most, because they block phase A work or the server move.
 
 ## Production and deployment (phases B to D)
 
-### Q10. Backup: how does the server reach Object Storage, and which encryption tool?
+### Q10. Backup: how does the server reach Object Storage, and which encryption tool? **Decided 2026-11-19**
 
+- **Aly's decision:** the write-only pre-authenticated request ("Write-only
+  link (Recommended)"), built in `deploy/backup/astra-backup` (runbook stage
+  11).
 - **Recommended default:** a write-only pre-authenticated request to a private
   bucket, with lifecycle rules for the 7/4/3 retention; encryption with `age`
   to a key only you hold (gpg is fine if you prefer it).

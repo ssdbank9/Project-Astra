@@ -1,0 +1,123 @@
+#!/bin/sh
+# Astra nightly backup (deployment runbook, stage 11). Installed as /usr/local/bin/astra-backup
+# (owner root, mode 755) and run by astra-backup.service as the astra user.
+#
+# 1. A verified SQLite snapshot of the database, encrypted with age to Aly's public key.
+# 2. That encrypted database copied off the server through Aly's write-only
+#    pre-authenticated request (PAR): daily/ every night, weekly/ on the first good night
+#    of each ISO week, monthly/ on the first good night of each month (UTC). The bucket's
+#    lifecycle rules delete them after 7, 28 and 92 days; this server can write to the
+#    bucket but never read, list or delete in it.
+# 3. The uploaded files kept in the server folder, as a second encrypted archive.
+# 4. The server's own copies pruned to 7 daily, 4 weekly, 3 monthly (astra backup-prune).
+#
+# The off-site copy comes right after the database, so no later step can cost it. A failed
+# step does not stop the steps after it; the run still ends with status 1, so the unit shows
+# it. Nothing unencrypted is left behind, even when the run is stopped, and an unfinished
+# file never takes a backup's name. One run at a time.
+set -eu
+umask 027
+
+DATA=${ASTRA_BACKUP_DATA:-/srv/astra/data}
+DIR=${ASTRA_BACKUP_DIR:-/srv/astra/backups}
+STATE=${ASTRA_BACKUP_STATE:-/var/lib/astra-backup}
+ASTRA=${ASTRA_BACKUP_ASTRA:-/opt/astra/app/.venv/bin/astra}
+RECIPIENT=${ASTRA_BACKUP_RECIPIENT:-/srv/astra/backup-recipient.txt}
+PAR_FILE=${ASTRA_BACKUP_PAR_FILE:-/srv/astra/backup-par-url}
+
+fail() {
+  echo "astra-backup: $*" >&2
+  exit 1
+}
+
+test -d "$STATE" || fail "no state folder $STATE (the unit's StateDirectory= makes it)"
+exec 9> "$STATE/lock"
+flock -n 9 || fail "another backup is running"
+
+# One clock reading for the name, the ISO week and the month.
+set -- $(date -u '+%Y%m%dT%H%M%SZ %G-W%V %Y-%m')
+STAMP=$1 WEEK=$2 MONTH=$3
+DB=$DIR/astra-$STAMP.sqlite3
+FILES=$DIR/uploads-$STAMP.tar
+trap 'rm -f "$DB" "$DB.age.part" "$FILES.age.part" "$FILES.status"' EXIT
+# A stopped run (systemctl stop, a reboot) still goes through the EXIT trap.
+trap 'exit 1' HUP INT TERM
+# Anything an earlier run could not clean up (a power cut): plaintext and unfinished files.
+rm -f "$DIR"/astra-*.sqlite3 "$DIR"/uploads-*.tar "$DIR"/*.part "$DIR"/*.status
+
+test -s "$RECIPIENT" || fail "no age public key in $RECIPIENT"
+test ! -e "$DB.age" || fail "$DB.age already exists"
+
+ASTRA_HOME=$DATA "$ASTRA" backup --to "$DB"
+age -R "$RECIPIENT" -o "$DB.age.part" "$DB"
+rm -f "$DB"
+mv "$DB.age.part" "$DB.age"
+echo "astra-backup: database written: $DB.age"
+
+RESULT=0
+
+# The off-site copy. The PAR URL is a secret: it is read from its file and handed to curl on
+# standard input (-K -), never on a command line other users of the server could list; -q
+# keeps any .curlrc out, and --globoff keeps curl from expanding [] or {} in it.
+offsite() {
+  test -s "$PAR_FILE" || { echo "astra-backup: NO OFF-SITE COPY: $PAR_FILE is missing or empty" >&2; return 1; }
+  PAR=$(cat "$PAR_FILE")
+  case $PAR in
+    *[[:space:]\"\\\[\]\{\}]*)
+      echo "astra-backup: NO OFF-SITE COPY: $PAR_FILE must hold one URL and nothing else" >&2; return 1 ;;
+    https://*/) ;;
+    *) echo "astra-backup: NO OFF-SITE COPY: $PAR_FILE must hold one https:// URL ending in /" >&2; return 1 ;;
+  esac
+  NAME=astra-$STAMP.sqlite3.age
+  upload "daily/$NAME" || return 1
+  # Weekly and monthly go up on the first good night of the week and the month, so a failed
+  # or missed night only moves them to the next one.
+  if [ "$(cat "$STATE/last-weekly" 2>/dev/null || true)" != "$WEEK" ]; then
+    upload "weekly/$NAME" || return 1
+    echo "$WEEK" > "$STATE/last-weekly"
+  fi
+  if [ "$(cat "$STATE/last-monthly" 2>/dev/null || true)" != "$MONTH" ]; then
+    upload "monthly/$NAME" || return 1
+    echo "$MONTH" > "$STATE/last-monthly"
+  fi
+}
+
+upload() {
+  if printf 'url = "%s%s"\n' "$PAR" "$1" \
+      | curl -q --globoff --fail --silent --show-error --retry 3 --max-time 900 \
+          --upload-file "$DB.age" --config -; then
+    echo "astra-backup: off-site copy: $1"
+  else
+    echo "astra-backup: NO OFF-SITE COPY: the upload to $1 failed" >&2
+    return 1
+  fi
+}
+
+offsite || RESULT=1
+
+# Uploaded files (MXY7BG), taken after the database: a stored file is written once and never
+# changed, so every file the database copy names is already there. tar's status is kept in
+# a file, because a pipeline's status is only that of its last command. Status 1 means a
+# file was added or removed while it read (Astra was in use): the archive is still good, and
+# the file is in tomorrow's. Status 2 or more is a failure.
+if [ -d "$DATA/uploads/objects" ]; then
+  if { tar -C "$DATA" -cf - uploads/objects; echo $? > "$FILES.status"; } \
+      | age -R "$RECIPIENT" -o "$FILES.age.part"; then
+    TAR_STATUS=$(cat "$FILES.status" 2>/dev/null || echo 2)
+  else
+    TAR_STATUS="2 (age failed)"
+  fi
+  if [ "$TAR_STATUS" = 0 ] || [ "$TAR_STATUS" = 1 ]; then
+    mv "$FILES.age.part" "$FILES.age"
+    echo "astra-backup: files written: $FILES.age"
+    [ "$TAR_STATUS" = 0 ] || echo "astra-backup: note: files changed while they were archived; tomorrow's archive has them"
+  else
+    rm -f "$FILES.age.part"
+    echo "astra-backup: the uploads archive could not be written (tar status $TAR_STATUS)" >&2
+    RESULT=1
+  fi
+fi
+
+"$ASTRA" backup-prune --dir "$DIR" || RESULT=1
+
+exit "$RESULT"

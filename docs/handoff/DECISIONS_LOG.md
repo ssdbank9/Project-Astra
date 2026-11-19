@@ -297,6 +297,14 @@ plain button; Enter submits).
   Not covered, because Aly was not asked: the **[ALY]** marks in the two
   documents, and the six findings in the README's "Launch fixes — 2026-11-19".
 
+### 2026-11-19 — backup retention and the off-site copy (chat with Claude)
+
+- Asked what to take on next, Aly chose "Build backup retention".
+- Q10, how the server reaches the bucket: Aly chose "Write-only link
+  (Recommended)", a write-only pre-authenticated request to a private bucket
+  with lifecycle rules for the off-site retention. The server can add objects
+  but never read, list or delete them.
+
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
 These are choices Claude made and reported; Aly has not overruled them. They

@@ -7,7 +7,7 @@ below that mentions tickets, lanes or board counts is to be acted on through
 jaira any more; `.jaira/` is read-only history. From now on this file carries
 status and open work, updated in the same commit as the work.
 
-Status at `a7bf759` (plus this commit):
+Status at `d802763` (plus this commit):
 
 - MXY7BG hosted attachments: slice 1 (`18c4e54`) and slice 2 (`8fdd9d5`) are
   pushed and reviewed. Slice 3 (App Owner-only audited permanent direct
@@ -34,6 +34,12 @@ Status at `a7bf759` (plus this commit):
   `docs/user/`, waiting for Aly's details. Pushed in `a7bf759` and accepted
   by Aly on 2026-11-19 ("Accept"). Findings for Aly are in "Launch fixes —
   2026-11-19" below.
+- Backup retention and off-site copy (2026-11-19, Aly: "Build backup
+  retention"; Q10 decided: the write-only link): the nightly script, its
+  systemd units and `astra backup-prune` (7 daily, 4 weekly, 3 monthly on the
+  server) are in `deploy/` and `src/`, and runbook stage 11 installs them.
+  Built in this commit; waits for Aly's acceptance. Nothing is installed on a
+  server. See "Backup retention — 2026-11-19" below.
 - Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
   plain JS: built, tested, reviewed and pushed on 2026-11-16; on 2026-11-17 a
   second side-by-side check in the browser found four gaps, now closed (Edit
@@ -47,6 +53,63 @@ Status at `a7bf759` (plus this commit):
   recorded in `DECISIONS_LOG.md` on 2026-11-08; 0RHNMG is a duplicate of
   JRNDC8 once B3Y1XY is accepted. Acceptance is now a line from Aly in chat,
   recorded here.
+
+## Backup retention — 2026-11-19
+
+Aly chose "Build backup retention" and, for the off-site copy (Q10), "Write-only
+link (Recommended)". Built in one commit; it waits for Aly's acceptance.
+Nothing is installed or switched on anywhere.
+
+- `src/astra/backup_retention.py` and `astra backup-prune --dir FOLDER
+  [--dry-run]`: keeps the newest backup of each of the 7 most recent days, 4
+  ISO weeks and 3 months that have one (the current week and month count, as
+  in restic), with its uploads archive; deletes only its own file names, never
+  a symlink, a `.part`, a plaintext copy, an archive without its database or a
+  backup stamped in the future.
+- `deploy/backup/astra-backup`: database snapshot, `age`, then straight away
+  the off-site copy through the write-only link (`daily/` nightly, `weekly/`
+  and `monthly/` on the first good night of each ISO week and month), then the
+  uploads archive, then the prune. A failed step does not stop the rest but
+  fails the run. The link is read from `/srv/astra/backup-par-url` and given to
+  curl on standard input (`-q --globoff`), so it is never on a command line or
+  in the journal. One run at a time; a stopped run leaves no plaintext.
+- `deploy/systemd/astra-backup.service` and `.timer` (21:30 UTC, `Persistent`).
+- Runbook stage 11.1-11.3 install these files; 11.2 lists Aly's console steps
+  (private bucket, lifecycle rules 7/28/92 days, a write-only link with an
+  expiry date). The desktop copy now takes the uploads archives too. The backup
+  heartbeat (stage 12) is now required before go-live. `OPEN_QUESTIONS.md` Q10
+  is marked decided.
+
+Checks:
+- Tests: `test_backup_retention` (plan, folder, CLI, a 400-night simulation)
+  and `DeployBackupTests` in `test_deploy_config`.
+- WSL Ubuntu 26.04 end-to-end run of the real script with the real `astra`
+  command, a stand-in for `age` (not installed there) and a local HTTPS stand-in
+  for the bucket: 53 checks pass (uploads, catch-up of a refused weekly upload,
+  pruning 90 old backups, bad links, `age` and `tar` failures, a stopped run,
+  a second run at once, a `.curlrc`, an existing stamp). `sh -n` and
+  `systemd-analyze verify` pass.
+- Guard removal: 37 guards removed one at a time in a complete copy that passed
+  untouched (the symlink guard run in WSL); each made a test fail.
+- Independent review (a second agent, read-only): its first pass found nine
+  points, none losing data outright; all are fixed (the upload now comes before
+  the archive, a stopped run cleans up, a lock, weekly and monthly catch-up,
+  `-q --globoff` and `[]{}` refused, future stamps, the desktop copy,
+  required heartbeat, unit hardening). A second pass confirmed all nine fixed and found one docstring typo, fixed; it also ran curl, Python with sqlite3, flock and tar under the unit's sandbox settings with systemd-run (age not installed there).
+- Full suite: Ran 1456 tests, OK (skipped=4: two symlink tests and two POSIX shell checks, none possible on this Windows machine; the symlink and shell checks ran in WSL).
+
+Unverified until the drill on a real server: real `age`, the unit's sandbox at
+run time (`SystemCallFilter=@system-service` with `age`, `curl` and Python),
+and a real OCI write-only link and lifecycle rules.
+
+For Aly:
+1. Uploaded files are not in the off-site copy, only on the server and in the
+   weekly desktop copy; a lost server loses the files added since that copy.
+   Sending the archive off-site too multiplies the bucket's size by the copies
+   kept. Decide whether to.
+2. The write-only link expires on the date you set; renew it before then, or
+   every night fails with `NO OFF-SITE COPY` (the heartbeat alerts).
+3. Desktop copies are never pruned; delete old ones by hand, in pairs.
 
 ## Launch fixes — 2026-11-19
 
@@ -102,7 +165,7 @@ Checks:
 Found while checking, not changed (Aly to decide):
 1. Backups are not launch-ready: the 7/4/3 retention and the off-box upload are
    not built, so the runbook keeps the backup timer disabled (stage 11). This
-   blocks go-live.
+   blocks go-live. (Built since: "Backup retention — 2026-11-19" below.)
 2. Members are not notified of new work or of the answer to a submission; only
    App Owners get task notices. The Inbox's empty text still says
    "Assignments, reviews and changes to your tasks appear here" (`app.js`).
