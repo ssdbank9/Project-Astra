@@ -304,6 +304,11 @@ plain button; Enter submits).
   (Recommended)", a write-only pre-authenticated request to a private bucket
   with lifecycle rules for the off-site retention. The server can add objects
   but never read, list or delete them.
+- Asked "Do you accept the backup work in d9cf385?", Aly answered "Accept".
+  Not covered, because Aly was not asked: whether to send the uploads archive
+  off-site, the console steps of runbook stage 11.2, the drill on a real
+  server, and the other points "For Aly" in the README's "Backup retention —
+  2026-11-19".
 
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 

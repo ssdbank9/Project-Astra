@@ -7,7 +7,7 @@ below that mentions tickets, lanes or board counts is to be acted on through
 jaira any more; `.jaira/` is read-only history. From now on this file carries
 status and open work, updated in the same commit as the work.
 
-Status at `d802763` (plus this commit):
+Status at `d9cf385` (plus this commit):
 
 - MXY7BG hosted attachments: slice 1 (`18c4e54`) and slice 2 (`8fdd9d5`) are
   pushed and reviewed. Slice 3 (App Owner-only audited permanent direct
@@ -38,8 +38,8 @@ Status at `d802763` (plus this commit):
   retention"; Q10 decided: the write-only link): the nightly script, its
   systemd units and `astra backup-prune` (7 daily, 4 weekly, 3 monthly on the
   server) are in `deploy/` and `src/`, and runbook stage 11 installs them.
-  Built in this commit; waits for Aly's acceptance. Nothing is installed on a
-  server. See "Backup retention — 2026-11-19" below.
+  Pushed in `d9cf385` and accepted by Aly on 2026-11-19 ("Accept"). Nothing
+  is installed on a server. See "Backup retention — 2026-11-19" below.
 - Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
   plain JS: built, tested, reviewed and pushed on 2026-11-16; on 2026-11-17 a
   second side-by-side check in the browser found four gaps, now closed (Edit
@@ -57,8 +57,10 @@ Status at `d802763` (plus this commit):
 ## Backup retention — 2026-11-19
 
 Aly chose "Build backup retention" and, for the off-site copy (Q10), "Write-only
-link (Recommended)". Built in one commit; it waits for Aly's acceptance.
-Nothing is installed or switched on anywhere.
+link (Recommended)". Pushed in `d9cf385`; accepted by Aly on 2026-11-19
+("Accept"). The acceptance covers the built work only: nothing is installed or
+switched on anywhere, the drill on a real server is still to be done, and the
+points "For Aly" below are still open.
 
 - `src/astra/backup_retention.py` and `astra backup-prune --dir FOLDER
   [--dry-run]`: keeps the newest backup of each of the 7 most recent days, 4
