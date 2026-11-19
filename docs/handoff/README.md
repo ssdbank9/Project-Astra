@@ -7,7 +7,7 @@ below that mentions tickets, lanes or board counts is to be acted on through
 jaira any more; `.jaira/` is read-only history. From now on this file carries
 status and open work, updated in the same commit as the work.
 
-Status at `7bf2f1a` (plus this commit):
+Status at `fbf1974` (plus this commit):
 
 - MXY7BG hosted attachments: slice 1 (`18c4e54`) and slice 2 (`8fdd9d5`) are
   pushed and reviewed. Slice 3 (App Owner-only audited permanent direct
@@ -24,10 +24,15 @@ Status at `7bf2f1a` (plus this commit):
   through a direct link showing no person in the task history, is built in
   `7bf2f1a` (step 3.6) and was accepted by Aly on 2026-11-17 ("Accept").
   Open work: each file's row is to record its bucket before the first real
-  use of a bucket. Nits left: two owners saving the attachment settings at
-  once overwrite each other (both audited);
-  `attachment_settings` and `attachment_links` are not in the backup
-  required-table list.
+  use of a bucket. The two nits left then (two owners saving the attachment
+  settings at once, and two tables missing from the backup check) are fixed
+  in the launch fixes below.
+- Launch fixes (2026-11-19, Aly: "Yes, start them"): the daily summary timer
+  no longer spins on the night clocks fall back (F9HBSJ's defect), the backup
+  check requires every table, and a stale save of the attachment settings is
+  refused. Drafts of the user quick-start and the privacy note are in
+  `docs/user/`, waiting for Aly. Built in this commit; waits for Aly's
+  acceptance. Findings for Aly are in "Launch fixes — 2026-11-19" below.
 - Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
   plain JS: built, tested, reviewed and pushed on 2026-11-16; on 2026-11-17 a
   second side-by-side check in the browser found four gaps, now closed (Edit
@@ -41,6 +46,72 @@ Status at `7bf2f1a` (plus this commit):
   recorded in `DECISIONS_LOG.md` on 2026-11-08; 0RHNMG is a duplicate of
   JRNDC8 once B3Y1XY is accepted. Acceptance is now a line from Aly in chat,
   recorded here.
+
+## Launch fixes — 2026-11-19
+
+Asked what is left before launch, Aly chose to start the code fixes and the two
+user documents first ("Yes, start them"). Built in one commit; it waits for
+Aly's acceptance.
+
+- Daily summary timer (F9HBSJ's open defect, `daily_digest.py`): the wait to
+  the next summary is now worked out in UTC from both readings of the delivery
+  time, so on the night clocks fall back it is never zero (the scheduler used
+  to query SQLite nonstop for up to an hour), and a server that was down for
+  the first of two repeated 01:30s still sends that day's summary at the
+  second. Tests drive the real scheduler calls on a simulated clock across
+  both clock changes: one summary a day, never a zero wait. As before, a
+  delivery time inside the skipped spring hour sends one gap-length late
+  (02:30 in New York sends at 03:30).
+- Backups (`backup.py`): a restore now refuses a current-schema file missing
+  `daily_digest_settings`, `daily_digest_runs`, `attachment_settings` or
+  `attachment_links`, which the required-table list had missed. A test now
+  pins the list to every table of a new database, so a future table cannot be
+  forgotten.
+- Attachment settings: the page sends back which save it was loaded from
+  (`expected_updated_at`, null for the defaults); if another App Owner saved
+  since, or the page could not load the settings, the save is refused with 409
+  and a message to reload. The HTTP route requires the field; the check runs
+  inside the write lock, after the owner check.
+- Documents: `docs/user/QUICK_START.md` (E4) and `docs/user/PRIVACY_NOTE.md`
+  (E6), drafts with **[ALY]** marks for the address, support channel, region,
+  contact and two promises only Aly can make. No screenshots yet (they need the
+  hosted address). Neither is linked from the app.
+
+Checks:
+- Guard removal: 13 guards removed one at a time in a complete throwaway copy
+  that passed untouched; each made a test fail. (The first run missed one: the
+  HTTP test could not tell a missing version from a wrong one; the test now
+  checks each message.)
+- Independent review of the code (a second agent, read-only): nothing
+  blocking. It simulated the timer over a year in 12 zones, among them
+  Lord_Howe (30-minute shift), Apia 2011 (a skipped date) and Troll (2-hour
+  shift): no zero wait, no missed or doubled day. Its finding that a failed
+  reload kept the previous version is fixed and guarded.
+- Fact-check of both documents (a third agent, read-only): its corrections are
+  applied (sign-in records, backups, log retention, who adds files, the
+  Chairman's view, notifications, undo scope, button names).
+- Browser (local test server, App Owner, test data): after another save went
+  in, saving the open Attachments form showed the refusal and stored nothing;
+  after reopening, the save went in.
+- Full suite: Ran 1436 tests, OK (skipped=2: the symlink test, no symlinks on
+  this machine, and the POSIX shell check, no sh on PATH).
+
+Found while checking, not changed (Aly to decide):
+1. Backups are not launch-ready: the 7/4/3 retention and the off-box upload are
+   not built, so the runbook keeps the backup timer disabled (stage 11). This
+   blocks go-live.
+2. Members are not notified of new work or of the answer to a submission; only
+   App Owners get task notices. The Inbox's empty text still says
+   "Assignments, reviews and changes to your tasks appear here" (`app.js`).
+   The quick-start tells members to check My Work.
+3. There is no Help link in the app (E5) and no link to the privacy note from
+   the sign-in page (E6).
+4. Hosted, every sign-in attempt is stored with address 127.0.0.1, because
+   Astra sees only Caddy; real addresses are in Caddy's log only.
+5. The system journal is limited by size (200M), not age, and Caddy's current
+   access-log file has no age limit, so addresses can be kept beyond 30 days.
+6. A non-owner who sends an incomplete settings body gets 400 before 403 (as
+   for the existing fields); nothing leaks.
 
 ## Enter in a form submits it — 2026-11-18
 

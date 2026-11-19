@@ -40,14 +40,25 @@ globalThis.runProbe=async()=>{
   nodes['attachment-settings-form']=form;
   const qs2=document.querySelector;document.querySelector=s=>{const m=/^#([\\w-]+)$/.exec(s);return m&&nodes[m[1]]?nodes[m[1]]:qs2(s)};
   const settings={upload_limit_mb:40,saved_limit_mb:120,unusable:null,default_limit_mb:25,hard_limit_mb:250,server_ceiling_mb:40,blocked_extensions:['.abc','.xyz'],blocked_mime_types:['text/plain'],builtin_extensions:['.exe','.js'],builtin_mime_types:[],updated_at:'2026-01-01T00:00:00Z',updated_by_name:'<b>Owner'};
-  let put=null;
-  api=async(path,opts)=>{if(opts&&opts.method==='PUT'){put={path,body:JSON.parse(opts.body)};return {settings:{...settings,upload_limit_mb:Number(put.body.upload_limit_mb),saved_limit_mb:Number(put.body.upload_limit_mb),unusable:'<i>unreadable'}}}return {settings}};
+  let put=null;const puts=[];
+  api=async(path,opts)=>{if(opts&&opts.method==='PUT'){put={path,body:JSON.parse(opts.body)};puts.push(put);return {settings:{...settings,upload_limit_mb:Number(put.body.upload_limit_mb),saved_limit_mb:Number(put.body.upload_limit_mb),unusable:'<i>unreadable',updated_at:'2026-02-0'+puts.length+'T00:00:00Z'}}}return {settings}};
   await loadAttachmentSettings();
   const loaded={limit:form.elements.upload_limit_mb.value,max:form.elements.upload_limit_mb.max,ext:form.elements.blocked_extensions.value,mime:form.elements.blocked_mime_types.value,
     status:nodes['attachment-settings-status'].textContent,ceiling:nodes['attachment-ceiling'].textContent,summary:nodes['attachment-builtin-summary'].textContent,builtin:nodes['attachment-builtin'].textContent};
   form.elements.upload_limit_mb.value=' 60 ';form.elements.blocked_extensions.value='.q\\n r ';form.elements.blocked_mime_types.value='';
   await form._submit({preventDefault(){},currentTarget:form});
   const admin={loaded,put,saved:nodes['attachment-settings-status'].textContent,error:nodes['attachment-settings-error'].textContent,ceilingAfter:nodes['attachment-ceiling'].textContent};
+  // A second save carries the version the first save returned, not the one first loaded. (A real
+  // input's value is always text; the stub keeps the number the first save wrote.)
+  form.elements.upload_limit_mb.value='60';
+  await form._submit({preventDefault(){},currentTarget:form});
+  // A reload that fails leaves no version behind, so a save from it cannot pass for current.
+  const okApi=api;api=async(path,opts)=>{if(opts&&opts.method==='PUT')return okApi(path,opts);throw new Error('offline')};
+  await loadAttachmentSettings();
+  form.elements.upload_limit_mb.value='60';
+  await form._submit({preventDefault(){},currentTarget:form});
+  api=okApi;
+  admin.expected=puts.map(p=>p.body.expected_updated_at);
   document.querySelector=qs2;
   // Slice 3: the direct link flow, driven through the real functions against a stub panel that
   // only hands out a control the panel's markup really contains.
@@ -257,7 +268,11 @@ class HostedAttachmentUiTests(unittest.TestCase):
         self.assertEqual(loaded['builtin'], '.exe .js')
         self.assertEqual(admin['put']['path'], '/api/attachment-settings')
         self.assertEqual(admin['put']['body'], {'upload_limit_mb': '60', 'blocked_extensions': '.q\n r ',
-                                                'blocked_mime_types': ''})
+                                                'blocked_mime_types': '',
+                                                'expected_updated_at': '2026-01-01T00:00:00Z'})
+        # The first save sent the version it was loaded with; the second, the one the first returned;
+        # a save after a failed reload, null (refused by the server whenever a saved row exists).
+        self.assertEqual(admin['expected'], ['2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z', None])
         self.assertIn('Saved. Uploads up to 60 MB', admin['saved'])
         self.assertNotIn('saved limit of', admin['ceilingAfter'])
         self.assertEqual(admin['error'], '<i>unreadable')  # the server's notice, as text

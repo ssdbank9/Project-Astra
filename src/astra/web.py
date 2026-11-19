@@ -668,10 +668,18 @@ class AstraRoutes:
                            if key not in payload]
                 if missing:
                     raise ValueError(f"Missing {', '.join(missing)}: send the limit and both blocked lists.")
+                # Which save the form was loaded from (null before the first save): a newer save
+                # by another owner refuses this one with 409 instead of being overwritten.
+                expected = payload.get("expected_updated_at", self)
+                if expected is self:
+                    raise ValueError("Missing expected_updated_at: reload the settings and save again.")
+                if expected is not None and not isinstance(expected, str):
+                    raise ValueError("expected_updated_at must be the settings' updated_at or null.")
                 settings = self.service.update_attachment_settings(
                     user, upload_limit_mb=payload["upload_limit_mb"],
                     blocked_extensions=payload["blocked_extensions"],
                     blocked_mime_types=payload["blocked_mime_types"],
+                    expected_updated_at=expected,
                 )
                 return self._json({"settings": settings})
             self.send_error(HTTPStatus.NOT_FOUND)

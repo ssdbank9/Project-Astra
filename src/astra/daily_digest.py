@@ -16,16 +16,32 @@ _LOG = logging.getLogger("astra.daily_digest")
 
 
 def seconds_until_next_digest(now: datetime, delivery_time: str, timezone_name: str) -> float:
-    """Return the wait until the next local delivery time, never a polling interval."""
+    """Return the wait until the next local delivery time, never a polling interval.
+
+    Times are compared as UTC instants. Python compares two datetimes that share a tzinfo by
+    their wall-clock reading, so on the night clocks fall back a delivery time already passed
+    in the repeated hour still looked ahead and the wait came out as 0, spinning the loop
+    (F9HBSJ). Both readings of the delivery time (fold 0 and 1) are candidates: in the repeated
+    hour that wakes the scheduler at the second 01:30 too, so a server that was down for the
+    first one still sends that day's summary (an extra wake finds it "already_sent"); in the
+    skipped spring hour the fold-1 reading falls before the jump (one "not_due" wake) and the
+    fold-0 reading after it, at the delivery time plus the gap (02:30 in New York sends at
+    03:30), when run_due_daily_digests finds the local time past the delivery time, as before
+    this change. The result is always above zero.
+    """
     if now.tzinfo is None:
         raise ValueError("Scheduler clock must include a timezone.")
     zone = ZoneInfo(timezone_name)
-    local_now = now.astimezone(zone)
+    now_utc = now.astimezone(timezone.utc)
+    local_date = now_utc.astimezone(zone).date()
     hour, minute = (int(part) for part in delivery_time.split(":"))
-    target = datetime.combine(local_now.date(), time(hour, minute), tzinfo=zone)
-    if target <= local_now:
-        target = datetime.combine(local_now.date() + timedelta(days=1), time(hour, minute), tzinfo=zone)
-    return max(0.0, (target.astimezone(timezone.utc) - now.astimezone(timezone.utc)).total_seconds())
+    candidates = [
+        datetime.combine(local_date + timedelta(days=offset), time(hour, minute, fold=fold),
+                         tzinfo=zone).astimezone(timezone.utc)
+        for offset in (0, 1, 2) for fold in (0, 1)
+    ]
+    target = min(candidate for candidate in candidates if candidate > now_utc)
+    return (target - now_utc).total_seconds()
 
 
 class DailyDigestScheduler:

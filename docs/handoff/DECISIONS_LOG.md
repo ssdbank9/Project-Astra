@@ -285,6 +285,15 @@ plain button; Enter submits).
 
 - Asked "Do you accept the Enter fix in ab03fb4?", Aly answered "Accept".
 
+### 2026-11-19 — what is left before launch (chat with Claude)
+
+- Aly: "Okay now what is left, i have to launch Astra". Claude listed the code
+  fixes, the two user documents, Aly's choices and accounts, and the
+  deployment runbook. Asked "Shall I start on the launch fixes and draft the
+  two documents?", Aly answered "Yes, start them". That covers fixing
+  F9HBSJ's daily summary defect, which Aly had said on 2026-10-22 to leave
+  for now.
+
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
 These are choices Claude made and reported; Aly has not overruled them. They

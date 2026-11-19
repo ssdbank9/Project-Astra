@@ -21,6 +21,9 @@ _CURRENT_REQUIRED_TABLES = frozenset({
     "task_schedule_proposals", "project_holidays", "task_attachments", "templates",
     "final_results", "owner_action_requests", "imports", "import_template_config",
     "user_events", "task_locks", "wip_limits",
+    # Added 2026-11-19: tables of schema 22 (daily summary) and 24-25 (hosted attachments)
+    # that this list had missed. test_backup pins the list to every table of a new database.
+    "daily_digest_settings", "daily_digest_runs", "attachment_settings", "attachment_links",
 })
 
 

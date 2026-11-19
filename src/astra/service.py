@@ -6402,8 +6402,14 @@ class AstraService:
             result["updated_by_name"] = user["display_name"] if user else None
         return result
 
+    _ANY_VERSION = object()
+
     def update_attachment_settings(self, actor: dict, *, upload_limit_mb, blocked_extensions,
-                                   blocked_mime_types) -> dict:
+                                   blocked_mime_types, expected_updated_at=_ANY_VERSION) -> dict:
+        """expected_updated_at is the updated_at the owner's form was loaded with (None for the
+        defaults, before any save). When it is given and the row has moved on, the save is
+        refused, so one owner never overwrites another's change unseen. The HTTP route always
+        passes it; only in-process callers may leave it out."""
         self.require_owner(actor)
         hard_mb = HARD_UPLOAD_LIMIT // MB
         if isinstance(upload_limit_mb, str) and re.fullmatch(r"[0-9]{1,3}", upload_limit_mb.strip()):
@@ -6422,6 +6428,12 @@ class AstraService:
                                   DANGEROUS_MIME_TYPES),
         )
         with self._actor_transaction(actor):
+            if expected_updated_at is not self._ANY_VERSION:
+                row = self._attachment_settings_row()
+                if (row["updated_at"] if row else None) != expected_updated_at:
+                    raise Conflict("Another App Owner saved the attachment settings after this page "
+                                   "loaded them, or this page could not load them. Reload the page "
+                                   "to see the current settings, then save again.")
             # Compared and audited against the row as saved, not as clamped, so re-saving what
             # the form shows under a lowered ceiling is a real change and is recorded as one.
             try:

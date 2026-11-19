@@ -2999,7 +2999,11 @@ async function loadDailyDigestSettings(){
   form.addEventListener("submit",saveDailyDigestSettings);
 }
 // MXY7BG slice 2: the App Owner's upload limit and denylist additions (Owner Items 8-9).
+// The save the form shows (null: the defaults, or not loaded). It goes back with every save, so a
+// newer save by another owner is refused (409) instead of overwritten.
+let attachmentSettingsSavedAt=null;
 function fillAttachmentSettings(form,settings){
+  attachmentSettingsSavedAt=settings.updated_at??null;
   form.elements.upload_limit_mb.value=settings.upload_limit_mb;form.elements.upload_limit_mb.max=settings.server_ceiling_mb;
   const lowered=settings.saved_limit_mb&&settings.saved_limit_mb!==settings.upload_limit_mb?` Your saved limit of ${settings.saved_limit_mb} MB is applied as ${settings.upload_limit_mb} MB because of the ceiling.`:"";
   document.querySelector("#attachment-ceiling").textContent=`This server admits uploads up to ${settings.server_ceiling_mb} MB; the ceiling itself is raised on the server, never here (deployment runbook, stage 9), and can never exceed ${settings.hard_limit_mb} MB.${lowered}`;
@@ -3013,6 +3017,7 @@ function fillAttachmentSettings(form,settings){
 async function loadAttachmentSettings(){
   const form=document.querySelector("#attachment-settings-form");if(!form)return;
   const error=document.querySelector("#attachment-settings-error"),status=document.querySelector("#attachment-settings-status");
+  attachmentSettingsSavedAt=null;  // a failed load must not keep the version of an earlier one
   try{
     const {settings}=await api("/api/attachment-settings");
     if(!form.isConnected)return;
@@ -3026,7 +3031,7 @@ async function saveAttachmentSettings(event){
   const form=event.currentTarget,error=document.querySelector("#attachment-settings-error"),status=document.querySelector("#attachment-settings-status");
   error.textContent="";status.textContent="Saving…";
   try{
-    const {settings}=await api("/api/attachment-settings",{method:"PUT",body:JSON.stringify({upload_limit_mb:form.elements.upload_limit_mb.value.trim(),blocked_extensions:form.elements.blocked_extensions.value,blocked_mime_types:form.elements.blocked_mime_types.value})});
+    const {settings}=await api("/api/attachment-settings",{method:"PUT",body:JSON.stringify({upload_limit_mb:form.elements.upload_limit_mb.value.trim(),blocked_extensions:form.elements.blocked_extensions.value,blocked_mime_types:form.elements.blocked_mime_types.value,expected_updated_at:attachmentSettingsSavedAt})});
     fillAttachmentSettings(form,settings);
     status.textContent=`Saved. Uploads up to ${settings.upload_limit_mb} MB; ${settings.blocked_extensions.length} extension${settings.blocked_extensions.length===1?"":"s"} and ${settings.blocked_mime_types.length} media type${settings.blocked_mime_types.length===1?"":"s"} added to the blocked list.`;
   }catch(err){status.textContent="";error.textContent=`Settings were not saved. ${err.message}`}

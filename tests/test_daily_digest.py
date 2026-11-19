@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -143,6 +143,68 @@ class DailyDigestServiceTests(unittest.TestCase):
         due = datetime(2026, 10, 15, 4, 0, tzinfo=timezone.utc)
         self.assertEqual(seconds_until_next_digest(before, "09:00", "Asia/Karachi"), 60)
         self.assertEqual(seconds_until_next_digest(due, "09:00", "Asia/Karachi"), 24 * 60 * 60)
+
+    def test_the_wait_is_never_zero_in_the_repeated_hour_when_clocks_fall_back(self):
+        # F9HBSJ: New York falls back on 2026-11-01 at 06:00 UTC, so 01:00-02:00 local happens
+        # twice. 01:30 first happens at 05:30 UTC (EDT) and again at 06:30 UTC (EST).
+        zone = "America/New_York"
+        self.assertEqual(seconds_until_next_digest(
+            datetime(2026, 11, 1, 6, 10, tzinfo=timezone.utc), "01:30", zone), 20 * 60)
+        self.assertEqual(seconds_until_next_digest(
+            datetime(2026, 11, 1, 5, 10, tzinfo=timezone.utc), "01:30", zone), 20 * 60)
+        # After the second 01:30 the next one is the next day's (01:30 EST = 06:30 UTC).
+        self.assertEqual(seconds_until_next_digest(
+            datetime(2026, 11, 1, 6, 30, tzinfo=timezone.utc), "01:30", zone), 24 * 60 * 60)
+        start = datetime(2026, 11, 1, 3, 0, tzinfo=timezone.utc)
+        for minute in range(0, 6 * 60):
+            now = start + timedelta(minutes=minute)
+            for delivery in ("00:30", "01:00", "01:30", "01:59", "02:00", "02:30"):
+                with self.subTest(now=now.isoformat(), delivery=delivery):
+                    self.assertGreater(seconds_until_next_digest(now, delivery, zone), 0)
+
+    def test_the_wait_is_never_zero_around_the_skipped_spring_hour(self):
+        # New York springs forward on 2026-03-08 at 07:00 UTC: 02:00-03:00 local never happens.
+        zone = "America/New_York"
+        start = datetime(2026, 3, 8, 4, 0, tzinfo=timezone.utc)
+        for minute in range(0, 6 * 60):
+            now = start + timedelta(minutes=minute)
+            for delivery in ("01:30", "02:00", "02:30", "03:00", "03:30"):
+                with self.subTest(now=now.isoformat(), delivery=delivery):
+                    wait = seconds_until_next_digest(now, delivery, zone)
+                    self.assertGreater(wait, 0)
+                    self.assertLessEqual(wait, 25 * 60 * 60)
+
+    def run_scheduler(self, start, hours, delivery, zone):
+        """Drive the scheduler loop's two calls on a simulated clock; return the wake times."""
+        self.service.update_daily_digest_settings(self.owner, enabled=True, delivery_time=delivery,
+                                                  timezone_name=zone)
+        now, end, wakes = start, start + timedelta(hours=hours), []
+        while now < end:
+            wakes.append(now)
+            self.assertLess(len(wakes), 20, "the scheduler loop is spinning")
+            self.service.run_due_daily_digests(now)
+            now = now + timedelta(seconds=seconds_until_next_digest(now, delivery, zone))
+        return wakes
+
+    def sent_dates(self):
+        return [row["digest_date"] for row in self.db.execute(
+            "SELECT digest_date FROM daily_digest_runs ORDER BY digest_date").fetchall()]
+
+    def test_the_scheduler_sends_one_summary_a_day_across_the_fall_back_night(self):
+        self.run_scheduler(datetime(2026, 10, 31, 4, 0, tzinfo=timezone.utc), 72, "01:30",
+                           "America/New_York")
+        self.assertEqual(self.sent_dates(), ["2026-10-31", "2026-11-01", "2026-11-02"])
+
+    def test_a_server_down_for_the_first_repeated_hour_still_sends_that_days_summary(self):
+        # Started at 01:10 EST (06:10 UTC), after the first 01:30 (05:30 UTC) went by unseen.
+        self.run_scheduler(datetime(2026, 11, 1, 6, 10, tzinfo=timezone.utc), 2, "01:30",
+                           "America/New_York")
+        self.assertEqual(self.sent_dates(), ["2026-11-01"])
+
+    def test_the_scheduler_sends_one_summary_a_day_across_the_skipped_spring_hour(self):
+        self.run_scheduler(datetime(2026, 3, 7, 5, 0, tzinfo=timezone.utc), 72, "02:30",
+                           "America/New_York")
+        self.assertEqual(self.sent_dates(), ["2026-03-07", "2026-03-08", "2026-03-09"])
 
     def test_cli_digest_command_uses_the_saved_database_and_reports_outcome(self):
         output = StringIO()

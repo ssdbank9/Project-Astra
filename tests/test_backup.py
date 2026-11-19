@@ -161,6 +161,44 @@ class BackupCliTests(unittest.TestCase):
         self.assertIn("missing required tables", str(code) + stderr)
         self.assertFalse(destination.exists())
 
+    def test_the_required_tables_are_every_table_of_a_new_database(self):
+        # A table added by a migration must be added to the backup's required list too, or a
+        # backup missing it is accepted as complete.
+        from astra.backup import _CURRENT_REQUIRED_TABLES
+
+        db = connect()
+        try:
+            tables = {row[0] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()}
+        finally:
+            db.close()
+        self.assertEqual(set(_CURRENT_REQUIRED_TABLES), tables)
+
+    def test_restore_refuses_a_backup_missing_a_hosted_attachment_or_daily_summary_table(self):
+        backup_path = Path(self.temp.name) / "complete.sqlite3"
+        self.run_cli(["backup", "--to", str(backup_path)])
+        for table in ("attachment_settings", "attachment_links", "daily_digest_settings",
+                      "daily_digest_runs"):
+            with self.subTest(table=table):
+                damaged = Path(self.temp.name) / f"without-{table}.sqlite3"
+                shutil.copyfile(backup_path, damaged)
+                connection = sqlite3.connect(damaged)
+                try:
+                    connection.execute(f"DROP TABLE {table}")
+                    connection.commit()
+                finally:
+                    connection.close()
+                destination = Path(self.temp.name) / f"recovery-{table}" / "astra.sqlite3"
+
+                code, _, stderr = self.run_cli_result(
+                    ["restore", "--from", str(damaged), "--to", str(destination)]
+                )
+
+                self.assertNotEqual(code, 0)
+                self.assertIn(f"missing required tables: {table}", str(code) + stderr)
+                self.assertFalse(destination.exists())
+
     def test_restore_removes_partial_target_and_sidecars_on_copy_failure(self):
         from astra.backup import restore_backup
 

@@ -860,6 +860,39 @@ class SettingsTests(Fixture):
         self.assertEqual(len(self.setting_events()), 2)
         self.assertEqual(self.setting_events()[-1]["actor_user_id"], second["id"])
 
+    def test_a_save_from_a_page_loaded_before_another_owners_save_is_refused(self):
+        second = self.user("second")
+        self.service.grant_secondary_owner(self.owner, second["id"], "backup owner")
+        second = dict(self.db.execute("SELECT * FROM users WHERE id=?", (second["id"],)).fetchone())
+        # Both pages were loaded with the defaults (no saved row: null).
+        first = self.service.update_attachment_settings(
+            self.owner, upload_limit_mb=20, blocked_extensions=[".aaa"], blocked_mime_types=[],
+            expected_updated_at=None)
+        for stale in (None, "2026-01-01T00:00:00+00:00"):
+            with self.subTest(expected=stale), self.assertRaisesRegex(Conflict, "Another App Owner saved"):
+                self.service.update_attachment_settings(
+                    second, upload_limit_mb=5, blocked_extensions=[".bbb"], blocked_mime_types=[],
+                    expected_updated_at=stale)
+        row = self.db.execute("SELECT upload_limit_bytes, blocked_extensions, updated_by FROM attachment_settings")
+        self.assertEqual(tuple(row.fetchone()), (20 * MB, '[".aaa"]', self.owner["id"]))
+        self.assertEqual(len(self.setting_events()), 1)
+        # After a reload the second owner's page carries the first owner's save, and its save goes in.
+        saved = self.service.update_attachment_settings(
+            second, upload_limit_mb=5, blocked_extensions=[".aaa", ".bbb"], blocked_mime_types=[],
+            expected_updated_at=first["updated_at"])
+        self.assertEqual((saved["upload_limit_mb"], saved["updated_by_name"]), (5, "Second"))
+        self.assertEqual(len(self.setting_events()), 2)
+        with self.assertRaises(Conflict):
+            self.service.update_attachment_settings(
+                self.owner, upload_limit_mb=7, blocked_extensions=[], blocked_mime_types=[],
+                expected_updated_at=first["updated_at"])
+        # A role check still comes first: a manager learns nothing about the saved version.
+        manager = self.user("manager", "manager")
+        with self.assertRaises(Forbidden):
+            self.service.update_attachment_settings(
+                manager, upload_limit_mb=7, blocked_extensions=[], blocked_mime_types=[],
+                expected_updated_at=None)
+
 
 class GuardUnitTests(unittest.TestCase):
     def test_storage_keys_are_32_hex_characters_only(self):
@@ -1039,7 +1072,8 @@ class HttpTests(unittest.TestCase):
         viewer = self.login("viewer@example.org", "viewer password")
         headers = {"Cookie": viewer[0], "X-CSRF-Token": viewer[1], "Content-Type": "application/json"}
         self.assertEqual(self.call("GET", "/api/attachment-settings", headers=headers)[0].status, 403)
-        body = json.dumps({"upload_limit_mb": 1, "blocked_extensions": [], "blocked_mime_types": []}).encode()
+        body = json.dumps({"upload_limit_mb": 1, "blocked_extensions": [], "blocked_mime_types": [],
+                           "expected_updated_at": None}).encode()
         self.assertEqual(self.call("PUT", "/api/attachment-settings", body, headers)[0].status, 403)
         owner = self.login("owner@example.org", "correct horse battery")
         headers = {"Cookie": owner[0], "X-CSRF-Token": owner[1], "Content-Type": "application/json"}
@@ -1049,12 +1083,31 @@ class HttpTests(unittest.TestCase):
         response, raw = self.call("PUT", "/api/attachment-settings", body, headers)
         self.assertEqual(response.status, 200)
         self.assertEqual(json.loads(raw)["settings"]["upload_limit_mb"], 1)
+        saved_at = json.loads(raw)["settings"]["updated_at"]
+        # A save from a page loaded before that one (null: the defaults) is refused with 409, a
+        # body that does not say which save it was loaded from with 400; neither changes the row.
+        stale = json.dumps({"upload_limit_mb": 2, "blocked_extensions": [], "blocked_mime_types": [],
+                            "expected_updated_at": None}).encode()
+        response, raw = self.call("PUT", "/api/attachment-settings", stale, headers)
+        self.assertEqual(response.status, 409)
+        self.assertIn("Another App Owner saved", json.loads(raw)["error"])
+        for unsaid, message in (
+                ({"upload_limit_mb": 2, "blocked_extensions": [], "blocked_mime_types": []},
+                 "Missing expected_updated_at"),
+                ({"upload_limit_mb": 2, "blocked_extensions": [], "blocked_mime_types": [],
+                  "expected_updated_at": 5}, "expected_updated_at must be")):
+            with self.subTest(body=unsaid):
+                response, raw = self.call("PUT", "/api/attachment-settings", json.dumps(unsaid).encode(), headers)
+                self.assertEqual(response.status, 400)
+                self.assertIn(message, json.loads(raw)["error"])
+        self.assertEqual(self.db.execute("SELECT upload_limit_bytes FROM attachment_settings").fetchone()[0], MB)
         response, raw = self.call("PUT", "/api/attachment-settings", b'{"upload_limit_mb": 251}', headers)
         self.assertEqual(response.status, 400)
         self.assertIn("Missing blocked_extensions, blocked_mime_types", json.loads(raw)["error"])
         self.assertEqual(json.loads(self.call("GET", "/api/attachment-settings", headers=headers)[1])
                          ["settings"]["upload_limit_mb"], 1)
-        full = {"upload_limit_mb": 251, "blocked_extensions": [], "blocked_mime_types": []}
+        full = {"upload_limit_mb": 251, "blocked_extensions": [], "blocked_mime_types": [],
+                "expected_updated_at": saved_at}
         response, raw = self.call("PUT", "/api/attachment-settings", json.dumps(full).encode(), headers)
         self.assertEqual(response.status, 400)
         self.assertIn("1 to 250", json.loads(raw)["error"])
