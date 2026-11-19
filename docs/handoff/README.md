@@ -7,7 +7,7 @@ below that mentions tickets, lanes or board counts is to be acted on through
 jaira any more; `.jaira/` is read-only history. From now on this file carries
 status and open work, updated in the same commit as the work.
 
-Status at `fbf1974` (plus this commit):
+Status at `a7bf759` (plus this commit):
 
 - MXY7BG hosted attachments: slice 1 (`18c4e54`) and slice 2 (`8fdd9d5`) are
   pushed and reviewed. Slice 3 (App Owner-only audited permanent direct
@@ -31,8 +31,9 @@ Status at `fbf1974` (plus this commit):
   no longer spins on the night clocks fall back (F9HBSJ's defect), the backup
   check requires every table, and a stale save of the attachment settings is
   refused. Drafts of the user quick-start and the privacy note are in
-  `docs/user/`, waiting for Aly. Built in this commit; waits for Aly's
-  acceptance. Findings for Aly are in "Launch fixes — 2026-11-19" below.
+  `docs/user/`, waiting for Aly's details. Pushed in `a7bf759` and accepted
+  by Aly on 2026-11-19 ("Accept"). Findings for Aly are in "Launch fixes —
+  2026-11-19" below.
 - Gantt chart replica of the shadcnstudio.com Gantt with dependencies, in
   plain JS: built, tested, reviewed and pushed on 2026-11-16; on 2026-11-17 a
   second side-by-side check in the browser found four gaps, now closed (Edit
@@ -50,8 +51,10 @@ Status at `fbf1974` (plus this commit):
 ## Launch fixes — 2026-11-19
 
 Asked what is left before launch, Aly chose to start the code fixes and the two
-user documents first ("Yes, start them"). Built in one commit; it waits for
-Aly's acceptance.
+user documents first ("Yes, start them"). Pushed in `a7bf759`; accepted by
+Aly on 2026-11-19 ("Accept"). The acceptance covers the code fixes and the
+drafts as drafts: the **[ALY]** marks in both documents are still to be filled
+in, and the findings below are still open.
 
 - Daily summary timer (F9HBSJ's open defect, `daily_digest.py`): the wait to
   the next summary is now worked out in UTC from both readings of the delivery

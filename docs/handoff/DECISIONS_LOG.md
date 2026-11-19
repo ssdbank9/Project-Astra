@@ -293,6 +293,9 @@ plain button; Enter submits).
   two documents?", Aly answered "Yes, start them". That covers fixing
   F9HBSJ's daily summary defect, which Aly had said on 2026-10-22 to leave
   for now.
+- Asked "Do you accept the launch fixes in a7bf759?", Aly answered "Accept".
+  Not covered, because Aly was not asked: the **[ALY]** marks in the two
+  documents, and the six findings in the README's "Launch fixes — 2026-11-19".
 
 ## Part 2 — Claude's recorded default calls (not overruled by Aly)
 
